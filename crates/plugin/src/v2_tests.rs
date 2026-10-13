@@ -84,7 +84,7 @@ fn an_instance_keeps_its_memory_and_reports_panel_changes() {
     let mut inst = Instance::new(&m, &Limits::default()).unwrap();
     let mut host = Settings::default();
     let first = inst.call("{}", &mut host).unwrap();
-    assert_eq!((first.output.as_str(), first.ui), ("1", Some(UiChange::Show(Panel::parse(PANEL).unwrap()))));
+    assert_eq!((first.output.as_str(), first.ui), ("1", Some(UiChange::Show(Panel::parse(PANEL, 2).unwrap()))));
     let second = inst.call("{}", &mut host).unwrap();
     assert!(second.output.contains("panel:") && second.ui.is_none(), "{second:?}");
     let third = inst.call("{}", &mut host).unwrap();
@@ -124,6 +124,7 @@ fn panels_are_validated_and_keep_entered_values() {
             {"type": "text", "name": "t"},
             {"type": "button", "name": "go", "label": "Go"}
         ]}"##,
+        2,
     )
     .unwrap();
     assert_eq!(p.control("accent").unwrap().default, Some(json!("#FF00AA")));
@@ -153,15 +154,16 @@ fn panels_are_validated_and_keep_entered_values() {
         &many,
     ];
     for j in junk {
-        assert!(Panel::parse(j).is_err(), "accepted {}", j.chars().take(60).collect::<String>());
+        assert!(Panel::parse(j, 2).is_err(), "accepted {}", j.chars().take(60).collect::<String>());
     }
     let huge = format!(r#"{{"controls": [{{"type": "note", "label": "{}"}}]}}"#, "x".repeat(70_000));
-    assert!(Panel::parse(&huge).unwrap_err().contains("larger"));
+    assert!(Panel::parse(&huge, 2).unwrap_err().contains("larger"));
     let long_note = format!(r#"{{"controls": [{{"type": "note", "label": "{}"}}]}}"#, "x".repeat(1001));
-    assert!(Panel::parse(&long_note).is_err());
+    assert!(Panel::parse(&long_note, 2).is_err());
     // Junk values are dropped, not kept.
     let p = Panel::parse(
         r#"{"controls": [{"type": "color", "name": "c", "value": {"deep": [1, 2]}}, {"type": "boolean", "name": "b", "value": "yes"}]}"#,
+        2,
     )
     .unwrap();
     assert_eq!(json!(p.values(&Map::new())), json!({"c": "#000000", "b": false}));

@@ -2,7 +2,8 @@
 //! memory cap, and sees the outside world only through the host functions below. There is no WASI:
 //! no file system, network, clock or randomness.
 //!
-//! # ABI (version 3; version 1 is the first seven imports, version 2 adds panels and settings)
+//! # ABI (version 4; version 1 is the first seven imports, version 2 adds panels and settings,
+//! version 3 widgets, version 4 widget timers and more in the panel and widget descriptions)
 //!
 //! The module exports its `memory` and `figcraft_run(input_len: i32) -> i32`. Host functions are
 //! imported from the module `figcraft`; strings are UTF-8 `(ptr, len)` pairs in the plugin's memory.
@@ -22,6 +23,7 @@
 //! | `setting_set` | `(key_ptr, key_len, value_ptr, value_len) -> i32` | Stores JSON under the key. 1: refused, the reply says why. |
 //! | `setting_delete` | `(key_ptr, key_len)` | Forgets a setting. |
 //! | `widget_render` | `(ptr, len) -> i32` | Draws the widget being called back: a [`WidgetRender`] as JSON. 1: invalid, the reply says why. |
+//! | `widget_timer` | `(ms) -> i32` | API 4. Asks for the widget being called back to be called again in `ms` milliseconds (100 to 3,600,000; 0: no timer). 1: refused, the reply says why. |
 //!
 //! When `figcraft_run` starts, the reply holds the input JSON (`input_len` bytes):
 //! `{"api", "command", "params", "selection"}`, plus `event` and `values` when a panel calls the
@@ -58,6 +60,7 @@ const IMPORTS: &[(&str, usize, usize)] = &[
     ("setting_set", 4, 1),
     ("setting_delete", 2, 0),
     ("widget_render", 2, 1),
+    ("widget_timer", 1, 1),
 ];
 
 /// What a run may use.
@@ -81,6 +84,9 @@ pub struct Limits {
     pub max_log_line_bytes: usize,
     /// Total log bytes kept and forwarded per run (excluding string/vector overhead).
     pub max_log_bytes: usize,
+    /// The plugin API the module was written for (its manifest's `api`): what later versions
+    /// added is refused, and descriptions are read as that version read them.
+    pub api: u32,
 }
 
 impl Default for Limits {
@@ -95,6 +101,7 @@ impl Default for Limits {
             max_logs: 1000,
             max_log_line_bytes: 8 * 1024,
             max_log_bytes: 1024 * 1024,
+            api: crate::API_VERSION,
         }
     }
 }
@@ -160,6 +167,8 @@ pub struct RunOutput {
     pub ui: Option<UiChange>,
     /// The last `widget_render` of the run.
     pub widget: Option<WidgetRender>,
+    /// The last `widget_timer` of the run: the delay in milliseconds (0: no timer).
+    pub timer: Option<u32>,
 }
 
 /// A host call that needs the [`Host`]: the plugin is paused while the host answers it (see
@@ -522,7 +531,7 @@ fn linker(engine: &Engine) -> Result<Linker<State>, PluginError> {
         charge(&mut c)?;
         let spec = read_str(&mut c, ptr, len)?;
         let st = c.data_mut();
-        Ok(match Panel::parse(&spec) {
+        Ok(match Panel::parse(&spec, st.limits.api) {
             Ok(panel) => {
                 st.out.ui = Some(UiChange::Show(panel));
                 0
@@ -538,7 +547,7 @@ fn linker(engine: &Engine) -> Result<Linker<State>, PluginError> {
         charge(&mut c)?;
         let spec = read_str(&mut c, ptr, len)?;
         let st = c.data_mut();
-        Ok(match WidgetRender::parse(&spec) {
+        Ok(match WidgetRender::parse(&spec, st.limits.api) {
             Ok(w) => {
                 st.out.widget = Some(w);
                 0
@@ -548,6 +557,23 @@ fn linker(engine: &Engine) -> Result<Linker<State>, PluginError> {
                 1
             }
         })
+    })
+    .map_err(err)?;
+    l.func_wrap(IMPORT_MODULE, "widget_timer", |mut c: Ctx<'_>, ms: i32| -> Result<i32, wasmi::Error> {
+        use crate::widget::{API_4, MAX_TIMER_MS, MIN_TIMER_MS};
+        charge(&mut c)?;
+        let st = c.data_mut();
+        let ms = u32::try_from(ms).ok().filter(|ms| *ms == 0 || (MIN_TIMER_MS..=MAX_TIMER_MS).contains(ms));
+        let refusal = match ms {
+            _ if st.limits.api < API_4 => format!("widget timers need plugin API {API_4}"),
+            None => format!("a timer runs {MIN_TIMER_MS} to {MAX_TIMER_MS} milliseconds (0: no timer)"),
+            Some(ms) => {
+                st.out.timer = Some(ms);
+                return Ok(0);
+            }
+        };
+        st.set_reply(refusal.into_bytes());
+        Ok(1)
     })
     .map_err(err)?;
     l.func_wrap(IMPORT_MODULE, "ui_close", |mut c: Ctx<'_>| -> Result<(), wasmi::Error> {

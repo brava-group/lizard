@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 /// The manifest's file name.
 pub const MANIFEST_FILE: &str = "figcraft-plugin.json";
 /// The plugin API version this build implements (`api` in the manifest).
-pub const API_VERSION: u32 = 3;
+pub const API_VERSION: u32 = 4;
 /// Largest manifest read.
 pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 
@@ -23,6 +23,11 @@ const MAX_ALLOW: usize = 256;
 /// Largest panel spec a plugin may show, and its most controls.
 pub const MAX_PANEL_BYTES: usize = 64 * 1024;
 const MAX_CONTROLS: usize = 64;
+/// API 4. Largest panel spec with images (base64 in it), and the images' decoded bytes together.
+pub const MAX_PANEL_BYTES_4: usize = 1024 * 1024;
+pub const MAX_PANEL_IMAGE_BYTES: usize = 512 * 1024;
+/// API 4. An image control's height in a panel.
+const IMAGE_HEIGHT: std::ops::RangeInclusive<f64> = 16.0..=400.0;
 /// Longest text parameter value.
 const MAX_TEXT_VALUE: usize = 10_000;
 
@@ -43,7 +48,8 @@ pub struct Manifest {
     /// The WebAssembly module, relative to the manifest (`plugin.wasm`).
     pub main: String,
     /// The plugin API version the plugin was written for (1 when not given; panels and settings
-    /// need 2, widgets 3).
+    /// need 2, widgets 3; text input, property menus, hover, timers and richer drawing in widgets,
+    /// and sliders, images and sections in panels need 4).
     #[serde(default = "api_version")]
     pub api: u32,
     #[serde(default)]
@@ -125,6 +131,22 @@ pub struct Param {
     pub min: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
+    /// API 4 from here on. A `slider`'s (or `number`'s) step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    /// Panels: shown greyed and can't be used.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+    /// Panels: a validation message shown under the field.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
+    /// Panels: an `image`'s bytes (PNG, JPEG…) as base64, how it fits its box and the box's height.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<crate::widget::WidgetFit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
 }
 
 /// The kind of value a parameter takes.
@@ -144,6 +166,29 @@ pub enum ParamKind {
     Button,
     /// Panels only: text (`label`, up to 1000 characters).
     Note,
+    /// API 4. A number from `min` to `max` (0 to 100 when not given) in `step`s, dragged.
+    Slider,
+    /// API 4, panels only: a picture (`data`; `label` names it for screen readers).
+    Image,
+    /// API 4, panels only: a progress bar (`value` from 0 to 1).
+    Progress,
+    /// API 4, panels only: a line between controls.
+    Divider,
+    /// API 4, panels only: a heading (`label`) that folds the controls up to the next section or
+    /// divider (`value`: whether it starts open; true when not given).
+    Section,
+}
+
+impl ParamKind {
+    /// Added by plugin API 4.
+    fn api_4(self) -> bool {
+        matches!(self, ParamKind::Slider | ParamKind::Image | ParamKind::Progress | ParamKind::Divider | ParamKind::Section)
+    }
+
+    /// Needs no `name`: it has no value and isn't used.
+    fn nameless(self) -> bool {
+        matches!(self, ParamKind::Note | ParamKind::Image | ParamKind::Progress | ParamKind::Divider | ParamKind::Section)
+    }
 }
 
 impl Param {
@@ -152,9 +197,9 @@ impl Param {
         if self.label.is_empty() { &self.name } else { &self.label }
     }
 
-    /// Whether it holds a value (not a button or a note).
+    /// Whether it holds a value the user sets (not a button, a note or another display control).
     pub fn is_field(&self) -> bool {
-        !matches!(self.kind, ParamKind::Button | ParamKind::Note)
+        self.kind != ParamKind::Button && !self.kind.nameless()
     }
 
     /// The value used when none is given.
@@ -164,11 +209,11 @@ impl Param {
         }
         match self.kind {
             ParamKind::Text => Value::String(String::new()),
-            ParamKind::Number => serde_json::json!(self.clamp(0.0)),
+            ParamKind::Number | ParamKind::Slider => serde_json::json!(self.clamp(0.0)),
             ParamKind::Boolean => Value::Bool(false),
             ParamKind::Select | ParamKind::List => self.options.first().map_or(Value::Null, |o| Value::String(o.clone())),
             ParamKind::Color => Value::String("#000000".into()),
-            ParamKind::Button | ParamKind::Note => Value::Null,
+            _ => Value::Null,
         }
     }
 
@@ -182,7 +227,7 @@ impl Param {
                 Value::Number(n) => Ok(Value::String(n.to_string())),
                 _ => Err(format!("`{name}` must be text")),
             },
-            ParamKind::Number => {
+            ParamKind::Number | ParamKind::Slider => {
                 let n = match v {
                     Value::Number(n) => n.as_f64(),
                     Value::String(s) => s.trim().parse::<f64>().ok(),
@@ -203,15 +248,44 @@ impl Param {
                 .and_then(figcraft_color::Color::from_hex)
                 .map(|c| Value::String(c.to_css_hex()))
                 .ok_or_else(|| format!("`{name}` must be a hex colour like #FF5A5F")),
-            ParamKind::Button | ParamKind::Note => Ok(Value::Null),
+            // What the control shows: a progress bar's fraction, whether a section starts open.
+            ParamKind::Progress => Ok(serde_json::json!(v.as_f64().filter(|n| n.is_finite()).unwrap_or(0.0).clamp(0.0, 1.0))),
+            ParamKind::Section => Ok(Value::Bool(v.as_bool().unwrap_or(true))),
+            _ => Ok(Value::Null),
         }
+    }
+
+    /// Read as the plugin APIs before 4 did: the kinds API 4 added are refused (they were unknown)
+    /// and its fields dropped (they were ignored).
+    fn as_api_3(&mut self) -> Result<(), String> {
+        if self.kind.api_4() {
+            return Err(format!("a {} control needs plugin API {}", format!("{:?}", self.kind).to_lowercase(), crate::widget::API_4));
+        }
+        (self.step, self.disabled, self.fit, self.height) = (None, false, None, None);
+        self.error.clear();
+        self.data.clear();
+        Ok(())
     }
 
     /// Check a parameter or panel control: its name, label, options and bounds. A default that
     /// doesn't fit its kind is dropped.
     fn check(&mut self) -> Result<(), String> {
-        if !(self.kind == ParamKind::Note && self.name.is_empty()) {
+        if !(self.kind.nameless() && self.name.is_empty()) {
             check_id("parameter name", &self.name, MAX_NAME)?;
+        }
+        self.error = clean("error", &self.error, 200)?;
+        if self.step.is_some_and(|s| !s.is_finite() || s <= 0.0) {
+            return Err(format!("parameter `{}` has a bad step", self.name));
+        }
+        if self.kind == ParamKind::Slider {
+            // A slider always has both ends.
+            (self.min, self.max) = (self.min.or(Some(0.0)), self.max.or(Some(100.0)));
+        }
+        if (self.kind == ParamKind::Image) == self.data.trim().is_empty() {
+            return Err(format!("`data` (base64) is for (and needed by) images (control `{}`)", self.name));
+        }
+        if self.height.is_some_and(|h| !IMAGE_HEIGHT.contains(&h)) {
+            return Err(format!("an image is {}–{} high", IMAGE_HEIGHT.start(), IMAGE_HEIGHT.end()));
         }
         let max = if self.kind == ParamKind::Note { MAX_TEXT } else { MAX_LABEL };
         self.label = clean("parameter label", &self.label, max)?;
@@ -234,9 +308,14 @@ impl Param {
         Ok(())
     }
 
-    /// `n` within the number's bounds.
+    /// `n` within the number's bounds, on its nearest step (counted from `min`).
     fn clamp(&self, n: f64) -> f64 {
-        n.max(self.min.unwrap_or(f64::MIN)).min(self.max.unwrap_or(f64::MAX))
+        let (lo, hi) = (self.min.unwrap_or(f64::MIN), self.max.unwrap_or(f64::MAX));
+        let n = match (self.step, self.min) {
+            (Some(step), Some(from)) => from + ((n.max(lo).min(hi) - from) / step).round() * step,
+            _ => n,
+        };
+        if n.is_finite() { n.max(lo).min(hi) } else { lo.max(0.0).min(hi) }
     }
 }
 
@@ -333,9 +412,12 @@ impl Manifest {
                 return Err(format!("command `{}` has more than {MAX_PARAMS} parameters", c.id));
             }
             for p in &mut c.params {
+                if self.api < crate::widget::API_4 {
+                    p.as_api_3()?;
+                }
                 p.check()?;
                 if !p.is_field() {
-                    return Err(format!("parameter `{}`: buttons and notes only go in panels", p.name));
+                    return Err(format!("parameter `{}`: buttons, notes and other display controls only go in panels", p.name));
                 }
             }
             if let Some(dup) = first_duplicate(c.params.iter().map(|p| p.name.as_str())) {
@@ -357,10 +439,13 @@ pub struct Panel {
 }
 
 impl Panel {
-    /// Parse and validate a panel spec (it comes from the plugin: untrusted).
-    pub fn parse(text: &str) -> Result<Panel, String> {
-        if text.len() > MAX_PANEL_BYTES {
-            return Err(format!("the panel is larger than {} KB", MAX_PANEL_BYTES / 1024));
+    /// Parse and validate a panel spec (it comes from the plugin: untrusted) from a plugin written
+    /// for plugin API `api`.
+    pub fn parse(text: &str, api: u32) -> Result<Panel, String> {
+        let old = api < crate::widget::API_4;
+        let max = if old { MAX_PANEL_BYTES } else { MAX_PANEL_BYTES_4 };
+        if text.len() > max {
+            return Err(format!("the panel is larger than {} KB", max / 1024));
         }
         let mut p: Panel = serde_json::from_str(text).map_err(|e| format!("panel: {e}"))?;
         p.title = clean("title", &p.title, MAX_NAME).map_err(|e| format!("panel: {e}"))?;
@@ -368,7 +453,14 @@ impl Panel {
             return Err(format!("panel: more than {MAX_CONTROLS} controls"));
         }
         for c in &mut p.controls {
+            if old {
+                c.as_api_3().map_err(|e| format!("panel: {e}"))?;
+            }
             c.check().map_err(|e| format!("panel: {e}"))?;
+        }
+        // Base64: four characters for three bytes (checked again when decoded).
+        if p.controls.iter().map(|c| c.data.trim().len() / 4 * 3).sum::<usize>() > MAX_PANEL_IMAGE_BYTES + 3 {
+            return Err(format!("panel: the images are larger than {} KB together", MAX_PANEL_IMAGE_BYTES / 1024));
         }
         if let Some(dup) = first_duplicate(p.controls.iter().map(|c| c.name.as_str()).filter(|n| !n.is_empty())) {
             return Err(format!("panel: two controls are called `{dup}`"));

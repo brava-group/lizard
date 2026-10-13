@@ -19,7 +19,7 @@ impl Host for Quiet {
 }
 
 fn parse(v: Value) -> Result<WidgetRender, String> {
-    WidgetRender::parse(&v.to_string())
+    WidgetRender::parse(&v.to_string(), 3)
 }
 
 #[test]
@@ -73,8 +73,8 @@ fn junk_descriptions_are_refused() {
         assert!(parse(j.clone()).is_err(), "accepted {}", j.to_string().chars().take(80).collect::<String>());
     }
     assert!(parse(image(1000)).is_ok());
-    assert!(WidgetRender::parse(&"[".repeat(100_000)).is_err(), "deep JSON fails cleanly");
-    assert!(WidgetRender::parse(&" ".repeat(5 * 1024 * 1024)).is_err());
+    assert!(WidgetRender::parse(&"[".repeat(100_000), 3).is_err(), "deep JSON fails cleanly");
+    assert!(WidgetRender::parse(&" ".repeat(5 * 1024 * 1024), 3).is_err());
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn widgets_need_api_3() {
     assert!(m(2).unwrap_err().contains("API 3"));
     let ok = m(3).unwrap();
     assert!(ok.widget && ok.commands.is_empty(), "a widget-only plugin has no menu command");
-    assert!(Manifest::from_value(&json!({"id": "w", "name": "W", "main": "w.wasm", "api": 4})).is_err());
+    assert!(Manifest::from_value(&json!({"id": "w", "name": "W", "main": "w.wasm", "api": 5})).is_err());
     let v2 = Manifest::from_value(&json!({"id": "p", "name": "P", "main": "p.wasm", "api": 2})).unwrap();
     assert!(!v2.widget && v2.commands.len() == 1, "v2 manifests are unchanged");
 }
