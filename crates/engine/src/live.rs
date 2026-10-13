@@ -880,6 +880,8 @@ impl Session {
     /// stay where they can, and the undo history isn't touched.
     pub fn apply_remote(&mut self, uid: u64, doc: Arc<Document>) {
         let Some(ds) = self.docs.iter_mut().find(|d| d.uid == uid) else { return };
+        // A widget's hover look isn't the document: it goes (the next pointer move shows it again).
+        ds.end_widget_hover();
         ds.doc = doc;
         if !ds.doc.pages.contains(&ds.page) {
             ds.page = ds.doc.first_page().unwrap_or(ds.page);
@@ -1329,6 +1331,8 @@ impl Session {
     fn live_deferred(&mut self, id: SessionId) {
         let Some(live) = self.live.sessions.get(&id).filter(|l| !l.deferred.is_empty() && l.syncing()) else { return };
         let Some(uid) = live.doc_uid else { return };
+        // A widget's hover look is no reason to wait: it steps aside and comes back after.
+        let hover = self.docs.iter_mut().find(|d| d.uid == uid).and_then(DocState::end_widget_hover);
         if self.docs.iter().find(|d| d.uid == uid).is_none_or(busy) {
             return;
         }
@@ -1352,6 +1356,9 @@ impl Session {
         }
         self.live.send(id, out);
         self.apply_remote(uid, doc);
+        if self.tab() == Some(uid) {
+            crate::widgets::rehover(self, hover);
+        }
     }
 
     /// Show the peer followed in session `id`: their viewport (and their page, in the session's

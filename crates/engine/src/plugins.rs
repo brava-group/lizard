@@ -17,7 +17,7 @@ use crate::cmd::{CommandSpec, find_command};
 use crate::params::{get, num, string};
 use crate::{EngineError, Result, Session, bad, spec};
 
-pub use figcraft_plugin::{Access, MANIFEST_FILE, Manifest, Panel, Param, ParamKind};
+pub use figcraft_plugin::{Access, MANIFEST_FILE, Manifest, Panel, Param, ParamKind, WidgetFit};
 
 /// What one plugin may keep in its settings (keys and JSON values, in bytes), and its longest key.
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
@@ -312,9 +312,10 @@ fn module_from_disk(_: &Session, _: &InstalledPlugin, path: &str) -> Result<Arc<
     Err(EngineError::Other(format!("{path}: there are no files in the browser")))
 }
 
-/// The sandbox limits for a run, with `fuel` lowering the instruction budget.
-pub(crate) fn limits(fuel: Option<f64>) -> Limits {
-    let mut limits = Limits::default();
+/// The sandbox limits for a run of the plugin with manifest `m` (the plugin API it was written
+/// for decides what it may use), with `fuel` lowering the instruction budget.
+pub(crate) fn limits(fuel: Option<f64>, m: &Manifest) -> Limits {
+    let mut limits = Limits { api: m.api, ..Limits::default() };
     if let Some(f) = fuel.filter(|f| f.is_finite()) {
         limits.fuel = (f.max(1000.0) as u64).min(limits.fuel);
     }
@@ -420,7 +421,7 @@ pub fn run(s: &mut Session, id: &str, command: Option<&str>, params: &Value, fue
     let c = m.command(command).ok_or_else(|| bad(cmd, format!("{} has no command `{}`", m.name, command.unwrap_or_default())))?;
     let params = c.resolve_params(params).map_err(|e| bad(cmd, e))?;
     let wasm = module_of(s, &p)?;
-    let limits = limits(fuel);
+    let limits = limits(fuel, m);
     // The API the plugin was written for: a v1 plugin gets the input it always got.
     let input = json!({"api": m.api, "command": c.id, "params": params, "selection": s.selection()}).to_string();
     s.plugins.last = Some((m.id.clone(), c.id.clone(), params.clone()));
@@ -491,8 +492,11 @@ fn event(s: &mut Session, p: &Value) -> Result<Value> {
     let c = open
         .panel
         .control(&control)
-        .filter(|c| c.kind != ParamKind::Note)
+        .filter(|c| c.is_field() || c.kind == ParamKind::Button)
         .ok_or_else(|| bad(cmd, format!("the panel has no control `{control}`")))?;
+    if c.disabled {
+        return Err(EngineError::Disabled(cmd.into(), format!("`{control}` is disabled")));
+    }
     let field = c.is_field();
     let value = if field { c.coerce(get(p, "value").unwrap_or(&Value::Null)).map_err(|e| bad(cmd, e))? } else { Value::Null };
     let mut open = s.plugins.panels.remove(at);

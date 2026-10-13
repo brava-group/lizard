@@ -32,6 +32,21 @@ pub fn begin(s: &mut Session, id: NodeId, caret: Option<usize>, created: bool) -
 pub fn end(s: &mut Session) -> Result<()> {
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     s.ds_mut()?.text_edit = None;
+    // A widget's editable text isn't the user's to change: what was typed goes to the widget's
+    // plugin, which redraws it (one undo step), and the layer itself is put back.
+    if let Some(input) = crate::widgets::input_of(s.doc()?, te.id) {
+        let typed = text_of(s, te.id)?.characters;
+        s.cancel_interaction()?;
+        let changed = text_of(s, te.id).is_ok_and(|was| was.characters != typed);
+        let widget = crate::widgets::widget_of(s.doc()?, te.id);
+        if changed && let Err(e) = s.execute("widget.setText", &serde_json::json!({"id": te.id, "input": input.name, "text": typed})) {
+            s.message = Some(e.to_string());
+        }
+        let ds = s.ds_mut()?;
+        ds.selection = widget.into_iter().collect();
+        ds.revision += 1;
+        return Ok(());
+    }
     let empty = text_of(s, te.id).map(|t| t.characters.trim().is_empty()).unwrap_or(false);
     if empty {
         let doc = s.doc_mut()?;
@@ -84,13 +99,24 @@ fn edit(s: &mut Session, f: impl FnOnce(&mut TextData, &mut TextEdit)) -> Result
 /// characters dropped, so pasted plain text from any platform lands cleanly.
 pub fn insert(s: &mut Session, text: &str) -> Result<()> {
     let text: String = crate::cmd::props::normalize_line_endings(text).chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
+    // A widget's editable text takes what its plugin allows: one line unless it's multiline, and
+    // no more characters than its maximum.
+    let input = s.ds()?.text_edit.as_ref().and_then(|te| crate::widgets::input_of(&s.ds().ok()?.doc, te.id));
+    let text = match &input {
+        Some(input) => {
+            let te = s.ds()?.text_edit.clone();
+            let (kept, replaced) = te.map_or((0, 0), |te| (text_of(s, te.id).map_or(0, |t| t.char_count()), range(&te).1 - range(&te).0));
+            input.clean(&text).chars().take(input.max.saturating_sub(kept.saturating_sub(replaced))).collect()
+        }
+        None => text,
+    };
     if text.is_empty() {
         return Ok(());
     }
     edit(s, |t, te| {
         let (a, b) = range(te);
         // "- ", "* " or "1. " typed at the start of a plain paragraph starts a list.
-        if text == " " && a == b && t.para_list(t.para_of(a)).list == ListStyle::None {
+        if input.is_none() && text == " " && a == b && t.para_list(t.para_of(a)).list == ListStyle::None {
             let chars: Vec<char> = t.characters.chars().collect();
             let start = line_start(&chars, a);
             let typed: String = chars.get(start..a).unwrap_or(&[]).iter().collect();
@@ -220,7 +246,12 @@ pub fn key(s: &mut Session, key: &str, shift: bool, word: bool, line: bool) -> R
     let t = text_of(s, te.id)?;
     let chars: Vec<char> = t.characters.chars().collect();
     let n = chars.len();
-    if matches!(key, "Tab" | "Backspace" | "Enter") && !word && !line && list_key(s, key, shift)? {
+    // In a widget's one-line text, Enter and Tab commit.
+    let input = crate::widgets::input_of(s.doc()?, te.id);
+    if matches!(key, "Enter" | "Tab") && input.as_ref().is_some_and(|i| !i.multiline || key == "Tab") {
+        return end(s);
+    }
+    if input.is_none() && matches!(key, "Tab" | "Backspace" | "Enter") && !word && !line && list_key(s, key, shift)? {
         return Ok(());
     }
     match key {

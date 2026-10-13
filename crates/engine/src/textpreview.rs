@@ -56,6 +56,7 @@ pub fn show(s: &mut Session, command: &str, params: &Value) -> Result<()> {
 pub fn end(s: &mut Session) -> bool {
     let Ok(ds) = s.ds_mut() else { return false };
     let Some(base) = ds.text_preview.take() else { return false };
+    ds.widget_hover = None;
     ds.doc = base;
     ds.revision += 1;
     true

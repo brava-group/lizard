@@ -311,6 +311,8 @@ pub struct Overlay {
     /// while one is dragged (see [`crate::shape_handles`]).
     pub shape_hover: Option<ShapeHandle>,
     pub shape: Option<ShapeHint>,
+    /// The tooltip of the widget part under the pointer.
+    pub widget_tip: Option<String>,
 }
 
 /// The Scale tool's live readout while dragging a handle.
@@ -1036,6 +1038,8 @@ impl Session {
             cursor = Cursor::Text;
         }
         let mut hover = None;
+        // The widget part under the pointer that has a hover style, and the one with a tooltip.
+        let (mut widget_part, mut widget_tip) = (None, None);
         let mut guides = Vec::new();
         let mut measure_box = None;
         let arc_hover = if self.arc_handles_shown() { crate::arc_handles::hit(&doc, &sel, ev.p(), ev.zoom).map(|(_, h)| h) } else { None };
@@ -1053,9 +1057,14 @@ impl Session {
                 cursor = resize_cursor(&doc, &sel, h);
             } else {
                 let leaf = self.hit(&doc, page, ev.p(), ev.tol() * 2.0);
-                if leaf.and_then(|l| crate::widgets::target_at(&doc, l, ev.p())).is_some() {
-                    cursor = Cursor::Pointer;
+                // A widget's parts: a hand over what's clickable, an I-beam over a text to edit.
+                match leaf.and_then(|l| crate::widgets::part_at(&doc, l, ev.p())) {
+                    Some((_, crate::widgets::Part::Target(_))) => cursor = Cursor::Pointer,
+                    Some((_, crate::widgets::Part::Input(_))) => cursor = Cursor::Text,
+                    None => {}
                 }
+                widget_part = leaf.and_then(|l| crate::widgets::hover_at(&doc, l, ev.p())).map(|part| (part, ev.p()));
+                widget_tip = leaf.and_then(|l| crate::widgets::tooltip_at(&doc, l, ev.p()));
                 hover = label_at(&doc, page, &self.tool.labels, ev.p()).or_else(|| leaf.map(|leaf| select_target(&doc, leaf, &sel, ev.cmd)));
                 // Alt over a selected layer: a drag from here duplicates it.
                 if ev.alt && tool == ToolId::Move && hover.is_some_and(|h| sel.contains(&h) && !locked_in(&doc, h)) {
@@ -1094,6 +1103,8 @@ impl Session {
             }
         }
         self.tool.overlay.guides = guides;
+        self.tool.overlay.widget_tip = widget_tip;
+        crate::widgets::set_hover(self, widget_part);
         let ds = self.ds_mut()?;
         if ds.hover != hover {
             ds.hover = hover;
@@ -1883,7 +1894,7 @@ impl Session {
         // Quick clicks on a widget's clickable part are clicks, one by one.
         if matches!(self.tool.tool, ToolId::Move | ToolId::Scale)
             && !(ev.shift || ev.cmd || ev.alt)
-            && self.hit(&doc, page, ev.p(), ev.tol() * 2.0).and_then(|hit| crate::widgets::target_at(&doc, hit, ev.p())).is_some()
+            && self.hit(&doc, page, ev.p(), ev.tol() * 2.0).and_then(|hit| crate::widgets::part_at(&doc, hit, ev.p())).is_some()
         {
             self.tool.gesture = Gesture::None;
             self.cancel_interaction()?;
@@ -1929,11 +1940,17 @@ impl Session {
     }
 
     /// A plain click at `p` on a clickable part of a widget calls its plugin back (a failure is
-    /// shown as a message).
+    /// shown as a message); one on a text of it that can be edited starts editing it in place,
+    /// all of it selected (committing calls the plugin back: see [`textedit::end`]).
     fn widget_click(&mut self, p: Point, tol: f64) -> Result<()> {
+        use crate::widgets::Part;
         let (doc, page) = (self.doc()?.clone(), self.page()?);
-        let Some((id, target)) = self.hit(&doc, page, p, tol).and_then(|hit| crate::widgets::target_at(&doc, hit, p)) else { return Ok(()) };
-        if let Err(e) = self.execute("widget.click", &serde_json::json!({"id": id, "target": target})) {
+        let result = match self.hit(&doc, page, p, tol).and_then(|hit| crate::widgets::part_at(&doc, hit, p)) {
+            Some((id, Part::Target(target))) => self.execute("widget.click", &serde_json::json!({"id": id, "target": target})).map(|_| ()),
+            Some((_, Part::Input(text))) => textedit::begin(self, text, None, false),
+            None => Ok(()),
+        };
+        if let Err(e) = result {
             self.message = Some(e.to_string());
         }
         Ok(())

@@ -349,6 +349,11 @@ pub struct DocState {
     /// The last duplicate while its copies are the selection: Duplicate repeats its offset (see
     /// [`cmd::edit::Duplicated`]; not saved).
     pub(crate) last_duplicate: Option<cmd::edit::Duplicated>,
+    /// The widgets' pending timers (see [`widgets`]; not saved: closing the file cancels them).
+    pub(crate) widget_timers: Vec<widgets::Timer>,
+    /// The part of a widget shown in its hover style and the page point the pointer is at: `doc`
+    /// shows that look as a live preview (`text_preview` keeps the document itself).
+    pub(crate) widget_hover: Option<(NodeId, figcraft_geom::Point)>,
 }
 
 /// A version shown on the canvas in place of the document: read-only until it's restored or the
@@ -409,6 +414,8 @@ impl DocState {
             rotation_origin: None,
             view_from_prefs: false,
             last_duplicate: None,
+            widget_timers: Vec::new(),
+            widget_hover: None,
         };
         st.zoom_to_fit();
         st
@@ -438,6 +445,22 @@ impl DocState {
     pub fn branches_mut(&mut self) -> &mut Vec<figcraft_format::Branch> {
         self.versions_changed = true;
         &mut self.branches
+    }
+
+    /// Take a widget part's hover look off (see [`widgets::set_hover`]): the document shows as it
+    /// is. Returns the page point the pointer was at, to put the look back for.
+    pub(crate) fn end_widget_hover(&mut self) -> Option<figcraft_geom::Point> {
+        let (_, at) = self.widget_hover.take()?;
+        if let Some(base) = self.text_preview.take() {
+            self.doc = base;
+            self.revision += 1;
+        }
+        Some(at)
+    }
+
+    /// The document as shown, without a widget part's hover look: what a prototype of it plays.
+    pub fn without_widget_hover(&self) -> &Arc<Document> {
+        self.text_preview.as_ref().filter(|_| self.widget_hover.is_some()).unwrap_or(&self.doc)
     }
 
     /// The document itself, not a version or live text preview shown in its place.
@@ -1250,6 +1273,11 @@ impl Session {
     /// Run `f` as one undo step called `label`: the commands it executes push no steps of their
     /// own, and when it fails the documents stay at their group-start state.
     pub fn grouped<T>(&mut self, label: &str, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.grouped_as(Some(label), f)
+    }
+
+    /// Like [`grouped`](Self::grouped); without a label changes join the previous undo step.
+    pub(crate) fn grouped_as<T>(&mut self, label: Option<&str>, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         self.ds()?;
         let before: Vec<_> =
             self.docs.iter().map(|ds| (ds.uid, ds.doc.clone(), ds.selection.clone(), ds.page, ds.history.undo.len(), ds.history.limit)).collect();
@@ -1301,7 +1329,7 @@ impl Session {
             }
         }
         for (uid, doc, selection, page) in changed {
-            self.record(uid, Some(label), doc, selection, page);
+            self.record(uid, label, doc, selection, page);
         }
         result
     }
@@ -1883,3 +1911,5 @@ mod widgets_tests;
 mod selection_reorder_tests;
 #[cfg(test)]
 mod selection_spacing_tests;
+#[cfg(test)]
+mod widgets_v4_tests;
