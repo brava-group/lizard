@@ -1,0 +1,13 @@
+{
+  "id": "org.figcraft.examples.dot-grid",
+  "name": "Dot grid",
+  "version": "1.0.0",
+  "description": "Makes a grid of dots. Its panel has sliders for the count, size and gap, and a preview picture that follows them.",
+  "main": "dot_grid.wasm",
+  "api": 4,
+  "permissions": {
+    "access": "write",
+    "commands": ["view.get", "shape.ellipse", "object.group", "select.set"]
+  },
+  "commands": [{ "id": "panel", "label": "Dot grid…" }]
+}

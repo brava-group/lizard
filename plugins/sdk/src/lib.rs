@@ -28,6 +28,11 @@
 //! [`Input::widget`] set (its state and what was clicked) and hands back the new state and the
 //! layers with [`render_widget`]. Each call starts afresh: the state is all a widget remembers.
 //!
+//! With API 4 a widget hears of more than clicks ([`Widget::event`]): a text of it the user edited
+//! in place, an item of its property menu, a timer it asked for ([`set_timer`]). It can also draw
+//! more (lines, vectors, gradients, shadows, text styles, hover styles, tooltips); [`ui`] has
+//! builders for descriptions and panels, so a plugin needn't spell the JSON out.
+//!
 //! The SDK is `no_std` (it needs `alloc`); outside WebAssembly every host call fails, so a plugin's
 //! own logic can still be unit-tested on the host. See `docs/plugins.md` for the ABI underneath.
 #![cfg_attr(not(test), no_std)]
@@ -39,6 +44,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 pub use serde_json::{self, Value, json};
+
+pub mod ui;
 
 /// What a plugin function returns: its output (shown or returned to the caller), or an error that
 /// fails the run and rolls the document back.
@@ -68,6 +75,43 @@ pub struct Widget {
     pub state: Value,
     /// The target clicked.
     pub target: Option<String>,
+    /// What happened to the widget.
+    pub event: WidgetEvent,
+}
+
+/// What a widget is called for.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum WidgetEvent {
+    /// It was just inserted: draw it for the first time.
+    #[default]
+    Insert,
+    /// The part with this `target` was clicked.
+    Click(String),
+    /// API 4. The user edited the text named `input` in place; `text` is what they left there
+    /// (already cut to its maximum length, and one line unless it's multiline).
+    Text { input: String, text: String },
+    /// API 4. The user chose item `name` of the property menu; `value` is a toggle's new state
+    /// (a boolean), a dropdown's or colour's choice (a string), or null for an action.
+    Menu { name: String, value: Value },
+    /// API 4. The timer asked for with [`set_timer`] is due.
+    Timer,
+}
+
+impl WidgetEvent {
+    fn parse(e: Option<&Value>) -> WidgetEvent {
+        let text = |key: &str| e.and_then(|e| e.get(key)).and_then(Value::as_str).map(ToString::to_string);
+        if let Some(target) = text("target") {
+            WidgetEvent::Click(target)
+        } else if let Some(input) = text("input") {
+            WidgetEvent::Text { input, text: text("text").unwrap_or_default() }
+        } else if let Some(name) = text("menu") {
+            WidgetEvent::Menu { name, value: e.and_then(|e| e.get("value")).cloned().unwrap_or(Value::Null) }
+        } else if e.and_then(|e| e.get("timer")).is_some() {
+            WidgetEvent::Timer
+        } else {
+            WidgetEvent::Insert
+        }
+    }
 }
 
 /// A button pressed or a value changed in the plugin's panel.
@@ -98,6 +142,7 @@ impl Input {
                 id: w.get("id").and_then(Value::as_u64).unwrap_or_default(),
                 state: w.get("state").cloned().unwrap_or_else(|| json!({})),
                 target: w.get("event").and_then(|e| e.get("target")).and_then(Value::as_str).map(ToString::to_string),
+                event: WidgetEvent::parse(w.get("event")),
             }),
         })
     }
@@ -166,6 +211,19 @@ pub fn close_ui() {
 pub fn render_widget(widget: &Value) -> Result<()> {
     let spec = serde_json::to_string(widget).map_err(|e| e.to_string())?;
     if host::widget_render(spec.as_bytes()) == 0 { Ok(()) } else { Err(String::from_utf8_lossy(&host::reply()).into_owned()) }
+}
+
+/// API 4. Ask for the widget being called to be called again (with [`WidgetEvent::Timer`]) in
+/// `ms` milliseconds: 100 to 3,600,000 (an hour). A widget has one timer at most (asking again
+/// replaces it), and it runs only while its file is open and in front, for whoever started it
+/// last. Calling back for a timer is like any other callback: draw the widget again, or don't.
+pub fn set_timer(ms: u32) -> Result<()> {
+    if host::widget_timer(i32::try_from(ms).unwrap_or(i32::MAX)) == 0 { Ok(()) } else { Err(String::from_utf8_lossy(&host::reply()).into_owned()) }
+}
+
+/// API 4. Stop the widget's pending timer.
+pub fn cancel_timer() {
+    host::widget_timer(0);
 }
 
 /// The plugin's setting `key`, as stored by [`set_setting`].
@@ -238,6 +296,7 @@ mod host {
             pub fn setting_set(key: *const u8, key_len: usize, value: *const u8, value_len: usize) -> i32;
             pub fn setting_delete(key: *const u8, key_len: usize);
             pub fn widget_render(ptr: *const u8, len: usize) -> i32;
+            pub fn widget_timer(ms: i32) -> i32;
         }
     }
 
@@ -283,6 +342,9 @@ mod host {
     pub fn widget_render(s: &[u8]) -> i32 {
         unsafe { sys::widget_render(s.as_ptr(), s.len()) }
     }
+    pub fn widget_timer(ms: i32) -> i32 {
+        unsafe { sys::widget_timer(ms) }
+    }
 }
 
 /// Outside WebAssembly (a plugin's own unit tests) every host call fails.
@@ -316,6 +378,9 @@ mod host {
     pub fn widget_render(_s: &[u8]) -> i32 {
         1
     }
+    pub fn widget_timer(_ms: i32) -> i32 {
+        1
+    }
 }
 
 #[cfg(test)]
@@ -344,5 +409,13 @@ mod tests {
             .widget
             .unwrap_or_default();
         assert_eq!((w.id, &w.state, w.target.as_deref()), (9, &json!({"n": 1}), Some("inc")));
+        assert_eq!(w.event, WidgetEvent::Click("inc".into()));
+        let event =
+            |e: Value| Input::parse(&json!({"widget": {"id": 1, "event": e}}).to_string()).unwrap_or_default().widget.unwrap_or_default().event;
+        assert_eq!(event(Value::Null), WidgetEvent::Insert);
+        assert_eq!(event(json!({"input": "title", "text": "Hi"})), WidgetEvent::Text { input: "title".into(), text: "Hi".into() });
+        assert_eq!(event(json!({"menu": "tint", "value": "#FF0000"})), WidgetEvent::Menu { name: "tint".into(), value: json!("#FF0000") });
+        assert_eq!(event(json!({"timer": true})), WidgetEvent::Timer);
+        assert!(set_timer(1000).is_err(), "no host off WebAssembly");
     }
 }

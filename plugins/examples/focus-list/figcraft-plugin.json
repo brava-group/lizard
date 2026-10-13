@@ -1,0 +1,10 @@
+{
+  "id": "org.figcraft.examples.focus-list",
+  "name": "Focus list",
+  "version": "1.0.0",
+  "description": "A sticky checklist widget: edit its title and items in place, tick them off, and start a focus countdown that ticks every second.",
+  "main": "focus_list.wasm",
+  "api": 4,
+  "widget": true,
+  "permissions": { "access": "read" }
+}

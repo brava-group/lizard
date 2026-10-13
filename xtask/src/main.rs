@@ -9,7 +9,8 @@
 //! - `wasm`    check the core crates and web app for wasm32, and build the plugin SDK and examples
 //! - `plugins` format-check, lint, test and build the plugin SDK and example plugins (`plugins/`, a
 //!   workspace of its own) for wasm32: `<target>/plugins/dist/<example>/` holds each manifest and
-//!   module, ready for Plugins ▸ Development ▸ Import plugin from manifest…
+//!   module, ready for Plugins ▸ Development ▸ Import plugin from manifest…; then runs every
+//!   built example in the engine (`figcraft-cli run`), so a module that no longer works fails here
 //! - `bench`   release-build timings at 1k/10k/50k layers (`bench 1000,10000` for other sizes) and
 //!   with a synthetic design system used by 2,000 instances
 
@@ -81,7 +82,7 @@ fn wasm() -> bool {
 
 /// The example plugins in `plugins/examples` (each folder's name is its package; its module is
 /// `<name with _>.wasm`).
-const EXAMPLE_PLUGINS: &[&str] = &["tidy-names", "swatch-grid", "counter"];
+const EXAMPLE_PLUGINS: &[&str] = &["tidy-names", "swatch-grid", "counter", "focus-list", "dot-grid"];
 
 /// The plugin workspace: fmt, clippy and build for wasm32, host tests, then each example's manifest
 /// and module side by side in `<target>/plugins/dist/<example>/`.
@@ -116,7 +117,48 @@ fn plugins() -> bool {
             }
         }
     }
-    true
+    smoke(&target)
+}
+
+/// What the built examples are asked to do, each in the engine as a script would: the commands of
+/// every plugin API (a run, a panel, a widget with its clicks, typed text, menu and timer). A
+/// widget command without an `id` acts on the selected widget (the one just inserted).
+const SMOKE: &[(&str, &str)] = &[
+    ("shape.rectangle", r#"{"x": 0, "y": 0, "width": 40, "height": 40, "props": {"name": "  a   layer copy "}}"#),
+    ("select.all", "{}"),
+    ("plugin.run", r#"{"id": "org.figcraft.examples.tidy-names", "command": "tidy", "params": {"case": "Title Case"}}"#),
+    ("plugin.run", r#"{"id": "org.figcraft.examples.swatch-grid", "command": "panel"}"#),
+    ("plugin.event", r#"{"id": "org.figcraft.examples.swatch-grid", "control": "palette", "value": "Ocean"}"#),
+    ("plugin.event", r#"{"id": "org.figcraft.examples.swatch-grid", "control": "generate"}"#),
+    ("plugin.close", r#"{"id": "org.figcraft.examples.swatch-grid"}"#),
+    ("widget.insert", r#"{"plugin": "org.figcraft.examples.counter", "x": 0, "y": 200}"#),
+    ("widget.click", r#"{"target": "increment"}"#),
+    ("widget.menuAction", r#"{"item": "step", "value": "5"}"#),
+    ("widget.menuAction", r#"{"item": "reset"}"#),
+    ("widget.insert", r#"{"plugin": "org.figcraft.examples.focus-list", "x": 0, "y": 400}"#),
+    ("widget.setText", r#"{"input": "title", "text": "Smoke test"}"#),
+    ("widget.setText", r#"{"input": "new", "text": "One more"}"#),
+    ("widget.click", r#"{"target": "toggle.0"}"#),
+    ("widget.click", r#"{"target": "focus"}"#),
+    ("widget.fireTimer", "{}"),
+    ("widget.list", "{}"),
+    ("plugin.run", r#"{"id": "org.figcraft.examples.dot-grid"}"#),
+    ("plugin.event", r#"{"id": "org.figcraft.examples.dot-grid", "control": "columns", "value": 4}"#),
+    ("plugin.event", r#"{"id": "org.figcraft.examples.dot-grid", "control": "generate"}"#),
+    ("plugin.close", r#"{"id": "org.figcraft.examples.dot-grid"}"#),
+];
+
+/// Import the examples built into `<target>/dist` and run [`SMOKE`] with them.
+fn smoke(target: &std::path::Path) -> bool {
+    let dist = target.join("dist").to_string_lossy().replace('\\', "/");
+    let imports = EXAMPLE_PLUGINS.iter().map(|name| format!(r#"{{"command": "plugin.import", "params": {{"path": "{dist}/{name}"}}}}"#));
+    let steps = SMOKE.iter().map(|(command, params)| format!(r#"{{"command": "{command}", "params": {params}}}"#));
+    let script = target.join("smoke.jsonl");
+    if let Err(e) = std::fs::write(&script, imports.chain(steps).collect::<Vec<_>>().join("\n")) {
+        eprintln!("plugins: {}: {e}", script.display());
+        return false;
+    }
+    run(cargo().args(["run", "-q", "-p", "figcraft-cli", "--", "run"]).arg(&script).stdout(std::process::Stdio::null()))
 }
 
 /// Engine/render timings (`figcraft-cli perf`) and UI frame timings (an ignored test driving the
