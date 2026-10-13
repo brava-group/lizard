@@ -1258,16 +1258,40 @@ Plugin settings are kept per plugin with the preferences (in a headless session,
 ```
 
 Widgets (API 3, layers on the canvas a plugin draws) are driven the same way: `widget.insert
-{plugin, x?, y?}` puts one on the page (centred in the view without a position) and returns `{id,
-plugin, state, targets, output, logs, calls, fuel}`; `widget.click {id, target}` clicks one of its
-`targets` as a click on the canvas would (the plugin redraws it; one undo step; returns the same);
-`widget.list` lists every widget in the file with its plugin, page, state and targets. A widget's
-state is layer data, so it is saved, undone and synced with the file.
+{plugin, x?, y?}` puts one on the page (centred in the view without a position), selects it and
+returns `{id, plugin, state, targets, inputs, menu, timer, output, logs, calls, fuel}`;
+`widget.click {id?, target}` clicks one of its `targets` as a click on the canvas would (the plugin
+redraws it; one undo step; returns the same); `widget.list` lists every widget in the file with
+its plugin, page, state, targets, editable texts, property menu and pending timer. A widget's
+state is layer data, so it is saved, undone and synced with the file. Without an `id`, a widget
+command acts on the selected widget.
+
+Everything a person can do to an API 4 widget has a command too, each a callback to its plugin
+and one undo step:
+
+- `widget.setText {id?, input, text}` commits a text typed in place: `input` is one of the
+  widget's `inputs` (`[{name, text, maxLength, multiline}]`); the text is cut to `maxLength` and
+  put on one line unless the input is `multiline`.
+- `widget.menu {id?}` lists the property menu: `items: [{type, name, label, value, options, url}]`
+  (`action`, `toggle`, `dropdown`, `color`, `separator`, `link`). `widget.menuAction {id?, item,
+  value?}` uses one: no value for an action, `true` / `false` for a toggle (without it, flipped),
+  one of `options` for a dropdown or a colour. A link is never opened from a command: it returns
+  `{id, item, url}`.
+- `widget.fireTimer {id?}` fires the widget's pending timer (`timer` in `widget.list` is the
+  milliseconds left, or null). A headless session has no clock: an agent fires timers itself. In
+  the app they fire when due; a run of timer callbacks is one undo step.
+
+Hover styles and tooltips are the app's to show and have no command (nothing is called for them).
 
 ```json
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"org.figcraft.examples.counter"}}}}
 {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.click","params":{"id":12,"target":"increment"}}}}
 {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.list","params":{}}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.menuAction","params":{"id":12,"item":"step","value":"5"}}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"org.figcraft.examples.focus-list"}}}}
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.setText","params":{"input":"title","text":"Release day"}}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.click","params":{"target":"focus"}}}}
+{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.fireTimer","params":{}}}}
 ```
 
 Plugins from a `figcraft-server`'s plugin directory ([`plugins.md`](plugins.md#plugin-directories)):
