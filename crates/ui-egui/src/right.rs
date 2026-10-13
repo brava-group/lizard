@@ -365,6 +365,9 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
     }
     header(app, ui, &doc, &sel);
     widgets::separator(ui);
+    if crate::widget_ui::design_section(app, ui, &doc, &sel) {
+        widgets::separator(ui);
+    }
     // Editing a vector with points selected, the points' fields stand in for the layer's position
     // and dimensions.
     let points_selected = vector_edit.as_ref().is_some_and(|ve| !ve.vertices.is_empty() || !ve.segments.is_empty());

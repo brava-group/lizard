@@ -20,7 +20,7 @@ const IDLE: Duration = Duration::from_secs(1);
 
 pub(crate) struct Harness {
     ctx: egui::Context,
-    app: FigApp,
+    pub(crate) app: FigApp,
     time: f64,
 }
 
@@ -34,7 +34,7 @@ impl Harness {
     }
 
     /// One frame with `events`, 1/60 s after the last; returns the repaint delay it asked for.
-    fn frame(&mut self, events: Vec<Event>) -> Duration {
+    pub(crate) fn frame(&mut self, events: Vec<Event>) -> Duration {
         self.time += 1.0 / 60.0;
         let input =
             RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(self.time), events, ..Default::default() };
@@ -47,7 +47,7 @@ impl Harness {
     /// Draw frames with no input until the UI is idle: no render in flight and three frames in a
     /// row asking for no repaint sooner than [`IDLE`]. Returns the last frame's delay; fails with
     /// what kept asking for frames.
-    fn settle(&mut self) -> Duration {
+    pub(crate) fn settle(&mut self) -> Duration {
         let mut quiet = 0;
         for _ in 0..2000 {
             let delay = self.frame(vec![]);
@@ -60,7 +60,7 @@ impl Harness {
         panic!("still asking for frames after 2000 with no input: {:?}", self.ctx.repaint_causes());
     }
 
-    fn run(&mut self, cmd: &str, params: Value) -> Value {
+    pub(crate) fn run(&mut self, cmd: &str, params: Value) -> Value {
         let r = self.app.session.execute(cmd, &params).unwrap();
         self.app.handle_ui_requests();
         r

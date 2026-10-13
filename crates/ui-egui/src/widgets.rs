@@ -984,28 +984,89 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tip: &str) -> bool {
 /// A bar floating at the top centre of the `canvas` area (a version preview, the focus view):
 /// `add` lays out its contents in a row.
 pub fn canvas_banner<R>(ctx: &egui::Context, id: Id, canvas: Rect, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let t = Tokens::get(ctx);
     egui::Area::new(id)
         .order(egui::Order::Foreground)
         .pivot(Align2::CENTER_TOP)
         .fixed_pos(pos2(canvas.center().x, canvas.min.y + 12.0))
-        .show(ctx, |ui| {
-            egui::Frame::NONE
-                .fill(t.panel)
-                .stroke(Stroke::new(1.0, t.border))
-                .corner_radius(CornerRadius::same(8))
-                .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 12, spread: 0, color: t.shadow })
-                .inner_margin(egui::Margin { left: 14, right: 8, top: 8, bottom: 8 })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        add(ui)
-                    })
-                    .inner
-                })
-                .inner
+        .show(ctx, |ui| bar(ui, add))
+        .inner
+}
+
+/// A bar's box (the panel's fill, a border, a shadow) around `add`'s contents, laid out in a row.
+pub fn bar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.panel)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(8))
+        .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 12, spread: 0, color: t.shadow })
+        .inner_margin(egui::Margin { left: 14, right: 8, top: 8, bottom: 8 })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                add(ui)
+            })
+            .inner
         })
         .inner
+}
+
+/// A horizontal slider over `range`, named `name` for screen readers, with a mark at `tick` (a
+/// notable value). `value` None = mixed: no knob. Returns its response and, when it was moved,
+/// the new value and whether the gesture ended.
+pub fn slider(
+    ui: &mut Ui,
+    id: Id,
+    name: &str,
+    range: (f64, f64),
+    tick: Option<f64>,
+    value: Option<f64>,
+    width: f32,
+) -> (Response, Option<(f64, bool)>) {
+    let t = Tokens::get(ui.ctx());
+    let (min, max) = range;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let resp = ui.interact(rect, id, Sense::click_and_drag());
+    a11y::slider(&resp, name, value, range);
+    let track = Rect::from_center_size(rect.center(), vec2(width - 12.0, 4.0));
+    let span = (max - min).max(1e-9);
+    let x_of = |v: f64| track.min.x + ((v - min) / span).clamp(0.0, 1.0) as f32 * track.width();
+    let p = ui.painter();
+    p.rect_filled(track, CornerRadius::same(2), t.border);
+    if let Some(tick) = tick {
+        let x = x_of(tick);
+        p.line_segment([pos2(x, track.min.y - 3.0), pos2(x, track.max.y + 3.0)], Stroke::new(1.0, t.border_strong));
+    }
+    if let Some(v) = value {
+        let x = x_of(v);
+        p.rect_filled(Rect::from_min_max(track.min, pos2(x, track.max.y)), CornerRadius::same(2), t.accent);
+        p.circle_filled(pos2(x, track.center().y), 6.0, Color32::WHITE);
+        let ring = if resp.hovered() || resp.dragged() { t.accent } else { t.border_strong };
+        p.circle_stroke(pos2(x, track.center().y), 6.0, Stroke::new(1.0, ring));
+    }
+    let moved = if (resp.dragged() || resp.clicked() || resp.drag_started())
+        && let Some(pos) = resp.interact_pointer_pos()
+    {
+        let f = f64::from(((pos.x - track.min.x) / track.width().max(1.0)).clamp(0.0, 1.0));
+        Some((min + f * span, resp.drag_stopped() || resp.clicked()))
+    } else if resp.drag_stopped() {
+        value.map(|v| (v, true))
+    } else {
+        None
+    };
+    (resp, moved)
+}
+
+/// A progress bar `width` wide filled to `fraction` (0–1), named `name` for screen readers.
+pub fn progress_bar(ui: &mut Ui, name: &str, fraction: f64, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let fraction = if fraction.is_finite() { fraction.clamp(0.0, 1.0) } else { 0.0 };
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 12.0), Sense::hover());
+    a11y::progress(&resp, name, fraction);
+    let track = Rect::from_center_size(rect.center(), vec2(width, 4.0));
+    ui.painter().rect_filled(track, CornerRadius::same(2), t.border);
+    let done = Rect::from_min_max(track.min, pos2(track.min.x + track.width() * fraction as f32, track.max.y));
+    ui.painter().rect_filled(done, CornerRadius::same(2), t.accent);
 }
 
 /// Where a dragged row will land: an accent line across `x0..x1` at `y`.

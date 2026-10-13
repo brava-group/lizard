@@ -6,7 +6,7 @@
 
 use egui::{Align2, Context, Id, RichText, Ui};
 use figcraft_engine::plugin_directory::{PluginEntry, installed_version, newer_version};
-use figcraft_engine::plugins::{Access, InstalledPlugin, Param, ParamKind};
+use figcraft_engine::plugins::{Access, InstalledPlugin, Param, ParamKind, WidgetFit};
 use figcraft_figma_plugin::catalog::{self, Page};
 use serde_json::{Map, Value, json};
 
@@ -111,6 +111,13 @@ pub struct ReviewMark {
 
 /// Width of the plugin windows' fields.
 const FIELD_W: f32 = 220.0;
+/// While a slider is dragged its plugin hears of it at most this often (seconds), and once more
+/// when the drag ends.
+const SLIDER_EVERY: f64 = 0.1;
+/// Width of the number field beside a slider.
+const SLIDER_FIELD_W: f32 = 52.0;
+/// A panel's picture is decoded only up to this many pixels on a side.
+const MAX_IMAGE_SIDE: u32 = 2048;
 /// How far apart plugin panels open, side by side (a panel and a gap).
 const PANEL_STEP: f32 = 372.0;
 
@@ -1189,21 +1196,87 @@ fn form_window(app: &mut FigApp, ctx: &Context) {
     }
 }
 
+/// Whether a control is drawn across the panel, not as a row of the label and field columns.
+fn full_width(kind: ParamKind) -> bool {
+    matches!(kind, ParamKind::Section | ParamKind::Divider | ParamKind::Image | ParamKind::Progress)
+}
+
+/// The label in the left column: checkboxes and buttons carry their own, a note has none.
+fn caption(p: &Param) -> &str {
+    if matches!(p.kind, ParamKind::Boolean | ParamKind::Button | ParamKind::Note) { "" } else { p.title() }
+}
+
 /// Parameters or panel controls in two columns (label, field); buttons in a row share one line,
-/// the first button filled. Returns what the user did to which control.
+/// the first button filled. Dividers, pictures and progress bars span the panel, and a section's
+/// heading folds the controls after it, up to the next section or divider. Returns what the user
+/// did to which control.
 fn controls(ui: &mut Ui, salt: &str, params: &[Param], values: &Map<String, Value>, t: &Tokens) -> Option<Used> {
     let mut changed = None;
     let mut first_button = true;
-    egui::Grid::new(("plugin_controls", salt)).num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        for row in params.chunk_by(|a, b| a.kind == ParamKind::Button && b.kind == ParamKind::Button) {
+    // The label column is as wide as its widest label in every block of fields, so they line up.
+    let label_w = |p: &Param| ui.painter().layout_no_wrap(caption(p).to_string(), regular(11.0), t.text_secondary).size().x;
+    let caption_w = params.iter().filter(|p| !full_width(p.kind)).map(label_w).fold(0.0, f32::max);
+    let mut open = true;
+    for (i, block) in params.chunk_by(|a, b| !full_width(a.kind) && !full_width(b.kind)).enumerate() {
+        let Some(p) = block.first() else { continue };
+        match p.kind {
+            ParamKind::Section => {
+                let id = Id::new(("plugin_section", salt, i));
+                let starts_open = p.default.as_ref().and_then(Value::as_bool).unwrap_or(true);
+                open = ui.data(|d| d.get_temp(id)).unwrap_or(starts_open);
+                if widgets::disclosure(ui, &p.label, open) {
+                    open = !open;
+                    ui.data_mut(|d| d.insert_temp(id, open));
+                }
+            }
+            // A divider ends a section: it and what follows always show.
+            ParamKind::Divider => {
+                open = true;
+                ui.add_space(2.0);
+                widgets::separator(ui);
+                ui.add_space(2.0);
+            }
+            _ if !open => {}
+            ParamKind::Image => picture(ui, Id::new(("plugin_image", salt, i)), p, t),
+            ParamKind::Progress => {
+                if !p.label.is_empty() {
+                    widgets::label(ui, &p.label, t.text_secondary);
+                }
+                widgets::progress_bar(ui, p.title(), p.default.as_ref().and_then(Value::as_f64).unwrap_or(0.0), ui.available_width());
+            }
+            _ => {
+                let hit = fields(ui, (salt, i), block, values, caption_w, &mut first_button, t);
+                if hit.is_some() {
+                    changed = hit;
+                }
+            }
+        }
+        ui.add_space(if open || p.kind == ParamKind::Section { 8.0 } else { 0.0 });
+    }
+    changed
+}
+
+/// A block of fields, notes and buttons in two columns. A disabled control is greyed and can't be
+/// used; a field's validation message shows under it.
+fn fields(
+    ui: &mut Ui,
+    salt: (&str, usize),
+    block: &[Param],
+    values: &Map<String, Value>,
+    caption_w: f32,
+    first_button: &mut bool,
+    t: &Tokens,
+) -> Option<Used> {
+    let mut changed = None;
+    egui::Grid::new(("plugin_controls", salt)).num_columns(2).min_col_width(caption_w).spacing([12.0, 8.0]).show(ui, |ui| {
+        for row in block.chunk_by(|a, b| a.kind == ParamKind::Button && b.kind == ParamKind::Button) {
             let Some(p) = row.first() else { continue };
-            // Checkboxes and buttons carry their own label; a list's sits by its first item.
-            let caption = if matches!(p.kind, ParamKind::Boolean | ParamKind::Button | ParamKind::Note) { "" } else { p.title() };
-            let caption = RichText::new(caption).font(regular(11.0)).color(t.text_secondary);
+            let label = RichText::new(caption(p)).font(regular(11.0)).color(t.text_secondary);
+            // A list's label sits by its first item.
             if p.kind == ParamKind::List {
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.label(caption));
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| ui.label(label));
             } else {
-                ui.label(caption);
+                ui.label(label);
             }
             let hit = match p.kind {
                 ParamKind::Note => {
@@ -1215,23 +1288,119 @@ fn controls(ui: &mut Ui, salt: &str, params: &[Param], values: &Map<String, Valu
                 }
                 ParamKind::Button => {
                     ui.horizontal(|ui| {
-                        let pressed = row.iter().filter(|b| widgets::button(ui, b.title(), std::mem::take(&mut first_button), true).clicked());
+                        let pressed = row.iter().filter(|b| widgets::button(ui, b.title(), std::mem::take(first_button), !b.disabled).clicked());
                         pressed.last().map(|b| Used::Set(b.name.clone(), Value::Null))
                     })
                     .inner
                 }
                 _ => {
                     let current = values.get(&p.name).cloned().unwrap_or_else(|| p.default_value());
-                    field(ui, Id::new(("plugin_control", salt, &p.name)), p, &current)
+                    let id = Id::new(("plugin_control", salt, &p.name));
+                    ui.add_enabled_ui(!p.disabled, |ui| field(ui, id, p, &current)).inner
                 }
             };
             if hit.is_some() {
                 changed = hit;
             }
             ui.end_row();
+            if !p.error.is_empty() {
+                ui.label("");
+                ui.vertical(|ui| {
+                    ui.set_max_width(FIELD_W);
+                    ui.add(egui::Label::new(RichText::new(&p.error).font(regular(11.0)).color(t.danger)).wrap());
+                });
+                ui.end_row();
+            }
         }
     });
     changed
+}
+
+/// A panel's picture, fitted in the panel's width at its height and named for screen readers. It
+/// is decoded once, and again only when the plugin shows another.
+fn picture(ui: &mut Ui, id: Id, p: &Param, t: &Tokens) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    p.data.hash(&mut hasher);
+    let key = hasher.finish();
+    let kept = ui.data(|d| d.get_temp::<(u64, Option<egui::TextureHandle>)>(id)).filter(|(k, _)| *k == key);
+    let (_, texture) = kept.unwrap_or_else(|| {
+        let fresh = (key, decode(&p.data).map(|img| ui.ctx().load_texture("plugin-image", img, egui::TextureOptions::LINEAR)));
+        ui.data_mut(|d| d.insert_temp(id, fresh.clone()));
+        fresh
+    });
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), p.height.unwrap_or(120.0) as f32), egui::Sense::hover());
+    crate::a11y::image(&resp, p.title());
+    let Some(texture) = texture else {
+        ui.painter().rect_filled(rect, egui::CornerRadius::same(4), t.field);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, tr("This picture can't be shown"), regular(11.0), t.text_secondary);
+        return;
+    };
+    // `fit` shows all of it, `fill` stretches it to the box; `crop` and `tile` cover the box.
+    let (size, mut uv) = (texture.size_vec2(), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)));
+    let scale = |cover: bool| {
+        let (sx, sy) = (rect.width() / size.x.max(1.0), rect.height() / size.y.max(1.0));
+        if cover { sx.max(sy) } else { sx.min(sy) }
+    };
+    let shown = match p.fit {
+        None | Some(WidgetFit::Fit) => egui::Rect::from_center_size(rect.center(), size * scale(false)),
+        Some(WidgetFit::Fill) => rect,
+        Some(WidgetFit::Crop | WidgetFit::Tile) => {
+            let covered = size * scale(true);
+            uv = egui::Rect::from_center_size(egui::pos2(0.5, 0.5), egui::vec2(rect.width() / covered.x, rect.height() / covered.y));
+            rect
+        }
+    };
+    ui.painter().with_clip_rect(rect).image(texture.id(), shown, uv, egui::Color32::WHITE);
+}
+
+/// A picture's pixels from its file's bytes as base64 (PNG, JPEG, BMP…), if it is one of at most
+/// [`MAX_IMAGE_SIDE`] pixels on a side.
+fn decode(data: &str) -> Option<egui::ColorImage> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).ok()?;
+    let reader = || image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok();
+    let (w, h) = reader()?.into_dimensions().ok()?;
+    if w == 0 || h == 0 || w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE {
+        return None;
+    }
+    let rgba = reader()?.decode().ok()?.to_rgba8();
+    Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba))
+}
+
+/// Whether a slider that moved tells its plugin now: when the drag ends, and while it goes on at
+/// most every [`SLIDER_EVERY`] seconds (`last`: when the plugin last heard of this drag).
+pub(crate) fn slider_due(done: bool, now: f64, last: Option<f64>) -> bool {
+    done || last.is_none_or(|l| now - l >= SLIDER_EVERY)
+}
+
+/// A slider with its value in a number field beside it (which also takes the keyboard). While it
+/// is dragged it shows the dragged value at once and tells the plugin now and then.
+fn slider(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Value> {
+    let name = p.title();
+    // (the value being dragged, when the plugin last heard of the drag)
+    let live = ui.data(|d| d.get_temp::<(f64, Option<f64>)>(id));
+    let shown = live.map(|l| l.0).or(current.as_f64());
+    let range = (p.min.unwrap_or(0.0), p.max.unwrap_or(100.0));
+    ui.horizontal(|ui| {
+        let (_, moved) = widgets::slider(ui, id, name, range, None, shown, FIELD_W - SLIDER_FIELD_W - 8.0);
+        let typed = match widgets::number_field(ui, id.with("value"), Lead::Named(name), shown, "", SLIDER_FIELD_W, p.step.unwrap_or(1.0)) {
+            Some(FieldEdit::Set(v) | FieldEdit::Scrub(v, true)) => p.coerce(&json!(v)).ok(),
+            _ => None,
+        };
+        let Some((v, done)) = moved else { return typed };
+        let value = p.coerce(&json!(v)).ok()?;
+        let (now, last) = (ui.input(|i| i.time), live.and_then(|l| l.1));
+        // Nothing to tell when the plugin already has this value.
+        let due = slider_due(done, now, last) && value.as_f64() != current.as_f64();
+        let told = if due { Some(now) } else { last };
+        ui.data_mut(|d| match done {
+            true => d.remove::<(f64, Option<f64>)>(id),
+            false => drop(d.insert_temp(id, (value.as_f64().unwrap_or(v), told))),
+        });
+        due.then_some(value)
+    })
+    .inner
 }
 
 /// One parameter's field, named for screen readers: its new value when it changed.
@@ -1239,10 +1408,11 @@ fn field(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Used> {
     let name = p.title();
     let v = match p.kind {
         ParamKind::Text => widgets::text_field_named(ui, id, current.as_str().unwrap_or_default(), FIELD_W, name).map(Value::String),
-        ParamKind::Number => match widgets::number_field(ui, id, Lead::Named(name), current.as_f64(), "", FIELD_W, 1.0)? {
+        ParamKind::Number => match widgets::number_field(ui, id, Lead::Named(name), current.as_f64(), "", FIELD_W, p.step.unwrap_or(1.0))? {
             FieldEdit::Set(v) | FieldEdit::Scrub(v, true) => p.coerce(&json!(v)).ok(),
             FieldEdit::Scrub(_, false) => None,
         },
+        ParamKind::Slider => slider(ui, id, p, current),
         ParamKind::Boolean => {
             let on = current.as_bool().unwrap_or(false);
             widgets::checkbox(ui, on, name).then_some(Value::Bool(!on))
@@ -1288,7 +1458,8 @@ fn field(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Used> {
             }
             typed
         }
-        ParamKind::Button | ParamKind::Note => None,
+        // Buttons, notes and the controls that span the panel aren't fields.
+        _ => None,
     };
     v.map(|v| Used::Set(p.name.clone(), v))
 }

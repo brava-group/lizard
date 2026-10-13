@@ -965,6 +965,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     crate::versions::preview_banner(app, &ctx, rect);
     crate::branch_ui::banner(app, &ctx, rect);
     crate::dev_mode::focus_bar(app, &ctx, rect);
+    crate::widget_ui::menu_bar(app, ui, rect);
+    crate::widget_ui::pointer(app, &resp);
     // The cursor: the tool's, unless something on the canvas with its own has the pointer.
     app.canvas.cursor = None;
     if own_cursor && resp.hovered() && ctx.input(|i| i.pointer.hover_pos()).is_some() {

@@ -896,6 +896,33 @@ pub fn number(resp: &Response, label: &str, value: Option<f64>, suffix: &str, em
     });
 }
 
+/// A slider at `value` (none: mixed) within `range`.
+pub fn slider(resp: &Response, label: &str, value: Option<f64>, range: (f64, f64)) {
+    node(resp, label, |n| {
+        n.set_role(Role::Slider);
+        n.set_min_numeric_value(range.0);
+        n.set_max_numeric_value(range.1);
+        if let Some(v) = value {
+            n.set_numeric_value(v);
+        }
+    });
+}
+
+/// A progress bar filled to `fraction` (0–1).
+pub fn progress(resp: &Response, label: &str, fraction: f64) {
+    node(resp, label, |n| {
+        n.set_role(Role::ProgressIndicator);
+        n.set_min_numeric_value(0.0);
+        n.set_max_numeric_value(1.0);
+        n.set_numeric_value(fraction);
+    });
+}
+
+/// A picture, named by what it shows.
+pub fn image(resp: &Response, label: &str) {
+    node(resp, label, |n| n.set_role(Role::Image));
+}
+
 /// A text field showing `value`.
 pub fn text(resp: &Response, label: &str, value: &str) {
     node(resp, label, |n| {

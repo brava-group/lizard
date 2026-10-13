@@ -70,6 +70,7 @@ pub mod variable_ui;
 pub mod variables_panel;
 pub mod vector_panel;
 pub mod versions;
+pub mod widget_ui;
 pub mod widgets;
 pub mod windows;
 
@@ -228,6 +229,8 @@ mod vector_panel_tests;
 mod vector_tail_ui_tests;
 #[cfg(test)]
 mod web_clipboard_tests;
+#[cfg(test)]
+mod widget_ui_tests;
 #[cfg(test)]
 mod windows_qa_tests;
 #[cfg(test)]
@@ -1607,6 +1610,8 @@ impl FigApp {
         }
         // Files that arrived without a command (joined, recovered) take the kept View toggles too.
         self.session.apply_view_prefs();
+        // Widget timers that are due call their plugins back; the next one wakes the window.
+        widget_ui::tick(self, &ctx);
         windows::begin(self, &ctx);
         let (files, prefs) = (self.session.docs.len(), self.session.prefs.clone());
         self.frame(ui);

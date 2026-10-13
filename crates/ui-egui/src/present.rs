@@ -28,6 +28,7 @@ use figcraft_doc::proto::{
     Action, Device, DeviceColor, Direction, Easing, KeyMods, Overflow, OverlayPosition, PrototypeSettings, ScrollPosition, Transition, Trigger,
 };
 use figcraft_doc::{Document, HConstraint, Node, NodeId, NodeKind, VConstraint};
+use figcraft_engine::widgets::Part;
 use figcraft_geom::{Affine, Point};
 use serde_json::{Value, json};
 
@@ -313,8 +314,16 @@ pub struct Presenter {
     uses_pads: bool,
     /// The controller buttons held at the last poll (bit i: standard layout index i).
     pads_held: u32,
-    /// Clicks on widgets' clickable parts (widget, target), for [`Presenter::click_widgets`].
-    widget_clicks: Vec<(NodeId, String)>,
+    /// What happened to widgets (a `widget.*` command and its parameters), for
+    /// [`Presenter::run_widgets`].
+    widget_events: Vec<(&'static str, Value)>,
+    /// The widgets' pending timers on the player's clock: (widget, when it is due).
+    widget_timers: Vec<(NodeId, f64)>,
+    /// The widget part shown in its hover style, and the tooltip of the part under the pointer.
+    widget_hover: Option<NodeId>,
+    widget_tip: Option<String>,
+    /// The widget text being typed into (its layer), and whether typing just started.
+    widget_input: Option<(NodeId, bool)>,
 }
 
 impl Presenter {
@@ -375,7 +384,11 @@ impl Presenter {
             pads: Vec::new(),
             uses_pads: false,
             pads_held: 0,
-            widget_clicks: Vec::new(),
+            widget_events: Vec::new(),
+            widget_timers: Vec::new(),
+            widget_hover: None,
+            widget_tip: None,
+            widget_input: None,
         }
     }
 
@@ -467,6 +480,7 @@ impl Presenter {
         let copy = Document::clone(doc);
         self.original = Some(copy.clone());
         self.design = Some(copy);
+        self.forget_widgets();
         self.relayout();
         if first {
             self.arrived = now;
@@ -505,6 +519,10 @@ impl Presenter {
             }
             figcraft_engine::proto_run::play_interactions(d);
             raise_fixed(d);
+            // The widget part under the pointer shows its hover style.
+            if let Some(look) = self.widget_hover.and_then(|part| figcraft_engine::widgets::hovered(d, part)) {
+                *d = look;
+            }
         }
         self.uses_pads = d.as_ref().is_some_and(figcraft_doc::proto::uses_gamepad);
         self.doc = d;
@@ -688,8 +706,16 @@ impl Presenter {
         self.anim = None;
         self.temp = None;
         self.design = self.original.clone();
+        self.forget_widgets();
         self.relayout();
         self.arrive(now);
+    }
+
+    /// The prototype's copy of the file starts over: its widgets' timers, hover and typing go.
+    fn forget_widgets(&mut self) {
+        self.widget_events.clear();
+        self.widget_timers.clear();
+        (self.widget_hover, self.widget_tip, self.widget_input) = (None, None, None);
     }
 
     fn revert(&mut self, now: f64) {
@@ -754,15 +780,24 @@ impl Presenter {
         did
     }
 
-    /// Run the widget clicks the player took: each calls its plugin back on the player's copy (the
-    /// prototype's own state of the widget), as on the canvas but without touching the file.
-    /// Returns what went wrong, for a toast.
-    pub fn click_widgets(&mut self, s: &figcraft_engine::Session) -> Option<String> {
+    /// Run what happened to widgets in the player (clicks, text typed into them) and their timers
+    /// that are due at `now` on the player's clock: each calls its plugin back on the player's
+    /// copy (the prototype's own state of the widget), as on the canvas but without touching the
+    /// file. Returns what went wrong, for a toast.
+    pub fn run_widgets(&mut self, s: &figcraft_engine::Session, now: f64) -> Option<String> {
+        let due = self.widget_timers.iter().filter(|t| t.1 <= now).map(|t| ("widget.fireTimer", json!({"id": t.0})));
+        self.widget_events.extend(due.collect::<Vec<_>>());
+        self.widget_timers.retain(|t| t.1 > now);
         let mut error = None;
-        for (id, target) in std::mem::take(&mut self.widget_clicks) {
+        for (cmd, params) in std::mem::take(&mut self.widget_events) {
             let Some(doc) = self.design.clone() else { break };
-            match figcraft_engine::widgets::click_on(s, doc, id, &target) {
-                Ok((d, _)) => {
+            match figcraft_engine::widgets::run_on(s, doc, cmd, &params) {
+                Ok((d, out)) => {
+                    // The callback started or stopped the widget's timer: the player keeps the clock.
+                    if let (Some(w), true) = (out["id"].as_u64().map(NodeId), out["timerChanged"] == json!(true)) {
+                        self.widget_timers.retain(|t| t.0 != w);
+                        self.widget_timers.extend(out["timer"].as_f64().map(|ms| (w, now + ms / 1000.0)));
+                    }
                     self.design = Some(d);
                     self.relayout();
                 }
@@ -1648,9 +1683,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let now = ctx.input(|i| i.time);
     let Some(mut pres) = app.ui.present.take() else { return };
     if let Ok(ds) = app.session.ds() {
-        pres.sync(&ds.doc, now);
+        pres.sync(ds.without_widget_hover(), now);
     }
     poll_pads(app, &mut pres, &ctx);
+    let in_widget_text = pres.widget_input.is_some();
     let mut action = None;
     // Typing a reply to a comment keeps the keys from the prototype; Shift+C shows the comments.
     let typing = ctx.egui_wants_keyboard_input();
@@ -1700,7 +1736,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     if let Some(device) = picked_device {
         choose_device(app, &mut pres, &device);
     }
-    if action == Some(BarAction::Close) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Escape while typing into a widget's text ends the typing, not the presentation.
+    if action == Some(BarAction::Close) || (!in_widget_text && ctx.input(|i| i.key_pressed(egui::Key::Escape))) {
         app.ui.present_uid = None;
         return;
     }
@@ -1839,7 +1876,7 @@ fn finish(app: &mut FigApp, p: &mut Presenter) {
     for u in p.urls.drain(..) {
         app.services.open_url(&u);
     }
-    if let Some(e) = p.click_widgets(&app.session) {
+    if let Some(e) = p.run_widgets(&app.session, p.clock) {
         app.toast(e);
     }
 }
@@ -1917,7 +1954,7 @@ pub fn show_pane(app: &mut FigApp, ctx: &egui::Context) {
         return;
     }
     let now = ctx.input(|i| i.time);
-    let (doc, selected) = (ds.doc.clone(), selected_frame(ds));
+    let (doc, selected) = (ds.without_widget_hover().clone(), selected_frame(ds));
     pane.player.sync(&doc, now);
     // Deselecting and coming back to the same frame keeps the preview where it got to.
     if selected.is_some() && selected != pane.selected {
@@ -2136,6 +2173,7 @@ fn player(p: &mut Presenter, ui: &mut Ui, rect: Rect, now: f64, chrome: Chrome) 
         painter.rect_filled(l.screen, CornerRadius::ZERO, bg);
     }
     draw(p, &painter, &ctx, &l, now);
+    widget_extras(p, ui, &resp, &l);
     if p.view.inspect && !chrome.pane {
         inspect_hover(p, &painter, &ctx, &l, area);
     }
@@ -2153,7 +2191,43 @@ fn player(p: &mut Presenter, ui: &mut Ui, rect: Rect, now: f64, chrome: Chrome) 
     if let Some(due) = p.waiting.iter().map(|w| w.due - now).reduce(f64::min) {
         crate::repaint_in(&ctx, due.clamp(0.0, 60.0));
     }
+    // Widget timers run on the player's clock: wake for the next one (it fires after the frame).
+    if let Some(due) = p.widget_timers.iter().map(|t| t.1).reduce(f64::min) {
+        crate::repaint_in(&ctx, due - now);
+    }
     action
+}
+
+/// What widgets show over the player: the tooltip of the part under the pointer, and the field
+/// over a text being typed into (Enter or a click elsewhere commits it to the widget's plugin,
+/// Escape leaves it as it was).
+// shortcut: one line, and an emptied text is left as it was (the shared rename field); the
+// canvas editor takes several lines. Upgrade if prototypes need multiline widget text.
+fn widget_extras(p: &mut Presenter, ui: &mut Ui, area: &egui::Response, l: &Layout) {
+    if let Some(tip) = p.widget_tip.as_deref().filter(|_| area.hovered()) {
+        area.clone().on_hover_text_at_pointer(tip);
+    }
+    let Some((layer, start)) = p.widget_input else { return };
+    // The field opens the frame after the click that asked for it: a field takes a click that
+    // ends elsewhere in its first frame as one that takes the keyboard away from it.
+    if start && ui.input(|i| i.pointer.any_released() || i.pointer.any_down()) {
+        ui.ctx().request_repaint();
+        return;
+    }
+    let (_, place, _) = l.active(p.current);
+    let found =
+        l.disp.world_bounds(layer).zip(l.disp.node(layer).and_then(|n| n.kind.text())).zip(figcraft_engine::widgets::input_of(&l.disp, layer));
+    let Some(((bounds, text), input)) = found else {
+        p.widget_input = None;
+        return;
+    };
+    let rect = place.rect(bounds);
+    let font = regular((rect.height() * 0.7).clamp(9.0, 32.0));
+    let (typed, open) = widgets::rename_field(ui, Id::new(("present_widget_input", layer)), &text.characters, rect, font, start);
+    if let Some(typed) = typed {
+        p.widget_events.push(("widget.setText", json!({"id": layer, "input": input.name, "text": typed})));
+    }
+    p.widget_input = open.then_some((layer, false));
 }
 
 /// Inspecting: the layer under the pointer becomes the inspected one; it is outlined.
@@ -2476,6 +2550,23 @@ fn input(p: &mut Presenter, ctx: &egui::Context, l: &Layout, over_area: bool, ke
     if !hits.is_empty() {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+    // Widgets: the part under the pointer shows its hover style and its tooltip, with a hand over
+    // what can be clicked and an I-beam over a text to type into. Their plugins aren't called.
+    {
+        use figcraft_engine::widgets::{hover_at, part_at, tooltip_at};
+        let under = pos.filter(|_| over_area).and_then(|q| Some((layer_at(doc, root, &place, q)?, place.page(q))));
+        match under.and_then(|(hit, at)| part_at(doc, hit, at)) {
+            Some((_, Part::Target(_))) => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
+            Some((_, Part::Input(_))) => ctx.set_cursor_icon(egui::CursorIcon::Text),
+            None => {}
+        }
+        p.widget_tip = under.and_then(|(hit, at)| tooltip_at(doc, hit, at));
+        let hover = under.and_then(|(hit, at)| hover_at(doc, hit, at));
+        if hover != p.widget_hover {
+            p.widget_hover = hover;
+            p.relayout();
+        }
+    }
     // First (top-most) hit that has a matching trigger.
     let pick = |want: &dyn Fn(&Trigger) -> bool| -> Option<(NodeId, usize, Rect)> {
         hits.iter().find_map(|(id, r)| find_trigger(doc, *id, want).map(|k| (*id, k, *r)))
@@ -2613,12 +2704,18 @@ fn input(p: &mut Presenter, ctx: &egui::Context, l: &Layout, over_area: bool, ke
             {
                 return;
             }
-            // A widget's clickable part calls its plugin back (after the frame, with the session).
-            if let Some(q) = pos
-                && let Some(t) = layer_at(doc, root, &place, q).and_then(|hit| figcraft_engine::widgets::target_at(doc, hit, place.page(q)))
-            {
-                p.widget_clicks.push(t);
-                return;
+            // A widget's clickable part calls its plugin back (after the frame, with the session);
+            // a text of it that can be edited is typed into in place.
+            match pos.and_then(|q| layer_at(doc, root, &place, q).and_then(|hit| figcraft_engine::widgets::part_at(doc, hit, place.page(q)))) {
+                Some((w, Part::Target(target))) => {
+                    p.widget_events.push(("widget.click", json!({"id": w, "target": target})));
+                    return;
+                }
+                Some((_, Part::Input(text))) => {
+                    p.widget_input = Some((text, true));
+                    return;
+                }
+                None => {}
             }
             // Clicking where nothing reacts flashes the hotspots.
             if p.view.hotspot_hints {
@@ -2827,6 +2924,9 @@ mod behaviour_tests;
 #[cfg(test)]
 #[path = "present_tail_tests.rs"]
 mod tail_tests;
+#[cfg(test)]
+#[path = "present_widgets_tests.rs"]
+mod widgets_tests;
 
 #[cfg(test)]
 #[path = "present_delay_tests.rs"]
