@@ -33,7 +33,21 @@ pub struct Ctx<'a> {
     pub under: Option<&'a Under<'a>>,
     /// Seconds into animated GIFs (0: their first frame; only the presenter plays them).
     pub time: f64,
+    /// Paint bounds already worked out in this render.
+    pub bounds: &'a Bounds,
 }
+
+/// The local paint bounds worked out during one render, by node and greeking scale. Culling asks
+/// for a node's bounds and then for each of its children's, so without them every layer's subtree
+/// was walked again at each level above it.
+#[derive(Default)]
+pub struct Bounds(std::cell::RefCell<HashMap<BoundsKey, (Rect, usize)>>);
+
+/// A layer, and the scale its text is greeked at (none: drawn in full).
+type BoundsKey = (NodeId, Option<u64>);
+
+/// Deepest nesting the paint bounds walk follows.
+const MAX_BOUNDS_DEPTH: usize = 64;
 
 pub fn ts_transform(a: Affine) -> Transform {
     let c = a.as_coeffs();
@@ -279,32 +293,57 @@ fn text_box_bounds(n: &Node) -> Rect {
 /// Local bounds a node paints into (its box grown by stroke/effect reach, plus unclipped children).
 /// Text that overflows its box counts where its glyphs are, so it isn't culled while visible;
 /// text greeked at `greek_scale` (see [`lod::greeked`]) paints only inside [`text_box_bounds`].
-fn local_paint_bounds(doc: &Document, n: &Node, depth: usize, greek_scale: Option<f64>) -> Rect {
+pub(crate) fn local_paint_bounds(doc: &Document, n: &Node, depth: usize, greek_scale: Option<f64>) -> Rect {
+    bounds_within(doc, n, depth, greek_scale, None).0
+}
+
+/// [`local_paint_bounds`], kept in and read from `memo` when there is one. Also returns how many
+/// levels the walk went down, or `None` when the nesting cap cut it short: such bounds depend on
+/// the depth they were asked at and aren't kept, and kept bounds are read only where their levels
+/// still fit under the cap.
+pub(crate) fn bounds_within(doc: &Document, n: &Node, depth: usize, greek_scale: Option<f64>, memo: Option<&Bounds>) -> (Rect, Option<usize>) {
+    // A layer without children is quicker to work out again than to look up.
+    let memo = memo.filter(|_| !n.children.is_empty());
+    let key = (n.id, greek_scale.map(f64::to_bits));
+    if let Some((r, levels)) = memo.and_then(|m| m.0.borrow().get(&key).copied())
+        && depth + levels <= MAX_BOUNDS_DEPTH
+    {
+        return (r, Some(levels));
+    }
     let reach = n.paint_reach();
     let mut r = n.local_rect().inflate(reach, reach);
+    let mut levels = Some(0);
     let clips = n.clip && n.kind.is_frame_like();
-    if (!clips || n.kind.bounds_follow_children()) && depth < 64 && !n.hides_contents() {
-        for c in n.children.iter().filter_map(|c| doc.node(*c)) {
-            if !c.visible {
-                continue;
+    if (!clips || n.kind.bounds_follow_children()) && !n.hides_contents() {
+        if depth < MAX_BOUNDS_DEPTH {
+            let mut below = Some(0);
+            for c in n.children.iter().filter_map(|c| doc.node(*c)) {
+                if !c.visible {
+                    continue;
+                }
+                let (cb, c_levels) = bounds_within(doc, c, depth + 1, greek_scale, memo);
+                below = below.zip(c_levels).map(|(b, l)| b.max(l));
+                r = r.union(figcraft_geom::transform_rect_bbox(c.transform, cb));
             }
-            let cb = local_paint_bounds(doc, c, depth + 1, greek_scale);
-            r = r.union(figcraft_geom::transform_rect_bbox(c.transform, cb));
+            levels = below.map(|b| b + 1);
+        } else if !n.children.is_empty() {
+            levels = None;
         }
     }
     // Text can overflow its box.
     if let NodeKind::Text(_) = n.kind {
         r = r.union(text_box_bounds(n).inflate(reach, reach));
-        if greek_scale.is_some_and(|s| lod::greeked(n, s)) {
-            return r;
-        }
-        if let Some((l, dy)) = figcraft_text::layout_node(n)
+        if !greek_scale.is_some_and(|s| lod::greeked(n, s))
+            && let Some((l, dy)) = figcraft_text::layout_node(n)
             && let Some(ink) = l.ink_bounds()
         {
             r = r.union(ink + figcraft_geom::kurbo::Vec2::new(0.0, dy));
         }
     }
-    r
+    if let (Some(m), Some(l)) = (memo, levels) {
+        m.0.borrow_mut().insert(key, (r, l));
+    }
+    (r, levels)
 }
 
 /// How far (document units) effects that read outside a node's paint bounds reach: blurs, glass,
@@ -385,7 +424,7 @@ pub fn draw_node(ctx: &Ctx, pix: &mut Pixmap, id: NodeId, parent_xf: Affine, dep
     }
     let xf = parent_xf * n.transform;
     let (pw, ph) = (pix.width(), pix.height());
-    let local = local_paint_bounds(ctx.doc, n, 0, ctx.lod.then_some(ctx.scale));
+    let local = bounds_within(ctx.doc, n, 0, ctx.lod.then_some(ctx.scale), Some(ctx.bounds)).0;
     let dev = device_rect(xf, local);
     // Effects that read outside (blur) need a margin when culling. Absurd effects (a spread or
     // blur of millions of pixels) keep a sane layer: what lies further off reads as empty.

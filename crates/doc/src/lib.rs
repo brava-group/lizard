@@ -77,17 +77,19 @@ pub enum DocError {
 
 pub type DocResult<T> = Result<T, DocError>;
 
-/// The set of touched node ids, and whether any layer is a mask (worked out when first asked
-/// after a change: hit testing skips its mask checks without one). Never part of equality or
+/// The set of touched node ids, whether any layer is a mask (hit testing skips its mask checks
+/// without one) and the largest background blur radius (renders keep that much overlap between
+/// their bands), both worked out when first asked after a change. Never part of equality or
 /// serialisation.
 #[derive(Clone, Debug, Default)]
-pub struct Dirty(pub std::collections::BTreeSet<NodeId>, std::sync::OnceLock<bool>);
+pub struct Dirty(pub std::collections::BTreeSet<NodeId>, std::sync::OnceLock<bool>, std::sync::OnceLock<f64>);
 
 impl Dirty {
     /// Record node `id` as touched (edited, added or removed).
     fn touch(&mut self, id: NodeId) {
         self.0.insert(id);
         self.1 = std::sync::OnceLock::new();
+        self.2 = std::sync::OnceLock::new();
     }
 }
 
@@ -252,6 +254,11 @@ impl Document {
     /// Whether any layer of the document is a mask.
     pub fn has_masks(&self) -> bool {
         *self.dirty.1.get_or_init(|| self.nodes.values().any(|n| n.is_mask))
+    }
+
+    /// The largest background blur or glass radius of any layer's effects (0 without any).
+    pub fn max_backdrop_radius(&self) -> f64 {
+        *self.dirty.2.get_or_init(|| self.nodes.values().flat_map(|n| n.effects.iter()).map(Effect::backdrop_radius).fold(0.0, f64::max))
     }
 
     /// Node ids touched so far (without clearing).
