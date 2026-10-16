@@ -9,7 +9,6 @@ pub mod backdrop;
 pub mod blur;
 pub mod boolean;
 pub mod draw;
-mod export_depth;
 pub mod fx;
 pub mod glass;
 pub mod grain;
@@ -23,7 +22,6 @@ pub mod retained;
 pub mod shadow;
 
 pub use draw::{node_outline, paint_bounds, stroke_fill, subtree_outline, ts_path};
-pub use export_depth::{ExportDepthError, MAX_EXPORT_DEPTH, check_export_depth};
 pub use icon::rasterize_icon;
 pub use retained::{DamageRect, Retained, Work};
 pub use tiny_skia::{FillRule, Pixmap};
@@ -463,8 +461,6 @@ pub fn png_insert_chunk(png: Vec<u8>, kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod backdrop_shadow_tests;
-#[cfg(test)]
 mod backdrop_tests;
 #[cfg(test)]
 mod band_tests;
@@ -479,15 +475,9 @@ mod effects_behaviour_tests;
 #[cfg(test)]
 mod gif_tests;
 #[cfg(test)]
-mod glass_bench_tests;
-#[cfg(test)]
-mod glass_cut_tests;
-#[cfg(test)]
 mod grain_tests;
 #[cfg(test)]
 mod group_effects_tests;
-#[cfg(test)]
-mod image_budget_tests;
 #[cfg(test)]
 mod image_profile_tests;
 #[cfg(test)]

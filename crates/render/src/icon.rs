@@ -27,8 +27,8 @@ fn unpre(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] {
 }
 
 /// Rasterize SVG path data (`d`, drawn in a 24-unit box) to `px` by `px` RGBA bytes
-/// (unpremultiplied rows): filled `fill`, or stroked `stroke` (colour, 24-unit width).
-/// `None` for bad path data, a bad colour, or a silly size.
+/// (unpremultiplied rows): stroked `stroke` (colour, 24-unit width) when given, else filled
+/// `fill`. `None` for bad path data, a bad colour, or a silly size.
 pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, px: u32) -> Option<Vec<u8>> {
     if !(8..=256).contains(&px) || d.trim().is_empty() || d.len() > 16 * 1024 {
         return None;
@@ -38,16 +38,8 @@ pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, 
     let scale = f64::from(px) / 24.0;
     let mut pix = Pixmap::new(px, px)?;
     let xf = Transform::from_scale(scale as f32, scale as f32);
-    match (fill.and_then(rgba), stroke) {
-        (Some([r, g, b, a]), _) => {
-            let paint = Paint {
-                shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)),
-                anti_alias: true,
-                ..Paint::default()
-            };
-            pix.fill_path(&path, &paint, FillRule::Winding, xf, None);
-        }
-        (None, Some((color, width))) => {
+    match (stroke, fill.and_then(rgba)) {
+        (Some((color, width)), _) => {
             let [r, g, b, a] = rgba(color)?;
             if !width.is_finite() || width <= 0.0 || width > 24.0 {
                 return None;
@@ -58,12 +50,21 @@ pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, 
                 ..Paint::default()
             };
             let stroke = Stroke {
-                width: (width * scale) as f32,
+                // In user space: the transform scales it to device pixels.
+                width: width as f32,
                 line_cap: LineCap::Round,
                 line_join: LineJoin::Round,
                 ..Stroke::default()
             };
             pix.stroke_path(&path, &paint, &stroke, xf, None);
+        }
+        (None, Some([r, g, b, a])) => {
+            let paint = Paint {
+                shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)),
+                anti_alias: true,
+                ..Paint::default()
+            };
+            pix.fill_path(&path, &paint, FillRule::Winding, xf, None);
         }
         _ => return None,
     }
@@ -92,6 +93,14 @@ mod tests {
         let stroked = rasterize_icon("M4 12L20 12", None, Some(("#0D99FF", 2.0)), px).expect("strokes");
         let blue = stroked.chunks_exact(4).filter(|p| p[3] > 0 && p[2] > 200).count();
         assert!(blue > 10, "a stroked line paints pixels: {blue}");
+        // A stroke wins when both are given (an outline icon stays an outline).
+        let both = rasterize_icon("M4 12L20 12", Some("#F24822"), Some(("#0D99FF", 2.0)), px).expect("both");
+        let red = both.chunks_exact(4).filter(|p| p[3] == 255 && p[0] > 200 && p[2] < 100).count();
+        assert_eq!(red, 0, "no fill leaks into a stroked icon");
+        // Strokes are user-space thin: a plus of two 14-unit strokes at width 2 covers ~10%.
+        let plus = rasterize_icon("M12 5v14M5 12h14", Some("#111111"), Some(("#111111", 2.0)), px).expect("plus");
+        let painted = plus.chunks_exact(4).filter(|p| p[3] > 20).count() as f64 / (px * px) as f64;
+        assert!(painted < 0.25, "strokes double-scaled look bold: {painted}");
     }
 
     #[test]

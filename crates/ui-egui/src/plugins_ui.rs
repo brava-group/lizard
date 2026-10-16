@@ -118,8 +118,7 @@ const SLIDER_EVERY: f64 = 0.1;
 const SLIDER_FIELD_W: f32 = 52.0;
 /// A panel's picture is decoded only up to this many pixels on a side.
 const MAX_IMAGE_SIDE: u32 = 2048;
-/// A grid cell across, and the pixels its icon is rasterised at (crisp on retina).
-const GRID_CELL: f32 = 44.0;
+/// The pixels a grid icon is rasterised at (crisp on retina).
 const GRID_ICON_PX: u32 = 72;
 /// How far apart plugin panels open, side by side (a panel and a gap).
 const PANEL_STEP: f32 = 372.0;
@@ -1368,13 +1367,15 @@ fn picture(ui: &mut Ui, id: Id, p: &Param, t: &Tokens) {
 fn grid(ui: &mut Ui, salt: Id, p: &Param, values: &Map<String, Value>, t: &Tokens) -> Option<Used> {
     let picked = values.get(&p.name).and_then(Value::as_str).unwrap_or_default().to_string();
     let columns = p.columns.unwrap_or(6.0).clamp(1.0, 12.0) as usize;
+    // Cells fill the panel's width, so the grid has no lopsided padding.
+    let cell = ((ui.available_width() - 6.0 * (columns - 1) as f32) / columns as f32).max(28.0);
     let mut hit = None;
     ui.add_enabled_ui(!p.disabled, |ui| {
         egui::Grid::new(("plugin_cells", salt)).num_columns(columns).spacing([6.0, 6.0]).show(ui, |ui| {
             for (n, item) in p.items.iter().enumerate() {
                 let id = Id::new(("plugin_cell", salt, n));
                 let texture = cell_texture(ui, id, item);
-                let (rect, mut resp) = ui.allocate_exact_size(egui::vec2(GRID_CELL, GRID_CELL), egui::Sense::click());
+                let (rect, mut resp) = ui.allocate_exact_size(egui::vec2(cell, cell), egui::Sense::click());
                 let name = if item.label.is_empty() { item.value.as_str() } else { item.label.as_str() };
                 crate::a11y::image(&resp, name);
                 resp = resp.on_hover_text(name);
