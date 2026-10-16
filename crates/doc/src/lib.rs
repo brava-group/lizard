@@ -1124,8 +1124,14 @@ impl Document {
     /// mask with the layers above it up to the next mask, or a single layer. An auto layout frame
     /// whose first child paints on top paints the runs in reverse (see [`Node::paint_order`]).
     pub fn paint_runs(&self, n: &Node) -> Vec<std::ops::Range<usize>> {
-        let kids = &n.children;
-        let node = |i: usize| kids.get(i).and_then(|k| self.node(*k));
+        let kids: Vec<Option<&Node>> = n.children.iter().map(|k| self.node(*k)).collect();
+        Self::paint_runs_of(&kids, n.layout.as_ref().is_some_and(|l| l.reverse_z))
+    }
+
+    /// [`Self::paint_runs`] of children already looked up (`None`: not in the document), last run
+    /// first when `reverse_z`.
+    pub fn paint_runs_of(kids: &[Option<&Node>], reverse_z: bool) -> Vec<std::ops::Range<usize>> {
+        let node = |i: usize| kids.get(i).copied().flatten();
         let mut runs = Vec::new();
         let mut i = 0;
         while i < kids.len() {
@@ -1138,7 +1144,7 @@ impl Document {
             runs.push(i..j);
             i = j;
         }
-        if n.layout.as_ref().is_some_and(|l| l.reverse_z) {
+        if reverse_z {
             runs.reverse();
         }
         runs

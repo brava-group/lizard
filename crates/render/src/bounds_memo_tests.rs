@@ -56,3 +56,37 @@ fn the_largest_background_blur_follows_edits() {
     d.remove(r).unwrap();
     assert_eq!(max_backdrop_blur(&d), 0.0);
 }
+
+#[test]
+fn kept_splat_answers_are_the_answers_worked_out_afresh() {
+    use figcraft_color::{ImageScaleMode, Paint};
+    // Groups nested past the 64-level walk, with an image-filled rectangle at the bottom of one
+    // branch and a plain one at the bottom of the other: answers asked for deep-first and
+    // top-first, at depths 0 and 20, are those worked out alone.
+    let mut d = Document::new("deep");
+    let p = d.first_page().unwrap();
+    let mut chain = Vec::new();
+    for image in [false, true] {
+        let mut parent = p;
+        for k in 0..80 {
+            let g = d.create(parent, NodeKind::Frame, &format!("{image} {k}"), 0.0, 0.0, 10.0, 10.0).unwrap();
+            d.node_mut(g).unwrap().clip = false;
+            chain.push(g);
+            parent = g;
+        }
+        let r = d.create(parent, NodeKind::Rectangle, "R", 0.0, 0.0, 10.0, 10.0).unwrap();
+        if image {
+            d.node_mut(r).unwrap().fills = vec![Paint::image("missing", ImageScaleMode::Fill)];
+        }
+    }
+    for order in [chain.iter().rev().copied().collect::<Vec<_>>(), chain.clone()] {
+        let memo = draw::Bounds::default();
+        for id in &order {
+            let n = d.node(*id).unwrap();
+            for depth in [0, 20] {
+                let kept = lod::splattable_within(&d, n, depth, Some(&memo)).0;
+                assert_eq!(kept, lod::splattable(&d, n, depth), "{} at depth {depth}", n.name);
+            }
+        }
+    }
+}
