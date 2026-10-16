@@ -355,7 +355,7 @@ plugin directory requests (`plugin.directory.*` says so). Import plugins with `p
 | `permissions.access` | `read` (the default): commands that leave the document as it is; such plugins also run from Dev Mode's Inspect tab. `write`: edits too. |
 | `permissions.commands` | Optional allowlist: exact command ids or prefixes ending in `*` (`node.*`). Empty: any command the access allows. |
 | `commands` | The menu commands, each `{id, label, params?}`. Without any, the plugin has one, `run`, unless it's a widget (a widget needs no command). |
-| `params[]` | `{name, label?, type, default?, options?, min?, max?, step?}`; `type` is `text`, `number` (clamped to `min`/`max`), `boolean`, `select` (one of `options`, a menu), `list` (one of `options`, shown as a list), `color` (hex, `#RRGGBB` or `#RRGGBBAA`) or, with API 4, `slider` (a number from `min` to `max`, 0 to 100 when not given, in `step`s). A default that doesn't fit is dropped. |
+| `params[]` | `{name, label?, type, default?, options?, min?, max?, step?}`; `type` is `text`, `number` (clamped to `min`/`max`), `boolean`, `select` (one of `options`, a menu), `list` (one of `options`, shown as a list), `color` (hex, `#RRGGBB` or `#RRGGBBAA`) or, with API 4, `slider` (a number from `min` to `max`, 0 to 100 when not given, in `step`s). Panels also take `button`, `note`, `image`, `progress`, `divider`, `section` and `grid` (a command's parameters never do). A default that doesn't fit is dropped. |
 
 ## What a plugin can't do
 
@@ -497,6 +497,11 @@ API 4 adds these controls and fields:
   {"type": "slider", "name": "gap", "label": "Gap", "min": 0, "max": 32, "step": 1, "value": 8},
   {"type": "divider"},
   {"type": "image", "label": "A preview of the dot grid", "data": "Qk02bAAA…", "height": 120, "fit": "fit"},
+  {"type": "grid", "name": "shape", "label": "Shape", "columns": 4, "value": "circle", "items": [
+    {"value": "circle", "path": "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z", "label": "Circle", "color": "#1E1E1E"},
+    {"value": "plus", "path": "M12 5v14M5 12h14", "label": "Plus", "color": "#1E1E1E", "stroke": 2.0},
+    {"value": "photo", "data": "iVBORw0KGgo…", "label": "A photo"}
+  ]},
   {"type": "progress", "label": "36 of 144 dots", "value": 0.25},
   {"type": "button", "name": "generate", "label": "Generate", "disabled": true}
 ]}
@@ -508,6 +513,12 @@ API 4 adds these controls and fields:
   in the module), `height` high (16–400, 120 when not given), `fit` in the panel's width (`fit`
   shows all of it, `fill` stretches it, `crop` and `tile` cover the box); `label` names it for
   screen readers.
+- `grid`: clickable cells, `columns` across (6 when not given, 1–12). Each item has a `value`
+  (unique, the picked value) and shows SVG path data (`path`, painted in `color`, `#1E1E1E` when
+  not given: filled, or stroked `stroke` wide) or a picture (`data`, as an image control's);
+  `label` names it for screen readers and tooltips. A click calls the plugin back with the picked
+  value, like a button; the picked cell draws selected. 1–256 cells, each path 16 KB at most, and
+  a cell's picture counts toward the images' 512 KB together.
 - `progress`: a bar filled to `value` (0–1), with `label` above it.
 - `divider`: a line across the panel.
 - `section`: a heading (`label`) that folds the controls after it, up to the next section or
