@@ -155,6 +155,8 @@ pub struct HistoryEntry {
     pub doc: Arc<Document>,
     pub selection: Vec<NodeId>,
     pub page: NodeId,
+    /// The step came from the in-app agent's document-scoped MCP bridge.
+    pub agent: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -484,7 +486,7 @@ impl DocState {
 
     /// Push a snapshot undo step: the document was `before` (shown with `selection` on `page`).
     pub(crate) fn push_undo(&mut self, label: &str, before: Arc<Document>, selection: Vec<NodeId>, page: NodeId) {
-        self.history.undo.push(HistoryEntry { label: label.to_string(), doc: before, selection, page });
+        self.history.undo.push(HistoryEntry { label: label.to_string(), doc: before, selection, page, agent: false });
         if self.history.undo.len() > self.history.limit.max(1) {
             self.history.undo.remove(0);
         }
@@ -1080,7 +1082,7 @@ impl Session {
             return Ok(self.live_travel(true));
         }
         let Some(e) = ds.history.undo.pop() else { return Ok(false) };
-        let redo = HistoryEntry { label: e.label.clone(), doc: ds.doc.clone(), selection: ds.selection.clone(), page: ds.page };
+        let redo = HistoryEntry { label: e.label.clone(), doc: ds.doc.clone(), selection: ds.selection.clone(), page: ds.page, agent: e.agent };
         ds.history.redo.push(redo);
         ds.doc = e.doc;
         ds.selection = e.selection;
@@ -1109,7 +1111,7 @@ impl Session {
             return Ok(self.live_travel(false));
         }
         let Some(e) = ds.history.redo.pop() else { return Ok(false) };
-        let undo = HistoryEntry { label: e.label.clone(), doc: ds.doc.clone(), selection: ds.selection.clone(), page: ds.page };
+        let undo = HistoryEntry { label: e.label.clone(), doc: ds.doc.clone(), selection: ds.selection.clone(), page: ds.page, agent: e.agent };
         ds.history.undo.push(undo);
         ds.doc = e.doc;
         ds.selection = e.selection;

@@ -258,6 +258,7 @@ fn control_requests_and_screenshots_wake_an_idle_ui() {
         params: json!({}),
         reply: tx.clone(),
         cancelled: Default::default(),
+        agent_guard: None,
     });
     assert_eq!(h.frame(vec![]), Duration::ZERO);
     assert!(rx.try_recv().unwrap().result.is_ok());
@@ -265,7 +266,14 @@ fn control_requests_and_screenshots_wake_an_idle_ui() {
     // A screenshot keeps frames coming until the window delivers it, then the UI rests again.
     let path = std::env::temp_dir().join(format!("figcraft-idle-shot-{}.png", std::process::id()));
     let params = json!({"path": path.to_string_lossy()});
-    h.app.control_queue.push(ControlRequest { id: json!(2), method: "ui.screenshot".into(), params, reply: tx, cancelled: Default::default() });
+    h.app.control_queue.push(ControlRequest {
+        id: json!(2),
+        method: "ui.screenshot".into(),
+        params,
+        reply: tx,
+        cancelled: Default::default(),
+        agent_guard: None,
+    });
     for _ in 0..5 {
         assert_eq!(h.frame(vec![]), Duration::ZERO, "waiting for the screenshot");
     }
@@ -350,6 +358,7 @@ fn a_hidden_window_answers_requests_that_need_no_frame() {
         params,
         reply: tx.clone(),
         cancelled: Default::default(),
+        agent_guard: None,
     };
     h.app.control_queue.push(request(1, "engine.execute", json!({"command": "file.save", "params": {"path": path.to_string_lossy()}})));
     h.app.control_queue.push(request(2, "ui.inspect", json!({})));

@@ -3,6 +3,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,15 +27,16 @@ pub fn drain_queue(queue: &Queue, target: &mut Vec<ControlRequest>) {
     target.extend(queue.drain(..count));
 }
 
-pub fn start(port: u16, queue: Queue, ctx: CtxSlot) {
+pub fn start(port: u16, queue: Queue, ctx: CtxSlot) -> Option<u16> {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
             log::error!("control server: can't bind 127.0.0.1:{port}: {e} (another app may own it; pick another port)");
             eprintln!("FigCraft control server failed to bind port {port}: {e}");
-            return;
+            return None;
         }
     };
+    let port = listener.local_addr().ok()?.port();
     eprintln!("FigCraft control server listening on 127.0.0.1:{port}");
     let spawned = std::thread::Builder::new().name("figcraft-control".into()).spawn(move || {
         let mut workers = Vec::new();
@@ -44,7 +46,46 @@ pub fn start(port: u16, queue: Queue, ctx: CtxSlot) {
     });
     if let Err(e) = spawned {
         log::error!("control server thread: {e}");
+        return None;
     }
+    Some(port)
+}
+
+/// A private MCP bridge tied to the document that started the agent. Dropping its flag revokes
+/// queued and future calls, including calls from an old agent process still shutting down.
+pub fn start_agent(document: u64, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
+    let port = listener.local_addr().ok()?.port();
+    listener.set_nonblocking(true).ok()?;
+    let enabled = Arc::new(AtomicBool::new(true));
+    let flag = enabled.clone();
+    std::thread::Builder::new()
+        .name("figcraft-agent-control".into())
+        .spawn(move || {
+            let mut workers = Vec::new();
+            while flag.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        workers.retain(|worker: &std::thread::JoinHandle<()>| !worker.is_finished());
+                        if workers.len() >= MAX_CONNECTIONS {
+                            continue;
+                        }
+                        let queue = queue.clone();
+                        let ctx = ctx.clone();
+                        let guard = flag.clone();
+                        if let Ok(worker) = std::thread::Builder::new().name("figcraft-agent-control-conn".into()).spawn(move || {
+                            let _ = serve_guarded(stream, queue, ctx, TIMEOUT, Some((document, guard)));
+                        }) {
+                            workers.push(worker);
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(50)),
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok()?;
+    Some((port, enabled))
 }
 
 fn spawn_connection(stream: TcpStream, queue: Queue, ctx: CtxSlot, workers: &mut Vec<std::thread::JoinHandle<()>>, timeout: Duration) {
@@ -60,7 +101,11 @@ fn spawn_connection(stream: TcpStream, queue: Queue, ctx: CtxSlot, workers: &mut
     }
 }
 
-fn serve(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> std::io::Result<()> {
+fn serve(out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> std::io::Result<()> {
+    serve_guarded(out, queue, ctx, timeout, None)
+}
+
+fn serve_guarded(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration, guard: Option<(u64, Arc<AtomicBool>)>) -> std::io::Result<()> {
     out.set_read_timeout(Some(timeout))?;
     out.set_write_timeout(Some(timeout))?;
     let mut reader = BufReader::new(out.try_clone()?);
@@ -85,7 +130,16 @@ fn serve(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> s
             Ok(v) => {
                 let id = v.get("id").cloned().unwrap_or(Value::Null);
                 let method = v.get("method").and_then(Value::as_str).unwrap_or("").to_string();
-                let params = v.get("params").cloned().unwrap_or(json!({}));
+                let mut params = v.get("params").cloned().unwrap_or(json!({}));
+                if let Some((document, enabled)) = &guard {
+                    if !enabled.load(Ordering::Acquire) {
+                        writeln!(out, "{}", json!({"id": id, "ok": false, "error": "A sessão do agente foi encerrada"}))?;
+                        continue;
+                    }
+                    if let Some(object) = params.as_object_mut() {
+                        object.insert("__agent_document".into(), json!(document));
+                    }
+                }
                 let (tx, rx) = std::sync::mpsc::channel();
                 let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let mut pending = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -95,7 +149,14 @@ fn serve(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> s
                     writeln!(out, "{}", json!({"id": id, "ok": false, "error": "control request queue is full"}))?;
                     continue;
                 }
-                pending.push(ControlRequest { id: id.clone(), method, params, reply: tx, cancelled: cancelled.clone() });
+                pending.push(ControlRequest {
+                    id: id.clone(),
+                    method,
+                    params,
+                    reply: tx,
+                    cancelled: cancelled.clone(),
+                    agent_guard: guard.as_ref().map(|(_, flag)| flag.clone()),
+                });
                 drop(pending);
                 if let Some(c) = ctx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
                     c.request_repaint();

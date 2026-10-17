@@ -59,7 +59,7 @@ blockers.
 | M9 Real-time collaboration | core done (#103: ids, change sets, server ordering, convergence); live sessions (WebSocket transport with limits and reconnect, hosting from the app, invite links, document sync between apps, cursors, selections, avatars, follow, `collab.*` commands); per-user undo, rejection handling, offline queue and resuming after a reconnect; styles, variables, collections, modes and comments created in a session get ids from their creator's space; others' text carets and selections on the canvas; the browser client (joins desktop-hosted sessions); `figcraft://` links open the app and join (Windows registers per user; macOS and Linux packages declare the scheme); the standalone `figcraft-server` (persistence with compaction, restarts that lose nothing confirmed, publishing from the app, share links to edit or view, revocable); team libraries kept on the server and enabled by a share link, with usage counts, and swapping a library; `wss://` from the desktop app, server releases and a deployment guide | accounts, teams | 45–90 |
 | M10 Localization (new) | not started | layer + 11 languages | 60–100 |
 | M11 Plugins | runtime, API, menu, manager and SDK done (#101); plugin panels and settings (ABI v2); widgets (API 3), panels side by side, colour picker on plugin fields; a plugin directory on `figcraft-server` (publish, browse, install, update) | a public catalogue, publisher accounts and signatures, the directory in the browser, richer widget events; Figma plugin compatibility is an owner decision | 8–26 |
-| M12 AI features (new, owner decision) | chat sidebar shell (2026-10-17); no provider | local models and document actions | 30–60 |
+| M12 AI features (new, owner decision) | desktop chat with external ACP adapters and document actions through MCP (2026-10-17) | local models and specialized image/design actions | 30–60 |
 
 ## Next, after the current focus
 
@@ -73,6 +73,7 @@ blockers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | M12: desktop Agent chat connects local ACP adapters to document-scoped MCP commands, with streaming, approvals, Stop, local history and guarded Undo. Specialized AI features remain open. Estimate unchanged. |
 | 2026-10-17 | minor | M12 has a chat sidebar shell, but no local model or document actions yet. Estimate unchanged. |
 | 2026-10-16 | minor | Community fixes from #478 up (batches #591, #598, #602; 69 PRs) and a control-channel fix: a line that isn't JSON now ends a `--control` connection, so a web page can't drive the app through a browser request (#589). Highlights: page copies keep navigation, flows, prototype settings and guides; Find and Replace keeps line endings and case-insensitive matches; text hyperlinks survive import and export; recent colours record only what was picked; MCP screenshots respect `maxSize`; Swedish catalog (UI strings), Czech plurals; bounded canvas overscan while panning; Korean fallback at the run's weight; many vector-edit, guide, page and .fig round-trip fixes. Numbers unchanged |
 | 2026-10-14 | minor | M7: the Small caps button in Type settings showed a box where the UI font has no small-capital `ɢ` (builds without Inter use egui's fonts); its sample is now a capital and a smaller capital, drawn from ordinary letters every UI font has. Numbers unchanged |

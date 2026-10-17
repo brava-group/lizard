@@ -44,11 +44,17 @@ pub struct ControlRequest {
     pub reply: std::sync::mpsc::Sender<ControlReply>,
     /// The transport stops waiting after its timeout; discard requests still queued then.
     pub cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The in-app agent session can revoke a request even after the server queued it.
+    pub agent_guard: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl ControlRequest {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn is_revoked(&self) -> bool {
+        self.agent_guard.as_ref().is_some_and(|flag| !flag.load(std::sync::atomic::Ordering::Acquire))
     }
 }
 
@@ -96,6 +102,10 @@ pub fn drain(app: &mut FigApp, ctx: &Context) {
     let reqs = std::mem::take(&mut app.control_queue);
     for r in reqs {
         if r.is_cancelled() {
+            continue;
+        }
+        if r.is_revoked() {
+            let _ = r.reply.send(ControlReply { id: r.id, result: Err("A sessão do agente foi encerrada".into()) });
             continue;
         }
         // Requests for another window wait for its frame.
@@ -156,6 +166,10 @@ pub fn drain_hidden(app: &mut FigApp, ctx: &Context) {
         if r.is_cancelled() {
             continue;
         }
+        if r.is_revoked() {
+            let _ = r.reply.send(ControlReply { id: r.id, result: Err("A sessão do agente foi encerrada".into()) });
+            continue;
+        }
         let target = r.params.get("window").and_then(Value::as_u64).unwrap_or(app.windows.focused);
         if !app.windows.exists(target) {
             let _ = r.reply.send(ControlReply { id: r.id, result: Err(format!("no window {target}")) });
@@ -208,11 +222,30 @@ fn b(p: &Value, k: &str) -> bool {
 
 /// Handle one control method (also used by tests and the headless snapshot tool).
 pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Result<Value, String> {
+    if let Some(expected) = p.get("__agent_document").and_then(Value::as_u64)
+        && app.session.ds().ok().map(|ds| ds.uid) != Some(expected)
+    {
+        return Err("O documento ativo mudou; a ação do agente foi recusada".into());
+    }
+    if p.get("__agent_document").is_some() && app.session.ds().ok().is_some_and(|ds| ds.interaction.is_some()) {
+        return Err("Termine o gesto no canvas antes de executar uma ação do agente".into());
+    }
     match method {
         "engine.execute" => {
             let cmd = p.get("command").and_then(Value::as_str).ok_or("`command` required")?;
             let params = p.get("params").cloned().unwrap_or(json!({}));
+            let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
+            if r.is_ok()
+                && p.get("__agent_document")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|expected| app.session.ds().ok().is_some_and(|ds| ds.uid == expected))
+                && let Ok(ds) = app.session.ds_mut()
+            {
+                for entry in ds.history.undo.iter_mut().skip(before) {
+                    entry.agent = true;
+                }
+            }
             // Programmatic calls never open dialogs.
             app.session.ui_requests.retain(|u| !u.kind.starts_with("dialog."));
             app.handle_ui_requests();

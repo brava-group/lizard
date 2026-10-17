@@ -2,12 +2,16 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use figcraft_engine::{Prefs, Session};
-use figcraft_ui_egui::{DialogFuture, FigApp, Services};
+use figcraft_ui_egui::agent_panel::{AgentEvent, AgentKind};
+use figcraft_ui_egui::{ControlRequest, DialogFuture, FigApp, Services};
 use serde_json::{Value, json};
+
+type ControlQueue = Arc<Mutex<Vec<ControlRequest>>>;
+type ContextSlot = Arc<Mutex<Option<egui::Context>>>;
 
 pub struct Desktop {
     clipboard: Option<arboard::Clipboard>,
@@ -20,6 +24,9 @@ pub struct Desktop {
     language: Option<String>,
     /// Recovery copies of unsaved files (written at once after a panic).
     recovery: crate::recovery::Shared,
+    agent: Option<crate::agent::Agent>,
+    agent_control: Option<(ControlQueue, ContextSlot)>,
+    agent_bridge: Option<(u16, Arc<AtomicBool>)>,
 }
 
 pub fn config_dir() -> Option<PathBuf> {
@@ -54,7 +61,29 @@ impl Desktop {
         let reduce_motion = Arc::new(AtomicBool::new(false));
         let flag = reduce_motion.clone();
         std::thread::spawn(move || flag.store(system_reduce_motion(), Ordering::Relaxed));
-        Self { clipboard: arboard::Clipboard::new().ok(), dir, prefs, reduce_motion, language: system_language(), recovery }
+        Self {
+            clipboard: arboard::Clipboard::new().ok(),
+            dir,
+            prefs,
+            reduce_motion,
+            language: system_language(),
+            recovery,
+            agent: None,
+            agent_control: None,
+            agent_bridge: None,
+        }
+    }
+
+    pub fn configure_agent(&mut self, queue: ControlQueue, context: ContextSlot) {
+        self.agent_control = Some((queue, context));
+    }
+
+    fn agent_port(&mut self, document: u64) -> Result<u16, String> {
+        let Some((queue, context)) = &self.agent_control else { return Err("O canal de controle não está disponível".into()) };
+        let (port, enabled) = crate::control_server::start_agent(document, queue.clone(), context.clone())
+            .ok_or("Não foi possível abrir o canal de controle do FigCraft")?;
+        self.agent_bridge = Some((port, enabled));
+        Ok(port)
     }
 }
 
@@ -224,6 +253,68 @@ fn picked(pick: impl Future<Output = Option<rfd::FileHandle>> + 'static) -> Dial
 }
 
 impl Services for Desktop {
+    fn agent_send(&mut self, kind: AgentKind, prompt: String, document: u64) -> Result<(), String> {
+        if self.agent.as_ref().is_some_and(|a| a.document != document || a.kind != kind) {
+            self.agent_reset();
+        }
+        if self.agent.is_none() {
+            let port = self.agent_port(document)?;
+            let cli = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|parent| parent.join(if cfg!(windows) { "figcraft-cli.exe" } else { "figcraft-cli" })))
+                .filter(|p| p.is_file())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "figcraft-cli".into());
+            let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("FigCraft Agent"));
+            std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
+            self.agent = Some(crate::agent::Agent::start(kind, document, port, &cwd.to_string_lossy(), &cli)?);
+        }
+        self.agent.as_ref().ok_or("O agente não está disponível".into()).and_then(|a| a.send(prompt))
+    }
+
+    fn agent_poll(&mut self) -> Vec<AgentEvent> {
+        self.agent.as_ref().map_or_else(Vec::new, crate::agent::Agent::poll)
+    }
+
+    fn agent_stop(&mut self) {
+        if let Some(agent) = &self.agent {
+            agent.stop();
+        }
+    }
+
+    fn agent_reset(&mut self) {
+        self.agent = None;
+        if let Some((_, enabled)) = self.agent_bridge.take() {
+            enabled.store(false, Ordering::Release);
+        }
+    }
+
+    fn agent_permission(&mut self, id: Value, option: Option<String>) {
+        if let Some(agent) = &self.agent {
+            agent.permission(id, option);
+        }
+    }
+
+    fn agent_history_load(&mut self) -> Value {
+        self.dir
+            .as_ref()
+            .and_then(|dir| std::fs::read(dir.join("agent-chats.json")).ok())
+            .filter(|bytes| bytes.len() <= 8 * 1024 * 1024)
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(Value::Null)
+    }
+
+    fn agent_history_save(&mut self, history: &Value) {
+        if let Some(dir) = &self.dir
+            && let Ok(bytes) = serde_json::to_vec(history)
+            && bytes.len() <= 8 * 1024 * 1024
+            && let Err(error) = std::fs::create_dir_all(dir)
+                .and_then(|()| write_private(&dir.join("agent-chats.json.tmp"), &bytes))
+                .and_then(|()| std::fs::rename(dir.join("agent-chats.json.tmp"), dir.join("agent-chats.json")))
+        {
+            log::warn!("agent chat history: {error}");
+        }
+    }
     fn pick_open(&mut self, title: &str, exts: &[&str]) -> DialogFuture {
         picked(dialog(title).add_filter("Supported files", exts).pick_file())
     }

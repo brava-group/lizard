@@ -43,6 +43,7 @@ objc2-foundation = "0.3.2"
 
 [dev-dependencies]
 wat = { workspace = true }
+figcraft-mcp = { workspace = true }
 
 [build-dependencies]
 winresource = "0.1"

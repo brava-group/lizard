@@ -206,6 +206,20 @@ pub use control::{ControlReply, ControlRequest};
 
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).
 pub trait Services {
+    /// Start or continue a local ACP design agent. Desktop implementations run it off the UI thread.
+    fn agent_send(&mut self, _agent: agent_panel::AgentKind, _prompt: String, _document: u64) -> Result<(), String> {
+        Err("Agentes locais estão disponíveis apenas no aplicativo desktop".into())
+    }
+    fn agent_poll(&mut self) -> Vec<agent_panel::AgentEvent> {
+        Vec::new()
+    }
+    fn agent_stop(&mut self) {}
+    fn agent_reset(&mut self) {}
+    fn agent_permission(&mut self, _id: serde_json::Value, _option: Option<String>) {}
+    fn agent_history_load(&mut self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+    fn agent_history_save(&mut self, _history: &serde_json::Value) {}
     fn pick_open(&mut self, _title: &str, _exts: &[&str]) -> DialogFuture {
         Box::pin(std::future::ready(None))
     }
@@ -1270,6 +1284,7 @@ impl FigApp {
         self.frame_stats.record(&ctx);
         let first = !self.fonts_installed;
         self.logic(&ctx);
+        agent_panel::sync(self, &ctx);
         self.autosave_tick(&ctx);
         self.auto_save_tick(&ctx);
         if first {

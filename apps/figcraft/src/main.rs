@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent;
 #[cfg(target_os = "macos")]
 mod apple_events;
 mod args;
@@ -21,6 +22,8 @@ mod startup;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
 
+#[cfg(test)]
+mod agent_bridge_tests;
 #[cfg(all(test, target_os = "macos"))]
 mod apple_events_tests;
 #[cfg(test)]
@@ -151,7 +154,7 @@ fn main() -> eframe::Result {
     let recovery_root = services::config_dir().map(|d| d.join("Recovery"));
     // The preferences first: they hold the online files a recovered document may be one of.
     let recovery = recovery::Shared::default();
-    let svc = services::Desktop::load(recovery.clone());
+    let mut svc = services::Desktop::load(recovery.clone());
     if let Some(prefs) = svc.prefs.clone() {
         session.prefs = prefs;
     }
@@ -177,15 +180,16 @@ fn main() -> eframe::Result {
     // The interface language from the first frame on, and for the message when the window can't
     // open (no frame then).
     figcraft_ui_egui::i18n::set(&session.prefs.language, figcraft_ui_egui::Services::system_language(&svc).as_deref());
+    let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    if let Some(port) = port {
+        let _ = control_server::start(port, queue.clone(), ctx_slot.clone());
+    }
+    svc.configure_agent(queue.clone(), ctx_slot.clone());
     let mut fig = FigApp::new(session, Box::new(svc));
     fig.ui.home = false;
     fig.note_recovered(recovered.copies);
     if let Some(link) = &args.join {
         figcraft_ui_egui::live::open_invite(&mut fig, link);
-    }
-    let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
-    if let Some(p) = port {
-        control_server::start(p, queue.clone(), ctx_slot.clone());
     }
     let icon = services::window_icon();
     // The app id is the Wayland app_id and the X11 window class on Linux: the desktop entry's name
