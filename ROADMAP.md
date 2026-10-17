@@ -313,6 +313,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Rotation cursor follows the four selection corners by rotating the supplied image in 90° steps, keeping its centred hot spot. Focused cursor tests and inspection of the four image variants cover the change; parity estimates are unchanged. |
 | 2026-10-17 | minor | Canvas cursors now display the exact PNG payloads embedded in the owner-supplied SVG reference for supported cursor states, at the reference’s 32 px size. The assets are recorded as local-only pending redistribution rights; parity estimates are unchanged. |
 | 2026-10-17 | minor | Nearby zooms keep the covering full-resolution canvas texture until the new vector render arrives; necessary previews render at half rather than quarter device resolution per axis. Zoom-out that exposes uncached area gets a whole-view preview in the input frame. Continuous pinch/Cmd-scroll uses 0.8× logarithmic gain. Stationary drags skip repeated document previews, and cheap vector renders may finish in the pointer input frame with at most 10 ms of bounded waiting. Synthetic dashboard timings are in `docs/hardware-parity.md`; GPU canvas rendering and estimates remain unchanged. |
 | 2026-10-17 | minor | Clipboard image links observed in Chrome now restore their SHA-1-verified pixels into editable image fills during paste. A real browser copy was pasted and visually checked in the desktop app; focused engine and UI tests pass. No headline number changed. |

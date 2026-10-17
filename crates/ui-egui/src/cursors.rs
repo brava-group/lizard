@@ -37,7 +37,7 @@ pub enum Shown {
 /// Cursor textures belong to the canvas's egui context and are decoded only on first use.
 #[derive(Default)]
 pub struct CursorTextures {
-    loaded: HashMap<(Asset, u32), TextureHandle>,
+    loaded: HashMap<(Asset, u32, u8), TextureHandle>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -128,17 +128,24 @@ impl Asset {
 }
 
 impl CursorTextures {
-    fn get(&mut self, ctx: &egui::Context, asset: Asset) -> Option<&TextureHandle> {
+    fn get(&mut self, ctx: &egui::Context, asset: Asset, quarter_turns: u8) -> Option<&TextureHandle> {
         let pixels = (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32;
-        let key = (asset, pixels);
+        let quarter_turns = if asset == Asset::Rotate { quarter_turns % 4 } else { 0 };
+        let key = (asset, pixels, quarter_turns);
         if !self.loaded.contains_key(&key) {
             let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).ok()?.into_rgba8();
             // egui's linear sampler has no mip levels. Downsample with a proper reconstruction
             // filter so the 256 px source stays crisp at its 32 pt display size.
             let rgba = image::imageops::resize(&png, pixels, pixels, image::imageops::FilterType::Lanczos3);
+            let rgba = match quarter_turns {
+                1 => image::imageops::rotate90(&rgba),
+                2 => image::imageops::rotate180(&rgba),
+                3 => image::imageops::rotate270(&rgba),
+                _ => rgba,
+            };
             let side = usize::try_from(pixels).ok()?;
             let image = egui::ColorImage::from_rgba_unmultiplied([side, side], rgba.as_raw());
-            let texture = ctx.load_texture(format!("canvas-cursor-{}-{pixels}", asset.name()), image, TextureOptions::LINEAR);
+            let texture = ctx.load_texture(format!("canvas-cursor-{}-{pixels}-{quarter_turns}", asset.name()), image, TextureOptions::LINEAR);
             self.loaded.insert(key, texture);
         }
         self.loaded.get(&key)
@@ -146,6 +153,15 @@ impl CursorTextures {
 }
 
 impl Glyph {
+    /// The source image points up and left, matching the bottom-right corner. The corner's
+    /// centre-to-handle angle selects one of four right-angle rotations of that exact image.
+    fn quarter_turns(self) -> u8 {
+        match self {
+            Self::Rotate(degrees) if degrees.is_finite() => (degrees.rem_euclid(360.0) / 90.0).floor() as u8,
+            _ => 0,
+        }
+    }
+
     fn asset(self) -> Asset {
         match self {
             Self::Arrow | Self::Move => Asset::Move,
@@ -273,7 +289,7 @@ impl Shown {
         ctx.set_cursor_icon(self.icon());
         let Self::Drawn(glyph) = self else { return };
         let asset = glyph.asset();
-        let Some(texture) = textures.get(ctx, asset) else {
+        let Some(texture) = textures.get(ctx, asset, glyph.quarter_turns()) else {
             ctx.set_cursor_icon(CursorIcon::Default);
             return;
         };
@@ -322,5 +338,17 @@ mod tests {
         assert_eq!(Glyph::Pen(PenCursor::Add).asset(), Asset::PenInsert);
         assert_eq!(Glyph::Pen(PenCursor::Bend).asset(), Asset::Bend);
         assert_eq!(Glyph::Pointer.asset(), Asset::Click);
+    }
+
+    #[test]
+    fn rotation_cursor_faces_each_selection_corner() {
+        // Angles are measured from the box centre, clockwise in screen coordinates.
+        for (angle, quarter_turns) in [(45.0, 0), (135.0, 1), (225.0, 2), (315.0, 3), (-45.0, 3)] {
+            assert_eq!(Glyph::Rotate(angle).quarter_turns(), quarter_turns, "{angle}°");
+        }
+        // Non-square selections keep the same visual variant throughout a corner's quadrant.
+        for (angle, quarter_turns) in [(12.0, 0), (168.0, 1), (192.0, 2), (348.0, 3)] {
+            assert_eq!(Glyph::Rotate(angle).quarter_turns(), quarter_turns, "{angle}°");
+        }
     }
 }
