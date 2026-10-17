@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::FigApp;
 use crate::i18n::{tr, trf, trn};
-use crate::render_worker::{Done, Job, Worker};
+use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
 use crate::theme::{ACCENT, COMPONENT, Tokens, doc_c32, regular, semibold};
 
 pub struct CanvasState {
@@ -23,6 +23,7 @@ pub struct CanvasState {
     tex_of: Option<(u64, NodeId)>,
     /// The document version behind the texture, so stale previews cannot replace newer pixels.
     tex_doc: Option<Arc<Document>>,
+    tex_style: Option<RenderStyle>,
     /// The texture is a coarse preview (see [`crate::render_worker`]).
     pub tex_coarse: bool,
     submitted: Option<JobKey>,
@@ -30,6 +31,8 @@ pub struct CanvasState {
     want_view: Option<figcraft_render::View>,
     /// What the last canvas render had to do (shown by `ui.inspect`).
     pub render_work: Option<figcraft_render::Work>,
+    /// Device pixels uploaded for the last completed render (zero when its texture was reused).
+    pub upload_pixels: u64,
     /// From asking for a render to its preview, and its refined image, handed to egui as the
     /// canvas texture (ms; the texture is uploaded when that frame is painted).
     pub preview_latency_ms: Option<f64>,
@@ -60,10 +63,12 @@ impl Default for CanvasState {
             tex_view: None,
             tex_of: None,
             tex_doc: None,
+            tex_style: None,
             tex_coarse: false,
             submitted: None,
             want_view: None,
             render_work: None,
+            upload_pixels: 0,
             preview_latency_ms: None,
             refine_latency_ms: None,
             dragging: false,
@@ -77,6 +82,12 @@ impl Default for CanvasState {
             preedit: None,
             pressure: None,
         }
+    }
+}
+
+impl CanvasState {
+    pub(crate) fn texture_current(&self, ds: &figcraft_engine::DocState) -> bool {
+        self.tex_of == Some((ds.uid, ds.page)) && !self.tex_coarse && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
     }
 }
 
@@ -192,7 +203,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     app.sync_preedit();
     // Retained rendering snaps the view outward and adds one pixel on each axis.
     let max_texture_side = (ctx.input(|i| i.max_texture_side).min(16_384) as u32).saturating_sub(1).max(1);
-    request_render(app, worker, ppp, max_texture_side);
     // Every finished render is shown, even when a newer one is already on its way: renders finish
     // in order, and an edit every frame (a drag) would otherwise never show until it stopped.
     let shown = app.session.ds().map(|ds| (ds.uid, ds.page)).ok();
@@ -200,31 +210,75 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && shown == Some((done.uid, done.page))
         && shows(&app.canvas, &done, shown)
     {
-        if !done.coarse {
-            app.canvas.render_work = Some(done.work);
-            app.ui.render_ms = done.ms;
-        }
         // A pixel preview render is magnified with hard pixel edges.
         let filter = if app.session.ds().ok().and_then(|d| d.view.pixel_preview_scale()) == Some(done.view.scale) {
             egui::TextureOptions::NEAREST
         } else {
             egui::TextureOptions::LINEAR
         };
-        match &mut app.canvas.texture {
-            Some(t) => t.set(done.image, filter),
-            None => app.canvas.texture = Some(ctx.load_texture("figcraft-canvas", done.image, filter)),
-        }
-        let latency = Some(done.at.elapsed().as_secs_f64() * 1000.0);
-        if done.coarse {
-            app.canvas.preview_latency_ms = latency;
+        let same_view = app.canvas.tex_view.as_ref().is_some_and(|v| {
+            v.origin.0.to_bits() == done.view.origin.0.to_bits()
+                && v.origin.1.to_bits() == done.view.origin.1.to_bits()
+                && v.scale.to_bits() == done.view.scale.to_bits()
+                && v.width == done.view.width
+                && v.height == done.view.height
+        });
+        let can_patch = !done.coarse
+            && !app.canvas.tex_coarse
+            && same_view
+            && app.canvas.tex_style.as_ref() == Some(&done.style)
+            && app.canvas.tex_of == Some((done.uid, done.page))
+            && app.canvas.tex_doc.as_ref().is_some_and(|shown| done.base_docs.iter().any(|base| Arc::ptr_eq(base, shown)));
+        let applied = match (&mut app.canvas.texture, done.update) {
+            (Some(t), TextureUpdate::Partial(patches)) if can_patch => {
+                app.canvas.upload_pixels = patches.iter().map(|(_, image)| image.size.iter().map(|n| *n as u64).product::<u64>()).sum();
+                for (at, image) in patches {
+                    t.set_partial(at, image, filter);
+                }
+                true
+            }
+            (Some(_), TextureUpdate::Reused) if can_patch => {
+                app.canvas.upload_pixels = 0;
+                true
+            }
+            (Some(t), TextureUpdate::Full(image)) => {
+                app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
+                t.set(image, filter);
+                true
+            }
+            (slot @ None, TextureUpdate::Full(image)) => {
+                app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
+                *slot = Some(ctx.load_texture("figcraft-canvas", image, filter));
+                true
+            }
+            _ => false,
+        };
+        if applied {
+            if !done.coarse {
+                app.canvas.render_work = Some(done.work);
+                app.ui.render_ms = done.ms;
+            }
+            let latency = Some(done.at.elapsed().as_secs_f64() * 1000.0);
+            if done.coarse {
+                app.canvas.preview_latency_ms = latency;
+            } else {
+                app.canvas.refine_latency_ms = latency;
+            }
+            app.canvas.tex_view = Some(done.view);
+            app.canvas.tex_of = Some((done.uid, done.page));
+            app.canvas.tex_doc = Some(done.doc);
+            app.canvas.tex_style = Some(done.style);
+            app.canvas.tex_coarse = done.coarse;
         } else {
-            app.canvas.refine_latency_ms = latency;
+            // A result that depended on a skipped base cannot update the visible texture.
+            // Request a new full image against the texture that is actually on screen.
+            app.canvas.submitted = None;
+            ctx.request_repaint();
         }
-        app.canvas.tex_view = Some(done.view);
-        app.canvas.tex_of = Some((done.uid, done.page));
-        app.canvas.tex_doc = Some(done.doc);
-        app.canvas.tex_coarse = done.coarse;
     }
+    // Observe the latest completed texture before submitting the next document preview. During a
+    // fast drag this lets the worker produce a small patch against the frame actually on screen.
+    request_render(app, worker, ppp, max_texture_side);
     let painter = ui.painter_at(rect);
     let t = Tokens::get(&ctx);
     // Page background (also behind a stale/partial texture).
@@ -382,6 +436,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ppp: f32, max_texture_s
     if app.canvas.submitted.as_ref() == Some(&key) {
         return;
     }
+    let visible_texture = !app.canvas.tex_coarse && app.canvas.tex_of == Some((ds.uid, ds.page));
     let job = Job {
         doc,
         page: ds.page,
@@ -395,6 +450,9 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ppp: f32, max_texture_s
         uid: ds.uid,
         zoom_preview: ds.view.pixel_preview_scale().is_none(),
         at: web_time::Instant::now(),
+        texture_base: if visible_texture { app.canvas.tex_doc.clone() } else { None },
+        texture_view: if visible_texture { app.canvas.tex_view.clone() } else { None },
+        texture_style: if visible_texture { app.canvas.tex_style.clone() } else { None },
     };
     app.canvas.want_view = Some(job.view.clone());
     worker.submit(job);

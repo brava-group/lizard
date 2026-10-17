@@ -6,7 +6,10 @@ use figcraft_color::{Color, Paint};
 use figcraft_doc::{Document, Effect, EffectKind, Node, NodeId, NodeKind, Shadow, TextAutoResize, TextData};
 use figcraft_geom::Affine;
 
-use crate::{Options, Pixmap, Retained, View, Work, render_view, retained::snap};
+use crate::{
+    Options, Pixmap, Retained, View, Work, render_view,
+    retained::{damage_between, snap},
+};
 
 /// System fonts load once, before any render here, so text has glyphs and fonts never change
 /// mid-test (a font change makes the next render full).
@@ -166,6 +169,65 @@ fn edits_render_only_what_changed() {
     assert!(partial(check(&mut r, &added, s.page, &v)));
     // Undo: back to an older version of the document.
     assert!(partial(check(&mut r, &s.doc, s.page, &v)));
+}
+
+#[test]
+fn texture_damage_covers_edits_but_pan_requires_full_upload() {
+    let s = scene(false);
+    let v = view(0.0, 0.0, 1.0);
+    let mut retained = Retained::default();
+    let initial = retained.render_with_damage(&s.doc, s.page, &v, &Options::default()).unwrap();
+    assert_eq!(initial.2, Work::Full);
+    assert!(initial.3.is_none());
+
+    let moved = edit(&s.doc, |d| d.get_mut(s.rect).unwrap().transform = Affine::translate((60.0, 40.0)));
+    let (_, image, work, damage) = retained.render_with_damage(&moved, s.page, &v, &Options::default()).unwrap();
+    assert!(matches!(work, Work::Partial { .. }));
+    let damage = damage.unwrap();
+    assert!(!damage.is_empty());
+    assert!(damage.iter().map(|r| u64::from(r.width) * u64::from(r.height)).sum::<u64>() < u64::from(image.width()) * u64::from(image.height()));
+    let previous = image.clone();
+
+    let recolored = edit(&moved, |d| solid(d.get_mut(s.rect).unwrap(), "20A060"));
+    let (_, next, _, damage) = retained.render_with_damage(&recolored, s.page, &v, &Options::default()).unwrap();
+    let mut patched = previous;
+    for r in damage.unwrap() {
+        for y in r.y..r.y + r.height {
+            let start = (usize::try_from(y).unwrap() * usize::try_from(next.width()).unwrap() + usize::try_from(r.x).unwrap()) * 4;
+            let end = start + usize::try_from(r.width).unwrap() * 4;
+            patched.data_mut()[start..end].copy_from_slice(&next.data()[start..end]);
+        }
+    }
+    assert_eq!(patched.data(), next.data());
+
+    let pan = view(10.0, 0.0, 1.0);
+    let (_, _, work, damage) = retained.render_with_damage(&recolored, s.page, &pan, &Options::default()).unwrap();
+    assert!(matches!(work, Work::Partial { .. }));
+    assert!(damage.is_none());
+}
+
+#[test]
+fn damage_from_last_displayed_frame_covers_skipped_drag_positions() {
+    let s = scene(false);
+    let v = view(0.0, 0.0, 1.0);
+    let mut retained = Retained::default();
+    let (shown, initial, _, _) = retained.render_with_damage(&s.doc, s.page, &v, &Options::default()).unwrap();
+    let mut patched = initial.clone();
+    let middle = edit(&s.doc, |d| d.get_mut(s.rect).unwrap().transform = Affine::translate((45.0, 15.0)));
+    retained.render_with_damage(&middle, s.page, &v, &Options::default()).unwrap();
+    let latest = edit(&middle, |d| d.get_mut(s.rect).unwrap().transform = Affine::translate((105.0, 25.0)));
+    let (_, image, work, _) = retained.render_with_damage(&latest, s.page, &v, &Options::default()).unwrap();
+    assert!(partial(work));
+    let damage = damage_between(&s.doc, &latest, s.page, &shown).unwrap();
+    assert!(!damage.is_empty());
+    for r in damage {
+        for y in r.y..r.y + r.height {
+            let start = (usize::try_from(y).unwrap() * usize::try_from(image.width()).unwrap() + usize::try_from(r.x).unwrap()) * 4;
+            let end = start + usize::try_from(r.width).unwrap() * 4;
+            patched.data_mut()[start..end].copy_from_slice(&image.data()[start..end]);
+        }
+    }
+    assert_eq!(patched.data(), image.data());
 }
 
 #[test]

@@ -1,8 +1,9 @@
 //! Recursive scene drawing.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use figcraft_color::{BlendMode, Paint};
 use figcraft_doc::{Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign};
@@ -670,38 +671,16 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
         NodeKind::Text(t) => {
             let Some((layout, dy)) = figcraft_text::layout_node(n) else { return };
             let gxf = xf * Affine::translate((0.0, dy));
-            // Colour glyphs (emoji) carry their own ink, which draws instead of their outline: a
-            // bitmap the font ships, or COLR layers with a colour each.
             let gs = gxf.determinant().abs().sqrt();
-            let mut ink: Vec<(usize, Ink)> = Vec::new();
-            // Group glyphs by style so runs with their own fills paint with them.
-            let mut by_style: HashMap<usize, BezPath> = HashMap::new();
-            for g in &layout.glyphs {
-                match g.color(gs) {
-                    Some(figcraft_text::ColorInk::Bitmap(bitmap, place)) => ink.push((g.style, Ink::Bitmap(bitmap, place))),
-                    Some(figcraft_text::ColorInk::Layers(layers)) => {
-                        for layer in layers.iter() {
-                            ink.push((g.style, Ink::Layer(g.layer_path(layer.gid), layer.rgba)));
-                        }
-                    }
-                    None => by_style.entry(g.style).or_default().extend(g.path().elements().iter().copied()),
-                }
-            }
-            for d in &layout.decorations {
-                by_style.entry(d.style).or_default().extend(d.path().elements().iter().copied());
-            }
-            // A run can have ink and no outline at all (bitmap-only fonts).
-            let mut keys: Vec<usize> = by_style.keys().copied().chain(ink.iter().map(|(style, _)| *style)).collect();
-            keys.sort_unstable();
-            keys.dedup();
+            let prepared = prepared_text(&layout, gs);
             // Every run's fills (its ink included), then what paints over the fills, then the
             // strokes on top.
-            for k in &keys {
+            for k in &prepared.keys {
                 let fills = layout.styles.get(*k).and_then(|s| s.fills.as_ref()).unwrap_or(&n.fills);
-                if let Some(tp) = by_style.get(k).and_then(ts_path) {
-                    fill_with(pix, &tp, fills, w, h, gxf, FillRule::Winding, ctx, None);
+                if let Some(tp) = prepared.styles.iter().find(|style| style.index == *k).and_then(|style| style.path.as_ref()) {
+                    fill_with(pix, tp, fills, w, h, gxf, FillRule::Winding, ctx, None);
                 }
-                for (_, item) in ink.iter().filter(|(style, _)| style == k) {
+                for (_, item) in prepared.ink.iter().filter(|(style, _)| style == k) {
                     match item {
                         Ink::Bitmap(bitmap, place) => blit(pix, bitmap, ts_transform(gxf * *place)),
                         Ink::Layer(path, rgba) => {
@@ -720,8 +699,8 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             }
             if n.has_visible_stroke() {
                 let props = figcraft_doc::StrokeProps { align: StrokeAlign::Center, ..n.stroke.clone() };
-                for path in keys.iter().filter_map(|k| by_style.get(k)) {
-                    let s = figcraft_pathops::stroke_center(path, props.weight, &props);
+                for style in &prepared.styles {
+                    let s = figcraft_pathops::stroke_center(&style.outline, props.weight, &props);
                     if let Some(ts) = ts_path(&s) {
                         fill_with(pix, &ts, &n.strokes, w, h, gxf, FillRule::Winding, ctx, None);
                     }
@@ -859,6 +838,75 @@ fn draw_children_clipped(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, dept
         draw_children(&Ctx { under: Some(&under), ..*ctx }, &mut layer, n, lxf, depth);
     }
     backdrop::replace(pix, (lx, ly), &layer, mask.as_ref().map(|m| (m, (0, 0))));
+}
+
+/// The glyph outlines are local to a text layout. Moving a frame changes only their transform, so
+/// build and convert them once per layout and device scale on each render thread. The weak layout
+/// reference prevents an evicted layout's address from matching an unrelated new one.
+struct PreparedText {
+    styles: Vec<PreparedStyle>,
+    ink: Vec<(usize, Ink)>,
+    keys: Vec<usize>,
+}
+
+struct PreparedStyle {
+    index: usize,
+    outline: BezPath,
+    path: Option<tiny_skia::Path>,
+}
+
+struct TextCacheEntry {
+    layout: Weak<figcraft_text::TextLayout>,
+    prepared: Arc<PreparedText>,
+}
+
+thread_local! {
+    static TEXT_PATHS: RefCell<HashMap<(usize, u64), TextCacheEntry>> = RefCell::new(HashMap::new());
+}
+
+fn prepared_text(layout: &Arc<figcraft_text::TextLayout>, scale: f64) -> Arc<PreparedText> {
+    let key = (Arc::as_ptr(layout) as usize, scale.to_bits());
+    if let Some(hit) = TEXT_PATHS.with(|cache| {
+        cache.borrow().get(&key).and_then(|entry| entry.layout.upgrade().filter(|old| Arc::ptr_eq(old, layout)).map(|_| entry.prepared.clone()))
+    }) {
+        return hit;
+    }
+
+    // Colour glyphs replace their outline with bitmap or COLR ink at this scale.
+    let mut ink = Vec::new();
+    let mut outlines: HashMap<usize, BezPath> = HashMap::new();
+    for glyph in &layout.glyphs {
+        match glyph.color(scale) {
+            Some(figcraft_text::ColorInk::Bitmap(bitmap, place)) => ink.push((glyph.style, Ink::Bitmap(bitmap, place))),
+            Some(figcraft_text::ColorInk::Layers(layers)) => {
+                for layer in layers.iter() {
+                    ink.push((glyph.style, Ink::Layer(glyph.layer_path(layer.gid), layer.rgba)));
+                }
+            }
+            None => outlines.entry(glyph.style).or_default().extend(glyph.path().elements().iter().copied()),
+        }
+    }
+    for decoration in &layout.decorations {
+        outlines.entry(decoration.style).or_default().extend(decoration.path().elements().iter().copied());
+    }
+    let mut keys: Vec<usize> = outlines.keys().copied().chain(ink.iter().map(|(style, _)| *style)).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    let mut styles: Vec<PreparedStyle> =
+        outlines.into_iter().map(|(index, outline)| PreparedStyle { index, path: ts_path(&outline), outline }).collect();
+    styles.sort_unstable_by_key(|style| style.index);
+    let prepared = Arc::new(PreparedText { styles, ink, keys });
+    TEXT_PATHS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 512 {
+            cache.retain(|_, entry| entry.layout.strong_count() > 0);
+            if cache.len() >= 512 {
+                cache.clear();
+            }
+        }
+        cache.insert(key, TextCacheEntry { layout: Arc::downgrade(layout), prepared: prepared.clone() });
+    });
+    prepared
 }
 
 /// Colour ink of a text run, in the order the run paints it. Strokes follow the outlines only: a

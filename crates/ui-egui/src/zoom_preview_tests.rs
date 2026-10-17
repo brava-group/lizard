@@ -13,7 +13,7 @@ use figcraft_render::{View, Work};
 use serde_json::json;
 
 use super::{CanvasState, shows};
-use crate::render_worker::{Done, Inline, Job, PREVIEW_AFTER_MS, PREVIEW_FACTOR, Renders, coarse_view, render_now};
+use crate::render_worker::{Done, Inline, Job, PREVIEW_AFTER_MS, PREVIEW_FACTOR, Renders, TextureUpdate, coarse_view, render_now};
 
 /// A page of ellipses with a rectangle on top; the session and the rectangle.
 fn document() -> (Session, NodeId) {
@@ -75,12 +75,63 @@ fn job(doc: &Arc<Document>, page: NodeId, uid: u64, view: View) -> Job {
         uid,
         zoom_preview: true,
         at: web_time::Instant::now(),
+        texture_base: None,
+        texture_view: None,
+        texture_style: None,
     }
 }
 
 /// Every pixel of `a` and `b` alike.
 fn same_pixels(a: &Done, b: &Done) -> bool {
     a.image.size == b.image.size && a.image.pixels == b.image.pixels
+}
+
+#[test]
+fn a_drag_converts_only_damage_when_the_visible_texture_is_its_base() {
+    let (mut s, rect) = document();
+    let ds = s.ds().unwrap();
+    let view = view_at((300.0, 200.0), 1.0, 800, 600);
+    let mut renders = Renders::default();
+    let first = renders.refine(&job(&ds.doc, ds.page, ds.uid, view.clone())).unwrap();
+    assert!(matches!(first.update, TextureUpdate::Full(_)));
+
+    s.execute("node.set", &json!({"id": rect, "props": {"x": 120}})).unwrap();
+    let ds = s.ds().unwrap();
+    let mut moved = job(&ds.doc, ds.page, ds.uid, view.clone());
+    moved.texture_base = Some(first.doc.clone());
+    moved.texture_view = Some(first.view.clone());
+    moved.texture_style = Some(first.style.clone());
+    let second = renders.refine(&moved).unwrap();
+    let TextureUpdate::Partial(patches) = &second.update else { panic!("the drag should upload local pixels") };
+    let uploaded: usize = patches.iter().map(|(_, image)| image.size[0] * image.size[1]).sum();
+    assert!(uploaded < second.image.size[0] * second.image.size[1] / 2);
+    for (at, patch) in patches {
+        for row in 0..patch.size[1] {
+            let start = (at[1] + row) * second.image.size[0] + at[0];
+            let part = row * patch.size[0];
+            assert_eq!(&patch.pixels[part..part + patch.size[0]], &second.image.pixels[start..start + patch.size[0]]);
+        }
+    }
+
+    s.execute("node.set", &json!({"id": rect, "props": {"x": 140}})).unwrap();
+    let ds = s.ds().unwrap();
+    let mut skipped = job(&ds.doc, ds.page, ds.uid, view);
+    skipped.texture_base = Some(first.doc);
+    skipped.texture_view = Some(first.view);
+    skipped.texture_style = Some(first.style);
+    let third = renders.refine(&skipped).unwrap();
+    let TextureUpdate::Partial(patches) = &third.update else { panic!("the skipped positions should upload damage against the displayed document") };
+    assert_eq!(third.base_docs.len(), 2);
+    for mut displayed in [first.image, second.image] {
+        for (at, patch) in patches {
+            for row in 0..patch.size[1] {
+                let start = (at[1] + row) * displayed.size[0] + at[0];
+                let part = row * patch.size[0];
+                displayed.pixels[start..start + patch.size[0]].copy_from_slice(&patch.pixels[part..part + patch.size[0]]);
+            }
+        }
+        assert_eq!(displayed.pixels, third.image.pixels);
+    }
 }
 
 fn covers(outer: &View, inner: &View) -> bool {

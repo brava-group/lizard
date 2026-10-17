@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use figcraft_color::ColorProfile;
 use figcraft_doc::{Document, NodeId};
-use figcraft_render::{Pixmap, Retained, View, Work};
+use figcraft_render::{DamageRect, Pixmap, Retained, View, Work};
 // A monotonic clock in the browser too: preview decisions rest on how long renders take there.
 use web_time::Instant;
 
@@ -21,6 +21,16 @@ use web_time::Instant;
 pub const PREVIEW_FACTOR: f64 = 4.0;
 /// Full renders quicker than this (about a frame) show without a preview first.
 pub const PREVIEW_AFTER_MS: f64 = 12.0;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct RenderStyle {
+    outline: bool,
+    outline_extras: figcraft_render::Outline,
+    outlined: Vec<NodeId>,
+    skip: Vec<NodeId>,
+    solo: Option<NodeId>,
+    proof: bool,
+}
 
 #[derive(Clone)]
 pub struct Job {
@@ -44,15 +54,46 @@ pub struct Job {
     pub zoom_preview: bool,
     /// When the UI asked for it: how long the image took to reach the screen.
     pub at: Instant,
+    /// The full-resolution texture currently shown by the UI, if any. A patch is sent only when
+    /// the renderer's retained base is that same document and view.
+    pub texture_base: Option<Arc<Document>>,
+    pub texture_view: Option<View>,
+    pub texture_style: Option<RenderStyle>,
+}
+
+impl Job {
+    fn style(&self) -> RenderStyle {
+        RenderStyle {
+            outline: self.outline,
+            outline_extras: self.outline_extras,
+            outlined: self.outlined.clone(),
+            skip: self.skip.clone(),
+            solo: self.solo,
+            proof: self.proof,
+        }
+    }
+}
+
+pub enum TextureUpdate {
+    Full(egui::ColorImage),
+    Partial(Vec<([usize; 2], egui::ColorImage)>),
+    Reused,
 }
 
 pub struct Done {
-    /// The image, ready for a texture (converted off the UI thread).
+    /// Pixel data to send to the texture. Edits at the same view convert only damaged regions.
+    pub update: TextureUpdate,
+    /// Full image for pixel-equivalence assertions in renderer tests.
+    #[cfg(test)]
     pub image: egui::ColorImage,
+    /// Either document the patch can update: the texture seen when submitted and the previous
+    /// render that may have reached the UI while this job was running.
+    pub base_docs: Vec<Arc<Document>>,
     /// The document rendered, so a later preview cannot replace newer pixels.
     pub doc: Arc<Document>,
     /// The view the image shows (the requested one snapped outwards to whole device pixels).
     pub view: View,
+    pub style: RenderStyle,
     pub ms: f64,
     pub work: Work,
     /// What it is an image of ([`Job::uid`], [`Job::page`]).
@@ -86,8 +127,61 @@ fn mark_outside_srgb(image: &mut egui::ColorImage, pix: &Pixmap, profile: ColorP
     }
 }
 
+fn patch_image(pix: &Pixmap, profile: ColorProfile, r: DamageRect) -> Option<([usize; 2], egui::ColorImage)> {
+    let (x, y, w, h) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
+    let stride = pix.width() as usize;
+    if w == 0 || h == 0 || x.checked_add(w)? > stride || y.checked_add(h)? > pix.height() as usize {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity(w.checked_mul(h)?.checked_mul(4)?);
+    for row in y..y + h {
+        let start = row.checked_mul(stride)?.checked_add(x)?.checked_mul(4)?;
+        rgba.extend_from_slice(pix.data().get(start..start + w * 4)?);
+    }
+    if !profile.is_srgb() {
+        profile.conversion_to(ColorProfile::Srgb).apply_pixels(&mut rgba);
+    }
+    Some(([x, y], egui::ColorImage::from_rgba_premultiplied([w, h], &rgba)))
+}
+
+fn merge_damage(mut regions: Vec<DamageRect>) -> Vec<DamageRect> {
+    let mut i = 0;
+    while i < regions.len() {
+        let mut merged = false;
+        let mut j = i + 1;
+        while j < regions.len() {
+            let a = regions[i];
+            let b = regions[j];
+            let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+            let (x1, y1) =
+                (a.x.saturating_add(a.width).max(b.x.saturating_add(b.width)), a.y.saturating_add(a.height).max(b.y.saturating_add(b.height)));
+            let union_area = u64::from(x1 - x0) * u64::from(y1 - y0);
+            let separate_area = u64::from(a.width) * u64::from(a.height) + u64::from(b.width) * u64::from(b.height);
+            if union_area <= separate_area {
+                regions[i] = DamageRect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+                regions.swap_remove(j);
+                merged = true;
+            } else {
+                j += 1;
+            }
+        }
+        if !merged {
+            i += 1;
+        }
+    }
+    regions
+}
+
+fn same_view(a: &View, b: &View) -> bool {
+    a.origin.0.to_bits() == b.origin.0.to_bits()
+        && a.origin.1.to_bits() == b.origin.1.to_bits()
+        && a.scale.to_bits() == b.scale.to_bits()
+        && a.width == b.width
+        && a.height == b.height
+}
+
 /// Render `view` of the job (its own view, or the coarse one standing in for it).
-fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool) -> Option<Done> {
+fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, base_doc: Option<Arc<Document>>) -> Option<Done> {
     let t0 = Instant::now();
     // The canvas is a preview: what's too small to see in detail at this zoom is approximated.
     let opts = figcraft_render::Options {
@@ -99,13 +193,77 @@ fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool) -> Option<
         lod: true,
         ..Default::default()
     };
-    let (view, pix, work) = retained.render(&job.doc, job.page, view, &opts)?;
+    let (view, pix, work, damage) = retained.render_with_damage(&job.doc, job.page, view, &opts)?;
+    let style = job.style();
+    let same_texture_view =
+        !coarse && !job.proof && job.texture_style.as_ref() == Some(&style) && job.texture_view.as_ref().is_some_and(|shown| same_view(shown, &view));
+    let mut base_docs = Vec::new();
+    let mut regions = Vec::new();
+    if same_texture_view {
+        if let Some(shown) = &job.texture_base {
+            let from_shown = if base_doc.as_ref().is_some_and(|base| Arc::ptr_eq(base, shown)) {
+                damage.clone()
+            } else if work != Work::Full {
+                figcraft_render::retained::damage_between(shown, &job.doc, job.page, &view)
+            } else {
+                None
+            };
+            if let Some(found) = from_shown {
+                regions.extend(found);
+                base_docs.push(shown.clone());
+            }
+        }
+        if let Some(previous) = &base_doc
+            && !base_docs.iter().any(|base| Arc::ptr_eq(base, previous))
+            && let Some(found) = damage
+        {
+            regions.extend(found);
+            base_docs.push(previous.clone());
+        }
+    }
+    let update = if same_texture_view && !base_docs.is_empty() {
+        let regions = merge_damage(regions);
+        if regions.is_empty() {
+            TextureUpdate::Reused
+        } else if regions.iter().map(|r| u64::from(r.width) * u64::from(r.height)).sum::<u64>() * 5
+            > u64::from(pix.width()) * u64::from(pix.height()) * 3
+        {
+            TextureUpdate::Full(screen_image(pix, job.doc.color_profile))
+        } else {
+            match regions.into_iter().map(|r| patch_image(pix, job.doc.color_profile, r)).collect::<Option<Vec<_>>>() {
+                Some(patches) => TextureUpdate::Partial(patches),
+                None => TextureUpdate::Full(screen_image(pix, job.doc.color_profile)),
+            }
+        }
+    } else {
+        let mut image = screen_image(pix, job.doc.color_profile);
+        if job.proof {
+            mark_outside_srgb(&mut image, pix, job.doc.color_profile);
+        }
+        TextureUpdate::Full(image)
+    };
+    #[cfg(test)]
     let mut image = screen_image(pix, job.doc.color_profile);
+    #[cfg(test)]
     if job.proof {
         mark_outside_srgb(&mut image, pix, job.doc.color_profile);
     }
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
-    Some(Done { image, doc: job.doc.clone(), view, ms, work, uid: job.uid, page: job.page, coarse, at: job.at })
+    Some(Done {
+        update,
+        #[cfg(test)]
+        image,
+        base_docs,
+        doc: job.doc.clone(),
+        view,
+        style,
+        ms,
+        work,
+        uid: job.uid,
+        page: job.page,
+        coarse,
+        at: job.at,
+    })
 }
 
 /// `view` with [`PREVIEW_FACTOR`] times fewer pixels each way, showing at least the same area.
@@ -121,6 +279,7 @@ pub struct Renders {
     preview: Retained,
     /// The last full render's document, page and scale.
     last: Option<(u64, NodeId, f64)>,
+    last_doc: Option<Arc<Document>>,
     /// How long the last render from scratch took.
     full_ms: f64,
     /// Previews come first only when renders from scratch take at least this long.
@@ -136,7 +295,7 @@ impl Default for Renders {
 impl Renders {
     /// Previews when renders from scratch take at least `ms` (tests: 0, always).
     pub fn with_threshold(ms: f64) -> Self {
-        Self { full: Retained::default(), preview: Retained::default(), last: None, full_ms: 0.0, preview_after_ms: ms }
+        Self { full: Retained::default(), preview: Retained::default(), last: None, last_doc: None, full_ms: 0.0, preview_after_ms: ms }
     }
 
     /// Whether `job` gets a preview first: the kept image is of another zoom, page or file (so the
@@ -154,14 +313,16 @@ impl Renders {
             return None;
         }
         let view = coarse_view(&job.view);
-        guarded(&mut self.preview, |r| run(job, &view, r, true))
+        guarded(&mut self.preview, |r| run(job, &view, r, true, None))
     }
 
     /// The image of `job`'s view, built on the kept one where it can be.
     pub fn refine(&mut self, job: &Job) -> Option<Done> {
-        let done = guarded(&mut self.full, |r| run(job, &job.view, r, false));
+        let base_doc = self.last_doc.clone();
+        let done = guarded(&mut self.full, |r| run(job, &job.view, r, false, base_doc));
         if let Some(d) = &done {
             self.last = Some((job.uid, job.page, job.view.scale));
+            self.last_doc = Some(job.doc.clone());
             if d.work == Work::Full {
                 self.full_ms = d.ms;
             }
@@ -296,5 +457,26 @@ impl Inline {
 
 /// Render synchronously from scratch (tests, screenshots).
 pub fn render_now(job: &Job) -> Option<Done> {
-    run(job, &job.view, &mut Retained::default(), false)
+    run(job, &job.view, &mut Retained::default(), false, None)
+}
+
+#[cfg(test)]
+#[test]
+fn local_patch_matches_full_screen_conversion_in_both_profiles() {
+    let mut pix = Pixmap::new(5, 4).unwrap();
+    for (index, rgba) in pix.data_mut().chunks_exact_mut(4).enumerate() {
+        rgba.copy_from_slice(&[(index * 11) as u8, (index * 7) as u8, (index * 3) as u8, 255]);
+    }
+    let region = DamageRect { x: 1, y: 1, width: 2, height: 2 };
+    for profile in ColorProfile::ALL {
+        let full = screen_image(&pix, profile);
+        let (at, patch) = patch_image(&pix, profile, region).unwrap();
+        assert_eq!(at, [1, 1]);
+        for row in 0..patch.size[1] {
+            let start = (at[1] + row) * full.size[0] + at[0];
+            let part = row * patch.size[0];
+            assert_eq!(&patch.pixels[part..part + patch.size[0]], &full.pixels[start..start + patch.size[0]]);
+        }
+    }
+    assert!(patch_image(&pix, ColorProfile::Srgb, DamageRect { x: 4, y: 1, width: 2, height: 2 }).is_none());
 }

@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -12,7 +12,7 @@ since 2025). FigCraft renders the canvas on the CPU and presents it through wgpu
 
 | Feature | Figma | FigCraft (macOS / Windows / Linux / web) | Hours |
 |---|---|---|---|
-| Canvas rendering | GPU | CPU (tiny-skia), banded across cores, retained (re-renders only what an edit or pan touches), levels of detail below 50% zoom; shown through wgpu (WebGPU or WebGL2 in the browser) | 30–60 for a GPU path |
+| Canvas rendering | GPU | CPU (tiny-skia), banded across cores, retained (re-renders only what an edit or pan touches); same-view edits convert and upload only damaged texture regions; levels of detail below 50% zoom; shown through wgpu (WebGPU or WebGL2 in the browser) | 30–60 for a GPU path |
 | Effects (blurs, glass, noise) | GPU | CPU | in the above |
 | HiDPI / Retina | yes | yes (all) | — |
 | Wide-gamut display (Display P3) | yes, on capable displays | colours stored and exported in P3; the screen shows sRGB: eframe/egui-wgpu 0.36 configure an 8-bit sRGB surface with no colour space option, although wgpu 30 can present Display P3 or extended sRGB on Metal, DX12, Vulkan and WebGPU (see gaps #18). The colour picker warns about colours outside sRGB and View ▸ Soft-proof sRGB stripes them on the canvas | 2–5 |
@@ -33,6 +33,21 @@ since 2025). FigCraft renders the canvas on the CPU and presents it through wgpu
 | `.figcraft` at 50k layers: save / load | ~0.09 s / ~0.16 s | n/a |
 | Idle window | 0 frames, ~0% CPU | — |
 
+In a 2880×1800 screenshot session on the owner's Mac, moving a 100×70 rectangle in 20-unit
+steps through `node.set` uploaded 34,364 pixels per settled edit, versus 3,791,886 for the
+initial full texture. This measures conversion and upload area, not GPU path drawing or pointer
+latency; the test document is small.
+
+With the synthetic BetterDeck design (248 nodes: 127 frames, 109 text layers, shapes and nested
+auto layout), dragging its entire 2048×1210 frame in 10 rapid, alternating moves over 900 page
+units took a median 65 ms for the last pointer move to reach the canvas texture before the
+multi-base patch, and 53 ms after it (three runs each, 2880×1800 Retina desktop session).
+The final update transferred about 1.33 million pixels instead of the full 3.79 million.
+Settled moves of 20–900 page units took a median 53 ms from pointer request to current texture,
+versus about 66 ms before text-path caching and direct patch copying. These timings end when egui
+receives the texture; GPU upload and display presentation come later. Fast frame dragging can
+still visibly trail the cursor because vector paths and effects render on the CPU.
+
 Nothing has been timed against Figma on the same document (needs `.fig` import). 
 
 ## Platforms
@@ -50,6 +65,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | Same-view canvas edits and live drags convert and upload damaged pixel regions only, even when intermediate positions were skipped. Cached text outlines and a direct copy of rendered patch rows reduce CPU work. Pan, zoom, soft proof and changes that cannot safely use a patch send full textures. `ui.inspect.canvas.uploadPixels` and `textureCurrent` make the transfer observable. The document and undo remain vector based; GPU canvas rendering is still missing. |
 | 2026-10-14 | minor | Copy and paste in the browser: the web build never wrote to the system clipboard, so Cmd+V after Cmd+C pasted whatever text the clipboard held before (as a text layer) instead of the copied layers. Copies (layers, Copy as SVG/CSS/text/PNG, links) now go out through egui's output, which eframe writes during the copy event (`web_clipboard_tests`). Numbers unchanged. |
 | 2026-10-11 | minor | Windows QA pass (gap 8): everyday workflows on Windows 11 through the desktop app and MCP; fixed: unsaved changes lost when the app was killed or crashed (recovery copies every few seconds, reopened at the next start), Ctrl+arrows/Backspace/Delete acting on the whole line in text (now by word; Ctrl+Home/End to the text's ends), scrubbed fields snapping back on release, typing on a field Tab reached, Escape not closing dialogs, skewed or vanishing linear gradients, hints cut off at the panel edge, the window-close question in English in the Spanish interface. Percentages and hours unchanged |
 | 2026-10-11 | minor | Display P3 honest minimum (gap 18): the colour picker of a Display P3 file warns when a colour is outside sRGB (Outside sRGB, with what the canvas and exports do), and View ▸ Soft-proof sRGB (`view.proofSrgb`) stripes the canvas pixels sRGB can't show. Why the canvas still shows sRGB: wgpu 30 can present Display P3 or extended-range sRGB surfaces (Metal, DX12, Vulkan, WebGPU canvases), but eframe/egui-wgpu 0.36 configure an 8-bit sRGB surface with no option for the format or colour space, and egui's renderer writes sRGB-encoded UI colours; showing P3 needs those two upstream (or a patched egui-wgpu). Hardware 13–27 h → 12–26 h; gap 18 6–12 h → 5–11 h; percentages, feature breadth (~79%) and ready for real work (~47%) unchanged at this rounding; full parity ~363–697 h → ~362–696 h |

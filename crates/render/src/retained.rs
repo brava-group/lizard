@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use figcraft_doc::{Document, EffectKind, NodeId, NodeKind};
 use figcraft_geom::Rect;
-use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
+use tiny_skia::Pixmap;
 
 use crate::{Options, View, draw, render_view};
 
@@ -26,6 +26,15 @@ pub enum Work {
     },
     /// The whole view.
     Full,
+}
+
+/// A region of the retained image whose device pixels changed. Half-open coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Re-rendered areas beyond this many get merged into their bounding box.
@@ -140,6 +149,19 @@ impl Retained {
     /// Render `view` of `page`, reusing the previous render where nothing changed. Returns the
     /// view actually drawn (snapped to device pixels, see [`snap`]), the image and what it took.
     pub fn render(&mut self, doc: &Arc<Document>, page: NodeId, view: &View, opts: &Options) -> Option<(View, &Pixmap, Work)> {
+        self.render_with_damage(doc, page, view, opts).map(|(view, pix, work, _)| (view, pix, work))
+    }
+
+    /// As [`Self::render`], with damage for a same-view texture upload. `None` means the entire
+    /// texture changed; an empty list means its pixels can be kept. A pan shifts kept CPU pixels,
+    /// so its texture still needs a full upload even if only the exposed strips were rendered.
+    pub fn render_with_damage(
+        &mut self,
+        doc: &Arc<Document>,
+        page: NodeId,
+        view: &View,
+        opts: &Options,
+    ) -> Option<(View, &Pixmap, Work, Option<Vec<DamageRect>>)> {
         // A view that can't be put on a pixel grid (non-finite or absurd) draws nothing.
         let Some((snapped, px)) = snap(view) else {
             self.last = None;
@@ -168,17 +190,17 @@ impl Retained {
         {
             let same_doc = Arc::ptr_eq(&last.doc, doc);
             let s = if same_doc { last.sensitive.clone() } else { Arc::new(sensitive(doc)) };
-            if let Some((pix, pixels)) = patch(last, doc, page, &snapped, px, opts, &s) {
+            if let Some((pix, pixels, damage)) = patch(last, doc, page, &snapped, px, opts, &s) {
                 work = if pixels == 0 { Work::Reused } else { Work::Partial { pixels } };
                 let frame = self.keep(doc, page, (&snapped, px, fonts), opts, pix, s);
-                return Some((snapped, &frame.pix, work));
+                return Some((snapped, &frame.pix, work, damage));
             }
             sens = Some(s);
         }
         let pix = render_view(doc, page, &snapped, opts)?;
         let s = sens.unwrap_or_else(|| Arc::new(sensitive(doc)));
         let frame = self.keep(doc, page, (&snapped, px, fonts), opts, pix, s);
-        Some((snapped, &frame.pix, work))
+        Some((snapped, &frame.pix, work, None))
     }
 
     /// Keep `pix`, the render of `at`: the snapped view, its top-left device pixel and the font
@@ -259,9 +281,87 @@ fn changed_areas(doc: &Document, page: NodeId, id: NodeId, out: &mut Vec<Rect>) 
     Some(())
 }
 
+/// Pixel regions needed to bring an already displayed image of `old` up to date with `new`.
+/// This also works when render jobs between the two documents were skipped during a fast drag.
+/// The caller must ensure both images have the same view and rendering options.
+pub fn damage_between(old: &Document, new: &Document, page: NodeId, view: &View) -> Option<Vec<DamageRect>> {
+    if old.color_profile != new.color_profile {
+        return None;
+    }
+    let (fx, fy) = (view.origin.0 * view.scale, view.origin.1 * view.scale);
+    if !(fx.is_finite() && fy.is_finite() && fx.abs() < 1e15 && fy.abs() < 1e15 && view.scale.is_finite() && view.scale > 0.0) {
+        return None;
+    }
+    let px = (fx.round() as i64, fy.round() as i64);
+    let old_sensitive = sensitive(old);
+    let new_sensitive = sensitive(new);
+    let reach = crate::backdrop_reach(old_sensitive.backdrop_blur.max(new_sensitive.backdrop_blur), view.scale).ceil();
+    if !reach.is_finite() || reach > MAX_MARGIN_PX {
+        return None;
+    }
+    let reach = reach as i64;
+    let mut areas = Vec::new();
+    for id in new.changed_ids(old, MAX_CHANGED)? {
+        if in_pattern_source(old, &old_sensitive, id) || in_pattern_source(new, &new_sensitive, id) {
+            return None;
+        }
+        changed_areas(old, page, id, &mut areas)?;
+        changed_areas(new, page, id, &mut areas)?;
+    }
+    let (w, h) = (i64::from(view.width), i64::from(view.height));
+    let mut damage: Vec<Px> = areas
+        .into_iter()
+        .filter_map(|r| to_px(r, view.scale, px))
+        .filter_map(|p| Px { x0: p.x0 - reach, y0: p.y0 - reach, x1: p.x1 + reach, y1: p.y1 + reach }.clamp(w, h))
+        .collect();
+    let sensitive: Vec<Px> = old_sensitive.areas.iter().chain(new_sensitive.areas.iter()).filter_map(|r| to_px(*r, view.scale, px)).collect();
+    for _ in 0..4 {
+        let mut grew = false;
+        for d in &mut damage {
+            for a in &sensitive {
+                let hits = a.x0 < d.x1 && d.x0 < a.x1 && a.y0 < d.y1 && d.y0 < a.y1;
+                if hits && a.union(d) != *d {
+                    *d = a.union(d);
+                    grew = true;
+                }
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    let mut damage = merge(damage.into_iter().filter_map(|d| d.clamp(w, h)).collect());
+    if damage.len() > MAX_RECTS {
+        let all = damage.iter().skip(1).fold(*damage.first()?, |a, b| a.union(b));
+        damage = vec![all];
+    }
+    if damage.iter().map(Px::area).sum::<u64>() as f64 > MAX_PARTIAL_SHARE * (w * h) as f64 {
+        return None;
+    }
+    damage
+        .into_iter()
+        .map(|d| {
+            Some(DamageRect {
+                x: u32::try_from(d.x0).ok()?,
+                y: u32::try_from(d.y0).ok()?,
+                width: u32::try_from(d.x1 - d.x0).ok()?,
+                height: u32::try_from(d.y1 - d.y0).ok()?,
+            })
+        })
+        .collect()
+}
+
 /// The previous frame brought up to date for `doc` at `px`, rendering only what changed; `None`
 /// when a full render is the better (or only correct) choice. Also returns the pixels rendered.
-fn patch(last: Frame, doc: &Arc<Document>, page: NodeId, view: &View, px: (i64, i64), opts: &Options, s: &Sensitive) -> Option<(Pixmap, u64)> {
+fn patch(
+    last: Frame,
+    doc: &Arc<Document>,
+    page: NodeId,
+    view: &View,
+    px: (i64, i64),
+    opts: &Options,
+    s: &Sensitive,
+) -> Option<(Pixmap, u64, Option<Vec<DamageRect>>)> {
     let (w, h) = (i64::from(view.width), i64::from(view.height));
     let (dx, dy) = (px.0.checked_sub(last.px.0)?, px.1.checked_sub(last.px.1)?);
     if dx.abs() >= w || dy.abs() >= h {
@@ -305,7 +405,7 @@ fn patch(last: Frame, doc: &Arc<Document>, page: NodeId, view: &View, px: (i64, 
     }
     let mut damage: Vec<Px> = damage.iter().filter_map(|d| d.clamp(w, h)).collect();
     if damage.is_empty() && dx == 0 && dy == 0 {
-        return Some((last.pix, 0));
+        return Some((last.pix, 0, Some(Vec::new())));
     }
     // Layers whose look depends on where they are cut are redrawn whole.
     let sensitive: Vec<Px> = s.areas.iter().chain(last.sensitive.areas.iter()).filter_map(|r| to_px(*r, view.scale, px)).collect();
@@ -340,7 +440,24 @@ fn patch(last: Frame, doc: &Arc<Document>, page: NodeId, view: &View, px: (i64, 
     for d in &damage {
         render_into(doc, page, view, px, d, margin, opts, &mut pix)?;
     }
-    Some((pix, pixels))
+    let regions = if dx == 0 && dy == 0 {
+        Some(
+            damage
+                .into_iter()
+                .map(|d| {
+                    Some(DamageRect {
+                        x: u32::try_from(d.x0).ok()?,
+                        y: u32::try_from(d.y0).ok()?,
+                        width: u32::try_from(d.x1 - d.x0).ok()?,
+                        height: u32::try_from(d.y1 - d.y0).ok()?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )
+    } else {
+        None
+    };
+    Some((pix, pixels, regions))
 }
 
 /// Move the image's content by `(-dx, -dy)` pixels in place (what was at `(x, y)` goes to
@@ -402,14 +519,21 @@ fn render_into(doc: &Document, page: NodeId, view: &View, px: (i64, i64), d: &Px
     // The same pixel grid as the frame: origin (px + offset) / scale.
     let sub = View { origin: ((px.0 + ox) as f64 / s, (px.1 + oy) as f64 / s), scale: s, width: rw, height: rh };
     let part = render_view(doc, page, &sub, opts)?;
-    let inner = IntRect::from_xywh(
-        i32::try_from(margin).ok()?,
-        i32::try_from(margin).ok()?,
-        u32::try_from(d.x1 - d.x0).ok()?,
-        u32::try_from(d.y1 - d.y0).ok()?,
-    )?;
-    let inner = part.clone_rect(inner)?;
-    let copy = PixmapPaint { blend_mode: tiny_skia::BlendMode::Source, ..Default::default() };
-    pix.draw_pixmap(i32::try_from(d.x0).ok()?, i32::try_from(d.y0).ok()?, inner.as_ref(), &copy, Transform::identity(), None);
+    // Both pixmaps are premultiplied RGBA on the same pixel grid. Copying the inner rows is
+    // exactly a Source blit, without cloning a temporary pixmap or running the shader pipeline.
+    let (width, height) = (usize::try_from(d.x1 - d.x0).ok()?, usize::try_from(d.y1 - d.y0).ok()?);
+    let (dst_x, dst_y, margin) = (usize::try_from(d.x0).ok()?, usize::try_from(d.y0).ok()?, usize::try_from(margin).ok()?);
+    let src_stride = usize::try_from(part.width()).ok()?.checked_mul(4)?;
+    let dst_stride = usize::try_from(pix.width()).ok()?.checked_mul(4)?;
+    let row_bytes = width.checked_mul(4)?;
+    let src_x = margin.checked_mul(4)?;
+    let dst_x = dst_x.checked_mul(4)?;
+    for y in 0..height {
+        let src_start = margin.checked_add(y)?.checked_mul(src_stride)?.checked_add(src_x)?;
+        let dst_start = dst_y.checked_add(y)?.checked_mul(dst_stride)?.checked_add(dst_x)?;
+        let src = part.data().get(src_start..src_start.checked_add(row_bytes)?)?;
+        let dst = pix.data_mut().get_mut(dst_start..dst_start.checked_add(row_bytes)?)?;
+        dst.copy_from_slice(src);
+    }
     Some(())
 }

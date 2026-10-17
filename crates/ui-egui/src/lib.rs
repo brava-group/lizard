@@ -1505,6 +1505,8 @@ impl FigApp {
                     figcraft_render::Work::Partial { pixels } => json!({"kind": "partial", "pixels": pixels}),
                     figcraft_render::Work::Full => json!({"kind": "full"}),
                 }),
+                "uploadPixels": self.canvas.upload_pixels,
+                "textureCurrent": self.session.ds().ok().is_some_and(|ds| self.canvas.texture_current(ds)),
                 "quality": if self.canvas.tex_coarse { "preview" } else { "refined" },
                 "previewLatencyMs": self.canvas.preview_latency_ms,
                 "refineLatencyMs": self.canvas.refine_latency_ms,
