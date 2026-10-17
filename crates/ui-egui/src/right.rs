@@ -450,6 +450,7 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
             }
         });
     });
+    ui.add_space(12.0);
     widgets::separator(ui);
     // Local variables & styles.
     let vars = doc.variables.variables.iter().filter(|v| !figcraft_engine::library::is_remote_variable(doc, &v.id)).count();
@@ -462,9 +463,11 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
             app.ui.variables.get_or_insert_with(Default::default);
         }
     });
+    ui.add_space(12.0);
     widgets::separator(ui);
     widgets::section_header(ui, tr("Local styles"), &[], figcraft_engine::library::local_styles(doc).next().is_none());
     crate::style_picker::local_styles(app, ui, doc);
+    ui.add_space(12.0);
     widgets::separator(ui);
     crate::export_panel::page_section(app, ui, doc, page);
 }

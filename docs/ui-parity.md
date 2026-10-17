@@ -166,6 +166,7 @@ in the table. `crates/ui-egui/src/shortcut_keys_tests.rs` drives the keys a look
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Corrected the shared property dropdown chevron size and added bottom spacing to the page's Color profile, Local variables and Local styles sections. |
 | 2026-10-17 | minor | Matched the main tab strip's add and close glyphs to the property panels; the unsaved marker now uses the document icon blue. |
 | 2026-10-15 | minor | Hex fields take CSS colour names (`red` → `FF0000`): fills, strokes, effects, grids, variables, backgrounds and the colour picker |
 | 2026-10-15 | minor | Typography: drag the line-height, letter-spacing and paragraph-spacing icons to scrub their values; shared numeric-field rates, resize cursor and one Undo step per gesture (#373). |

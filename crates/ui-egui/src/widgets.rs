@@ -760,7 +760,7 @@ pub fn dropdown_lead(ui: &mut Ui, label: &str, width: f32, lead: Option<DropLead
     let shown = elide(ui, label, rect.max.x - x - 20.0);
     let galley = ui.painter().layout_no_wrap(shown.clone(), regular(11.0), t.text);
     ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, t.text);
-    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.max.x - 10.0, rect.center().y), vec2(12.0, 12.0)), Icon::Chevron, t.icon_secondary);
+    icons::paint_colorpicker(ui.painter(), Rect::from_center_size(pos2(rect.max.x - 12.0, rect.center().y), vec2(5.002, 3.002)), 7, t.icon_secondary);
     if shown != label { resp.on_hover_text(label) } else { resp }
 }
 
