@@ -1,14 +1,14 @@
-//! The pointer on the canvas: each engine cursor ([`figcraft_engine::tools::Cursor`]) as one of
-//! the system's cursors, or as a small glyph FigCraft draws at the pointer with the system's
-//! hidden (a rotate cursor turned to its corner, the pen's states, the eyedropper, the comment
-//! pin). The glyphs are original, drawn from lines and the code-drawn icons: no cursor images.
+//! Canvas cursors from the owner's local `cursores.html` reference.
+//!
+//! Its SVG files contain embedded PNG images, so the corresponding PNG payloads are shown
+//! directly. This preserves the supplied artwork without tracing or redrawing it.
 
-use egui::{Color32, CursorIcon, Painter, Pos2, Shape, Stroke, pos2, vec2};
+use std::collections::HashMap;
+
+use egui::{Color32, CursorIcon, Pos2, Rect, TextureHandle, TextureOptions, pos2, vec2};
 use figcraft_engine::tools::{Cursor, PenCursor};
 
-use crate::icons::{self, Icon};
-
-/// A cursor FigCraft draws.
+/// The engine cursor's visual state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Glyph {
     Arrow,
@@ -20,23 +20,161 @@ pub enum Glyph {
     Zoom(bool),
     Pencil,
     PaintBucket,
-    /// A curved double arrow about the direction (degrees, 0 = right, 90 = down) from the box's
-    /// centre to the corner.
     Rotate(f32),
     Pen(PenCursor),
     Eyedropper,
     Comment,
+    Pointer,
 }
 
-/// What the pointer shows.
+/// A cursor rendered by the OS or by the reference image.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Shown {
     System(CursorIcon),
     Drawn(Glyph),
 }
 
-/// The system's two-headed arrow nearest a resize along `degrees` (0 = horizontal, 90 = vertical;
-/// screen angles, so 45 runs from the top left to the bottom right).
+/// Cursor textures belong to the canvas's egui context and are decoded only on first use.
+#[derive(Default)]
+pub struct CursorTextures {
+    loaded: HashMap<(Asset, u32), TextureHandle>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum Asset {
+    Move,
+    Crosshair,
+    ResizeHorizontal,
+    ResizeVertical,
+    ResizeDiagonalDr,
+    ResizeDiagonalUr,
+    Rotate,
+    Hand,
+    HandPress,
+    Duplicate,
+    ZoomIn,
+    ZoomOut,
+    Pen,
+    PenSnap,
+    PenInsert,
+    Bend,
+    Eyedropper,
+    Comment,
+    PaintBucket,
+    Click,
+}
+
+impl Asset {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Move => "move",
+            Self::Crosshair => "crosshair",
+            Self::ResizeHorizontal => "resize-horizontal",
+            Self::ResizeVertical => "resize-vertical",
+            Self::ResizeDiagonalDr => "resize-diagonal-dr",
+            Self::ResizeDiagonalUr => "resize-diagonal-ur",
+            Self::Rotate => "rotate",
+            Self::Hand => "hand",
+            Self::HandPress => "hand-press",
+            Self::Duplicate => "duplicate",
+            Self::ZoomIn => "zoom-in",
+            Self::ZoomOut => "zoom-out",
+            Self::Pen => "pen",
+            Self::PenSnap => "pen-snap",
+            Self::PenInsert => "pen-insert",
+            Self::Bend => "bend",
+            Self::Eyedropper => "eyedropper",
+            Self::Comment => "comment",
+            Self::PaintBucket => "paint-bucket",
+            Self::Click => "click",
+        }
+    }
+
+    fn png(self) -> &'static [u8] {
+        match self {
+            Self::Move => include_bytes!("../assets/cursors/move.png"),
+            Self::Crosshair => include_bytes!("../assets/cursors/crosshair.png"),
+            Self::ResizeHorizontal => include_bytes!("../assets/cursors/resize-horizontal.png"),
+            Self::ResizeVertical => include_bytes!("../assets/cursors/resize-vertical.png"),
+            Self::ResizeDiagonalDr => include_bytes!("../assets/cursors/resize-diagonal-dr.png"),
+            Self::ResizeDiagonalUr => include_bytes!("../assets/cursors/resize-diagonal-ur.png"),
+            Self::Rotate => include_bytes!("../assets/cursors/rotate.png"),
+            Self::Hand => include_bytes!("../assets/cursors/hand.png"),
+            Self::HandPress => include_bytes!("../assets/cursors/hand-press.png"),
+            Self::Duplicate => include_bytes!("../assets/cursors/duplicate.png"),
+            Self::ZoomIn => include_bytes!("../assets/cursors/zoom-in.png"),
+            Self::ZoomOut => include_bytes!("../assets/cursors/zoom-out.png"),
+            Self::Pen => include_bytes!("../assets/cursors/pen.png"),
+            Self::PenSnap => include_bytes!("../assets/cursors/pen-snap.png"),
+            Self::PenInsert => include_bytes!("../assets/cursors/pen-insert.png"),
+            Self::Bend => include_bytes!("../assets/cursors/bend.png"),
+            Self::Eyedropper => include_bytes!("../assets/cursors/eyedropper.png"),
+            Self::Comment => include_bytes!("../assets/cursors/comment.png"),
+            Self::PaintBucket => include_bytes!("../assets/cursors/paint-bucket.png"),
+            Self::Click => include_bytes!("../assets/cursors/click.png"),
+        }
+    }
+
+    /// Hot spot in the 32 × 32 image, in logical points.
+    fn hotspot(self) -> egui::Vec2 {
+        match self {
+            Self::Move | Self::Duplicate | Self::Pen | Self::PenSnap | Self::PenInsert | Self::Click => vec2(0.0, 0.0),
+            Self::Eyedropper => vec2(5.0, 27.0),
+            Self::Comment => vec2(6.0, 27.0),
+            Self::PaintBucket => vec2(8.0, 24.0),
+            _ => vec2(16.0, 16.0),
+        }
+    }
+}
+
+impl CursorTextures {
+    fn get(&mut self, ctx: &egui::Context, asset: Asset) -> Option<&TextureHandle> {
+        let pixels = (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32;
+        let key = (asset, pixels);
+        if !self.loaded.contains_key(&key) {
+            let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).ok()?.into_rgba8();
+            // egui's linear sampler has no mip levels. Downsample with a proper reconstruction
+            // filter so the 256 px source stays crisp at its 32 pt display size.
+            let rgba = image::imageops::resize(&png, pixels, pixels, image::imageops::FilterType::Lanczos3);
+            let side = usize::try_from(pixels).ok()?;
+            let image = egui::ColorImage::from_rgba_unmultiplied([side, side], rgba.as_raw());
+            let texture = ctx.load_texture(format!("canvas-cursor-{}-{pixels}", asset.name()), image, TextureOptions::LINEAR);
+            self.loaded.insert(key, texture);
+        }
+        self.loaded.get(&key)
+    }
+}
+
+impl Glyph {
+    fn asset(self) -> Asset {
+        match self {
+            Self::Arrow | Self::Move => Asset::Move,
+            Self::Crosshair => Asset::Crosshair,
+            Self::Resize(degrees) => match resize_icon(f64::from(degrees)) {
+                CursorIcon::ResizeHorizontal => Asset::ResizeHorizontal,
+                CursorIcon::ResizeVertical => Asset::ResizeVertical,
+                CursorIcon::ResizeNwSe => Asset::ResizeDiagonalDr,
+                _ => Asset::ResizeDiagonalUr,
+            },
+            Self::Hand(false) => Asset::Hand,
+            Self::Hand(true) => Asset::HandPress,
+            Self::Copy => Asset::Duplicate,
+            Self::Zoom(false) => Asset::ZoomIn,
+            Self::Zoom(true) => Asset::ZoomOut,
+            Self::Pencil | Self::Pen(PenCursor::New) => Asset::Pen,
+            Self::Pen(PenCursor::Close) => Asset::PenSnap,
+            Self::Pen(PenCursor::Add) => Asset::PenInsert,
+            Self::Pen(PenCursor::Bend) => Asset::Bend,
+            Self::PaintBucket => Asset::PaintBucket,
+            Self::Rotate(_) => Asset::Rotate,
+            Self::Eyedropper => Asset::Eyedropper,
+            Self::Comment => Asset::Comment,
+            Self::Pointer => Asset::Click,
+        }
+    }
+}
+
+/// The nearest resize arrow for a screen angle (0 = horizontal, 90 = vertical).
 pub fn resize_icon(degrees: f64) -> CursorIcon {
     let a = degrees.rem_euclid(180.0);
     if !(22.5..157.5).contains(&a) {
@@ -50,7 +188,6 @@ pub fn resize_icon(degrees: f64) -> CursorIcon {
     }
 }
 
-/// What shows for the engine's `cursor`.
 pub fn of(cursor: Cursor) -> Shown {
     use Shown::{Drawn, System};
     match cursor {
@@ -67,16 +204,14 @@ pub fn of(cursor: Cursor) -> Shown {
         Cursor::Pencil => Drawn(Glyph::Pencil),
         Cursor::PaintBucket => Drawn(Glyph::PaintBucket),
         Cursor::Copy => Drawn(Glyph::Copy),
-        Cursor::Pointer => System(CursorIcon::PointingHand),
+        Cursor::Pointer => Drawn(Glyph::Pointer),
         Cursor::Eyedropper => Drawn(Glyph::Eyedropper),
         Cursor::Comment => Drawn(Glyph::Comment),
         Cursor::NotAllowed => System(CursorIcon::NotAllowed),
     }
 }
 
-/// What shows on the canvas: panning (Space or the middle button: the open hand, closed while a
-/// button is down) and the zoom tool (Z; `Some(true)`: Alt, zooming out) come before the tool's
-/// cursor.
+/// Pan and zoom override the active tool's cursor.
 pub fn on_canvas(panning: bool, button_down: bool, zoom_out: Option<bool>, cursor: Cursor) -> Shown {
     match (panning, zoom_out) {
         (true, _) => Shown::Drawn(Glyph::Hand(button_down)),
@@ -86,184 +221,106 @@ pub fn on_canvas(panning: bool, button_down: bool, zoom_out: Option<bool>, curso
 }
 
 impl Shown {
-    /// The system cursor to ask for (none under a drawn one).
     pub fn icon(self) -> CursorIcon {
         match self {
-            Shown::System(i) => i,
-            Shown::Drawn(_) => CursorIcon::None,
+            Self::System(i) => i,
+            Self::Drawn(_) => CursorIcon::None,
         }
     }
 
-    /// A name for it (`ui.inspect`): the CSS cursor names where there is one ("default",
-    /// "nwse-resize", "copy"), and "rotate" (with its angle), "pen", "pen-close", "pen-add",
-    /// "pen-bend", "eyedropper" and "comment" for the drawn ones.
+    /// Name reported through `ui.inspect`.
     pub fn name(self) -> String {
         match self {
-            Shown::System(i) => match i {
+            Self::System(i) => match i {
                 CursorIcon::Default => "default",
-                CursorIcon::Crosshair => "crosshair",
-                CursorIcon::Move => "move",
-                CursorIcon::ResizeHorizontal => "ew-resize",
-                CursorIcon::ResizeVertical => "ns-resize",
-                CursorIcon::ResizeNwSe => "nwse-resize",
-                CursorIcon::ResizeNeSw => "nesw-resize",
-                CursorIcon::Grab => "grab",
-                CursorIcon::Grabbing => "grabbing",
                 CursorIcon::Text => "text",
-                CursorIcon::Copy => "copy",
-                CursorIcon::PointingHand => "pointer",
                 CursorIcon::NotAllowed => "not-allowed",
-                CursorIcon::ZoomIn => "zoom-in",
-                CursorIcon::ZoomOut => "zoom-out",
                 _ => "other",
             }
-            .to_string(),
-            Shown::Drawn(Glyph::Arrow) => "default".into(),
-            Shown::Drawn(Glyph::Move) => "move".into(),
-            Shown::Drawn(Glyph::Crosshair) => "crosshair".into(),
-            Shown::Drawn(Glyph::Resize(a)) => match resize_icon(f64::from(a)) {
-                CursorIcon::ResizeHorizontal => "ew-resize",
-                CursorIcon::ResizeVertical => "ns-resize",
-                CursorIcon::ResizeNwSe => "nwse-resize",
-                _ => "nesw-resize",
-            }
             .into(),
-            Shown::Drawn(Glyph::Hand(false)) => "grab".into(),
-            Shown::Drawn(Glyph::Hand(true)) => "grabbing".into(),
-            Shown::Drawn(Glyph::Copy) => "copy".into(),
-            Shown::Drawn(Glyph::Zoom(false)) => "zoom-in".into(),
-            Shown::Drawn(Glyph::Zoom(true)) => "zoom-out".into(),
-            Shown::Drawn(Glyph::Pencil) => "pencil".into(),
-            Shown::Drawn(Glyph::PaintBucket) => "paint-bucket".into(),
-            Shown::Drawn(Glyph::Rotate(a)) => format!("rotate {}", a.round()),
-            Shown::Drawn(Glyph::Pen(PenCursor::New)) => "pen".into(),
-            Shown::Drawn(Glyph::Pen(PenCursor::Close)) => "pen-close".into(),
-            Shown::Drawn(Glyph::Pen(PenCursor::Add)) => "pen-add".into(),
-            Shown::Drawn(Glyph::Pen(PenCursor::Bend)) => "pen-bend".into(),
-            Shown::Drawn(Glyph::Eyedropper) => "eyedropper".into(),
-            Shown::Drawn(Glyph::Comment) => "comment".into(),
+            Self::Drawn(glyph) => match glyph {
+                Glyph::Arrow => "default".into(),
+                Glyph::Move => "move".into(),
+                Glyph::Crosshair => "crosshair".into(),
+                Glyph::Resize(a) => match resize_icon(f64::from(a)) {
+                    CursorIcon::ResizeHorizontal => "ew-resize",
+                    CursorIcon::ResizeVertical => "ns-resize",
+                    CursorIcon::ResizeNwSe => "nwse-resize",
+                    _ => "nesw-resize",
+                }
+                .into(),
+                Glyph::Hand(false) => "grab".into(),
+                Glyph::Hand(true) => "grabbing".into(),
+                Glyph::Copy => "copy".into(),
+                Glyph::Zoom(false) => "zoom-in".into(),
+                Glyph::Zoom(true) => "zoom-out".into(),
+                Glyph::Pencil => "pencil".into(),
+                Glyph::PaintBucket => "paint-bucket".into(),
+                Glyph::Rotate(a) => format!("rotate {}", a.round()),
+                Glyph::Pen(PenCursor::New) => "pen".into(),
+                Glyph::Pen(PenCursor::Close) => "pen-close".into(),
+                Glyph::Pen(PenCursor::Add) => "pen-add".into(),
+                Glyph::Pen(PenCursor::Bend) => "pen-bend".into(),
+                Glyph::Eyedropper => "eyedropper".into(),
+                Glyph::Comment => "comment".into(),
+                Glyph::Pointer => "pointer".into(),
+            },
         }
     }
 
-    /// Ask for the system cursor and draw the glyph, if it is one, at `at` over everything else.
-    pub fn show(self, ctx: &egui::Context, at: Pos2) {
+    /// Paint the supplied 32 × 32 cursor image over the canvas at the pointer.
+    pub fn show(self, ctx: &egui::Context, at: Pos2, textures: &mut CursorTextures) {
         ctx.set_cursor_icon(self.icon());
-        if let Shown::Drawn(g) = self {
-            paint(&ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas_cursor"))), at, g);
-        }
+        let Self::Drawn(glyph) = self else { return };
+        let asset = glyph.asset();
+        let Some(texture) = textures.get(ctx, asset) else {
+            ctx.set_cursor_icon(CursorIcon::Default);
+            return;
+        };
+        let rect = Rect::from_min_size(at - asset.hotspot(), vec2(32.0, 32.0));
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas_cursor")));
+        painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
 
-/// Dark lines over a light edge: readable on any page and artwork.
-const INK: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-const EDGE: Color32 = Color32::WHITE;
+#[cfg(test)]
+mod tests {
+    use super::{Asset, Glyph};
+    use figcraft_engine::tools::PenCursor;
 
-/// A line through `pts` with the light edge under it.
-fn line(painter: &Painter, pts: &[Pos2]) {
-    painter.add(Shape::line(pts.to_vec(), Stroke::new(3.5, EDGE)));
-    painter.add(Shape::line(pts.to_vec(), Stroke::new(1.5, INK)));
-}
-
-/// `icon` in a 16 px box at `min`, with the light edge around it.
-fn icon(painter: &Painter, min: Pos2, icon: Icon) {
-    let r = egui::Rect::from_min_size(min, vec2(16.0, 16.0));
-    for d in [vec2(-1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, -1.0), vec2(0.0, 1.0)] {
-        icons::paint(painter, r.translate(d), icon, EDGE);
-    }
-    icons::paint(painter, r, icon, INK);
-}
-
-/// Points of the arc of radius `r` about `c` from angle `a0` to `a1` (radians).
-fn arc(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
-    (0..=12).map(|i| a0 + (a1 - a0) * i as f32 / 12.0).map(|a| c + vec2(a.cos(), a.sin()) * r).collect()
-}
-
-/// Draw `glyph` with its hot spot at `at`.
-pub fn paint(painter: &Painter, at: Pos2, glyph: Glyph) {
-    match glyph {
-        Glyph::Arrow | Glyph::Move => icon(painter, at - vec2(4.0, 2.0), Icon::Move),
-        Glyph::Crosshair => {
-            line(painter, &[at - vec2(8.0, 0.0), at + vec2(8.0, 0.0)]);
-            line(painter, &[at - vec2(0.0, 8.0), at + vec2(0.0, 8.0)]);
+    #[test]
+    fn supplied_cursor_images_decode_and_states_use_the_reference_files() {
+        for asset in [
+            Asset::Move,
+            Asset::Crosshair,
+            Asset::ResizeHorizontal,
+            Asset::ResizeVertical,
+            Asset::ResizeDiagonalDr,
+            Asset::ResizeDiagonalUr,
+            Asset::Rotate,
+            Asset::Hand,
+            Asset::HandPress,
+            Asset::Duplicate,
+            Asset::ZoomIn,
+            Asset::ZoomOut,
+            Asset::Pen,
+            Asset::PenSnap,
+            Asset::PenInsert,
+            Asset::Bend,
+            Asset::Eyedropper,
+            Asset::Comment,
+            Asset::PaintBucket,
+            Asset::Click,
+        ] {
+            let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).unwrap();
+            assert_eq!((png.width(), png.height()), (256, 256), "{}", asset.name());
         }
-        Glyph::Resize(degrees) => {
-            let angle = degrees.to_radians();
-            let dir = vec2(angle.cos(), angle.sin());
-            let side = vec2(-dir.y, dir.x);
-            let a = at - dir * 8.5;
-            let b = at + dir * 8.5;
-            line(painter, &[a, b]);
-            for (tip, inward) in [(a, dir), (b, -dir)] {
-                line(painter, &[tip + inward * 5.0 + side * 3.0, tip, tip + inward * 5.0 - side * 3.0]);
-            }
-        }
-        Glyph::Hand(closed) => {
-            icon(painter, at - vec2(8.0, 8.0), Icon::Hand);
-            if closed {
-                line(painter, &[at - vec2(4.0, 1.0), at + vec2(4.0, 1.0)]);
-            }
-        }
-        Glyph::Copy => {
-            icon(painter, at - vec2(4.0, 2.0), Icon::Move);
-            let badge = at + vec2(11.0, 12.0);
-            painter.circle_filled(badge, 5.5, EDGE);
-            painter.circle_stroke(badge, 5.5, Stroke::new(1.0, INK));
-            painter.line_segment([badge - vec2(2.5, 0.0), badge + vec2(2.5, 0.0)], Stroke::new(1.2, INK));
-            painter.line_segment([badge - vec2(0.0, 2.5), badge + vec2(0.0, 2.5)], Stroke::new(1.2, INK));
-        }
-        Glyph::Zoom(out) => {
-            painter.circle_stroke(at, 5.5, Stroke::new(3.5, EDGE));
-            painter.circle_stroke(at, 5.5, Stroke::new(1.5, INK));
-            line(painter, &[at + vec2(4.0, 4.0), at + vec2(10.0, 10.0)]);
-            painter.line_segment([at - vec2(2.5, 0.0), at + vec2(2.5, 0.0)], Stroke::new(1.3, INK));
-            if !out {
-                painter.line_segment([at - vec2(0.0, 2.5), at + vec2(0.0, 2.5)], Stroke::new(1.3, INK));
-            }
-        }
-        Glyph::Pencil => icon(painter, at - vec2(2.5, 13.5), Icon::Pencil),
-        Glyph::PaintBucket => icon(painter, at - vec2(7.5, 8.0), Icon::PaintBucket),
-        Glyph::Rotate(degrees) => {
-            // An arc bulging away from the box, through the pointer, with an arrowhead at each end.
-            let (dir, r, half) = (degrees.to_radians(), 11.0, 0.8);
-            let c = at - vec2(dir.cos(), dir.sin()) * r;
-            let pts = arc(c, r, dir - half, dir + half);
-            line(painter, &pts);
-            for (end, sign) in [(dir - half, -1.0), (dir + half, 1.0)] {
-                let tip = c + vec2(end.cos(), end.sin()) * r;
-                // Along the arc at its end, pointing onwards.
-                let t = vec2(-end.sin(), end.cos()) * sign;
-                let n = vec2(end.cos(), end.sin());
-                line(painter, &[tip - t * 4.5 + n * 3.5, tip + t * 1.0, tip - t * 4.5 - n * 3.5]);
-            }
-        }
-        Glyph::Pen(state) => {
-            // A cross open at the centre (the point it lands on stays visible), and what a click
-            // does at its lower right.
-            for (a, b) in [
-                (vec2(-8.0, 0.0), vec2(-2.5, 0.0)),
-                (vec2(2.5, 0.0), vec2(8.0, 0.0)),
-                (vec2(0.0, -8.0), vec2(0.0, -2.5)),
-                (vec2(0.0, 2.5), vec2(0.0, 8.0)),
-            ] {
-                line(painter, &[at + a, at + b]);
-            }
-            let b = at + vec2(10.0, 10.0);
-            match state {
-                PenCursor::New => {}
-                PenCursor::Close => {
-                    let mut ring = arc(b, 3.0, 0.0, std::f32::consts::TAU);
-                    ring.push(pos2(b.x + 3.0, b.y));
-                    line(painter, &ring);
-                }
-                PenCursor::Add => {
-                    line(painter, &[b - vec2(3.5, 0.0), b + vec2(3.5, 0.0)]);
-                    line(painter, &[b - vec2(0.0, 3.5), b + vec2(0.0, 3.5)]);
-                }
-                PenCursor::Bend => line(painter, &arc(b + vec2(-3.5, 3.5), 7.0, -std::f32::consts::FRAC_PI_2, 0.0)),
-            }
-        }
-        // The dropper's tip and the pin's tail, at the bottom left of their icons, are the hot spots.
-        Glyph::Eyedropper => icon(painter, at - vec2(2.5, 13.5), Icon::Eyedropper),
-        Glyph::Comment => icon(painter, at - vec2(2.5, 13.5), Icon::Comment),
+        assert_eq!(Glyph::Move.asset(), Asset::Move);
+        assert_eq!(Glyph::Crosshair.asset(), Asset::Crosshair);
+        assert_eq!(Glyph::Copy.asset(), Asset::Duplicate);
+        assert_eq!(Glyph::Pen(PenCursor::Close).asset(), Asset::PenSnap);
+        assert_eq!(Glyph::Pen(PenCursor::Add).asset(), Asset::PenInsert);
+        assert_eq!(Glyph::Pen(PenCursor::Bend).asset(), Asset::Bend);
+        assert_eq!(Glyph::Pointer.asset(), Asset::Click);
     }
 }

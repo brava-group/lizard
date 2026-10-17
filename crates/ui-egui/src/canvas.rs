@@ -52,6 +52,7 @@ pub struct CanvasState {
     /// What the pointer shows over the canvas (`ui.inspect`); none while it is elsewhere or
     /// something on the canvas with a cursor of its own has it (a ruler guide, a gradient handle).
     pub cursor: Option<crate::cursors::Shown>,
+    cursor_textures: crate::cursors::CursorTextures,
     preedit: Option<PreeditView>,
     /// The pen pressure last reported during the current press (pen and stylus touches; the
     /// winit backends and browsers that report it).
@@ -79,6 +80,7 @@ impl Default for CanvasState {
             space_pan: false,
             middle_pan: None,
             cursor: None,
+            cursor_textures: crate::cursors::CursorTextures::default(),
             zoom_tool: None,
             zoom_drag: None,
             last_pointer: None,
@@ -277,7 +279,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     if let (true, Some(at)) = (own_cursor && resp.hovered(), ctx.input(|i| i.pointer.hover_pos())) {
         let panning = app.canvas.space_pan || app.canvas.middle_pan.is_some();
         let shown = crate::cursors::on_canvas(panning, ctx.input(|i| i.pointer.any_down()), app.canvas.zoom_tool, app.session.tool.overlay.cursor);
-        shown.show(&ctx, at);
+        shown.show(&ctx, at, &mut app.canvas.cursor_textures);
         app.canvas.cursor = Some(shown);
     }
 }

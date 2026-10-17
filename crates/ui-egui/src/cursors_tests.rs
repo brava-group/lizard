@@ -40,7 +40,7 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
         (Cursor::Pencil, Drawn(Glyph::Pencil), "pencil"),
         (Cursor::PaintBucket, Drawn(Glyph::PaintBucket), "paint-bucket"),
         (Cursor::Copy, Drawn(Glyph::Copy), "copy"),
-        (Cursor::Pointer, System(CursorIcon::PointingHand), "pointer"),
+        (Cursor::Pointer, Drawn(Glyph::Pointer), "pointer"),
         (Cursor::Eyedropper, Drawn(Glyph::Eyedropper), "eyedropper"),
         (Cursor::Comment, Drawn(Glyph::Comment), "comment"),
         (Cursor::NotAllowed, System(CursorIcon::NotAllowed), "not-allowed"),
