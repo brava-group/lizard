@@ -11,7 +11,28 @@ use figcraft_engine::{Prefs, Session};
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
-use crate::{CANVAS_MIN, FigApp, LEFT_PANEL, NoServices, PANEL_DEFAULT, RIGHT_PANEL, Services, fit_panels};
+use crate::{CANVAS_MIN, FigApp, LEFT_PANEL, LeftTab, NoServices, PANEL_DEFAULT, RIGHT_PANEL, Services, fit_panels};
+
+#[test]
+fn agent_rail_opens_chat_and_restores_explorer_width() {
+    let (mut u, _) = ui();
+    u.app.set_panel_widths(300.0, PANEL_DEFAULT);
+    u.frame(vec![]);
+    u.button(pos2(24.0, 156.0), true);
+    u.button(pos2(24.0, 156.0), false);
+    assert_eq!(u.app.ui.left_tab, LeftTab::Agent);
+    assert_eq!(u.app.ui.left_width, 417.0);
+    assert_eq!(u.app.inspect()["leftTab"], "Agent");
+
+    u.button(pos2(100.0, 253.0), true);
+    u.button(pos2(100.0, 253.0), false);
+    assert_eq!(u.app.ui.agent.draft, "Organize e refine este design.");
+
+    u.button(pos2(24.0, 116.0), true);
+    u.button(pos2(24.0, 116.0), false);
+    assert_eq!(u.app.ui.left_tab, LeftTab::File);
+    assert_eq!(u.app.ui.left_width, 300.0);
+}
 
 /// The panel widths in the preferences each time they were kept.
 type Kept = Arc<Mutex<Vec<(f32, f32)>>>;

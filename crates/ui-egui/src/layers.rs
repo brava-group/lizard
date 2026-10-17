@@ -101,7 +101,7 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
     y += 16.0;
     let items = [
         (NavIcon::File, tr("File"), Some(LeftTab::File)),
-        (NavIcon::Agent, tr("Agent"), None),
+        (NavIcon::Agent, tr("Agent"), Some(LeftTab::Agent)),
         (NavIcon::Assets, tr("Assets"), Some(LeftTab::Assets)),
         (NavIcon::Variables, tr("Variables"), None),
     ];
@@ -112,8 +112,7 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
         }
         let hit = Rect::from_min_size(pos2(r.min.x, y), vec2(r.width(), 40.0));
         let ir = Rect::from_center_size(hit.center(), vec2(32.0, 32.0));
-        let sense = if icon == NavIcon::Agent { Sense::hover() } else { Sense::click() };
-        let resp = ui.interact(hit, ui.id().with(("rail", label)), sense).tip(label);
+        let resp = ui.interact(hit, ui.id().with(("rail", label)), Sense::click()).tip(label);
         let active = tab.is_some_and(|tb| tb == app.ui.left_tab && !app.ui.left_collapsed && !app.ui.versions.open);
         if tab.is_some() {
             a11y::tab(&resp, label, active);
@@ -138,8 +137,7 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
                     if active {
                         app.ui.left_collapsed = true;
                     } else {
-                        app.ui.left_tab = tb;
-                        app.ui.left_collapsed = false;
+                        app.select_left_tab(tb);
                     }
                     app.ui.versions = Default::default();
                 }
@@ -157,6 +155,10 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
 pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
     if app.ui.versions.open {
         crate::versions::panel(app, ui);
+        return;
+    }
+    if app.ui.left_tab == LeftTab::Agent {
+        crate::agent_panel::show(app, ui);
         return;
     }
     if app.ui.left_tab == LeftTab::File {
@@ -193,6 +195,7 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
             layers(app, ui);
         }
         LeftTab::Assets => crate::assets_panel::show(app, ui),
+        LeftTab::Agent => {}
     }
 }
 
@@ -543,8 +546,7 @@ pub(crate) fn start_rename(app: &mut FigApp, ids: &[NodeId]) {
     }
     let rows = listed_rows(&doc, page, &app.ui.expanded, &app.ui.layer_filter.trim().to_lowercase());
     let Some(id) = rows.iter().map(|r| r.id).find(|r| ids.contains(r)) else { return };
-    app.ui.left_tab = LeftTab::File;
-    app.ui.left_collapsed = false;
+    app.select_left_tab(LeftTab::File);
     rename_layer(app, id);
 }
 

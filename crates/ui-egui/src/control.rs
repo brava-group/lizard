@@ -392,7 +392,12 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
                 };
             }
             if let Some(t) = p.get("leftTab").and_then(Value::as_str) {
-                app.ui.left_tab = if t == "assets" { crate::LeftTab::Assets } else { crate::LeftTab::File };
+                let tab = match t {
+                    "agent" => crate::LeftTab::Agent,
+                    "assets" => crate::LeftTab::Assets,
+                    _ => crate::LeftTab::File,
+                };
+                app.select_left_tab(tab);
             }
             if let Some(t) = p.get("theme").and_then(Value::as_str) {
                 app.session.prefs.theme = t.to_string();

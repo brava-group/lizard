@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod a11y;
+pub mod agent_panel;
 pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;
@@ -317,6 +318,7 @@ pub enum RightTab {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum LeftTab {
     File,
+    Agent,
     Assets,
 }
 
@@ -399,6 +401,9 @@ pub struct UiState {
     /// The tab of the previous frame, to see the right panel change mode.
     pub last_right_tab: RightTab,
     pub left_tab: LeftTab,
+    /// Width of the file explorer while the wider Agent panel is open.
+    pub explorer_width: Option<f32>,
+    pub agent: agent_panel::AgentUi,
     pub pages_open: bool,
     pub expanded: BTreeSet<NodeId>,
     /// The layer being renamed in the layers panel.
@@ -529,6 +534,8 @@ impl Default for UiState {
             right_tab: RightTab::Design,
             last_right_tab: RightTab::Design,
             left_tab: LeftTab::File,
+            explorer_width: None,
+            agent: agent_panel::AgentUi::default(),
             pages_open: true,
             expanded: BTreeSet::new(),
             rename: None,
@@ -811,15 +818,15 @@ impl FigApp {
                     self.services.save_prefs(&self.session.prefs);
                 }
                 "focus.region" => self.ui.nav.step(r.data.get("step").and_then(Value::as_i64).unwrap_or(1).clamp(-4, 4) as i32),
-                "panel.layers" => self.ui.left_tab = LeftTab::File,
-                "panel.assets" => self.ui.left_tab = LeftTab::Assets,
+                "panel.layers" => self.select_left_tab(LeftTab::File),
+                "panel.agent" => self.select_left_tab(LeftTab::Agent),
+                "panel.assets" => self.select_left_tab(LeftTab::Assets),
                 "panel.versionHistory" => versions::open(self),
                 "view.devCompare" => {
                     self.ui.dev.compare = r.data.get("id").and_then(figcraft_engine::params::id_of).map(dev_compare::CompareView::new);
                 }
                 "panel.libraries" => {
-                    self.ui.left_tab = LeftTab::Assets;
-                    self.ui.left_collapsed = false;
+                    self.select_left_tab(LeftTab::Assets);
                     self.ui.libraries = true;
                 }
                 "home" => self.ui.home = true,
@@ -901,6 +908,25 @@ impl FigApp {
         if let Some(m) = self.session.message.take() {
             self.toast(m);
         }
+    }
+
+    /// Change the left view, preserving the explorer width while the Agent view is open.
+    pub fn select_left_tab(&mut self, tab: LeftTab) {
+        if tab == LeftTab::Agent && self.ui.left_tab != LeftTab::Agent {
+            self.ui.explorer_width = Some(self.ui.left_width);
+            self.ui.left_width = 417.0;
+        } else if tab != LeftTab::Agent
+            && self.ui.left_tab == LeftTab::Agent
+            && let Some(width) = self.ui.explorer_width.take()
+        {
+            self.ui.left_width = width;
+            if self.windows.current == 0 {
+                self.session.prefs.panel_widths.0 = width;
+                self.services.save_prefs(&self.session.prefs);
+            }
+        }
+        self.ui.left_tab = tab;
+        self.ui.left_collapsed = false;
     }
 
     /// Set the widths asked for this window's side panels (within their limits); the main
@@ -1337,6 +1363,7 @@ impl FigApp {
                 let label = match self.ui.left_tab {
                     _ if self.ui.versions.open => i18n::tr("Version history"),
                     LeftTab::File => i18n::tr("Layers"),
+                    LeftTab::Agent => i18n::tr("Agent"),
                     LeftTab::Assets => i18n::tr("Assets"),
                 };
                 a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
