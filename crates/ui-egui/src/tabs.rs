@@ -12,6 +12,7 @@ use crate::theme::{Tokens, regular};
 use crate::{FigApp, TitleBar};
 
 pub const HEIGHT: f32 = 40.0;
+const DOCUMENT_BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF7);
 
 pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
@@ -90,11 +91,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
             } else if resp.hovered() {
                 ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
             }
-            icons::paint_tab_document(
-                ui.painter(),
-                Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)),
-                Color32::from_rgb(0x7C, 0xC4, 0xF7),
-            );
+            icons::paint_tab_document(ui.painter(), Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)), DOCUMENT_BLUE);
             // The unsaved-changes dot follows the name on screen, whichever way the name reads.
             let shown = crate::bidi::paint_name(
                 ui.painter(),
@@ -109,7 +106,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 icons::paint(ui.painter(), at, crate::online::mark(shared), if shared { t.success } else { t.icon_secondary });
             }
             if dirty {
-                ui.painter().text(pos2(shown.max.x + 4.0, r.center().y), Align2::LEFT_CENTER, "•", regular(12.0), t.text);
+                ui.painter().circle_filled(pos2(shown.max.x + 7.0, r.center().y), 3.0, DOCUMENT_BLUE);
             }
             let cr = Rect::from_center_size(pos2(r.max.x - 16.0, r.center().y), vec2(18.0, 18.0));
             if resp.hovered() || active {
@@ -117,7 +114,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 if cresp.hovered() {
                     ui.painter().rect_filled(cr, CornerRadius::same(4), t.pressed);
                 }
-                icons::paint(ui.painter(), cr.shrink(4.0), Icon::Close, t.icon_secondary);
+                icons::paint_colorpicker(ui.painter(), Rect::from_center_size(cr.center(), vec2(10.01, 10.01)), 9, t.icon_secondary);
                 if cresp.clicked() {
                     close = Some(i);
                 }
@@ -137,7 +134,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         if nresp.hovered() {
             ui.painter().rect_filled(nr, CornerRadius::same(5), t.hover);
         }
-        icons::paint(ui.painter(), nr.shrink(7.0), Icon::Plus, t.icon);
+        icons::paint_colorpicker(ui.painter(), Rect::from_center_size(nr.center(), vec2(12.0, 12.0)), 8, t.icon);
         if nresp.clicked() {
             app.run("file.new", json!({}));
             app.ui.home = false;
