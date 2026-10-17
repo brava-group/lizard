@@ -114,6 +114,22 @@ pub enum NavIcon {
     Variables,
 }
 
+/// Glyphs from the owner-supplied Agent panel reference, kept at their SVG view-box sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentIcon {
+    Back,
+    More,
+    Emblem,
+    Polish,
+    Generate,
+    Plugins,
+    Chevron,
+    Add,
+    Library,
+    Microphone,
+    Send,
+}
+
 macro_rules! icons {
     ($($(#[$m:meta])* $name:ident,)*) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -573,6 +589,10 @@ pub fn paint_layer(painter: &Painter, rect: Rect, icon: LayerIcon, color: Color3
 
 pub fn paint_nav(painter: &Painter, rect: Rect, icon: NavIcon, color: Color32) {
     ui3::paint_nav(painter, rect, icon, color);
+}
+
+pub fn paint_agent(painter: &Painter, rect: Rect, icon: AgentIcon, color: Color32) {
+    ui3::paint_agent(painter, rect, icon, color);
 }
 
 pub fn paint_sizing(painter: &Painter, rect: Rect, icon: SizingIcon, color: Color32) {

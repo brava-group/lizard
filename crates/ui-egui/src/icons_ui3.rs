@@ -139,6 +139,19 @@ const SIZING_SVGS: [(&str, [f32; 2]); 12] = [
     (include_str!("../assets/sizing-height-min.svg"), [16.0, 16.0]),
     (include_str!("../assets/sizing-height-max.svg"), [16.0, 16.0]),
 ];
+const AGENT_SVGS: [(&str, [f32; 2]); 11] = [
+    (include_str!("../assets/agent-back.svg"), [5.001787, 9.001525]),
+    (include_str!("../assets/agent-more.svg"), [15.0, 3.0]),
+    (include_str!("../assets/agent-emblem.svg"), [16.499786, 16.499025]),
+    (include_str!("../assets/agent-polish.svg"), [13.498501, 12.998539]),
+    (include_str!("../assets/nav-agent.svg"), [14.0, 14.0]),
+    (include_str!("../assets/agent-plugins.svg"), [14.0, 13.0]),
+    (include_str!("../assets/agent-chevron.svg"), [9.001525, 5.001787]),
+    (include_str!("../assets/colorpicker-add-style.svg"), [12.0, 12.0]),
+    (include_str!("../assets/agent-library.svg"), [14.0, 11.74961]),
+    (include_str!("../assets/agent-mic.svg"), [10.0, 14.0]),
+    (include_str!("../assets/agent-send.svg"), [10.006924, 13.000607]),
+];
 const ALIGNMENT_SVGS: [&str; 6] = [
     include_str!("../assets/alignment-column-left.svg"),
     include_str!("../assets/alignment-column-center.svg"),
@@ -490,6 +503,27 @@ pub(super) fn paint_nav(painter: &Painter, rect: Rect, icon: super::NavIcon, col
     }
 }
 
+pub(super) fn paint_agent(painter: &Painter, rect: Rect, icon: super::AgentIcon, color: Color32) {
+    static AGENT: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
+    let icons = AGENT.get_or_init(|| AGENT_SVGS.iter().map(|(svg, _)| build(svg, true)).collect());
+    let index = match icon {
+        super::AgentIcon::Back => 0,
+        super::AgentIcon::More => 1,
+        super::AgentIcon::Emblem => 2,
+        super::AgentIcon::Polish => 3,
+        super::AgentIcon::Generate => 4,
+        super::AgentIcon::Plugins => 5,
+        super::AgentIcon::Chevron => 6,
+        super::AgentIcon::Add => 7,
+        super::AgentIcon::Library => 8,
+        super::AgentIcon::Microphone => 9,
+        super::AgentIcon::Send => 10,
+    };
+    if let Some(Some(geometry)) = icons.get(index) {
+        paint_geometry(painter, rect, geometry, color, AGENT_SVGS[index].1);
+    }
+}
+
 pub(super) fn paint_sizing(painter: &Painter, rect: Rect, icon: super::SizingIcon, color: Color32) {
     static SIZING: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
     let icons = SIZING.get_or_init(|| SIZING_SVGS.iter().map(|(svg, _)| build(svg, true)).collect());
@@ -543,6 +577,13 @@ fn paint_geometry_colored(painter: &Painter, rect: Rect, geometry: &Geometry, co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_reference_svgs_have_vector_geometry() {
+        for (index, (svg, _)) in AGENT_SVGS.into_iter().enumerate() {
+            assert!(build(svg, true).is_some(), "Agent SVG {index} did not tessellate");
+        }
+    }
 
     #[test]
     fn tab_document_has_antialiased_edges() {
