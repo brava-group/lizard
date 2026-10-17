@@ -28,7 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "edit.pasteDesignLayers",
             "Paste design layers",
-            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), preview? (base64 PNG of the same clipboard selection), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
+            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), images? (image-hash → base64 image bytes), preview? (base64 PNG of the same clipboard selection), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
             true,
             paste_design_layers
         ),
@@ -575,6 +575,32 @@ pub fn design_clipboard_buffer(html: &str) -> Option<Vec<u8>> {
     figcraft_format::fig::is_fig(&bytes).then_some(bytes)
 }
 
+/// Temporary image URLs carried by copied Figma layers. The clipboard names each image by the
+/// SHA-1 of its bytes; the bare design canvas itself contains only those hashes. Only Figma's
+/// signed image endpoint is accepted, so clipboard HTML cannot make the app fetch arbitrary URLs.
+pub fn design_clipboard_image_urls(html: &str) -> BTreeMap<String, String> {
+    const OPEN: &str = "(figmeta)";
+    const CLOSE: &str = "(/figmeta)";
+    const MAX_META: usize = 4 * 1024 * 1024;
+    const IMAGE_PREFIX: &str = "https://s3-alpha-sig.figma.com/img/";
+    let Some(start) = html.find(OPEN).map(|i| i + OPEN.len()) else { return BTreeMap::new() };
+    let Some(end) = html.get(start..).and_then(|tail| tail.find(CLOSE)).map(|i| start + i) else { return BTreeMap::new() };
+    let Some(encoded) = html.get(start..end).filter(|s| s.len() <= MAX_META * 2) else { return BTreeMap::new() };
+    let Some(bytes) = clip_base64_limited(encoded, MAX_META) else { return BTreeMap::new() };
+    let Ok(meta) = serde_json::from_slice::<Value>(&bytes) else { return BTreeMap::new() };
+    let Some(images) = meta.get("imageHashes").and_then(Value::as_object) else { return BTreeMap::new() };
+    images
+        .iter()
+        .filter(|(hash, _)| hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .filter_map(|(hash, url)| {
+            let url = url.as_str()?;
+            (url.len() <= 8192 && url.starts_with(IMAGE_PREFIX) && !url.bytes().any(|b| b.is_ascii_whitespace()))
+                .then(|| (hash.to_ascii_lowercase(), url.to_string()))
+        })
+        .take(64)
+        .collect()
+}
+
 fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "edit.pasteDesignLayers";
     let bytes = match (string(p, "html"), string(p, "data")) {
@@ -589,21 +615,24 @@ fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
     if tops.is_empty() {
         return Err(EngineError::Disabled(CMD.into(), "the copied layers came in empty".into()));
     }
-    // A real clipboard canvas often has image hashes but no image bytes. Its PNG preview is the
-    // only local copy of those pixels. Recover each missing image paint from its corresponding
-    // region of that preview while keeping the surrounding layers editable.
+    if let Some(images) = p.get("images").and_then(Value::as_object) {
+        restore_copied_images(&mut doc, images);
+    }
+    // A clipboard canvas can have image hashes without image bytes. When the signed source URL
+    // is unavailable, a PNG preview may still recover the corresponding visible pixels while
+    // keeping the surrounding layers editable.
     if let Some(preview) = string(p, "preview").and_then(|v| clip_base64_limited(&v, MAX_PREVIEW_BYTES)) {
         restore_preview_images(&mut doc, &tops, &preview);
-        if !tops.iter().flat_map(|id| doc.subtree(*id)).any(|id| {
-            doc.node(id).is_some_and(|n| {
-                n.fills.iter().chain(&n.strokes).any(|p| {
-                    let figcraft_color::PaintKind::Image(img) = &p.kind else { return false };
-                    image_is_placeholder(&doc, &img.image)
-                })
+    }
+    if !tops.iter().flat_map(|id| doc.subtree(*id)).any(|id| {
+        doc.node(id).is_some_and(|n| {
+            n.fills.iter().chain(&n.strokes).any(|p| {
+                let figcraft_color::PaintKind::Image(img) = &p.kind else { return false };
+                image_is_placeholder(&doc, &img.image)
             })
-        }) {
-            issues.retain(|issue| !issue.contains("image fill(s) whose image isn't in the file"));
-        }
+        })
+    }) {
+        issues.retain(|issue| !issue.contains("image fill(s) whose image isn't in the file"));
     }
     let doc = std::sync::Arc::new(doc);
     let (nodes, images, bounds) = copied(&doc, &tops);
@@ -615,6 +644,33 @@ fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
         out["warnings"] = json!(issues);
     }
     Ok(out)
+}
+
+pub(crate) fn restore_copied_images(doc: &mut Document, images: &serde_json::Map<String, Value>) {
+    use sha1::{Digest as _, Sha1};
+
+    for (hash, value) in images.iter().take(64) {
+        if hash.len() != 40 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) || !image_is_placeholder(doc, hash) {
+            continue;
+        }
+        let Some(data) = value.as_str().and_then(|s| clip_base64_limited(s, 32 * 1024 * 1024)) else { continue };
+        if format!("{:x}", Sha1::digest(&data)) != hash.to_ascii_lowercase() {
+            continue;
+        }
+        let Ok((key, _, _)) = figcraft_format::add_image(doc, data) else { continue };
+        let ids: Vec<_> = doc.nodes().map(|n| n.id).collect();
+        for id in ids {
+            let Some(node) = doc.node_mut(id) else { continue };
+            for paint in node.fills.iter_mut().chain(&mut node.strokes) {
+                if let figcraft_color::PaintKind::Image(img) = &mut paint.kind
+                    && img.image == *hash
+                {
+                    img.image.clone_from(&key);
+                }
+            }
+        }
+        doc.images.remove(hash);
+    }
 }
 
 fn image_is_placeholder(doc: &Document, key: &str) -> bool {

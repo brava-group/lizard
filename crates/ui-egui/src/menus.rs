@@ -4,6 +4,10 @@
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_engine::catalog::{MENU, SEP};
 use serde_json::json;
+use std::collections::BTreeMap;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::FigApp;
 use crate::a11y;
@@ -37,17 +41,46 @@ pub const UI_COMMANDS: &[&str] = &[
 pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
     // Only HTML that holds readable design data takes this path; other HTML pastes as before.
     if let Some(html) = app.services.clipboard_get_html().filter(|h| figcraft_engine::cmd::edit::design_clipboard_buffer(h).is_some()) {
+        let urls = figcraft_engine::cmd::edit::design_clipboard_image_urls(&html);
         let mut params = json!({"html": html});
         if let Some((png, _, _)) = clipboard_png_with_limit(app, 8192, 16_000_000) {
             use base64::Engine as _;
             params["preview"] = json!(base64::engine::general_purpose::STANDARD.encode(png));
         }
-        if let Some(r) = app.run("edit.pasteDesignLayers", params) {
-            // The pasted layers are now our copy: text another app puts on the clipboard later is newer.
-            app.ui.last_copy = Some(app.services.clipboard_get_text().unwrap_or_default());
-            let left_out = r["warnings"].as_array().map_or(0, Vec::len);
-            if left_out > 0 {
-                app.toast(trn("Pasted design layers; {n} kinds of content were left out", left_out, &[]));
+        let last_copy = app.services.clipboard_get_text().unwrap_or_default();
+        if urls.is_empty() {
+            finish_design_paste(app, params, last_copy);
+        } else {
+            let (tx, rx) = mpsc::channel();
+            let repaint = app.ui_context.clone();
+            let count = urls.len();
+            for (hash, url) in urls {
+                let sender = tx.clone();
+                let repaint = repaint.clone();
+                let mut request = ehttp::Request::get(&url);
+                request.timeout = Some(Duration::from_secs(10));
+                ehttp::fetch(request, move |response| {
+                    let bytes = response.ok().and_then(|r| {
+                        (r.ok && r.bytes.len() <= 32 * 1024 * 1024 && r.url.starts_with("https://s3-alpha-sig.figma.com/img/")).then_some(r.bytes)
+                    });
+                    let _ = sender.send((hash, bytes));
+                    if let Some(ctx) = repaint {
+                        ctx.request_repaint();
+                    }
+                });
+            }
+            app.pending_design_paste = Some(PendingDesignPaste {
+                params,
+                last_copy,
+                doc_uid: app.session.ds().map(|d| d.uid).unwrap_or(0),
+                expected: count,
+                received: 0,
+                images: BTreeMap::new(),
+                rx,
+                started: Instant::now(),
+            });
+            if let Some(ctx) = &app.ui_context {
+                ctx.request_repaint_after(Duration::from_secs(11));
             }
         }
         return;
@@ -80,6 +113,50 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
         }
     }
     app.run("edit.paste", json!({}));
+}
+
+pub(crate) struct PendingDesignPaste {
+    params: serde_json::Value,
+    last_copy: String,
+    doc_uid: u64,
+    expected: usize,
+    received: usize,
+    images: BTreeMap<String, String>,
+    rx: Receiver<(String, Option<Vec<u8>>)>,
+    started: Instant,
+}
+
+pub(crate) fn poll_design_paste(app: &mut FigApp, ctx: &egui::Context) {
+    let Some(mut pending) = app.pending_design_paste.take() else { return };
+    use base64::Engine as _;
+    while let Ok((hash, bytes)) = pending.rx.try_recv() {
+        pending.received += 1;
+        if let Some(bytes) = bytes {
+            pending.images.insert(hash, base64::engine::general_purpose::STANDARD.encode(bytes));
+        }
+    }
+    if pending.received < pending.expected && pending.started.elapsed() < Duration::from_secs(12) {
+        app.pending_design_paste = Some(pending);
+        ctx.request_repaint_after(Duration::from_millis(200));
+        return;
+    }
+    if app.session.ds().map(|d| d.uid).unwrap_or(0) != pending.doc_uid {
+        app.toast(tr("Paste canceled because the document changed"));
+        return;
+    }
+    pending.params["images"] = json!(pending.images);
+    finish_design_paste(app, pending.params, pending.last_copy);
+}
+
+fn finish_design_paste(app: &mut FigApp, params: serde_json::Value, last_copy: String) {
+    if let Some(r) = app.run("edit.pasteDesignLayers", params) {
+        // The pasted layers are now our copy: text another app puts on the clipboard later is newer.
+        app.ui.last_copy = Some(last_copy);
+        let left_out = r["warnings"].as_array().map_or(0, Vec::len);
+        if left_out > 0 {
+            app.toast(trn("Pasted design layers; {n} kinds of content were left out", left_out, &[]));
+        }
+    }
 }
 
 /// The system clipboard's image as PNG bytes, with its size.

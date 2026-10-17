@@ -663,6 +663,7 @@ pub struct FigApp {
     waiting: Vec<(String, Done)>,
     /// Native dialogs complete asynchronously so their modal event loop never re-enters winit.
     pending_dialog: Option<PendingDialog>,
+    pending_design_paste: Option<menus::PendingDesignPaste>,
     /// The latest UI context schedules the first poll and wakes the app when a dialog completes.
     ui_context: Option<egui::Context>,
 }
@@ -693,6 +694,7 @@ impl FigApp {
             window_requests: Vec::new(),
             waiting: Vec::new(),
             pending_dialog: None,
+            pending_design_paste: None,
             ui_context: None,
         }
     }
@@ -1333,6 +1335,7 @@ impl FigApp {
         let typing = std::mem::take(&mut self.field_focus) || a11y::field_focused(&ctx);
         // A dialog that closed acts first, in the window it was opened from.
         self.poll_dialog(&ctx);
+        menus::poll_design_paste(self, &ctx);
         // Control requests run first so their results reflect this frame.
         control::drain(self, &ctx);
         windows::requests(self, &ctx);

@@ -5,7 +5,7 @@ use base64::Engine as _;
 use serde_json::json;
 
 use super::*;
-use crate::cmd::edit::{CLIP_CLOSE, CLIP_OPEN, design_clipboard_buffer};
+use crate::cmd::edit::{CLIP_CLOSE, CLIP_OPEN, design_clipboard_buffer, design_clipboard_image_urls, restore_copied_images};
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -43,6 +43,57 @@ fn png(img: &image::RgbaImage) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     img.write_to(&mut out, image::ImageFormat::Png).unwrap();
     out.into_inner()
+}
+
+#[test]
+fn clipboard_metadata_only_accepts_signed_figma_image_links() {
+    let hash = "0123456789abcdef0123456789abcdef01234567";
+    let meta = json!({"imageHashes": {
+        hash: "https://s3-alpha-sig.figma.com/img/example?Expires=123&Signature=abc",
+        "not-a-hash": "https://s3-alpha-sig.figma.com/img/other",
+        "abcdefabcdefabcdefabcdefabcdefabcdefabcd": "https://example.com/img/other"
+    }});
+    let html = format!("(figmeta){}(/figmeta)", B64.encode(meta.to_string()));
+    let urls = design_clipboard_image_urls(&html);
+    assert_eq!(urls.len(), 1);
+    assert_eq!(urls.get(hash).map(String::as_str), Some("https://s3-alpha-sig.figma.com/img/example?Expires=123&Signature=abc"));
+    assert!(design_clipboard_image_urls("(figmeta)not base64(/figmeta)").is_empty());
+}
+
+#[test]
+fn signed_image_bytes_replace_placeholder_without_changing_fill_settings() {
+    use sha1::{Digest as _, Sha1};
+
+    let original = png(&image::RgbaImage::from_pixel(3, 2, image::Rgba([12, 98, 204, 255])));
+    let hash = format!("{:x}", Sha1::digest(&original));
+    let mut source = Session::new();
+    let photo = id(&source.execute("image.place", &json!({"data": B64.encode(&original), "width": 30, "height": 20})).unwrap());
+    let doc = source.doc_mut().unwrap();
+    let old_key = match &doc.node(photo).unwrap().fills[0].kind {
+        figcraft_color::PaintKind::Image(img) => img.image.clone(),
+        _ => panic!("expected an image fill"),
+    };
+    let mut placeholder = doc.images.remove(&old_key).unwrap();
+    placeholder.bytes = std::sync::Arc::new(vec![0]);
+    doc.images.insert(hash.clone(), placeholder);
+    let figcraft_color::PaintKind::Image(img) = &mut doc.node_mut(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
+    img.image = hash.clone();
+    img.scale_mode = figcraft_color::ImageScaleMode::Fit;
+    img.scale = 0.42;
+
+    let mut wrong = serde_json::Map::new();
+    wrong.insert(hash.clone(), json!(B64.encode(b"wrong bytes")));
+    restore_copied_images(doc, &wrong);
+    assert_eq!(doc.images[&hash].bytes.as_ref(), &[0]);
+
+    let mut images = serde_json::Map::new();
+    images.insert(hash.clone(), json!(B64.encode(&original)));
+    restore_copied_images(doc, &images);
+    let figcraft_color::PaintKind::Image(img) = &doc.node(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
+    assert_eq!(img.scale_mode, figcraft_color::ImageScaleMode::Fit);
+    assert_eq!(img.scale, 0.42);
+    assert_eq!(doc.images[&img.image].bytes.as_ref(), &original);
+    assert!(!doc.images.contains_key(&hash));
 }
 
 #[test]
