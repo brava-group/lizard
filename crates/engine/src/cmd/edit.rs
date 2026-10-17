@@ -25,6 +25,13 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("edit.copy", "Copy", "{ids?}", false, copy),
         spec!("edit.cut", "Cut", "{ids?}", true, cut),
         spec!("edit.paste", "Paste", "{parent?, x?, y? (page coordinates of the pasted top-left)}", true, paste),
+        spec!(
+            "edit.pasteDesignLayers",
+            "Paste design layers",
+            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
+            true,
+            paste_design_layers
+        ),
         spec!("edit.pasteOver", "Paste over selection", "{}", true, paste_over),
         spec!("edit.pasteReplace", "Paste to replace", "{ids?}", true, paste_replace),
         spec!("edit.copyProperties", "Copy properties", "{id?}", false, copy_props),
@@ -498,7 +505,20 @@ fn bump_name(n: &str) -> String {
 /// The copied form of the selection.
 pub fn copy_to_clipboard(s: &mut Session, ids: &[NodeId]) -> Result<()> {
     let ds = s.ds()?;
-    let doc = &ds.doc;
+    let (nodes, images, bounds) = copied(&ds.doc, ids);
+    let (source, source_path, uid) = (ds.doc.clone(), ds.path.clone(), ds.uid);
+    s.clipboard.source = Some(source);
+    s.clipboard.source_path = source_path;
+    s.clipboard.source_doc = uid;
+    s.clipboard.nodes = nodes;
+    s.clipboard.images = images;
+    s.clipboard.bounds = bounds;
+    Ok(())
+}
+
+type Copied = (Vec<(NodeId, Vec<Node>)>, BTreeMap<String, ImageData>, Option<figcraft_geom::Rect>);
+
+fn copied(doc: &Document, ids: &[NodeId]) -> Copied {
     let ids = z_sorted(doc, &roots(doc, ids));
     let mut nodes = Vec::new();
     let mut images = BTreeMap::new();
@@ -521,16 +541,59 @@ pub fn copy_to_clipboard(s: &mut Session, ids: &[NodeId]) -> Result<()> {
         nodes.push((*i, sub));
     }
     let bounds = doc.bounds_of(&ids);
-    let uid = ds.uid;
-    let source = Some(ds.doc.clone());
-    let source_path = ds.path.clone();
-    s.clipboard.source = source;
-    s.clipboard.source_path = source_path;
-    s.clipboard.nodes = nodes;
-    s.clipboard.images = images;
-    s.clipboard.bounds = bounds;
-    s.clipboard.source_doc = uid;
-    Ok(())
+    (nodes, images, bounds)
+}
+
+/// The markers around the copied layers in the clipboard's HTML, spelt as that format spells them.
+pub const CLIP_OPEN: &str = "(figma)";
+pub const CLIP_CLOSE: &str = "(/figma)";
+/// Largest design data read from the clipboard: the `.fig` import's own canvas cap (256 MB). Its
+/// base64 is checked first, so neither the text nor the decoded bytes can pass it.
+const MAX_CLIP_DATA: usize = 256 * 1024 * 1024;
+const MAX_CLIP_BASE64: usize = MAX_CLIP_DATA.div_ceil(3) * 4;
+
+/// Base64 `text` (whitespace ignored, padding optional) when it fits [`MAX_CLIP_DATA`].
+fn clip_base64(text: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    if text.bytes().filter(|b| !b.is_ascii_whitespace()).count() > MAX_CLIP_BASE64 {
+        return None;
+    }
+    let b64: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    base64::engine::general_purpose::STANDARD.decode(&b64).or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(&b64)).ok()
+}
+
+/// Layers copied from another design app travel in the clipboard's HTML as a `.fig` canvas in
+/// base64 between [`CLIP_OPEN`] and [`CLIP_CLOSE`]. This gives those bytes, or `None` when the HTML
+/// holds no readable design data (it may just mention the marker).
+pub fn design_clipboard_buffer(html: &str) -> Option<Vec<u8>> {
+    let start = html.find(CLIP_OPEN)? + CLIP_OPEN.len();
+    let len = html.get(start..)?.find(CLIP_CLOSE)?;
+    let bytes = clip_base64(html.get(start..start + len)?)?;
+    figcraft_format::fig::is_fig(&bytes).then_some(bytes)
+}
+
+fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "edit.pasteDesignLayers";
+    let bytes = match (string(p, "html"), string(p, "data")) {
+        (Some(html), _) => design_clipboard_buffer(&html).ok_or_else(|| bad(CMD, "the HTML holds no copied design layers"))?,
+        (None, Some(d)) => clip_base64(&d).ok_or_else(|| bad(CMD, "`data` is not base64 of at most 256 MB"))?,
+        (None, None) => return Err(bad(CMD, "pass `html` or `data`")),
+    };
+    let other = super::file::load_fig(&bytes, "Pasted layers").ok_or_else(|| bad(CMD, "the data is not copied design layers"))??;
+    let doc = std::sync::Arc::new(other.doc);
+    let tops: Vec<NodeId> = doc.pages.iter().filter_map(|pg| doc.node(*pg)).flat_map(|pg| pg.children.iter().copied()).collect();
+    if tops.is_empty() {
+        return Err(EngineError::Disabled(CMD.into(), "the copied layers came in empty".into()));
+    }
+    let (nodes, images, bounds) = copied(&doc, &tops);
+    let props = s.clipboard.props.take();
+    // No open file has id 0. So paste treats this copy as a copy from a different file.
+    s.clipboard = crate::Clipboard { nodes, images, props, bounds, source_doc: 0, source: Some(doc), source_path: None };
+    let mut out = paste(s, p)?;
+    if !other.issues.is_empty() {
+        out["warnings"] = json!(other.issues);
+    }
+    Ok(out)
 }
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {

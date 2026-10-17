@@ -38,7 +38,7 @@ struct Color float r, float g, float b, float a
 struct Vector float x, float y
 struct Matrix float m00, float m01, float m02, float m10, float m11, float m12
 struct ColorStop Color color, float position
-message Image byte[] hash, string name
+message Image byte[] hash, string name, uint dataBlob
 message AssetRef string key, string version
 message VariableID GUID guid, AssetRef assetRef
 message PropRefValue GUID defId
@@ -537,6 +537,53 @@ fn bare_canvas_and_zlib_chunks_open() {
         out.extend_from_slice(ch);
     }
     assert!(import(&out, "Z").is_ok());
+}
+
+/// The fixture message with the photo's image bytes in its own blobs, as copies written by plugins
+/// and tools carry them: the PNG goes at the end of `blobs` and `image.dataBlob` points `shift`
+/// places past it (0 is the PNG itself).
+fn message_with_image_in_blobs(shift: u64) -> Kv<'static> {
+    fn point_images_at(value: &mut Kv<'static>, blob: u64) {
+        match value {
+            Kv::Object(fields) => {
+                for (name, field) in fields.iter_mut() {
+                    match field {
+                        Kv::Object(image) if *name == "image" => image.push(("dataBlob", u(blob))),
+                        _ => point_images_at(field, blob),
+                    }
+                }
+            }
+            Kv::Array(items) => items.iter_mut().for_each(|item| point_images_at(item, blob)),
+            _ => {}
+        }
+    }
+    let mut msg = message();
+    let index = {
+        let Kv::Object(fields) = &mut msg else { panic!("the message is an object") };
+        let Some((_, Kv::Array(blobs))) = fields.iter_mut().find(|(name, _)| *name == "blobs") else { panic!("no blobs") };
+        blobs.push(o(vec![("bytes", Kv::Bytes(png()))]));
+        blobs.len() as u64 - 1
+    };
+    point_images_at(&mut msg, index + shift);
+    msg
+}
+
+#[test]
+fn a_bare_canvas_reads_images_carried_in_its_blobs() {
+    // The clipboard holds a bare canvas (no `images/`); the image comes from `image.dataBlob`.
+    let c = canvas(&schema(), &message_with_image_in_blobs(0));
+    let (doc, warnings) = import(&c, "Pasted").unwrap();
+    let photo = named(&doc, "Photo");
+    let figcraft_doc::color::PaintKind::Image(img) = &photo.fills[0].kind else { panic!("not an image fill") };
+    assert_eq!(doc.images.get(&img.image).map(|i| (i.width, i.height)), Some((2, 1)));
+    assert!(!warnings.iter().any(|w| w.contains("isn't in the file")), "{warnings:?}");
+}
+
+#[test]
+fn a_data_blob_past_the_blobs_stays_a_placeholder() {
+    let c = canvas(&schema(), &message_with_image_in_blobs(5));
+    let (_, warnings) = import(&c, "Pasted").unwrap();
+    assert!(warnings.iter().any(|w| w.contains("isn't in the file")), "{warnings:?}");
 }
 
 #[test]

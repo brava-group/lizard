@@ -506,10 +506,8 @@ fn load_with(
             Ok((doc.into(), false))
         }
         _ => {
-            if let Some(r) = figcraft_format::fig::try_import(bytes, &file_stem(name_hint)) {
-                let (mut doc, warnings) = r.map_err(|e| EngineError::Other(e.to_string()))?;
-                link_instances(&mut doc);
-                return Ok((figcraft_format::Loaded { issues: warnings, ..doc.into() }, true));
+            if let Some(r) = load_fig(bytes, &file_stem(name_hint)) {
+                return Ok((r?, true));
             }
             if let Some(r) = figcraft_format::rest::try_import_with(bytes, variables, images) {
                 let (mut doc, warnings) = r.map_err(|e| EngineError::Other(e.to_string()))?;
@@ -523,6 +521,15 @@ fn load_with(
             Ok((loaded, false))
         }
     }
+}
+
+/// Gives `None` when `bytes` are not a `.fig` file. Then other readers can try.
+pub(crate) fn load_fig(bytes: &[u8], name: &str) -> Option<Result<figcraft_format::Loaded>> {
+    let r = figcraft_format::fig::try_import(bytes, name)?;
+    Some(r.map_err(|e| EngineError::Other(e.to_string())).map(|(mut doc, warnings)| {
+        link_instances(&mut doc);
+        figcraft_format::Loaded { issues: warnings, ..doc.into() }
+    }))
 }
 
 /// Link imported instances to their mains (layer sources, overrides found by comparing values),

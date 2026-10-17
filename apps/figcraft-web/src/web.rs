@@ -2,6 +2,8 @@
 
 use figcraft_engine::Session;
 use figcraft_ui_egui::{FigApp, Services};
+use std::cell::RefCell;
+use std::rc::Rc;
 use wasm_bindgen::JsCast as _;
 
 const CANVAS_ID: &str = "figcraft_canvas";
@@ -18,6 +20,19 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
+        // Read the HTML flavor during the trusted paste event, before egui forwards its text
+        // flavor to FigApp. Browsers do not allow reading this flavor later on demand.
+        let pasted_html = Rc::new(RefCell::new(None));
+        let html_for_listener = Rc::clone(&pasted_html);
+        let on_paste = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(move |event: web_sys::ClipboardEvent| {
+            let html = event.clipboard_data().and_then(|data| data.get_data("text/html").ok()).filter(|value| !value.is_empty());
+            *html_for_listener.borrow_mut() = html;
+        });
+        if let Err(error) = document.add_event_listener_with_callback_and_bool("paste", on_paste.as_ref().unchecked_ref(), true) {
+            log::warn!("couldn't read HTML paste events: {error:?}");
+        } else {
+            on_paste.forget();
+        }
         let mut options = eframe::WebOptions::default();
         // `?webgl`: force the WebGL2 backend (troubleshooting, and headless browsers whose WebGPU
         // adapter request returns nothing).
@@ -30,7 +45,7 @@ pub fn start() {
             .start(
                 canvas,
                 options,
-                Box::new(|cc| {
+                Box::new(move |cc| {
                     if let Some(rs) = &cc.wgpu_render_state {
                         log::info!("figcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
                     }
@@ -40,8 +55,9 @@ pub fn start() {
                     // on the socket wakes the page for a frame.
                     let ctx = cc.egui_ctx.clone();
                     session.live.install(Box::new(figcraft_collab_net::NetLink::new(std::sync::Arc::new(move || ctx.request_repaint()))));
-                    let fig = FigApp::new(session, Box::new(WebServices { reduce_motion, ctx: cc.egui_ctx.clone() }));
-                    Ok(Box::new(WebShell { fig }))
+                    let fig =
+                        FigApp::new(session, Box::new(WebServices { reduce_motion, ctx: cc.egui_ctx.clone(), pasted_html: Rc::clone(&pasted_html) }));
+                    Ok(Box::new(WebShell { fig, pasted_html }))
                 }),
             )
             .await;
@@ -60,22 +76,26 @@ fn query() -> String {
 
 struct WebShell {
     fig: FigApp,
+    pasted_html: Rc<RefCell<Option<String>>>,
 }
 
 impl eframe::App for WebShell {
     // `FigApp::ui` runs its own per-frame logic first (fonts, theme), like the desktop app.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.fig.ui(ui);
+        // A paste handled by a text field must not be reused by a later menu Paste action.
+        self.pasted_html.borrow_mut().take();
     }
 }
 
 /// Browser services. Open dialogs return nothing for now (the trait's defaults); files are saved
-/// as downloads. Copies go to the system clipboard through egui's output; pastes arrive as paste
-/// events with their text (a page can't read the clipboard when it likes).
+/// as downloads. Copies go to the system clipboard through egui's output; paste events provide
+/// text through egui and HTML captured while the browser grants clipboard access.
 struct WebServices {
     /// `prefers-reduced-motion: reduce` (it follows the setting while the page is open).
     reduce_motion: Option<web_sys::MediaQueryList>,
     ctx: egui::Context,
+    pasted_html: Rc<RefCell<Option<String>>>,
 }
 
 impl Services for WebServices {
@@ -94,6 +114,9 @@ impl Services for WebServices {
     }
     fn clipboard_set_text(&mut self, s: &str) {
         figcraft_ui_egui::egui_copy_text(&self.ctx, s);
+    }
+    fn clipboard_get_html(&mut self) -> Option<String> {
+        self.pasted_html.borrow_mut().take()
     }
     fn clipboard_set_png(&mut self, w: u32, h: u32, rgba: &[u8]) {
         figcraft_ui_egui::egui_copy_png(&self.ctx, w, h, rgba);

@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::FigApp;
 use crate::a11y;
-use crate::i18n::{self, tr, tr_noop, trf};
+use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
 use crate::theme::{ACCENT, Tokens, regular};
 use crate::toolbar::pretty_shortcut;
@@ -30,10 +30,23 @@ pub const UI_COMMANDS: &[&str] = &[
 ];
 
 /// Run a menu item: some open dialogs or use platform services, the rest go to the engine.
-/// Paste: the system clipboard wins when it holds something newer than our own copy (an image, SVG
-/// or text from another app); otherwise our copied layers. `event_text` is the text the platform
-/// handed over with the paste event (the browser has no other way to read it).
+/// Paste: the system clipboard wins when it holds something newer than our own copy (layers copied
+/// from another design app, an image, SVG or text from another app); otherwise our copied layers.
+/// `event_text` is the text the platform handed over with the paste event (the browser has no
+/// other way to read it).
 pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
+    // Only HTML that holds readable design data takes this path; other HTML pastes as before.
+    if let Some(html) = app.services.clipboard_get_html().filter(|h| figcraft_engine::cmd::edit::design_clipboard_buffer(h).is_some()) {
+        if let Some(r) = app.run("edit.pasteDesignLayers", json!({"html": html})) {
+            // The pasted layers are now our copy: text another app puts on the clipboard later is newer.
+            app.ui.last_copy = Some(app.services.clipboard_get_text().unwrap_or_default());
+            let left_out = r["warnings"].as_array().map_or(0, Vec::len);
+            if left_out > 0 {
+                app.toast(trn("Pasted design layers; {n} kinds of content were left out", left_out, &[]));
+            }
+        }
+        return;
+    }
     let sys_text = app.services.clipboard_get_text().or_else(|| event_text.map(str::to_string)).filter(|t| !t.is_empty());
     let ours = sys_text.is_some() && sys_text == app.ui.last_copy;
     let (cx, cy) = app.session.ds().map(|d| (d.view.cx, d.view.cy)).unwrap_or((0.0, 0.0));

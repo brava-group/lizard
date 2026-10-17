@@ -32,3 +32,4 @@ web-time = "1.1.0"
 [dev-dependencies]
 wat = { workspace = true }
 image = { workspace = true }
+zip = { workspace = true }

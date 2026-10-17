@@ -89,6 +89,8 @@ mod comments_tests;
 #[cfg(test)]
 mod cursors_tests;
 #[cfg(test)]
+mod design_paste_tests;
+#[cfg(test)]
 mod dev_mode_tests;
 #[cfg(test)]
 mod duplicate_paint_tests;
@@ -241,6 +243,9 @@ pub trait Services {
     }
     fn clipboard_set_text(&mut self, _s: &str) {}
     fn clipboard_get_text(&mut self) -> Option<String> {
+        None
+    }
+    fn clipboard_get_html(&mut self) -> Option<String> {
         None
     }
     fn clipboard_set_png(&mut self, _w: u32, _h: u32, _rgba: &[u8]) {}
