@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::FigApp;
 use crate::i18n::{tr, trf, trn};
-use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
+use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker, preview_now};
 use crate::theme::{ACCENT, COMPONENT, Tokens, doc_c32, regular, semibold};
 
 pub struct CanvasState {
@@ -38,6 +38,9 @@ pub struct CanvasState {
     pub preview_latency_ms: Option<f64>,
     pub refine_latency_ms: Option<f64>,
     dragging: bool,
+    /// Last drag input sent to the engine. Repainting a stationary pointer must not clone and
+    /// normalize a complex document again; modifiers and pen pressure can still change it.
+    last_drag_input: Option<(Pos2, egui::Modifiers, Option<f32>)>,
     space_pan: bool,
     middle_pan: Option<(Pos2, f64, f64)>,
     /// The zoom tool (Z held): zooming out (Alt) or in, and where its drag started.
@@ -72,6 +75,7 @@ impl Default for CanvasState {
             preview_latency_ms: None,
             refine_latency_ms: None,
             dragging: false,
+            last_drag_input: None,
             space_pan: false,
             middle_pan: None,
             cursor: None,
@@ -177,6 +181,14 @@ fn pointer_event(app: &FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers
     }
 }
 
+/// Ease continuous pinch/Cmd-scroll input in logarithmic zoom space. A factor such as 1.25
+/// becomes about 1.20, and its reciprocal stays reciprocal, so zoom in and out feel alike.
+const ZOOM_GESTURE_GAIN: f64 = 0.8;
+
+fn canvas_zoom_delta(raw: f32) -> Option<f64> {
+    (raw.is_finite() && raw > 0.0).then(|| f64::from(raw).powf(ZOOM_GESTURE_GAIN))
+}
+
 pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let rect = ui.max_rect();
     app.canvas.rect = rect;
@@ -206,79 +218,19 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     // Every finished render is shown, even when a newer one is already on its way: renders finish
     // in order, and an edit every frame (a drag) would otherwise never show until it stopped.
     let shown = app.session.ds().map(|ds| (ds.uid, ds.page)).ok();
-    if let Some(done) = worker.poll()
-        && shown == Some((done.uid, done.page))
-        && shows(&app.canvas, &done, shown)
-    {
-        // A pixel preview render is magnified with hard pixel edges.
-        let filter = if app.session.ds().ok().and_then(|d| d.view.pixel_preview_scale()) == Some(done.view.scale) {
-            egui::TextureOptions::NEAREST
-        } else {
-            egui::TextureOptions::LINEAR
-        };
-        let same_view = app.canvas.tex_view.as_ref().is_some_and(|v| {
-            v.origin.0.to_bits() == done.view.origin.0.to_bits()
-                && v.origin.1.to_bits() == done.view.origin.1.to_bits()
-                && v.scale.to_bits() == done.view.scale.to_bits()
-                && v.width == done.view.width
-                && v.height == done.view.height
-        });
-        let can_patch = !done.coarse
-            && !app.canvas.tex_coarse
-            && same_view
-            && app.canvas.tex_style.as_ref() == Some(&done.style)
-            && app.canvas.tex_of == Some((done.uid, done.page))
-            && app.canvas.tex_doc.as_ref().is_some_and(|shown| done.base_docs.iter().any(|base| Arc::ptr_eq(base, shown)));
-        let applied = match (&mut app.canvas.texture, done.update) {
-            (Some(t), TextureUpdate::Partial(patches)) if can_patch => {
-                app.canvas.upload_pixels = patches.iter().map(|(_, image)| image.size.iter().map(|n| *n as u64).product::<u64>()).sum();
-                for (at, image) in patches {
-                    t.set_partial(at, image, filter);
-                }
-                true
-            }
-            (Some(_), TextureUpdate::Reused) if can_patch => {
-                app.canvas.upload_pixels = 0;
-                true
-            }
-            (Some(t), TextureUpdate::Full(image)) => {
-                app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
-                t.set(image, filter);
-                true
-            }
-            (slot @ None, TextureUpdate::Full(image)) => {
-                app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
-                *slot = Some(ctx.load_texture("figcraft-canvas", image, filter));
-                true
-            }
-            _ => false,
-        };
-        if applied {
-            if !done.coarse {
-                app.canvas.render_work = Some(done.work);
-                app.ui.render_ms = done.ms;
-            }
-            let latency = Some(done.at.elapsed().as_secs_f64() * 1000.0);
-            if done.coarse {
-                app.canvas.preview_latency_ms = latency;
-            } else {
-                app.canvas.refine_latency_ms = latency;
-            }
-            app.canvas.tex_view = Some(done.view);
-            app.canvas.tex_of = Some((done.uid, done.page));
-            app.canvas.tex_doc = Some(done.doc);
-            app.canvas.tex_style = Some(done.style);
-            app.canvas.tex_coarse = done.coarse;
-        } else {
-            // A result that depended on a skipped base cannot update the visible texture.
-            // Request a new full image against the texture that is actually on screen.
-            app.canvas.submitted = None;
-            ctx.request_repaint();
-        }
+    if let Some(done) = worker.poll() {
+        apply_render(app, &ctx, done, shown);
     }
     // Observe the latest completed texture before submitting the next document preview. During a
     // fast drag this lets the worker produce a small patch against the frame actually on screen.
-    request_render(app, worker, ppp, max_texture_side);
+    let fast_drag = app.canvas.dragging && !worker.in_flight() && (0.0..=10.0).contains(&app.ui.render_ms);
+    request_render(app, worker, &ctx, ppp, max_texture_side);
+    if fast_drag
+        && worker.in_flight()
+        && let Some(done) = worker.poll_for(std::time::Duration::from_millis(10))
+    {
+        apply_render(app, &ctx, done, shown);
+    }
     let painter = ui.painter_at(rect);
     let t = Tokens::get(&ctx);
     // Page background (also behind a stale/partial texture).
@@ -330,6 +282,77 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     }
 }
 
+fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option<(u64, NodeId)>) {
+    if shown != Some((done.uid, done.page)) || !shows(&app.canvas, &done, shown) {
+        return;
+    }
+    // A pixel preview render is magnified with hard pixel edges.
+    let filter = if app.session.ds().ok().and_then(|d| d.view.pixel_preview_scale()) == Some(done.view.scale) {
+        egui::TextureOptions::NEAREST
+    } else {
+        egui::TextureOptions::LINEAR
+    };
+    let same_view = app.canvas.tex_view.as_ref().is_some_and(|v| {
+        v.origin.0.to_bits() == done.view.origin.0.to_bits()
+            && v.origin.1.to_bits() == done.view.origin.1.to_bits()
+            && v.scale.to_bits() == done.view.scale.to_bits()
+            && v.width == done.view.width
+            && v.height == done.view.height
+    });
+    let can_patch = !done.coarse
+        && !app.canvas.tex_coarse
+        && same_view
+        && app.canvas.tex_style.as_ref() == Some(&done.style)
+        && app.canvas.tex_of == Some((done.uid, done.page))
+        && app.canvas.tex_doc.as_ref().is_some_and(|shown| done.base_docs.iter().any(|base| Arc::ptr_eq(base, shown)));
+    let applied = match (&mut app.canvas.texture, done.update) {
+        (Some(t), TextureUpdate::Partial(patches)) if can_patch => {
+            app.canvas.upload_pixels = patches.iter().map(|(_, image)| image.size.iter().map(|n| *n as u64).product::<u64>()).sum();
+            for (at, image) in patches {
+                t.set_partial(at, image, filter);
+            }
+            true
+        }
+        (Some(_), TextureUpdate::Reused) if can_patch => {
+            app.canvas.upload_pixels = 0;
+            true
+        }
+        (Some(t), TextureUpdate::Full(image)) => {
+            app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
+            t.set(image, filter);
+            true
+        }
+        (slot @ None, TextureUpdate::Full(image)) => {
+            app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
+            *slot = Some(ctx.load_texture("figcraft-canvas", image, filter));
+            true
+        }
+        _ => false,
+    };
+    if applied {
+        if !done.coarse {
+            app.canvas.render_work = Some(done.work);
+            app.ui.render_ms = done.ms;
+        }
+        let latency = Some(done.at.elapsed().as_secs_f64() * 1000.0);
+        if done.coarse {
+            app.canvas.preview_latency_ms = latency;
+        } else {
+            app.canvas.refine_latency_ms = latency;
+        }
+        app.canvas.tex_view = Some(done.view);
+        app.canvas.tex_of = Some((done.uid, done.page));
+        app.canvas.tex_doc = Some(done.doc);
+        app.canvas.tex_style = Some(done.style);
+        app.canvas.tex_coarse = done.coarse;
+    } else {
+        // A result that depended on a skipped base cannot update the visible texture.
+        // Request a new full image against the texture that is actually on screen.
+        app.canvas.submitted = None;
+        ctx.request_repaint();
+    }
+}
+
 /// What the canvas says to screen readers: the selected layer ("Rectangle 1, Rectangle, 120 by 80,
 /// selected"), how many are selected, or the page with nothing selected.
 pub fn describe(s: &figcraft_engine::Session) -> String {
@@ -367,6 +390,12 @@ fn shows(c: &CanvasState, done: &Done, shown: Option<(u64, NodeId)>) -> bool {
     if shown != Some((done.uid, done.page)) {
         return false;
     }
+    // A newer zoom-out preview may already cover the whole requested view. A full render from
+    // the previous zoom can finish afterward; showing it would expose empty strips again.
+    if c.tex_of == shown && c.tex_view.as_ref().zip(c.want_view.as_ref()).is_some_and(|(have, want)| covers(have, want) && !covers(&done.view, want))
+    {
+        return false;
+    }
     let refined_here = !c.tex_coarse
         && c.tex_of == shown
         && c.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &done.doc))
@@ -385,7 +414,7 @@ fn covers(outer: &figcraft_render::View, inner: &figcraft_render::View) -> bool 
     o.x0 <= i.x0 + eps && o.y0 <= i.y0 + eps && o.x1 >= i.x1 - eps && o.y1 >= i.y1 - eps
 }
 
-fn request_render(app: &mut FigApp, worker: &mut Worker, ppp: f32, max_texture_side: u32) {
+fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
     let Ok(ds) = app.session.ds() else { return };
     let rect = app.canvas.rect;
     let (mut ox, mut oy) = ds.view.origin();
@@ -437,7 +466,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ppp: f32, max_texture_s
         return;
     }
     let visible_texture = !app.canvas.tex_coarse && app.canvas.tex_of == Some((ds.uid, ds.page));
-    let job = Job {
+    let mut job = Job {
         doc,
         page: ds.page,
         view: figcraft_render::View { origin: requested, scale, width: size.0, height: size.1 },
@@ -455,6 +484,20 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ppp: f32, max_texture_s
         texture_style: if visible_texture { app.canvas.tex_style.clone() } else { None },
     };
     app.canvas.want_view = Some(job.view.clone());
+    // A fast zoom-out can expose page area outside the previous texture. Draw a whole-view
+    // vector preview before painting this UI frame, then let the worker refine it. Otherwise the
+    // newly exposed areas show only the page background for one or more frames.
+    let visible_view = figcraft_render::View { origin, scale, width: visible.0, height: visible.1 };
+    let exposed_zoom_out = app.canvas.tex_of == Some((job.uid, job.page))
+        && app.canvas.tex_view.as_ref().is_some_and(|old| scale < old.scale * 0.98 && !covers(old, &visible_view));
+    if exposed_zoom_out
+        && job.zoom_preview
+        && let Some(preview) = preview_now(&job)
+    {
+        apply_render(app, ctx, preview, Some((job.uid, job.page)));
+        // The preview is already on screen; skip the worker's duplicate preview.
+        job.zoom_preview = false;
+    }
     worker.submit(job);
     app.canvas.submitted = Some(key);
 }
@@ -570,6 +613,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         // A drag released off the canvas, or off the window, ends where the pointer was last seen.
         if app.canvas.dragging && !ctx.input(|i| i.pointer.primary_down()) {
             app.canvas.dragging = false;
+            app.canvas.last_drag_input = None;
             if let Some(at) = hover_pos.or_else(|| app.canvas.last_pointer.map(|p| app.to_screen(p.x, p.y))) {
                 send(app, PointerKind::Up, at, &mods);
             }
@@ -593,16 +637,18 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     if resp.hovered() {
         if (zoom_delta - 1.0).abs() > 1e-4 {
             let anchor = app.to_page(pos);
-            if let Ok(ds) = app.session.ds_mut() {
-                let z = ds.view.zoom * f64::from(zoom_delta);
+            if let (Some(delta), Ok(ds)) = (canvas_zoom_delta(zoom_delta), app.session.ds_mut()) {
+                let z = ds.view.zoom * delta;
                 ds.view.set_zoom_at(z, (anchor.x, anchor.y));
                 ds.revision += 1;
+                app.canvas.last_drag_input = None;
             }
         } else if scroll != egui::Vec2::ZERO
             && let Ok(ds) = app.session.ds_mut()
         {
             ds.view.scroll(f64::from(scroll.x), f64::from(scroll.y), mods.shift);
             ds.revision += 1;
+            app.canvas.last_drag_input = None;
         }
     }
     if zoom_tool(app, ui, resp, pos, mods, editing_text || typing_elsewhere) {
@@ -646,6 +692,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
             app.toast(e.to_string());
         }
         app.canvas.dragging = false;
+        app.canvas.last_drag_input = None;
         return true;
     }
     let primary_pressed = ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
@@ -689,7 +736,11 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         app.canvas.pressure = force;
     }
     if let Some(k) = kind {
-        send(app, k, pos, &mods);
+        let input = (pos, mods, app.canvas.pressure);
+        if k != PointerKind::Move || app.canvas.last_drag_input != Some(input) {
+            send(app, k, pos, &mods);
+        }
+        app.canvas.last_drag_input = if k == PointerKind::Up { None } else { Some(input) };
     }
     true
 }

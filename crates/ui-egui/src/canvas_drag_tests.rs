@@ -61,6 +61,105 @@ fn a_drag_shows_on_the_canvas_while_it_moves() {
     u.button(p + vec2(30.0, 10.0), false);
 }
 
+/// A synthetic dashboard with nested cards, shapes and text. It exercises the same large-frame
+/// redraw and texture conversion as a real design without depending on a proprietary file.
+#[test]
+#[ignore = "manual canvas latency benchmark: run with --ignored --nocapture"]
+fn complex_frame_drag_latency() {
+    use crate::render_worker::{Job, Renders};
+    use figcraft_render::View;
+    use web_time::Instant;
+
+    let mut s = Session::new();
+    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let root = id(s.execute("frame.create", &json!({"x": 100, "y": 80, "width": 1100, "height": 680, "props": {"fill": "#19191D"}})).unwrap());
+    for row in 0..5 {
+        for col in 0..7 {
+            let x = 28 + col * 150;
+            let y = 75 + row * 116;
+            let card = id(s
+                .execute("frame.create", &json!({"parent": root, "x": x, "y": y, "width": 136, "height": 102, "props": {"fill": "#28282E"}}))
+                .unwrap());
+            s.execute("shape.rectangle", &json!({"parent": card, "x": 14, "y": 12, "width": 34, "height": 34, "props": {"fill": "#755078"}}))
+                .unwrap();
+            s.execute(
+                "text.create",
+                &json!({"parent": card, "x": 14, "y": 58, "text": format!("Card {}", row * 7 + col), "props": {"fontSize": 14}}),
+            )
+            .unwrap();
+            s.execute("text.create", &json!({"parent": card, "x": 14, "y": 78, "text": "A useful subtitle", "props": {"fontSize": 10}})).unwrap();
+        }
+    }
+    let nodes = s.ds().unwrap().doc.node_count();
+    let view = View { origin: (0.0, 0.0), scale: 2.0, width: 2880, height: 1800 };
+    let make_job = |s: &Session| {
+        let ds = s.ds().unwrap();
+        Job {
+            doc: ds.doc.clone(),
+            page: ds.page,
+            view: view.clone(),
+            outline: false,
+            outline_extras: Default::default(),
+            outlined: vec![],
+            skip: vec![],
+            solo: None,
+            proof: false,
+            uid: ds.uid,
+            zoom_preview: false,
+            at: Instant::now(),
+            texture_base: None,
+            texture_view: None,
+            texture_style: None,
+        }
+    };
+    let mut renders = Renders::default();
+    assert!(renders.refine(&make_job(&s)).is_some());
+    let mut edits = Vec::new();
+    let mut paints = Vec::new();
+    for x in [140, 320, 180, 620, 150, 700, 160, 360, 130, 550] {
+        let t = Instant::now();
+        s.execute("node.set", &json!({"id": root, "props": {"x": x}})).unwrap();
+        edits.push(t.elapsed().as_secs_f64() * 1000.0);
+        let t = Instant::now();
+        let done = renders.refine(&make_job(&s)).unwrap();
+        paints.push(t.elapsed().as_secs_f64() * 1000.0);
+        assert!(!done.coarse);
+    }
+    let median = |times: &mut Vec<f64>| {
+        times.sort_by(f64::total_cmp);
+        times[times.len() / 2]
+    };
+    println!(
+        "complex dashboard: {nodes} nodes; edit median {:.1} ms; vector render + texture conversion median {:.1} ms",
+        median(&mut edits),
+        median(&mut paints)
+    );
+
+    s.execute("node.set", &json!({"id": root, "props": {"x": 100}})).unwrap();
+    s.execute("select.set", &json!({"ids": [root]})).unwrap();
+    let mut ui = Ui::new(s);
+    settle(&mut ui);
+    let p = ui.app.to_screen(110.0, 100.0);
+    assert!(ui.app.canvas.rect.contains(p));
+    ui.button(p, true);
+    settle(&mut ui);
+    let starting_render_ms = ui.app.ui.render_ms;
+    let mut same_frame = 0;
+    let mut frames = Vec::new();
+    for k in 1..=10 {
+        let t = web_time::Instant::now();
+        ui.frame(vec![Event::PointerMoved(p + vec2(k as f32 * 8.0, 0.0))]);
+        frames.push(t.elapsed().as_secs_f64() * 1000.0);
+        same_frame += usize::from(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)));
+    }
+    println!(
+        "canvas drag: starting render {:.1} ms; texture current in {same_frame}/10 input frames; input frame median {:.1} ms",
+        starting_render_ms,
+        median(&mut frames)
+    );
+    ui.button(p + vec2(80.0, 0.0), false);
+}
+
 #[test]
 fn releasing_a_canvas_drag_outside_finishes_the_interaction() {
     let mut s = Session::new();

@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -48,6 +48,26 @@ versus about 66 ms before text-path caching and direct patch copying. These timi
 receives the texture; GPU upload and display presentation come later. Fast frame dragging can
 still visibly trail the cursor because vector paths and effects render on the CPU.
 
+A second synthetic dashboard benchmark (142 nested frame, shape and text nodes) at 2880×1800
+rendered 10 alternating large moves with a median of 16.9–18.6 ms for vector rendering plus
+texture conversion across runs; document edits took under 0.1 ms. In the 1440×900 headless editor,
+one run whose last render took 7.9 ms showed the current vector texture in all 10 input frames
+(5.1 ms median input frame time); another run stayed asynchronous for all 10 frames when its
+previous render exceeded the 10 ms fast-path threshold. These are CPU and egui texture timings,
+not measured screen presentation. Large or slow renders can still trail the pointer.
+During a smooth zoom, a covering full-resolution texture is kept until the new vector render is
+ready; when a new preview is needed it has half, rather than quarter, device resolution per axis.
+When zooming out exposes area beyond the cached texture, a half-resolution vector preview is
+rendered in that input frame to fill the viewport while the worker refines it. This may lengthen
+one input frame for a complex document, but avoids blank strips while the background render waits.
+Continuous pinch/Cmd-scroll has 0.8× logarithmic gain, keeping reciprocal gestures symmetric.
+The drag benchmark used Cargo's `dev` profile (`opt-level=1` for the workspace). In a separate
+`release` run with the same synthetic dashboard plus an imported screenshot, the initial 2880×1800
+full render took 388 ms. A control-channel jump from 200% to 25% produced a covering preview in
+13.5 ms and a refined image in 86 ms. The screenshot after the jump showed the full view with no
+empty strips. These are different operations and cannot be used as a dev-versus-release speedup
+ratio. They show that expensive full CPU renders remain a limit even in an optimized build.
+
 Nothing has been timed against Figma on the same document (needs `.fig` import). 
 
 ## Platforms
@@ -65,6 +85,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Smooth zoom keeps an existing full-resolution texture when it covers a nearby view; zoom-out that exposes uncached area renders a full-viewport half-resolution vector preview in the input frame. Stationary drags avoid redundant engine work. Cheap vector drags can finish in the pointer's UI frame with a 10 ms wait; heavier work remains off thread. The 142-node synthetic benchmark above records the practical limit; no GPU path or parity estimate change. |
 | 2026-10-16 | minor | Same-view canvas edits and live drags convert and upload damaged pixel regions only, even when intermediate positions were skipped. Cached text outlines and a direct copy of rendered patch rows reduce CPU work. Pan, zoom, soft proof and changes that cannot safely use a patch send full textures. `ui.inspect.canvas.uploadPixels` and `textureCurrent` make the transfer observable. The document and undo remain vector based; GPU canvas rendering is still missing. |
 | 2026-10-14 | minor | Copy and paste in the browser: the web build never wrote to the system clipboard, so Cmd+V after Cmd+C pasted whatever text the clipboard held before (as a text layer) instead of the copied layers. Copies (layers, Copy as SVG/CSS/text/PNG, links) now go out through egui's output, which eframe writes during the copy event (`web_clipboard_tests`). Numbers unchanged. |
 | 2026-10-11 | minor | Windows QA pass (gap 8): everyday workflows on Windows 11 through the desktop app and MCP; fixed: unsaved changes lost when the app was killed or crashed (recovery copies every few seconds, reopened at the next start), Ctrl+arrows/Backspace/Delete acting on the whole line in text (now by word; Ctrl+Home/End to the text's ends), scrubbed fields snapping back on release, typing on a field Tab reached, Escape not closing dialogs, skewed or vanishing linear gradients, hints cut off at the panel edge, the window-close question in English in the Spanish interface. Percentages and hours unchanged |

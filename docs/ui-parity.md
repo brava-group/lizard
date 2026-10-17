@@ -94,7 +94,7 @@ interaction feel not yet compared.
 
 | Item | Status | Notes |
 |---|---|---|
-| Pan/zoom: wheel, pinch, Space-drag, Shift+0/1/2, Cmd+0, `+`/`-` | done | Shift-wheel pans sideways, pinch and the zoom tool keep the point under the pointer; zoom steps, limits (2%–25,600%) and frame order pinned where the documentation is silent (`view_behaviour_tests`) |
+| Pan/zoom: wheel, pinch, Space-drag, Shift+0/1/2, Cmd+0, `+`/`-` | done | Shift-wheel pans sideways, pinch and the zoom tool keep the point under the pointer; zoom steps, limits (2%–25,600%) and frame order pinned where the documentation is silent (`view_behaviour_tests`). Continuous pinch/Cmd-scroll uses 0.8× logarithmic gain. A nearby zoom keeps the covering full-resolution texture until a fresh vector render arrives; zoom-out that exposes uncached area fills it with an immediate half-resolution vector preview while the worker refines (`zoom_preview_tests`). |
 | Rulers and guides (drag out, move, remove; rotated frames; frame guides) | done | guides belong to the page or a top-level frame (a frame moved into another keeps its guides but they stop applying); a click selects one for Delete, the arrows or the context menu's Remove guide; Alt-drag drops a copy; Alt while dragging measures to the layers in the frame it crosses; ruler numbering checked by eye only |
 | Frame labels (rotated, right-to-left), size badge | done | |
 | Outline mode | done | Outlines, outlines for the selection, mask outlines, frame outlines; shapes are clicked on their outlines, reaching layers behind; View ▸ Outlines ▸ Include hidden layers (`view.outlinesHiddenLayers`) outlines hidden layers too and Include object bounds (`view.outlinesObjectBounds`) draws the box of every layer whose outline isn't its box (groups, text, ellipses, vectors); what either draws can be clicked there (a hidden layer on its outline, a group on its box) and nothing else can; both are view settings like the other outline flags (per file, off in a new one, checked in the menu); the lines are light on a dark page (`outline_options_tests`). The main menu now shows a check mark beside every View toggle that is on |
@@ -167,6 +167,7 @@ in the table. `crates/ui-egui/src/shortcut_keys_tests.rs` drives the keys a look
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Reduced transient zoom pixelation: nearby zooms keep the covering full-resolution canvas texture, and zoom-out that exposes uncached area gets a whole-view vector preview in the input frame. Continuous zoom input has 0.8× logarithmic gain for slower pinch/Cmd-scroll. Cheap vector drags can show their render in the same input frame; stationary pointers no longer repeat a document preview. No parity estimate changed. |
 | 2026-10-17 | minor | Replaced approximated Agent panel glyphs with the supplied SVG paths and matched the reference's 980 px section spacing, composer action inset and native icon sizes. Headless 417 × 980 render reviewed. No parity estimate changed. |
 | 2026-10-17 | minor | Agent panel now runs local ACP adapters through document-scoped MCP, with streaming messages and tools, permissions, history, Stop and guarded Undo. |
 | 2026-10-17 | minor | Corrected the shared property dropdown chevron size and added bottom spacing to the page's Color profile, Local variables and Local styles sections. |

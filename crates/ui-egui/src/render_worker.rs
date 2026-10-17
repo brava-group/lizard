@@ -18,7 +18,7 @@ use figcraft_render::{DamageRect, Pixmap, Retained, View, Work};
 use web_time::Instant;
 
 /// A preview has this many times fewer pixels each way than the view it stands in for.
-pub const PREVIEW_FACTOR: f64 = 4.0;
+pub const PREVIEW_FACTOR: f64 = 2.0;
 /// Full renders quicker than this (about a frame) show without a preview first.
 pub const PREVIEW_AFTER_MS: f64 = 12.0;
 
@@ -298,13 +298,31 @@ impl Renders {
         Self { full: Retained::default(), preview: Retained::default(), last: None, last_doc: None, full_ms: 0.0, preview_after_ms: ms }
     }
 
-    /// Whether `job` gets a preview first: the kept image is of another zoom, page or file (so the
-    /// full render starts from scratch) and those have been slow. The first render has no
-    /// measure yet and comes without one.
+    /// Whether `job` gets a preview first. A nearby zoom whose currently visible, full-resolution
+    /// texture covers the requested area keeps that texture while the vector render catches up.
+    /// Replacing it with a lower-resolution preview makes a smooth pinch visibly pixelated.
     fn wants_preview(&self, job: &Job) -> bool {
-        job.zoom_preview
-            && self.full_ms >= self.preview_after_ms
-            && self.last.is_some_and(|(uid, page, scale)| uid != job.uid || page != job.page || scale.to_bits() != job.view.scale.to_bits())
+        if !job.zoom_preview || self.full_ms < self.preview_after_ms {
+            return false;
+        }
+        let changed = self.last.is_some_and(|(uid, page, scale)| uid != job.uid || page != job.page || scale.to_bits() != job.view.scale.to_bits());
+        if !changed {
+            return false;
+        }
+        let old_covers = job.texture_base.as_ref().is_some_and(|old| Arc::ptr_eq(old, &job.doc))
+            && job.texture_style.as_ref() == Some(&job.style())
+            && job.texture_view.as_ref().is_some_and(|old| {
+                let ratio = job.view.scale / old.scale;
+                // The cached image has at least as many source pixels as a half-resolution
+                // preview would at this zoom. Reproject it until the fresh vector render lands.
+                if !(0.0..=PREVIEW_FACTOR).contains(&ratio) {
+                    return false;
+                }
+                let (a, b) = (old.page_rect(), job.view.page_rect());
+                let eps = 1e-6 / job.view.scale.max(1e-9);
+                a.x0 <= b.x0 + eps && a.y0 <= b.y0 + eps && a.x1 >= b.x1 - eps && a.y1 >= b.y1 - eps
+            });
+        !old_covers
     }
 
     /// The coarse preview of the whole of `job`'s view, when one should come first.
@@ -416,6 +434,13 @@ impl Worker {
         }
         last
     }
+
+    /// Give a cheap vector drag a short chance to finish in the same UI frame that received its
+    /// pointer move. More expensive renders stay asynchronous so they do not stall input.
+    pub fn poll_for(&mut self, duration: std::time::Duration) -> Option<Done> {
+        let first = self.rx.recv_timeout(duration).ok()?;
+        Some(self.poll().unwrap_or(first))
+    }
 }
 
 /// The browser's worker: renders inline, one image a frame: a preview first when one is due, the
@@ -453,11 +478,23 @@ impl Inline {
         let job = self.pending.take()?;
         self.renders.refine(&job)
     }
+
+    pub fn poll_for(&mut self, _duration: std::time::Duration) -> Option<Done> {
+        None
+    }
 }
 
 /// Render synchronously from scratch (tests, screenshots).
 pub fn render_now(job: &Job) -> Option<Done> {
     run(job, &job.view, &mut Retained::default(), false, None)
+}
+
+/// Fill an exposed viewport immediately while a zoom-out's vector render is still pending.
+/// This renders only a quarter of the target pixels and does not replace the worker's retained
+/// full-resolution image.
+pub fn preview_now(job: &Job) -> Option<Done> {
+    let view = coarse_view(&job.view);
+    guarded(&mut Retained::default(), |retained| run(job, &view, retained, true, None))
 }
 
 #[cfg(test)]

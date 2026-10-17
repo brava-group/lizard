@@ -12,8 +12,8 @@ use figcraft_engine::params::id_of;
 use figcraft_render::{View, Work};
 use serde_json::json;
 
-use super::{CanvasState, shows};
-use crate::render_worker::{Done, Inline, Job, PREVIEW_AFTER_MS, PREVIEW_FACTOR, Renders, TextureUpdate, coarse_view, render_now};
+use super::{CanvasState, canvas_zoom_delta, shows};
+use crate::render_worker::{Done, Inline, Job, PREVIEW_AFTER_MS, PREVIEW_FACTOR, Renders, TextureUpdate, coarse_view, preview_now, render_now};
 
 /// A page of ellipses with a rectangle on top; the session and the rectangle.
 fn document() -> (Session, NodeId) {
@@ -87,6 +87,54 @@ fn same_pixels(a: &Done, b: &Done) -> bool {
 }
 
 #[test]
+fn continuous_zoom_moves_less_per_gesture_and_is_symmetric() {
+    let zoom_in = canvas_zoom_delta(1.25).unwrap();
+    let zoom_out = canvas_zoom_delta(0.8).unwrap();
+    assert!((1.0..1.25).contains(&zoom_in));
+    assert!((0.8..1.0).contains(&zoom_out));
+    assert!((zoom_in * zoom_out - 1.0).abs() < 1e-6);
+    assert_eq!(canvas_zoom_delta(1.0), Some(1.0));
+    assert_eq!(canvas_zoom_delta(0.0), None);
+    assert_eq!(canvas_zoom_delta(f32::NAN), None);
+}
+
+#[test]
+fn immediate_zoom_out_preview_covers_the_new_view() {
+    let (s, _) = document();
+    let mut ui = crate::layers_drag_tests::Ui::new(s);
+    ui.app.run("view.zoom200", json!({}));
+    for _ in 0..100 {
+        ui.frame(vec![]);
+        if ui.app.worker.as_ref().is_some_and(|w| !w.in_flight()) && !ui.app.canvas.tex_coarse {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let old = ui.app.canvas.tex_view.clone().expect("the starting vector image");
+    ui.app.run("view.zoom50", json!({}));
+    ui.frame(vec![]);
+    let current = ui.app.canvas.tex_view.clone().expect("a preview in the zoom event's frame");
+    let ds = ui.app.session.ds().unwrap();
+    let (w, h) = (ui.app.canvas.rect.width() as u32, ui.app.canvas.rect.height() as u32);
+    let visible = View { origin: ds.view.origin(), scale: ds.view.zoom, width: w, height: h };
+    assert!(!covers(&old, &visible), "the old image cannot cover the zoomed-out viewport");
+    assert!(ui.app.canvas.tex_coarse && covers(&current, &visible), "the immediate vector preview fills the new viewport");
+}
+
+#[test]
+fn immediate_preview_matches_the_worker_preview() {
+    let (s, _) = document();
+    let ds = s.ds().unwrap();
+    let j = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 1.0, 800, 600));
+    let immediate = preview_now(&j).unwrap();
+    let mut renders = Renders::with_threshold(0.0);
+    let initial = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 2.0, 800, 600));
+    renders.refine(&initial).unwrap();
+    let worker = renders.preview(&j).unwrap();
+    assert!(immediate.coarse && same_pixels(&immediate, &worker));
+}
+
+#[test]
 fn a_drag_converts_only_damage_when_the_visible_texture_is_its_base() {
     let (mut s, rect) = document();
     let ds = s.ds().unwrap();
@@ -157,11 +205,38 @@ fn a_zoom_out_previews_the_whole_view_then_refines_to_a_fresh_render() {
     let fresh = render_now(&out).unwrap();
     assert!(
         (pixels(&p) as f64) * PREVIEW_FACTOR * PREVIEW_FACTOR < 1.5 * pixels(&fresh) as f64,
-        "a sixteenth of the pixels, give or take the snapping"
+        "a quarter of the pixels, give or take the snapping"
     );
     let refined = r.refine(&out).unwrap();
     assert!(!refined.coarse && refined.work == Work::Full);
     assert!(same_pixels(&refined, &fresh), "the settled image is a render from scratch");
+}
+
+#[test]
+fn a_small_zoom_keeps_the_visible_full_resolution_texture_until_refined() {
+    let (s, _) = document();
+    let ds = s.ds().unwrap();
+    let mut renders = Renders::with_threshold(0.0);
+    let start = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 1.0, 800, 600));
+    let old = renders.refine(&start).unwrap();
+    let mut near = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 1.1, 800, 600));
+    near.texture_base = Some(old.doc.clone());
+    near.texture_view = Some(old.view.clone());
+    near.texture_style = Some(old.style.clone());
+    assert!(renders.preview(&near).is_none(), "a slight pinch keeps sharper pixels already on screen");
+    let mut edited = near.clone();
+    edited.doc = Arc::new((*old.doc).clone());
+    assert!(renders.preview(&edited).is_some(), "stale content cannot suppress the new preview");
+    let mut changed_style = near.clone();
+    changed_style.proof = true;
+    assert!(renders.preview(&changed_style).is_some(), "a style change needs the new preview");
+    let refined = renders.refine(&near).unwrap();
+    assert!(!refined.coarse && same_pixels(&refined, &render_now(&near).unwrap()));
+
+    let mut far = near;
+    far.view = view_at((300.0, 200.0), 2.1, 800, 600);
+    far.texture_view = Some(old.view);
+    assert!(renders.preview(&far).is_some(), "a large zoom gets a fresh preview while it renders");
 }
 
 /// Zoom, pan and edit with `r`; whether each step was previewed, and the pan's and the edit's
@@ -317,6 +392,30 @@ fn the_canvas_shows_images_of_its_own_page_and_never_a_coarser_one_of_its_view()
     assert!(shows(&c, &preview, here));
     (c.tex_coarse, c.tex_of) = (false, Some((ds.uid, NodeId(ds.page.0 + 1))));
     assert!(shows(&c, &preview, here));
+}
+
+#[test]
+fn an_old_zoom_render_cannot_replace_a_preview_that_covers_the_new_view() {
+    let (s, _) = document();
+    let ds = s.ds().unwrap();
+    let here = Some((ds.uid, ds.page));
+    let mut renders = Renders::with_threshold(0.0);
+    let old = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 2.0, 200, 150));
+    let new = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 0.5, 200, 150));
+    let previous_full = renders.refine(&old).unwrap();
+    let new_preview = renders.preview(&new).unwrap();
+    assert!(covers(&new_preview.view, &new.view));
+    assert!(!covers(&previous_full.view, &new.view));
+    let canvas = CanvasState {
+        tex_view: Some(new_preview.view.clone()),
+        tex_of: here,
+        tex_doc: Some(new_preview.doc.clone()),
+        tex_coarse: true,
+        want_view: Some(new.view.clone()),
+        ..Default::default()
+    };
+    assert!(!shows(&canvas, &previous_full, here));
+    assert!(shows(&canvas, &renders.refine(&new).unwrap(), here));
 }
 
 #[test]
