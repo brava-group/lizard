@@ -380,6 +380,43 @@ fn drop_file(u: &mut Ui, path: &std::path::Path) -> Vec<Shape> {
     hovering
 }
 
+/// A file dropped with its contents but no file on disk (a virtual file from another app).
+#[derive(Debug)]
+struct DroppedBytes(std::path::PathBuf, Vec<u8>);
+
+impl egui::DroppedFile for DroppedBytes {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Ok(self.1.clone())
+    }
+}
+
+#[test]
+fn dropping_a_file_without_one_on_disk_opens_it_as_a_new_unsaved_document() {
+    let dir = Temp::new();
+    let path = dir.path("virtual.svg");
+    assert!(!path.exists());
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>"#.to_vec();
+    let mut u = first_run();
+    u.app.ui.home = true;
+    let file: egui::DroppedFileHandle = std::sync::Arc::new(DroppedBytes(path.clone(), svg));
+    u.frame_raw(egui::RawInput { dropped_files: vec![file], ..Default::default() });
+    assert_eq!(u.app.ui.pending_opens.len(), 1);
+    for _ in 0..3 {
+        u.frame(vec![]);
+    }
+    assert!(u.app.ui.pending_opens.is_empty());
+    assert_eq!(u.app.ui.last_error, None);
+    assert_eq!(u.app.session.docs.len(), 1, "the dropped contents open");
+    assert_eq!(u.app.session.docs[0].path, None, "with no save path made up for them");
+    assert!(u.app.session.docs[0].doc.nodes().any(|n| matches!(n.kind, figcraft_doc::NodeKind::Rectangle)), "the SVG's content");
+    assert!(!u.app.ui.home, "and the editor shows it");
+    assert!(!path.exists(), "nothing is written");
+}
+
 #[test]
 fn dropping_a_native_file_on_the_home_screen_opens_it() {
     let dir = Temp::new();
