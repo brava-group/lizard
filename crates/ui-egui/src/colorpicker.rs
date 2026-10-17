@@ -15,6 +15,15 @@ use crate::icons::{self, Icon};
 use crate::theme::{Tokens, doc_c32, regular, semibold};
 use crate::widgets;
 
+#[path = "colorpicker_custom.rs"]
+mod custom;
+#[path = "colorpicker_gradient.rs"]
+mod gradient;
+#[path = "colorpicker_image.rs"]
+mod image_tab;
+#[path = "colorpicker_pattern.rs"]
+mod pattern;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum PickerTarget {
     PageBackground,
@@ -327,6 +336,49 @@ fn hue_color(ctx: &egui::Context, h: f32) -> Color32 {
     doc_c32(ctx, Hsb { h, s: 1.0, b: 1.0 }.to_color())
 }
 
+/// Mask a gradient mesh with four smooth quarter-circle cutouts.
+fn mask_round_corners(ui: &Ui, rect: Rect, radius: f32) {
+    let painter = ui.painter();
+    let background = Tokens::get(ui.ctx()).panel;
+    let feather = 1.0 / ui.ctx().pixels_per_point();
+    let steps = (radius * ui.ctx().pixels_per_point() * 3.0).ceil().max(24.0) as usize;
+    let corners = [
+        (rect.left_top(), pos2(rect.left() + radius, rect.top() + radius), std::f32::consts::PI, 1.5 * std::f32::consts::PI),
+        (rect.right_top(), pos2(rect.right() - radius, rect.top() + radius), 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI),
+        (rect.right_bottom(), pos2(rect.right() - radius, rect.bottom() - radius), 0.0, 0.5 * std::f32::consts::PI),
+        (rect.left_bottom(), pos2(rect.left() + radius, rect.bottom() - radius), 0.5 * std::f32::consts::PI, std::f32::consts::PI),
+    ];
+    for (outer, center, start, end) in corners {
+        let arcs: Vec<(Pos2, Pos2)> = (0..=steps)
+            .map(|i| {
+                let angle = start + (end - start) * i as f32 / steps as f32;
+                let direction = vec2(angle.cos(), angle.sin());
+                (center + direction * (radius + feather / 2.0), center + direction * (radius - feather / 2.0))
+            })
+            .collect();
+        let mut mesh = Mesh::default();
+        mesh.colored_vertex(outer, background);
+        for (outside, _) in &arcs {
+            mesh.colored_vertex(*outside, background);
+        }
+        for i in 1..=steps {
+            mesh.add_triangle(0, i as u32, i as u32 + 1);
+        }
+        let transparent = Color32::from_rgba_unmultiplied(background.r(), background.g(), background.b(), 0);
+        let fringe_start = mesh.vertices.len() as u32;
+        for (outside, inside) in &arcs {
+            mesh.colored_vertex(*outside, background);
+            mesh.colored_vertex(*inside, transparent);
+        }
+        for i in 0..steps as u32 {
+            let a = fringe_start + i * 2;
+            mesh.add_triangle(a, a + 1, a + 2);
+            mesh.add_triangle(a + 1, a + 3, a + 2);
+        }
+        painter.add(mesh);
+    }
+}
+
 fn sv_square(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     // White → hue horizontally, then transparent → black vertically.
     let mut m = Mesh::default();
@@ -350,6 +402,7 @@ fn sv_square(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     m2.add_triangle(0, 1, 2);
     m2.add_triangle(0, 2, 3);
     ui.painter().add(m2);
+    mask_round_corners(ui, rect, 5.0);
     let resp = ui.interact(rect, Id::new("cp_sv"), Sense::click_and_drag());
     let mut changed = false;
     if (resp.dragged() || resp.clicked() || resp.drag_started())
@@ -381,7 +434,8 @@ fn hue_slider(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
         }
     }
     ui.painter().add(m);
-    slider_knob(ui, rect, hsb.h / 360.0, Id::new("cp_hue"))
+    mask_round_corners(ui, rect, rect.height() / 2.0);
+    slider_knob(ui, rect, hsb.h / 360.0, Id::new("cp_hue"), hue_color(ui.ctx(), hsb.h))
         .map(|(t, done)| {
             hsb.h = (t * 360.0).clamp(0.0, 359.9);
             (true, done)
@@ -389,15 +443,18 @@ fn hue_slider(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
         .unwrap_or((false, false))
 }
 
-fn slider_knob(ui: &mut Ui, rect: Rect, t: f32, id: Id) -> Option<(f32, bool)> {
-    let resp = ui.interact(rect.expand(4.0), id, Sense::click_and_drag());
-    let x = rect.min.x + t.clamp(0.0, 1.0) * rect.width();
-    ui.painter().circle_stroke(pos2(x, rect.center().y), rect.height() / 2.0 + 1.0, Stroke::new(2.0, Color32::WHITE));
-    ui.painter().circle_stroke(pos2(x, rect.center().y), rect.height() / 2.0 + 2.0, Stroke::new(1.0, Color32::from_black_alpha(80)));
+fn slider_knob(ui: &mut Ui, rect: Rect, t: f32, id: Id, color: Color32) -> Option<(f32, bool)> {
+    let resp = ui.interact(rect, id, Sense::click_and_drag());
+    let travel = (rect.width() - rect.height()).max(1.0);
+    let x = rect.min.x + rect.height() / 2.0 + t.clamp(0.0, 1.0) * travel;
+    let center = pos2(x, rect.center().y);
+    ui.painter().circle_filled(center, rect.height() / 2.0, Color32::WHITE);
+    ui.painter().circle_filled(center, rect.height() / 4.0, color);
+    ui.painter().circle_stroke(center, rect.height() / 2.0, Stroke::new(1.0, Color32::from_black_alpha(52)));
     if (resp.dragged() || resp.clicked() || resp.drag_started())
         && let Some(p) = resp.interact_pointer_pos()
     {
-        return Some((((p.x - rect.min.x) / rect.width()).clamp(0.0, 1.0), resp.drag_stopped() || resp.clicked()));
+        return Some((((p.x - rect.min.x - rect.height() / 2.0) / travel).clamp(0.0, 1.0), resp.drag_stopped() || resp.clicked()));
     }
     if resp.drag_stopped() {
         return Some((t, true));
@@ -420,7 +477,8 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
     m.add_triangle(0, 1, 2);
     m.add_triangle(0, 2, 3);
     ui.painter().add(m);
-    slider_knob(ui, rect, color.a, Id::new("cp_alpha"))
+    mask_round_corners(ui, rect, rect.height() / 2.0);
+    slider_knob(ui, rect, color.a, Id::new("cp_alpha"), opaque)
 }
 
 pub fn show(app: &mut FigApp, ctx: &egui::Context) {
@@ -437,6 +495,22 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
         app.ui.picker = None;
         return;
     };
+    if matches!(paint.kind, PaintKind::Solid { .. }) {
+        custom::show(app, ctx, &target, paint);
+        return;
+    }
+    if matches!(paint.kind, PaintKind::Gradient(_)) {
+        gradient::show(app, ctx, &target, paint);
+        return;
+    }
+    if matches!(paint.kind, PaintKind::Pattern(_)) {
+        pattern::show(app, ctx, &target, paint);
+        return;
+    }
+    if matches!(paint.kind, PaintKind::Image(_)) {
+        image_tab::show(app, ctx, &target, paint);
+        return;
+    }
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
     // A plugin's colour field: beside its window, which sits where the picker otherwise would.
@@ -469,68 +543,12 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 target,
                 PickerTarget::Effect { .. } | PickerTarget::PageBackground | PickerTarget::Variable { .. } | PickerTarget::PluginField { .. }
             ) {
-                let kinds = [
-                    (Icon::Fill, tr("Solid")),
-                    (Icon::GradientLinear, tr("Linear")),
-                    (Icon::GradientRadial, tr("Radial")),
-                    (Icon::GradientAngular, tr("Angular")),
-                    (Icon::GradientDiamond, tr("Diamond")),
-                    (Icon::Image, tr("Image")),
-                    (Icon::ViewGrid, tr("Pattern")),
-                ];
-                let active = match &paint.kind {
-                    PaintKind::Solid { .. } => 0,
-                    PaintKind::Gradient(g) => match g.kind {
-                        GradientKind::Linear => 1,
-                        GradientKind::Radial => 2,
-                        GradientKind::Angular => 3,
-                        GradientKind::Diamond => 4,
-                    },
-                    PaintKind::Image(_) => 5,
-                    PaintKind::Pattern(_) => 6,
-                };
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    if let Some(i) = widgets::segmented(ui, &kinds, Some(active), 30.0) {
-                        let base = paint.preview_color();
-                        let mut image_pending = false;
-                        paint.kind = match i {
-                            0 => PaintKind::Solid { color: base.with_alpha(1.0) },
-                            5 => {
-                                image_pending = true;
-                                let target = target.clone();
-                                app.pick_open(tr("Choose image"), &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"], move |app, p| {
-                                    let Ok(bytes) = std::fs::read(&p) else { return };
-                                    let Some(hash) = app.session.doc_mut().ok().and_then(|d| figcraft_format_add(d, bytes)) else { return };
-                                    if let Some(mut paint) = current_paint(app, &target) {
-                                        paint.kind = Paint::image(hash, ImageScaleMode::Fill).kind;
-                                        write(app, &target, &paint, false);
-                                    }
-                                });
-                                paint.kind.clone()
-                            }
-                            6 => match pattern_sources(app, &target).first() {
-                                Some((id, _)) => Paint::pattern(id.0).kind,
-                                None => {
-                                    app.toast(tr("Add a layer or component to tile first").to_string());
-                                    paint.kind.clone()
-                                }
-                            },
-                            k => {
-                                let kind = [GradientKind::Linear, GradientKind::Radial, GradientKind::Angular, GradientKind::Diamond][k - 1];
-                                match &paint.kind {
-                                    PaintKind::Gradient(g) => {
-                                        PaintKind::Gradient(Gradient { kind, ..Gradient::default_for(kind, base).with_stops(g.stops.clone()) })
-                                    }
-                                    _ => PaintKind::Gradient(Gradient::default_for(kind, base)),
-                                }
-                            }
-                        };
-                        if !image_pending {
-                            write(app, &target, &paint, false);
-                        }
+                ui.allocate_exact_size(vec2(240.0, 40.0), Sense::hover());
+                for index in 0..6 {
+                    if custom::paint_kind_button(ui, hr.min, index, index == 3).is_some_and(|response| response.clicked()) && index != 3 {
+                        custom::pick_kind(app, &target, &mut paint, index);
                     }
-                });
+                }
             }
             // The paint's own blend mode, with the paints and layers under it.
             if !matches!(
@@ -1114,19 +1132,6 @@ fn figcraft_format_add(doc: &mut figcraft_doc::Document, bytes: Vec<u8>) -> Opti
     };
     doc.images.insert(hash.clone(), figcraft_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: w, height: h });
     Some(hash)
-}
-
-trait WithStops {
-    fn with_stops(self, stops: Vec<ColorStop>) -> Self;
-}
-
-impl WithStops for Gradient {
-    fn with_stops(mut self, stops: Vec<ColorStop>) -> Self {
-        if stops.len() >= 2 {
-            self.stops = stops;
-        }
-        self
-    }
 }
 
 #[cfg(test)]

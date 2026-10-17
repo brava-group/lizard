@@ -18,6 +18,8 @@ mod graphics;
 mod recovery;
 mod services;
 mod startup;
+#[cfg(target_os = "macos")]
+mod traffic_lights;
 
 #[cfg(all(test, target_os = "macos"))]
 mod apple_events_tests;
@@ -57,6 +59,8 @@ struct App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        traffic_lights::center_in_header();
         {
             let mut slot = self.ctx_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if slot.is_none() {

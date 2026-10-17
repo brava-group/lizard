@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use crate::FigApp;
 use crate::a11y::{self, Tip};
 use crate::i18n::{tr, tr_noop, trf, trn};
-use crate::icons::{self, Icon};
+use crate::icons::{self, HeaderIcon, Icon};
 use crate::right::{menu_item, menu_item_with, menu_popup};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
 use crate::widgets;
@@ -475,7 +475,7 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
         let resp = ui.interact(Rect::from_center_size(c, vec2(2.0 * R, 2.0 * R)), ui.id().with("live_me"), Sense::click());
         a11y::menu_button(&resp, tr("You"), a11y::menu_open(&resp));
         if spotlighting || resp.hovered() {
-            ui.painter().circle_stroke(c, R + 2.5, Stroke::new(2.0, me_fill));
+            icons::paint_header(ui.painter(), Rect::from_center_size(c, vec2(30.0, 40.0)), HeaderIcon::AvatarRing, ACCENT);
         }
         menu_popup(&resp).width(200.0).show(|ui| {
             if menu_item(ui, if spotlighting { tr("Stop spotlighting") } else { tr("Spotlight me") }, "") {
@@ -515,13 +515,21 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
         ui.painter().circle_filled(c, R, t.pressed);
         ui.painter().text(c, Align2::CENTER_CENTER, format!("+{more}"), semibold(10.0), t.text);
     }
-    let chev = Rect::from_center_size(pos2(x + R + 10.0, cy), vec2(16.0, 24.0));
+    let chev = Rect::from_center_size(pos2(x + R + 10.0, cy), vec2(24.0, 24.0));
     let cresp = ui.interact(chev, ui.id().with("live_people"), Sense::click());
     a11y::menu_button(&cresp, tr("People in this file"), a11y::menu_open(&cresp));
-    if cresp.hovered() {
-        ui.painter().rect_filled(chev, CornerRadius::same(4), t.hover);
-    }
-    icons::paint(ui.painter(), Rect::from_center_size(chev.center(), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
+    ui.painter().rect_filled(
+        chev,
+        CornerRadius::same(12),
+        if cresp.hovered() {
+            t.pressed
+        } else if t.dark {
+            Color32::from_rgb(0x31, 0x31, 0x31)
+        } else {
+            t.hover
+        },
+    );
+    icons::paint(ui.painter(), chev, Icon::Chevron, t.icon);
     menu_popup(&cresp).width(220.0).show(|ui| {
         let row = |ui: &mut Ui, label: &str, fill: Color32, check: bool| {
             menu_item_with(ui, label, if check { tr("Following") } else { "" }, 22.0, |p, r, _| {

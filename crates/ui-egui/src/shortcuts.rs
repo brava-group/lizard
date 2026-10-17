@@ -109,7 +109,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
         text_keys(app, ctx, &events);
         return;
     }
-    // An image-only clipboard brings no paste event, just the key: paste from the key then.
+    // Some shells send only the key for an image-only clipboard; handle that fallback too.
     let paste_event = events.iter().any(|e| matches!(e, Event::Paste(_)));
     let paste_key = events.iter().any(|e| matches!(e, Event::Key { key: Key::V, pressed: true, repeat: false, modifiers, .. } if modifiers.command && !modifiers.shift && !modifiers.alt));
     if paste_key && !paste_event {

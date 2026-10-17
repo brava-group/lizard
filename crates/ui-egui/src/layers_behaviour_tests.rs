@@ -85,7 +85,7 @@ fn expanding_collapsing_and_revealing() {
     // Alt-click on a disclosure arrow opens everything inside (silent, pinned); again closes it.
     let row = u.row_at(f);
     // The arrow sits at the row's left, after the panel's inset.
-    let arrow = Pos2::new(74.0, row.y);
+    let arrow = Pos2::new(61.0, row.y);
     click(&mut u, arrow, ALT);
     assert!(u.app.ui.expanded.contains(&f) && u.app.ui.expanded.contains(&g), "silent: Alt-click on an arrow expands every layer inside (pinned)");
     click(&mut u, arrow, ALT);
@@ -192,7 +192,7 @@ fn page_row(u: &mut Ui, page: NodeId, back: NodeId) -> Pos2 {
             for _ in 0..30 {
                 u.frame(vec![]);
             }
-            // Rows are 32 high: aim at the middle.
+            // Page rows are 32 high: aim near the middle.
             return p + egui::vec2(0.0, 12.0);
         }
     }

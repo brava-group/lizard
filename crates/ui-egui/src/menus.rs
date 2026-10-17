@@ -41,9 +41,9 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
         if let Some((png, w, h)) = clipboard_png(app) {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD.encode(png);
-            // Centred in the view.
+            // A pasted image is a rectangle with an image fill at its own pixel size.
             let (x, y) = ((cx - f64::from(w) / 2.0).round(), (cy - f64::from(h) / 2.0).round());
-            app.run("file.import", json!({"data": b64, "name": "Pasted image.png", "x": x, "y": y}));
+            app.run("image.place", json!({"data": b64, "name": "Pasted image", "x": x, "y": y, "width": w, "height": h}));
             return;
         }
         // Text from elsewhere when it's newer than our copy, or when we have nothing to paste.
@@ -67,7 +67,12 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
 /// The system clipboard's image as PNG bytes, with its size.
 fn clipboard_png(app: &mut FigApp) -> Option<(Vec<u8>, u32, u32)> {
     let (w, h, rgba) = app.services.clipboard_get_image()?;
-    let img = image::RgbaImage::from_raw(w, h, rgba)?;
+    let mut img = image::RgbaImage::from_raw(w, h, rgba)?;
+    // Match Figma's clipboard limit while preserving the image's aspect ratio.
+    if w > 4096 || h > 4096 {
+        img = image::DynamicImage::ImageRgba8(img).resize(4096, 4096, image::imageops::FilterType::Lanczos3).to_rgba8();
+    }
+    let (w, h) = img.dimensions();
     let mut out = std::io::Cursor::new(Vec::new());
     img.write_to(&mut out, image::ImageFormat::Png).ok()?;
     Some((out.into_inner(), w, h))

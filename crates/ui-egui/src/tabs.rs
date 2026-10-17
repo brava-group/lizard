@@ -90,16 +90,15 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
             } else if resp.hovered() {
                 ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
             }
-            icons::paint(
+            icons::paint_tab_document(
                 ui.painter(),
-                Rect::from_center_size(pos2(r.min.x + 18.0, r.center().y), vec2(14.0, 14.0)),
-                Icon::Logo,
-                crate::theme::ACCENT,
+                Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)),
+                Color32::from_rgb(0x7C, 0xC4, 0xF7),
             );
             // The unsaved-changes dot follows the name on screen, whichever way the name reads.
             let shown = crate::bidi::paint_name(
                 ui.painter(),
-                pos2(r.min.x + 32.0, r.center().y),
+                pos2(r.min.x + 36.0, r.center().y),
                 &name,
                 regular(12.0),
                 t.text,
@@ -130,7 +129,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 close = Some(i);
             }
             x += w;
-            ui.painter().line_segment([pos2(x, rect.min.y + 10.0), pos2(x, rect.max.y - 10.0)], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, t.border));
         }
         // New tab.
         let nr = Rect::from_center_size(pos2(x + 20.0, rect.center().y), vec2(28.0, 28.0));

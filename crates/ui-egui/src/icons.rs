@@ -1,5 +1,5 @@
-//! FigCraft's icon set, drawn in code from simple primitives on a 16×16 grid. Original artwork
-//! (MIT OR Apache-2.0): no third-party icons are used anywhere.
+//! UI3 icons are tessellated from SVG paths. The original icon drawings
+//! remain for the FigCraft brand mark and as a fallback if an SVG is unavailable.
 //!
 //! The grid is pixel-exact at 16 px: 1-unit strokes sit on half coordinates (pixel centres) and
 //! fills on whole ones. Larger boxes scale by whole steps and smaller ones are hinted: straight
@@ -8,6 +8,111 @@
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
+
+#[path = "icons_ui3.rs"]
+mod ui3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderIcon {
+    Present,
+    ZoomChevron,
+    AvatarRing,
+    CreateComponent,
+    Mask,
+    MaskTertiary,
+    Union,
+    UnionTertiary,
+    EditObject,
+    SelectMatching,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PositionIcon {
+    AlignLeft,
+    AlignHCenter,
+    AlignRight,
+    AlignTop,
+    AlignVCenter,
+    AlignBottom,
+    Rotation,
+    RotateRight,
+    FlipH,
+    FlipV,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutIcon {
+    AspectRatio,
+    AutoLayout,
+    AutoLayoutActive,
+    Free,
+    Vertical,
+    Horizontal,
+    Grid,
+    Wrap,
+    GapVertical,
+    Settings,
+    PaddingHorizontal,
+    PaddingVertical,
+    PaddingIndividual,
+    PaddingIndividualActive,
+    PaddingLeft,
+    PaddingRight,
+    PaddingTop,
+    PaddingBottom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppearanceIcon {
+    Visible,
+    Blend,
+    Opacity,
+    Corners,
+    CornerTopLeft,
+    CornerTopRight,
+    CornerBottomLeft,
+    CornerBottomRight,
+    CornerSettings,
+}
+
+/// Exact SVG artwork for the width and height sizing menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SizingIcon {
+    Fixed,
+    Hug,
+    Fill,
+    Check,
+    Minimum,
+    Maximum,
+    Variable,
+    HeightFixed,
+    HeightHug,
+    HeightFill,
+    HeightMinimum,
+    HeightMaximum,
+}
+
+/// Native-size glyphs used only by the layer tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerIcon {
+    Frame,
+    LayoutH,
+    LayoutV,
+    LayoutGrid,
+    Text,
+    Absolute,
+    ChevronDown,
+    ChevronRight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavIcon {
+    Logo,
+    File,
+    Agent,
+    Assets,
+    Variables,
+}
 
 macro_rules! icons {
     ($($(#[$m:meta])* $name:ident,)*) => {
@@ -405,6 +510,9 @@ impl P<'_> {
 
 /// Paint `icon` centred in `rect` (a 16-unit glyph scaled to fit) in `color`.
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
+    if ui3::paint(painter, rect, icon, color) {
+        return;
+    }
     let ppp = painter.ctx().pixels_per_point();
     let px = 1.0 / ppp;
     // Physical pixels per grid unit: whole steps from 16 px up (quarter steps on fractional
@@ -418,6 +526,62 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let w = (k * 0.9).round().max(1.0) * px;
     let p = P { painter, o, s, px, stroke: Stroke::new(w, color), color };
     draw(&p, icon);
+}
+
+/// Paint one of the four toolbelt mode icons from its original 24 × 24 SVG path.
+pub fn paint_mode(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_mode(painter, rect, index, color);
+}
+
+/// Paint the document tab's original 19 × 19 vector artwork.
+pub fn paint_tab_document(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_tab_document(painter, rect, color);
+}
+
+/// Draw the property header's original SVG geometry with its native view box.
+pub fn paint_header(painter: &Painter, rect: Rect, icon: HeaderIcon, color: Color32) {
+    ui3::paint_header(painter, rect, icon, color);
+}
+
+pub fn paint_position(painter: &Painter, rect: Rect, icon: PositionIcon, color: Color32, tertiary: Color32) {
+    ui3::paint_position(painter, rect, icon, color, tertiary);
+}
+
+pub fn paint_layout(painter: &Painter, rect: Rect, icon: LayoutIcon, color: Color32) {
+    ui3::paint_layout(painter, rect, icon, color);
+}
+
+pub fn paint_appearance(painter: &Painter, rect: Rect, icon: AppearanceIcon, color: Color32) {
+    ui3::paint_appearance(painter, rect, icon, color);
+}
+
+pub fn paint_colorpicker(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_colorpicker(painter, rect, index, color);
+}
+
+pub fn paint_property(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_property(painter, rect, index, color);
+}
+
+pub fn paint_stroke_side(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_stroke_side(painter, rect, index, color);
+}
+
+pub fn paint_layer(painter: &Painter, rect: Rect, icon: LayerIcon, color: Color32) {
+    ui3::paint_layer(painter, rect, icon, color);
+}
+
+pub fn paint_nav(painter: &Painter, rect: Rect, icon: NavIcon, color: Color32) {
+    ui3::paint_nav(painter, rect, icon, color);
+}
+
+pub fn paint_sizing(painter: &Painter, rect: Rect, icon: SizingIcon, color: Color32) {
+    ui3::paint_sizing(painter, rect, icon, color);
+}
+
+/// Paint the selected cell of the auto layout alignment grid with the supplied 16 pt vector.
+pub fn paint_alignment(painter: &Painter, rect: Rect, horizontal: bool, position: usize) {
+    ui3::paint_alignment(painter, rect, horizontal, position);
 }
 
 fn draw(p: &P, icon: Icon) {
@@ -1149,28 +1313,6 @@ mod tests {
         });
         out.textures_delta.clear();
         assert!(out.shapes.len() > Icon::ALL.len() * 10);
-    }
-
-    /// The gradient kinds' icons show a fade: a mesh whose vertices run from opaque to clear.
-    #[test]
-    fn gradient_icons_fade() {
-        let ctx = egui::Context::default();
-        for icon in [Icon::GradientLinear, Icon::GradientRadial, Icon::GradientAngular, Icon::GradientDiamond] {
-            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                paint(ui.painter(), Rect::from_min_size(Pos2::ZERO, Vec2::splat(16.0)), icon, Color32::WHITE);
-            });
-            out.textures_delta.clear();
-            let alphas: Vec<u8> = out
-                .shapes
-                .iter()
-                .filter_map(|c| match &c.shape {
-                    Shape::Mesh(m) => Some(m.vertices.iter().map(|v| v.color.a()).collect::<Vec<_>>()),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
-            assert!(alphas.contains(&255) && alphas.contains(&0), "{icon:?} fades from opaque to clear: {alphas:?}");
-        }
     }
 
     #[test]

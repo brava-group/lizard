@@ -154,6 +154,26 @@ fn pans_and_edits_get_no_preview_and_build_on_the_kept_image() {
 }
 
 #[test]
+fn edited_layer_renders_at_full_resolution_without_a_drag_preview() {
+    let (mut s, rect) = document();
+    let view = view_at((300.0, 200.0), 2.0, 800, 600);
+    let mut renders = Renders::with_threshold(0.0);
+    let ds = s.ds().unwrap();
+    let initial = job(&ds.doc, ds.page, ds.uid, view.clone());
+    renders.refine(&initial).unwrap();
+    let mut without_preview = Renders::with_threshold(f64::INFINITY);
+    without_preview.refine(&initial).unwrap();
+
+    s.execute("node.set", &json!({"id": rect, "props": {"x": 120}})).unwrap();
+    let ds = s.ds().unwrap();
+    let moving = job(&ds.doc, ds.page, ds.uid, view);
+    assert!(renders.preview(&moving).is_none(), "moving a layer at the same zoom does not reduce resolution");
+    let refined = renders.refine(&moving).unwrap();
+    assert!(!refined.coarse);
+    assert!(same_pixels(&refined, &without_preview.refine(&moving).unwrap()));
+}
+
+#[test]
 fn previews_come_for_other_pages_and_files_but_not_in_pixel_preview_or_when_renders_are_quick() {
     let (mut s, _) = document();
     let (doc, page, uid) = {
@@ -235,7 +255,7 @@ fn the_canvas_shows_images_of_its_own_page_and_never_a_coarser_one_of_its_view()
     assert!(!shows(&c, &refined, Some((ds.uid, NodeId(ds.page.0 + 1)))), "another page");
     assert!(!shows(&c, &refined, None), "no file open");
     // Showing the refined image of the view asked for: a preview arriving late stays off.
-    (c.tex_view, c.tex_of, c.tex_coarse) = (Some(refined.view.clone()), here, false);
+    (c.tex_view, c.tex_of, c.tex_doc, c.tex_coarse) = (Some(refined.view.clone()), here, Some(refined.doc.clone()), false);
     assert!(!shows(&c, &preview, here));
     // Once the view asked for moves on, the preview is the better match.
     c.want_view = Some(far.view.clone());
@@ -270,6 +290,7 @@ fn a_preview_replaces_a_refined_image_of_the_same_zoom_elsewhere_on_the_page() {
     let c = CanvasState {
         tex_view: Some(refined_a.view.clone()),
         tex_of: here,
+        tex_doc: Some(refined_a.doc.clone()),
         tex_coarse: false,
         want_view: Some(a2.view.clone()),
         ..Default::default()

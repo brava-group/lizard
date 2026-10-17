@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::a11y::{self, Tip};
 use crate::i18n::{tr, trf, trn};
-use crate::icons::{self, Icon};
+use crate::icons::{self, AppearanceIcon, HeaderIcon, Icon, PositionIcon};
 use crate::list_drag::{ListDrag, move_flags, remove_flags};
 use crate::style_picker::{self, StyleSlot};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
@@ -80,32 +80,42 @@ impl FigApp {
 
 pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
+    ui.spacing_mut().item_spacing.y = 0.0;
     let w = ui.available_width();
+    let header_bg = t.panel;
+    let header_selected = if t.dark { Color32::from_rgb(0x31, 0x31, 0x31) } else { t.hover };
+    let header_hover = if t.dark { Color32::from_rgb(0x38, 0x38, 0x38) } else { t.pressed };
     // Top bar: people (you and the others in a live session), present, share.
     let (top, _) = ui.allocate_exact_size(vec2(w, 48.0), Sense::hover());
+    ui.painter().rect_filled(top, 0.0, header_bg);
     // As wide as its label needs (longer in some languages).
-    let label = ui.painter().layout_no_wrap(tr("Share").to_string(), semibold(11.5), Color32::WHITE);
+    let label = ui.painter().layout_no_wrap(tr("Share").to_string(), regular(12.0), Color32::WHITE);
     let sw = (label.size().x + 24.0).max(56.0);
-    let share = Rect::from_min_size(pos2(top.max.x - 14.0 - sw, top.center().y - 16.0), vec2(sw, 32.0));
+    let share = Rect::from_min_size(pos2(top.max.x - 9.0 - sw, top.center().y - 16.0), vec2(sw, 32.0));
     let sresp = ui.interact(share, ui.id().with("share"), Sense::click()).tip(tr("Share: live session, export"));
-    ui.painter().rect_filled(share, CornerRadius::same(6), if sresp.hovered() { t.accent_hover } else { ACCENT });
+    ui.painter().rect_filled(
+        share,
+        CornerRadius::same(6),
+        if sresp.hovered() { Color32::from_rgb(0x29, 0x91, 0xE8) } else { Color32::from_rgb(0x12, 0x81, 0xE1) },
+    );
     ui.painter().galley(share.center() - label.size() / 2.0, label, Color32::WHITE);
     crate::live::share_popover(app, &sresp);
     // Play presents; its chevron opens the play menu (present, or preview in a pane).
-    let play = Rect::from_min_size(pos2(share.min.x - 50.0, top.center().y - 14.0), vec2(42.0, 28.0));
+    let play = Rect::from_min_size(pos2(share.min.x - 52.0, top.center().y - 16.0), vec2(48.0, 32.0));
     let (tri_r, chev_r) =
         (Rect::from_min_max(play.min, pos2(play.max.x - 16.0, play.max.y)), Rect::from_min_max(pos2(play.max.x - 16.0, play.min.y), play.max));
     let present_keys = crate::toolbar::pretty_shortcut(crate::shortcuts::shortcut("proto.present").unwrap_or(""));
     let presp = ui.interact(tri_r, ui.id().with("play"), Sense::click()).tip(format!("{}  {present_keys}", tr("Present")));
     let mresp = ui.interact(chev_r, ui.id().with("play_menu"), Sense::click()).tip(tr("Present or preview"));
-    if presp.hovered() || mresp.hovered() {
-        ui.painter().rect_filled(play, CornerRadius::same(5), t.hover);
+    if presp.hovered() {
+        ui.painter().rect_filled(tri_r, CornerRadius::same(5), header_hover);
     }
-    let tri = Rect::from_center_size(play.center() - vec2(7.0, 0.0), vec2(16.0, 16.0));
-    let c = tri.center();
-    ui.painter().add(egui::Shape::closed_line(vec![c + vec2(-5.0, -7.0), c + vec2(7.0, 0.0), c + vec2(-5.0, 7.0)], Stroke::new(1.4, t.icon)));
-    icons::paint(ui.painter(), Rect::from_center_size(play.center() + vec2(12.0, 0.0), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
-    crate::live::people_bar(app, ui, Rect::from_min_max(pos2(top.min.x + 12.0, top.min.y), pos2(play.min.x - 6.0, top.max.y)));
+    if mresp.hovered() {
+        ui.painter().rect_filled(chev_r, CornerRadius::same(5), header_hover);
+    }
+    icons::paint_header(ui.painter(), Rect::from_center_size(tri_r.center(), vec2(24.0, 24.0)), HeaderIcon::Present, t.icon);
+    icons::paint(ui.painter(), Rect::from_center_size(chev_r.center(), vec2(24.0, 24.0)), Icon::Chevron, t.icon);
+    crate::live::people_bar(app, ui, Rect::from_min_max(pos2(top.min.x + 8.0, top.min.y), pos2(play.min.x - 6.0, top.max.y)));
     if presp.clicked() {
         app.run("proto.present", json!({}));
     }
@@ -121,36 +131,46 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
         }
     });
     // Tabs row.
-    let (tabs, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    ui.painter().line_segment([tabs.left_top(), tabs.right_top()], Stroke::new(1.0, t.border));
-    let mut x = tabs.min.x + 8.0;
-    for (tab, label) in [(RightTab::Design, tr("Design")), (RightTab::Prototype, tr("Prototype"))] {
-        let galley = ui.painter().layout_no_wrap(label.into(), semibold(11.0), t.text);
-        let r = Rect::from_min_size(pos2(x, tabs.center().y - 12.0), vec2(galley.size().x + 16.0, 24.0));
-        let resp = ui.interact(r, ui.id().with(("rtab", label)), Sense::click());
+    let (tabs, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
+    ui.painter().rect_filled(tabs, 0.0, header_bg);
+    let mut x = tabs.min.x + 10.0;
+    for (tab, label) in [(RightTab::Design, tr("Create")), (RightTab::Prototype, tr("Prototype"))] {
         let active = app.ui.right_tab == tab;
-        a11y::tab(&resp, label, active);
+        let galley = ui.painter().layout_no_wrap(label.into(), regular(12.0), Color32::PLACEHOLDER);
+        let r = Rect::from_min_size(pos2(x, tabs.min.y + 3.0), vec2(galley.size().x + 16.0, 24.0));
+        let resp = ui.interact(r, ui.id().with(("rtab", tab as u8)), Sense::click());
+        a11y::tab(&resp, if tab == RightTab::Design { tr("Design") } else { label }, active);
         if active {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
+            ui.painter().rect_filled(r, CornerRadius::same(6), header_selected);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(r, CornerRadius::same(6), header_hover);
         }
         ui.painter().galley(pos2(r.min.x + 8.0, r.center().y - galley.size().y / 2.0), galley, if active { t.text } else { t.text_secondary });
         if resp.clicked() {
             app.ui.right_tab = tab;
         }
-        x = r.max.x + 2.0;
+        x = r.max.x + 5.0;
     }
     // Zoom menu.
     let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
-    let zr = Rect::from_min_size(pos2(tabs.max.x - 64.0, tabs.center().y - 12.0), vec2(56.0, 24.0));
+    let zoom_label = format!("{}%", (zoom * 100.0).round());
+    let zoom_galley = ui.painter().layout_no_wrap(zoom_label.clone(), regular(12.0), t.text);
+    let zoom_width = (zoom_galley.size().x + 24.0).max(50.0);
+    let zr = Rect::from_min_size(pos2(tabs.max.x - 9.0 - zoom_width, tabs.min.y + 3.0), vec2(zoom_width, 24.0));
     let zresp = ui.interact(zr, ui.id().with("zoommenu"), Sense::click());
     // The value is only spelled out while a screen reader reads the tree.
     let value = if a11y::active(&zresp.ctx) { format!("{}%", (zoom * 100.0).round()) } else { String::new() };
     a11y::combo(&zresp, tr("Zoom"), &value, a11y::menu_open(&zresp));
     if zresp.hovered() {
-        ui.painter().rect_filled(zr, CornerRadius::same(5), t.hover);
+        ui.painter().rect_filled(zr, CornerRadius::same(5), header_hover);
     }
-    ui.painter().text(pos2(zr.min.x + 6.0, zr.center().y), Align2::LEFT_CENTER, format!("{}%", (zoom * 100.0).round()), regular(11.0), t.text);
-    icons::paint(ui.painter(), Rect::from_center_size(pos2(zr.max.x - 9.0, zr.center().y), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
+    ui.painter().galley(pos2(zr.min.x + 2.0, zr.center().y - zoom_galley.size().y / 2.0), zoom_galley, t.text);
+    icons::paint_header(
+        ui.painter(),
+        Rect::from_center_size(pos2(zr.max.x - 13.0, zr.center().y), vec2(16.0, 16.0)),
+        HeaderIcon::ZoomChevron,
+        t.icon,
+    );
     menu_popup(&zresp).width(200.0).show(|ui| {
         for (label, cmd) in [
             (tr("Zoom in"), "view.zoomIn"),
@@ -472,12 +492,12 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     };
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    let lr = Rect::from_min_size(pos2(r.min.x + 8.0, r.center().y - 12.0), vec2(120.0, 24.0));
+    let lr = Rect::from_min_size(pos2(r.min.x + 8.0, r.center().y - 16.0), vec2(86.0, 32.0));
     let resp = ui.interact(lr, ui.id().with("typedd"), Sense::click());
     if resp.hovered() {
         ui.painter().rect_filled(lr, CornerRadius::same(5), t.hover);
     }
-    ui.painter().text(pos2(lr.min.x + 8.0, lr.center().y), Align2::LEFT_CENTER, &label, semibold(13.0), t.text);
+    ui.painter().text(pos2(lr.min.x + 8.0, lr.center().y), Align2::LEFT_CENTER, &label, regular(12.0), t.text);
     if is_frame || is_group {
         icons::paint(
             ui.painter(),
@@ -518,152 +538,177 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             });
         });
     }
-    // Quick actions on the right.
+    // Native 24-unit SVGs, in the same 32-point action cells as the source toolbar.
     let mut x = r.max.x - 8.0;
-    let actions = [
-        (Icon::Component, tr("Create component"), "component.create"),
-        (Icon::Mask, tr("Use as mask"), "object.mask"),
-        (Icon::Union, tr("Boolean groups"), "bool.union"),
-    ];
-    // Layers in boolean groups, or one boolean group: the operation they use (checked in the menu).
-    let current = figcraft_engine::booleans::shown_op(doc, sel);
-    for (icon, label, cmd) in actions.into_iter().rev() {
-        let br = Rect::from_min_size(pos2(x - 24.0, r.center().y - 12.0), vec2(24.0, 24.0));
-        let tip = if cmd == "bool.union" { label } else { crate::shortcuts::tip(label, cmd) };
-        let bresp = ui.interact(br, ui.id().with(("qa", cmd)), Sense::click()).tip(tip);
-        if bresp.hovered() {
+    let action_rect = |x: f32, width: f32| Rect::from_min_size(pos2(x - width, r.center().y - 16.0), vec2(width, 32.0));
+    let edit_id = (sel.len() == 1).then(|| sel[0]).filter(|id| doc.node(*id).is_some_and(|n| n.kind.is_shape()));
+    if let Some(id) = edit_id {
+        let br = action_rect(x, 32.0);
+        let resp = ui.interact(br, ui.id().with("edit_object"), Sense::click()).tip(tr("Edit object"));
+        if resp.hovered() {
             ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
         }
-        // The boolean button shows the operation in use.
-        let icon = match (cmd, current) {
-            ("bool.union", Some(op)) => crate::layers::op_icon(op),
-            _ => icon,
-        };
-        icons::paint(ui.painter(), br.shrink(5.0), icon, t.icon);
-        if cmd == "bool.union" {
-            menu_popup(&bresp).width(180.0).show(|ui| {
-                for (op, c) in [
-                    (BoolOp::Union, "bool.union"),
-                    (BoolOp::Subtract, "bool.subtract"),
-                    (BoolOp::Intersect, "bool.intersect"),
-                    (BoolOp::Exclude, "bool.exclude"),
-                ] {
-                    let key = crate::shortcuts::shortcut(c).unwrap_or("");
-                    let picked = match current {
-                        Some(cur) => menu_check(ui, cur == op, tr(op.label()), key),
-                        None => menu_item(ui, tr(op.label()), key),
-                    };
-                    if picked {
-                        app.run(c, json!({}));
-                        ui.close();
-                    }
-                }
-                let key = crate::shortcuts::shortcut("vector.flatten").unwrap_or("");
-                let flatten = if current.is_some() { menu_item_beside_checks(ui, tr("Flatten"), key) } else { menu_item(ui, tr("Flatten"), key) };
-                if flatten {
-                    app.run("vector.flatten", json!({}));
-                    ui.close();
-                }
-            });
-        } else if bresp.clicked() {
+        icons::paint_header(ui.painter(), Rect::from_center_size(br.center(), vec2(24.0, 24.0)), HeaderIcon::EditObject, t.icon);
+        if resp.clicked() {
+            app.run("vector.edit.begin", json!({"id": id}));
+        }
+        x -= 32.0;
+    }
+    // Layers in boolean groups, or one boolean group: the operation they use (checked in the menu).
+    let current = figcraft_engine::booleans::shown_op(doc, sel);
+    let bool_menu_rect = action_rect(x, 16.0);
+    let bool_menu = ui.interact(bool_menu_rect, ui.id().with("bool_menu"), Sense::click()).tip(tr("Boolean groups"));
+    if bool_menu.hovered() {
+        ui.painter().rect_filled(bool_menu_rect, CornerRadius::same(5), t.hover);
+    }
+    icons::paint(ui.painter(), Rect::from_center_size(bool_menu_rect.center(), vec2(24.0, 24.0)), Icon::Chevron, t.icon);
+    menu_popup(&bool_menu).width(180.0).show(|ui| {
+        for (op, c) in [
+            (BoolOp::Union, "bool.union"),
+            (BoolOp::Subtract, "bool.subtract"),
+            (BoolOp::Intersect, "bool.intersect"),
+            (BoolOp::Exclude, "bool.exclude"),
+        ] {
+            let key = crate::shortcuts::shortcut(c).unwrap_or("");
+            let picked = match current {
+                Some(cur) => menu_check(ui, cur == op, tr(op.label()), key),
+                None => menu_item(ui, tr(op.label()), key),
+            };
+            if picked {
+                app.run(c, json!({}));
+                ui.close();
+            }
+        }
+        let key = crate::shortcuts::shortcut("vector.flatten").unwrap_or("");
+        let flatten = if current.is_some() { menu_item_beside_checks(ui, tr("Flatten"), key) } else { menu_item(ui, tr("Flatten"), key) };
+        if flatten {
+            app.run("vector.flatten", json!({}));
+            ui.close();
+        }
+    });
+    x -= 16.0;
+    let bool_rect = action_rect(x, 32.0);
+    let bool_button = ui.interact(bool_rect, ui.id().with("bool_union"), Sense::click()).tip(tr("Union"));
+    if bool_button.hovered() {
+        ui.painter().rect_filled(bool_rect, CornerRadius::same(5), t.hover);
+    }
+    let icon_rect = Rect::from_center_size(bool_rect.center(), vec2(24.0, 24.0));
+    if let Some(op) = current {
+        icons::paint(ui.painter(), icon_rect, crate::layers::op_icon(op), t.icon);
+    } else {
+        icons::paint_header(ui.painter(), icon_rect, HeaderIcon::UnionTertiary, t.text_tertiary);
+        icons::paint_header(ui.painter(), icon_rect, HeaderIcon::Union, t.icon);
+    }
+    if bool_button.clicked() && sel.len() >= 2 {
+        app.run("bool.union", json!({}));
+    }
+    x -= 32.0;
+    for (icon, label, cmd) in [
+        (HeaderIcon::Mask, tr("Use as mask"), "object.mask"),
+        (HeaderIcon::CreateComponent, tr("Create component"), "component.create"),
+        (HeaderIcon::SelectMatching, tr("Select matching layers"), "select.matching"),
+    ] {
+        let br = action_rect(x, 32.0);
+        let resp = ui.interact(br, ui.id().with(("qa", cmd)), Sense::click()).tip(crate::shortcuts::tip(label, cmd));
+        if resp.hovered() {
+            ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
+        }
+        let icon_rect = Rect::from_center_size(br.center(), vec2(24.0, 24.0));
+        icons::paint_header(ui.painter(), icon_rect, icon, t.icon);
+        if icon == HeaderIcon::Mask {
+            icons::paint_header(ui.painter(), icon_rect, HeaderIcon::MaskTertiary, t.text_tertiary);
+        }
+        if resp.clicked() {
             app.run(cmd, json!({}));
         }
-        x -= 26.0;
+        x -= 32.0;
     }
     crate::component_panel::instance_section(app, ui, doc, sel);
 }
 
 fn position(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
-    widgets::section_header(ui, tr("Position"), &[], false);
+    widgets::section_header(ui, tr("Alignment"), &[], false);
     // Layers inside an instance take their place and constraints from the main component.
     let nested = sel.iter().any(|i| figcraft_engine::components::inside_instance(doc, *i));
     ui.add_enabled_ui(!nested, |ui| position_fields(app, ui, doc, sel))
         .response
         .on_disabled_hover_text(tr("Layers in an instance take their position from the main component"));
-    ui.add_space(8.0);
+    ui.add_space(12.0);
+}
+
+fn position_segments(ui: &mut Ui, items: &[(PositionIcon, &str)], width: f32) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::same(5), if t.dark { Color32::from_rgb(0x31, 0x31, 0x31) } else { t.field });
+    let mut picked = None;
+    for (index, (icon, label)) in items.iter().enumerate() {
+        let cell = Rect::from_min_size(pos2(rect.min.x + width * index as f32 / 3.0, rect.min.y), vec2(width / 3.0, 24.0));
+        let resp = ui.interact(cell, ui.id().with(("position_segment", *label)), Sense::click()).tip(*label);
+        a11y::toggle(&resp, label, false);
+        if resp.hovered() && ui.is_enabled() {
+            ui.painter().rect_filled(cell, CornerRadius::same(5), t.hover);
+        }
+        icons::paint_position(
+            ui.painter(),
+            Rect::from_center_size(cell.center(), vec2(24.0, 24.0)),
+            *icon,
+            if ui.is_enabled() { t.icon } else { t.icon_secondary },
+            t.text_tertiary,
+        );
+        if resp.clicked() && ui.is_enabled() {
+            picked = Some(index);
+        }
+    }
+    picked
 }
 
 fn position_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
-    let col = widgets::col_width(ui.available_width());
-    widgets::sublabels(ui, tr("Alignment"), None);
-    row(ui, 32.0, |ui| {
+    let col = (ui.available_width() - PAD * 2.0 - 8.0) / 2.0;
+    block(ui, 24.0, 0.0, |ui| {
         let cmds = ["align.left", "align.hcenter", "align.right", "align.top", "align.vcenter", "align.bottom"];
         let tip = crate::shortcuts::tip;
         let items = [
-            (Icon::AlignLeft, tip(tr("Align left"), cmds[0])),
-            (Icon::AlignHCenter, tip(tr("Align horizontal centers"), cmds[1])),
-            (Icon::AlignRight, tip(tr("Align right"), cmds[2])),
-            (Icon::AlignTop, tip(tr("Align top"), cmds[3])),
-            (Icon::AlignVCenter, tip(tr("Align vertical centers"), cmds[4])),
-            (Icon::AlignBottom, tip(tr("Align bottom"), cmds[5])),
+            (PositionIcon::AlignLeft, tip(tr("Align left"), cmds[0])),
+            (PositionIcon::AlignHCenter, tip(tr("Align horizontal centers"), cmds[1])),
+            (PositionIcon::AlignRight, tip(tr("Align right"), cmds[2])),
+            (PositionIcon::AlignTop, tip(tr("Align top"), cmds[3])),
+            (PositionIcon::AlignVCenter, tip(tr("Align vertical centers"), cmds[4])),
+            (PositionIcon::AlignBottom, tip(tr("Align bottom"), cmds[5])),
         ];
-        let w = col / 3.0;
         let picked = ui.add_enabled_ui(figcraft_engine::cmd::arrange::can_align(doc, sel), |ui| {
-            let h = widgets::segmented(ui, &items[..3], None, w);
-            let v = widgets::segmented(ui, &items[3..], None, w).map(|i| i + 3);
+            let h = position_segments(ui, &items[..3], col);
+            let v = position_segments(ui, &items[3..], col).map(|i| i + 3);
             h.or(v)
         });
         picked.response.on_disabled_hover_text(tr("A layer on its own aligns to its frame: select more layers, or one in a frame"));
         if let Some(i) = picked.inner {
             app.run(cmds[i], json!({"ids": ids}));
         }
-        if sel.len() > 2 {
-            let more = icons::button(ui, Icon::DistributeH, 24.0, false, tr("Distribute and tidy"));
-            menu_popup(&more).show(|ui| {
-                for (l, c) in [
-                    (tr("Distribute horizontal spacing"), "distribute.horizontal"),
-                    (tr("Distribute vertical spacing"), "distribute.vertical"),
-                    (tr("Tidy up"), "arrange.tidy"),
-                ] {
-                    if menu_item(ui, l, crate::shortcuts::shortcut(c).unwrap_or("")) {
-                        app.run(c, json!({"ids": ids}));
-                        ui.close();
-                    }
-                }
-            });
-        }
     });
+    ui.add_space(8.0);
     // In the frame's space: groups have none of their own.
     // What each field shows of a layer (a relative edit of mixed values starts from it).
     let x_of = |n: &Node| (doc.frame_relative(n.id).as_coeffs()[4] * 100.0).round() / 100.0;
     let y_of = |n: &Node| (doc.frame_relative(n.id).as_coeffs()[5] * 100.0).round() / 100.0;
     let rot_of = |n: &Node| (figcraft_geom::rotation_degrees(n.transform) * 100.0).round() / 100.0;
     let (x, y, rot) = (common(doc, sel, x_of), common(doc, sel, y_of), common(doc, sel, rot_of));
-    let parent_al = sel.iter().all(|i| doc.node(*i).and_then(|n| n.parent).and_then(|p| doc.node(p)).is_some_and(|p| p.layout.is_some()));
-    let absolute = common(doc, sel, |n| n.child_layout.absolute);
-    widgets::sublabels(ui, tr("Position"), None);
-    row(ui, 32.0, |ui| {
+    block(ui, 24.0, 0.0, |ui| {
         let e = widgets::number_field_mixed(ui, Id::new("pos_x"), Lead::Text("X"), x, "", col, 1.0);
         app.field_of(&ids, "x", e, x_of, |v| json!(v));
         let e = widgets::number_field_mixed(ui, Id::new("pos_y"), Lead::Text("Y"), y, "", col, 1.0);
         app.field_of(&ids, "y", e, y_of, |v| json!(v));
-        // Children of auto layout frames can ignore the layout (absolute position).
-        if parent_al {
-            let on = absolute.unwrap_or(false);
-            if icons::button(
-                ui,
-                Icon::AbsolutePosition,
-                24.0,
-                on,
-                if on { tr("Use auto layout") } else { tr("Ignore auto layout (absolute position)") },
-            )
-            .clicked()
-            {
-                app.set_props(&ids, json!({"absolute": !on}));
-            }
-        }
     });
-    widgets::sublabels(ui, tr("Rotation"), None);
-    row(ui, 32.0, |ui| {
-        let e = widgets::number_field_mixed(ui, Id::new("pos_rot"), Lead::Icon(Icon::CornerRadius, tr("Rotation")), rot, "°", col, 1.0);
+    ui.add_space(8.0);
+    block(ui, 24.0, 0.0, |ui| {
+        let e = widgets::number_field_mixed(ui, Id::new("pos_rot"), Lead::PositionIcon(PositionIcon::Rotation, tr("Rotation")), rot, "°", col, 1.0);
         app.field_of(&ids, "rotation", e, rot_of, |v| json!(v));
         let items = [
-            (Icon::Rotate, tr("Rotate 90° right")),
-            (Icon::FlipH, crate::shortcuts::tip(tr("Flip horizontal"), "object.flipH")),
-            (Icon::FlipV, crate::shortcuts::tip(tr("Flip vertical"), "object.flipV")),
+            (PositionIcon::RotateRight, tr("Rotate 90° right")),
+            (PositionIcon::FlipH, crate::shortcuts::tip(tr("Flip horizontal"), "object.flipH")),
+            (PositionIcon::FlipV, crate::shortcuts::tip(tr("Flip vertical"), "object.flipV")),
         ];
-        if let Some(i) = widgets::segmented(ui, &items, None, col / 3.0) {
+        if let Some(i) = position_segments(ui, &items, col) {
             app.run(["object.rotateRight", "object.flipH", "object.flipV"][i], json!({"ids": ids}));
         }
     });
@@ -801,26 +846,41 @@ fn pretty(s: &str) -> String {
     }
 }
 
+fn appearance_header(ui: &mut Ui, visible: bool) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(pos2(rect.min.x + PAD, rect.center().y), Align2::LEFT_CENTER, tr("Appearance"), semibold(11.0), t.text);
+    let buttons = [
+        (0, rect.max.x - PAD - 36.0, crate::shortcuts::tip(tr("Show/Hide"), "object.toggleVisible")),
+        (1, rect.max.x - PAD - 12.0, tr("Blend mode")),
+    ];
+    let mut clicked = None;
+    for (index, x, tip) in buttons {
+        let button = Rect::from_center_size(pos2(x, rect.center().y), vec2(24.0, 24.0));
+        let response = ui.interact(button, ui.id().with(("appearance_header", index)), Sense::click()).tip(tip);
+        if response.hovered() {
+            ui.painter().rect_filled(button, CornerRadius::same(5), t.hover);
+        }
+        match index {
+            0 if visible => icons::paint_appearance(ui.painter(), button, AppearanceIcon::Visible, t.icon),
+            0 => icons::paint(ui.painter(), button.shrink(4.0), Icon::EyeOff, t.icon),
+            _ => icons::paint_appearance(ui.painter(), button, AppearanceIcon::Blend, t.icon),
+        }
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    clicked
+}
+
 fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let visible = common(doc, sel, |n| n.visible).unwrap_or(true);
-    let hdr = widgets::section_header(
-        ui,
-        tr("Appearance"),
-        &[
-            (if visible { Icon::Eye } else { Icon::EyeOff }, crate::shortcuts::tip(tr("Show/Hide"), "object.toggleVisible")),
-            (Icon::Variable, tr("Apply variable to visibility")),
-            (Icon::Blend, tr("Blend mode")),
-        ],
-        false,
-    );
+    let hdr = appearance_header(ui, visible);
     if hdr == Some(0) {
         app.run("object.toggleVisible", json!({"ids": ids}));
     }
     if hdr == Some(1) {
-        crate::variable_ui::open_at_pointer(ui, &ids, "visible", VariableType::Boolean);
-    }
-    if hdr == Some(2) {
         ui.data_mut(|d| d.insert_temp(Id::new("blend_open"), !d.get_temp::<bool>(Id::new("blend_open")).unwrap_or(false)));
     }
     let col = widgets::col_width(ui.available_width());
@@ -847,9 +907,9 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     // Only rectangles and frames round each corner on its own.
     let indep_ok = radius_ok && sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.has_independent_corners()));
     let r = common(doc, sel, |n| n.corners.uniform().map(|r| (r * 100.0).round() / 100.0));
-    widgets::sublabels(ui, tr("Opacity"), radius_ok.then_some(tr("Corner radius")));
-    row(ui, 32.0, |ui| {
-        let lead = Lead::Icon(Icon::Opacity, tr("Opacity"));
+    ui.add_space(3.0);
+    row(ui, 24.0, |ui| {
+        let lead = Lead::AppearanceIcon(AppearanceIcon::Opacity, tr("Opacity"));
         let e = crate::variable_ui::number_field_mixed(app, ui, &ids, "opacity", Id::new("ap_op"), lead, op, "%", col);
         app.field_of(&ids, "opacity", e, op_of, |v| json!((v / 100.0).clamp(0.0, 1.0)));
         if radius_ok {
@@ -859,7 +919,7 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 &ids,
                 "cornerRadius",
                 Id::new("ap_rad"),
-                Lead::Icon(Icon::CornerRadius, tr("Corner radius")),
+                Lead::AppearanceIcon(AppearanceIcon::Corners, tr("Corner radius")),
                 r.flatten(),
                 "",
                 col,
@@ -868,57 +928,149 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             let radius_of = |n: &Node| n.corners.uniform().unwrap_or_else(|| n.corners.radii.iter().copied().fold(0.0, f64::max));
             app.field_of(&ids, "cornerRadius", e, radius_of, |v| json!(v.max(0.0)));
             let open = ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false);
-            if indep_ok && icons::button(ui, Icon::IndependentCorners, 24.0, open, tr("Individual corners")).clicked() {
-                ui.data_mut(|d| d.insert_temp(Id::new("indep_corners"), !open));
+            if indep_ok {
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), Sense::click());
+                let response = response.tip(tr("Individual corners"));
+                crate::a11y::toggle(&response, tr("Individual corners"), open);
+                let t = Tokens::get(ui.ctx());
+                if open || response.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(5), if open { Color32::from_rgb(0x39, 0x43, 0x60) } else { t.hover });
+                }
+                icons::paint_appearance(ui.painter(), rect, AppearanceIcon::Corners, if open { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.icon });
+                if response.clicked() {
+                    ui.data_mut(|d| d.insert_temp(Id::new("indep_corners"), !open));
+                }
             }
         }
     });
     if indep_ok && ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false) {
         let radii = common(doc, sel, |n| n.corners.radii);
         let keys = [
-            ("topLeftRadius", tr("Top left radius")),
-            ("topRightRadius", tr("Top right radius")),
-            ("bottomRightRadius", tr("Bottom right radius")),
-            ("bottomLeftRadius", tr("Bottom left radius")),
+            ("topLeftRadius", tr("Top left radius"), AppearanceIcon::CornerTopLeft, 0usize),
+            ("topRightRadius", tr("Top right radius"), AppearanceIcon::CornerTopRight, 1),
+            ("bottomLeftRadius", tr("Bottom left radius"), AppearanceIcon::CornerBottomLeft, 3),
+            ("bottomRightRadius", tr("Bottom right radius"), AppearanceIcon::CornerBottomRight, 2),
         ];
-        row(ui, 32.0, |ui| {
-            for (k, (key, name)) in keys.iter().enumerate().take(2) {
+        ui.add_space(8.0);
+        row(ui, 24.0, |ui| {
+            for (k, (key, name, icon, radius_index)) in keys.iter().enumerate().take(2) {
                 let e = crate::variable_ui::number_field(
                     app,
                     ui,
                     &ids,
                     key,
                     Id::new(("corner", k)),
-                    Lead::Icon(Icon::CornerRadius, name),
-                    radii.map(|r| r[k]),
+                    Lead::AppearanceIcon(*icon, name),
+                    radii.map(|r| r[*radius_index]),
                     "",
                     col,
                 );
                 app.field(&ids, key, e, |v| json!(v.max(0.0)));
             }
         });
-        row(ui, 32.0, |ui| {
-            for (k, (key, name)) in keys.iter().enumerate().skip(2) {
+        ui.add_space(8.0);
+        row(ui, 24.0, |ui| {
+            for (k, (key, name, icon, radius_index)) in keys.iter().enumerate().skip(2) {
                 let e = crate::variable_ui::number_field(
                     app,
                     ui,
                     &ids,
                     key,
                     Id::new(("corner", k)),
-                    Lead::Icon(Icon::CornerRadius, name),
-                    radii.map(|r| r[k]),
+                    Lead::AppearanceIcon(*icon, name),
+                    radii.map(|r| r[*radius_index]),
                     "",
                     col,
                 );
                 app.field(&ids, key, e, |v| json!(v.max(0.0)));
             }
-        });
-        let sm = common(doc, sel, |n| (n.corners.smoothing * 100.0).round());
-        widgets::sublabels(ui, tr("Corner smoothing"), None);
-        row(ui, 32.0, |ui| {
-            let e = widgets::number_field(ui, Id::new("smoothing"), Lead::None, sm, "%", col, 1.0);
-            app.field(&ids, "cornerSmoothing", e, |v| json!((v / 100.0).clamp(0.0, 1.0)));
-            widgets::label(ui, "iOS: 60%", Tokens::get(ui.ctx()).text_tertiary);
+            let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+            let response = response.tip(tr("Corner smoothing"));
+            let t = Tokens::get(ui.ctx());
+            if response.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(5), t.hover);
+            }
+            icons::paint_appearance(ui.painter(), rect, AppearanceIcon::CornerSettings, t.icon);
+            egui::Popup::from_toggle_button_response(&response)
+                .kind(egui::PopupKind::Menu)
+                .width(240.0)
+                .gap(4.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(Color32::from_rgb(0x24, 0x24, 0x24))
+                        .stroke(Stroke::new(0.5, Color32::from_rgb(0x42, 0x42, 0x42)))
+                        .corner_radius(CornerRadius::same(13))
+                        .inner_margin(0.0),
+                )
+                .show(|ui| {
+                    let (modal, _) = ui.allocate_exact_size(vec2(240.0, 92.0), Sense::hover());
+                    let painter = ui.painter();
+                    painter.text(
+                        pos2(modal.min.x + 16.0, modal.min.y + 20.0),
+                        Align2::LEFT_CENTER,
+                        tr("Corner smoothing"),
+                        semibold(11.0),
+                        Color32::WHITE,
+                    );
+                    painter.line_segment(
+                        [pos2(modal.min.x, modal.min.y + 40.0), pos2(modal.max.x, modal.min.y + 40.0)],
+                        Stroke::new(1.0, Color32::from_rgb(0x38, 0x38, 0x38)),
+                    );
+                    let close = Rect::from_center_size(pos2(modal.max.x - 20.0, modal.min.y + 20.0), vec2(24.0, 24.0));
+                    let close_response = ui.interact(close, ui.id().with("corner_smoothing_close"), Sense::click()).tip(tr("Close"));
+                    if close_response.hovered() {
+                        painter.rect_filled(close, CornerRadius::same(5), Color32::from_rgb(0x38, 0x38, 0x38));
+                    }
+                    let cross = close.center();
+                    painter.line_segment([cross + vec2(-4.5, -4.5), cross + vec2(4.5, 4.5)], Stroke::new(1.2, Color32::WHITE));
+                    painter.line_segment([cross + vec2(4.5, -4.5), cross + vec2(-4.5, 4.5)], Stroke::new(1.2, Color32::WHITE));
+                    if close_response.clicked() {
+                        ui.close();
+                    }
+
+                    let value = common(doc, sel, |n| (n.corners.smoothing * 100.0).round()).unwrap_or(0.0).clamp(0.0, 100.0);
+                    let track = Rect::from_min_size(modal.min + vec2(16.0, 53.0), vec2(158.0, 16.0));
+                    let knob_x = track.min.x + 8.0 + (track.width() - 16.0) * (value as f32 / 100.0);
+                    painter.rect_filled(track, CornerRadius::same(8), Color32::from_rgb(0x30, 0x30, 0x30));
+                    painter.rect_filled(
+                        Rect::from_min_max(track.min + vec2(1.0, 1.0), pos2(knob_x, track.max.y - 1.0)),
+                        CornerRadius::same(7),
+                        ACCENT,
+                    );
+                    painter.rect_stroke(
+                        track,
+                        CornerRadius::same(8),
+                        Stroke::new(1.0, Color32::from_rgb(0x58, 0x58, 0x58)),
+                        egui::StrokeKind::Inside,
+                    );
+                    let marker_x = track.min.x + track.width() * 0.60;
+                    painter.circle_filled(pos2(marker_x, track.center().y), 1.7, Color32::from_rgb(0x78, 0x78, 0x78));
+                    painter.text(
+                        pos2(marker_x, modal.min.y + 81.0),
+                        Align2::CENTER_CENTER,
+                        "iOS",
+                        regular(10.0),
+                        Color32::from_rgb(0x78, 0x78, 0x78),
+                    );
+                    painter.circle_filled(pos2(knob_x, track.center().y + 1.0), 8.0, Color32::from_rgb(0xf8, 0xf8, 0xf8));
+                    let slider = ui.interact(track, ui.id().with("corner_smoothing_slider"), Sense::click_and_drag());
+                    if (slider.dragged() || slider.drag_stopped() || slider.clicked())
+                        && let Some(pointer) = slider.interact_pointer_pos()
+                    {
+                        let percent = ((pointer.x - track.min.x - 8.0) / (track.width() - 16.0) * 100.0).round().clamp(0.0, 100.0);
+                        let edit = if slider.clicked() {
+                            FieldEdit::Set(f64::from(percent))
+                        } else {
+                            FieldEdit::Scrub(f64::from(percent), slider.drag_stopped())
+                        };
+                        app.field(&ids, "cornerSmoothing", Some(edit), |v| json!((v / 100.0).clamp(0.0, 1.0)));
+                    }
+                    let field = Rect::from_min_size(modal.min + vec2(180.0, 49.0), vec2(44.0, 24.0));
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    child.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    let e = widgets::number_field(&mut child, Id::new("smoothing"), Lead::None, Some(value), "%", 44.0, 1.0);
+                    app.field(&ids, "cornerSmoothing", e, |v| json!((v / 100.0).clamp(0.0, 1.0)));
+                });
         });
     }
     let blend = common(doc, sel, |n| n.blend);
@@ -936,7 +1088,7 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             });
         });
     }
-    ui.add_space(8.0);
+    ui.add_space(if indep_ok && ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false) { 17.0 } else { 12.0 });
 }
 
 /// The variable modes of the selected frames (sections, components, instances): a row per
@@ -1094,12 +1246,7 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
     let title = if fills { tr("Fill") } else { tr("Stroke") };
     let empty = list.as_ref().is_none_or(|l| l.is_empty());
     let slot = if fills { StyleSlot::Fill } else { StyleSlot::Stroke };
-    if let Some(i) = widgets::section_header(
-        ui,
-        title,
-        &[(Icon::Styles, tr("Styles")), (Icon::Plus, if fills { tr("Add fill") } else { tr("Add stroke") })],
-        empty,
-    ) {
+    if let Some(i) = paint_section_header(ui, title, empty, fills) {
         if i == 1 {
             app.run(if fills { "fill.add" } else { "stroke.add" }, json!({"ids": ids}));
         } else {
@@ -1130,19 +1277,34 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
     if !fills && !empty {
         let weight = common(doc, sel, |n| n.stroke.weight);
         let align = common(doc, sel, |n| n.stroke.align);
-        let half = (ui.available_width() - PAD * 2.0 - 8.0) / 2.0;
-        row(ui, 32.0, |ui| {
-            let resp = widgets::dropdown(
-                ui,
-                match align {
-                    Some(StrokeAlign::Inside) => tr("Inside"),
-                    Some(StrokeAlign::Center) => tr("Center"),
-                    Some(StrokeAlign::Outside) => tr("Outside"),
-                    None => tr("Mixed"),
-                },
-                half,
-                None,
-            );
+        let sided = sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.is_frame_like() || matches!(n.kind, NodeKind::Rectangle)));
+        let t = Tokens::get(ui.ctx());
+        let (controls, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+        let field_width = ((controls.width() - 92.0) / 2.0).max(48.0);
+        let align_rect = Rect::from_min_size(pos2(controls.left() + 16.0, controls.top() + 4.0), vec2(field_width, 24.0));
+        let weight_rect = Rect::from_min_size(pos2(align_rect.right() + 8.0, align_rect.top()), vec2(field_width, 24.0));
+        let align_label = match align {
+            Some(StrokeAlign::Inside) => tr("Inside"),
+            Some(StrokeAlign::Center) => tr("Center"),
+            Some(StrokeAlign::Outside) => tr("Outside"),
+            None => tr("Mixed"),
+        };
+        let resp = ui.interact(align_rect, Id::new("stroke_align"), Sense::click()).tip(tr("Stroke alignment"));
+        ui.painter().rect_filled(align_rect, CornerRadius::same(5), t.panel);
+        ui.painter().rect_stroke(
+            align_rect,
+            CornerRadius::same(5),
+            Stroke::new(1.0, if resp.hovered() { t.field_hover_border } else { t.border }),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(pos2(align_rect.left() + 8.0, align_rect.center().y), Align2::LEFT_CENTER, align_label, regular(11.0), t.text);
+        icons::paint_colorpicker(
+            ui.painter(),
+            Rect::from_center_size(pos2(align_rect.right() - 12.0, align_rect.center().y), vec2(5.002, 3.002)),
+            7,
+            t.icon,
+        );
+        {
             menu_popup(&resp).show(|ui| {
                 for (l, v) in [(tr("Inside"), "inside"), (tr("Center"), "center"), (tr("Outside"), "outside")] {
                     if menu_item(ui, l, "") {
@@ -1151,45 +1313,80 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
                     }
                 }
             });
-            let sided = sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.is_frame_like() || matches!(n.kind, NodeKind::Rectangle)));
-            let weight_w = half - if sided { 60.0 } else { 32.0 };
+        }
+        {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(weight_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
             let e = crate::variable_ui::number_field_mixed(
                 app,
-                ui,
+                &mut child,
                 &ids,
                 "strokeWeight",
                 Id::new("stroke_w"),
-                Lead::Icon(Icon::Menu, tr("Stroke weight")),
+                Lead::PropertyIcon(1, tr("Stroke weight")),
                 weight,
                 "",
-                weight_w,
+                field_width,
             );
             app.field_of(&ids, "strokeWeight", e, |n| n.stroke.weight, |v| json!(v.max(0.0)));
-            if sided {
-                let sides_btn = icons::button(ui, Icon::IndependentCorners, 24.0, false, tr("Individual strokes"));
-                menu_popup(&sides_btn).show(|ui| {
-                    let w = weight.unwrap_or(1.0);
-                    for (l, v) in [
-                        (tr("All"), Value::Null),
-                        (tr("Top"), json!([w, 0.0, 0.0, 0.0])),
-                        (tr("Right"), json!([0.0, w, 0.0, 0.0])),
-                        (tr("Bottom"), json!([0.0, 0.0, w, 0.0])),
-                        (tr("Left"), json!([0.0, 0.0, 0.0, w])),
-                        (tr("Custom"), json!([w, w, w, w])),
-                    ] {
-                        if menu_item(ui, l, "") {
-                            app.set_props(&ids, json!({"strokeSides": v}));
-                            ui.close();
-                        }
+        }
+        let advanced = Rect::from_min_size(pos2(weight_rect.right() + 8.0, align_rect.top()), vec2(24.0, 24.0));
+        let advanced_btn = property_icon_response(ui, advanced, 2, tr("Advanced stroke"), false, true);
+        let frame = egui::Frame::popup(ui.style())
+            .inner_margin(0)
+            .corner_radius(13)
+            .fill(if t.dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel })
+            .stroke(Stroke::NONE);
+        egui::Popup::menu(&advanced_btn)
+            .width(240.0)
+            .frame(frame)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| stroke_settings_panel(app, ui, doc, sel));
+        let sides = Rect::from_min_size(pos2(controls.right() - 32.0, align_rect.top()), vec2(24.0, 24.0));
+        let sides_btn = property_icon_response(ui, sides, 3, tr("Individual strokes"), false, sided);
+        if sided {
+            let current = common(doc, sel, |n| n.stroke.sides);
+            let selected = match current {
+                Some(None) => Some(0),
+                Some(Some([top, 0.0, 0.0, 0.0])) if top > 0.0 => Some(1),
+                Some(Some([0.0, 0.0, bottom, 0.0])) if bottom > 0.0 => Some(2),
+                Some(Some([0.0, 0.0, 0.0, left])) if left > 0.0 => Some(3),
+                Some(Some([0.0, right, 0.0, 0.0])) if right > 0.0 => Some(4),
+                Some(Some(_)) => Some(5),
+                None => None,
+            };
+            let frame = egui::Frame::popup(ui.style())
+                .inner_margin(egui::Margin { left: 0, right: 0, top: 8, bottom: 7 })
+                .corner_radius(13)
+                .fill(if t.dark { Color32::from_rgb(0x1e, 0x1e, 0x1e) } else { t.panel })
+                .stroke(Stroke::NONE);
+            egui::Popup::menu(&sides_btn).width(150.0).frame(frame).style(menu_style).show(|ui| {
+                ui.set_width(150.0);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let w = weight.unwrap_or(1.0);
+                for (index, label, value) in [
+                    (0, tr("All"), Value::Null),
+                    (1, tr("Top"), json!([w, 0.0, 0.0, 0.0])),
+                    (2, tr("Bottom"), json!([0.0, 0.0, w, 0.0])),
+                    (3, tr("Left"), json!([0.0, 0.0, 0.0, w])),
+                    (4, tr("Right"), json!([0.0, w, 0.0, 0.0])),
+                ] {
+                    if stroke_side_menu_row(ui, label, index, selected == Some(index)) {
+                        app.set_props(&ids, json!({"strokeSides": value}));
+                        ui.close();
                     }
-                });
-            }
-            let adv_id = Id::new("stroke_adv");
-            let open = ui.data(|d| d.get_temp::<bool>(adv_id)).unwrap_or(false);
-            if icons::button(ui, Icon::Dots, 24.0, open, tr("Advanced stroke")).clicked() {
-                ui.data_mut(|d| d.insert_temp(adv_id, !open));
-            }
-        });
+                }
+                let (separator, _) = ui.allocate_exact_size(vec2(150.0, 8.0), Sense::hover());
+                ui.painter().line_segment(
+                    [pos2(separator.left(), separator.bottom() - 1.5), pos2(separator.right(), separator.bottom() - 1.5)],
+                    Stroke::new(1.0, if t.dark { Color32::from_rgb(0x38, 0x38, 0x38) } else { t.border }),
+                );
+                ui.add_space(8.0);
+                if stroke_side_menu_row(ui, tr("Custom"), 5, selected == Some(5)) {
+                    app.set_props(&ids, json!({"strokeSides": [w, w, w, w]}));
+                    ui.close();
+                }
+            });
+        }
         // Per-side weights, two to a row (like the corner radii) so a bound variable's name fits:
         // each side binds to a number variable on its own.
         if let Some(sides) = common(doc, sel, |n| n.stroke.sides).flatten() {
@@ -1205,10 +1402,291 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
                 });
             }
         }
-        if ui.data(|d| d.get_temp::<bool>(Id::new("stroke_adv"))).unwrap_or(false) {
-            stroke_settings(app, ui, doc, sel);
+    }
+    if !empty {
+        ui.add_space(12.0);
+    }
+}
+
+fn stroke_side_menu_row(ui: &mut Ui, label: &str, index: usize, selected: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(150.0, 24.0), Sense::click());
+    a11y::menu_item(&response, label, "", Some(selected));
+    a11y::own_focus(&response);
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect.shrink2(vec2(4.0, 0.0)), CornerRadius::same(5), t.hover);
+    }
+    let color = t.text;
+    if index < 5 {
+        if selected {
+            icons::paint_stroke_side(
+                ui.painter(),
+                Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(8.992507, 8.487045)),
+                0,
+                color,
+            );
+        }
+        let icon_size = if index == 0 {
+            vec2(12.0, 12.0)
+        } else if index < 3 {
+            vec2(12.0, 11.0)
+        } else {
+            vec2(11.0, 12.0)
+        };
+        let icon = Rect::from_center_size(pos2(rect.left() + 44.0, rect.center().y), icon_size);
+        if index == 0 {
+            icons::paint_property(ui.painter(), icon, 3, color);
+        } else {
+            icons::paint_stroke_side(ui.painter(), icon, index, color);
+        }
+        ui.painter().text(pos2(rect.left() + 60.0, rect.center().y), Align2::LEFT_CENTER, label, regular(11.0), color);
+    } else {
+        let icon = Rect::from_center_size(pos2(rect.left() + 24.0, rect.center().y), vec2(12.0, 12.0));
+        icons::paint_property(ui.painter(), icon, 2, color);
+        ui.painter().text(pos2(rect.left() + 40.0, rect.center().y), Align2::LEFT_CENTER, label, regular(11.0), color);
+    }
+    response.clicked()
+}
+
+/// Compact floating editor opened from the advanced stroke button.
+fn stroke_settings_panel(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+    let ids = sel.to_vec();
+    let t = Tokens::get(ui.ctx());
+    let dark = t.dark;
+    let bg = if dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel };
+    let raised = if dark { Color32::from_rgb(0x38, 0x38, 0x38) } else { t.field };
+    let border = if dark { Color32::from_rgb(0x44, 0x44, 0x44) } else { t.border };
+    let secondary = if dark { Color32::from_white_alpha(178) } else { t.text_secondary };
+    let (panel, _) = ui.allocate_exact_size(vec2(240.0, 224.0), Sense::hover());
+    let p = ui.painter().clone();
+    p.line_segment([pos2(panel.left(), panel.top() + 39.5), pos2(panel.right(), panel.top() + 39.5)], Stroke::new(1.0, raised));
+    p.text(pos2(panel.left() + 16.0, panel.top() + 20.0), Align2::LEFT_CENTER, tr("Stroke settings"), semibold(11.0), t.text);
+    let close = Rect::from_min_size(pos2(panel.right() - 32.0, panel.top() + 8.0), vec2(24.0, 24.0));
+    let close_response = ui.interact(close, ui.id().with("stroke_settings_close"), Sense::click()).tip(tr("Close"));
+    if close_response.hovered() {
+        p.rect_filled(close, CornerRadius::same(5), t.hover);
+    }
+    icons::paint_colorpicker(&p, Rect::from_center_size(close.center(), vec2(10.01, 10.01)), 9, t.icon);
+    if close_response.clicked() {
+        ui.close();
+    }
+
+    let tab_id = Id::new("stroke_settings_tab");
+    let mut tab = ui.data(|d| d.get_temp::<usize>(tab_id)).unwrap_or(0);
+    let tabs = Rect::from_min_size(pos2(panel.left() + 16.0, panel.top() + 52.0), vec2(208.0, 24.0));
+    p.rect_filled(tabs, CornerRadius::same(5), raised);
+    for (i, label) in [tr("Basic"), tr("Dynamic"), tr("Brush")].iter().enumerate() {
+        let x0 = tabs.left() + i as f32 * tabs.width() / 3.0;
+        let x1 = tabs.left() + (i + 1) as f32 * tabs.width() / 3.0;
+        let rect = Rect::from_min_max(pos2(x0, tabs.top()), pos2(x1, tabs.bottom()));
+        let response = ui.interact(rect, ui.id().with(("stroke_settings_tab", i)), Sense::click());
+        if response.clicked() {
+            tab = i;
+            ui.data_mut(|d| d.insert_temp(tab_id, tab));
+        }
+        if tab == i {
+            p.rect_filled(rect.shrink(2.0), CornerRadius::same(4), bg);
+        } else if response.hovered() {
+            p.rect_filled(rect.shrink(2.0), CornerRadius::same(4), t.hover);
+        }
+        p.text(rect.center(), Align2::CENTER_CENTER, label, regular(11.0), if tab == i { t.text } else { secondary });
+    }
+
+    if tab != 0 {
+        let body = Rect::from_min_max(pos2(panel.left(), panel.top() + 76.0), panel.max);
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+        egui::ScrollArea::vertical().max_height(148.0).show(&mut child, |ui| {
+            if tab == 1 {
+                stroke_settings(app, ui, doc, sel);
+            } else {
+                let brush = common(doc, sel, |n| n.stroke.brush.clone());
+                brush_row(app, ui, &ids, brush, 208.0);
+            }
+        });
+        return;
+    }
+
+    let stroke = common(doc, sel, |n| n.stroke.clone());
+    let content_y = panel.top() + 84.0;
+    let field_x = panel.left() + 96.0;
+    let field = |ui: &mut Ui, row: usize, width: f32, id: &'static str| {
+        let rect = Rect::from_min_size(pos2(field_x, content_y + row as f32 * 32.0 + 4.0), vec2(width, 24.0));
+        ui.interact(rect, ui.id().with(id), Sense::click())
+    };
+    for (i, label) in [tr("Style"), tr("Width profile"), tr("Join|stroke"), tr("Miter angle")].iter().enumerate() {
+        p.text(pos2(panel.left() + 16.0, content_y + i as f32 * 32.0 + 16.0), Align2::LEFT_CENTER, label, regular(11.0), secondary);
+    }
+
+    let dashed = stroke.as_ref().is_some_and(|s| !s.dashes.is_empty());
+    let style = field(ui, 0, 128.0, "stroke_settings_style");
+    p.rect_filled(style.rect, CornerRadius::same(5), bg);
+    p.rect_stroke(style.rect, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    let sy = style.rect.center().y;
+    if dashed {
+        for dx in [0.0, 6.0, 12.0] {
+            p.line_segment([pos2(style.rect.left() + 10.0 + dx, sy), pos2(style.rect.left() + 13.0 + dx, sy)], Stroke::new(1.0, t.text));
+        }
+    } else {
+        p.line_segment([pos2(style.rect.left() + 10.0, sy), pos2(style.rect.left() + 24.0, sy)], Stroke::new(1.0, t.text));
+    }
+    p.text(pos2(style.rect.left() + 32.0, sy), Align2::LEFT_CENTER, if dashed { tr("Dash") } else { tr("Solid") }, regular(11.0), t.text);
+    icons::paint_colorpicker(&p, Rect::from_center_size(pos2(style.rect.right() - 13.0, sy), vec2(5.0, 3.0)), 7, t.icon);
+    menu_popup(&style).show(|ui| {
+        for (label, value) in [(tr("Solid"), false), (tr("Dash"), true)] {
+            if menu_item(ui, label, "") {
+                let weight = stroke.as_ref().map_or(1.0, |s| s.weight.max(1.0));
+                app.set_props(&ids, json!({"dashes": if value { vec![weight * 4.0, weight * 4.0] } else { vec![] }}));
+                ui.close();
+            }
+        }
+    });
+
+    let profile = stroke.as_ref().and_then(|s| s.profile().cloned());
+    let profile_btn = field(ui, 1, 96.0, "stroke_settings_profile");
+    p.rect_filled(profile_btn.rect, CornerRadius::same(5), bg);
+    p.rect_stroke(profile_btn.rect, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    profile_art(
+        &p,
+        Rect::from_center_size(pos2(profile_btn.rect.left() + 39.0, profile_btn.rect.center().y), vec2(62.0, 4.0)),
+        profile.as_ref(),
+        t.text,
+    );
+    icons::paint_colorpicker(
+        &p,
+        Rect::from_center_size(pos2(profile_btn.rect.right() - 13.0, profile_btn.rect.center().y), vec2(5.0, 3.0)),
+        7,
+        t.icon,
+    );
+    menu_popup(&profile_btn).show(|ui| {
+        for preset in WidthPreset::ALL {
+            let prof = preset.profile();
+            let art = |pt: &egui::Painter, r: Rect, col: Color32| {
+                profile_art(pt, Rect::from_center_size(pos2(r.right() - 40.0, r.center().y), vec2(62.0, 8.0)), prof.as_ref(), col);
+            };
+            if menu_item_with(ui, tr(preset.label()), "", 72.0, art) {
+                app.run("stroke.widthProfile", json!({"ids": ids, "preset": preset.id()}));
+                ui.close();
+            }
+        }
+    });
+    let flip_rect = Rect::from_min_size(pos2(field_x + 104.0, profile_btn.rect.top()), vec2(24.0, 24.0));
+    let flip = ui.interact(flip_rect, ui.id().with("stroke_settings_flip"), Sense::click()).tip(tr("Flip width profile"));
+    let flip_col = if profile.is_some() { t.icon } else { secondary };
+    // Two opposing tapered ends with a central axis.
+    p.line_segment(
+        [pos2(flip_rect.center().x, flip_rect.top() + 6.0), pos2(flip_rect.center().x, flip_rect.bottom() - 6.0)],
+        Stroke::new(1.0, flip_col),
+    );
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            pos2(flip_rect.left() + 6.0, flip_rect.center().y - 4.0),
+            pos2(flip_rect.left() + 6.0, flip_rect.center().y + 4.0),
+            pos2(flip_rect.center().x - 3.0, flip_rect.center().y),
+        ],
+        flip_col,
+        Stroke::NONE,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            pos2(flip_rect.right() - 6.0, flip_rect.center().y - 4.0),
+            pos2(flip_rect.right() - 6.0, flip_rect.center().y + 4.0),
+            pos2(flip_rect.center().x + 3.0, flip_rect.center().y),
+        ],
+        flip_col,
+        Stroke::NONE,
+    ));
+    if flip.clicked()
+        && let Some(profile) = profile
+    {
+        let points: Vec<Value> =
+            profile.points.iter().rev().map(|q| figcraft_engine::cmd::props::width_point_json(&WidthPoint { t: 1.0 - q.t, ..*q })).collect();
+        app.run("stroke.widthProfile", json!({"ids": ids, "points": points}));
+    }
+
+    let join = stroke.as_ref().map(|s| s.join);
+    let join_group = Rect::from_min_size(pos2(field_x, content_y + 68.0), vec2(128.0, 24.0));
+    p.rect_filled(join_group, CornerRadius::same(5), raised);
+    for (i, value) in StrokeJoin::ALL.iter().enumerate() {
+        let x0 = join_group.left() + i as f32 * join_group.width() / 3.0;
+        let x1 = join_group.left() + (i + 1) as f32 * join_group.width() / 3.0;
+        let rect = Rect::from_min_max(pos2(x0, join_group.top()), pos2(x1, join_group.bottom()));
+        let response = ui.interact(rect, ui.id().with(("stroke_settings_join", i)), Sense::click()).tip(join_label(*value));
+        if join == Some(*value) {
+            p.rect_filled(rect.shrink(2.0), CornerRadius::same(4), bg);
+        } else if response.hovered() {
+            p.rect_filled(rect.shrink(2.0), CornerRadius::same(4), t.hover);
+        }
+        let col = if join == Some(*value) { t.text } else { secondary };
+        let a = rect.center() - vec2(5.0, 5.0);
+        let b = rect.center() + vec2(5.0, 5.0);
+        let corner = match value {
+            StrokeJoin::Miter => pos2(b.x, a.y),
+            StrokeJoin::Bevel => pos2(b.x - 4.0, a.y),
+            StrokeJoin::Round => pos2(b.x - 2.0, a.y + 1.0),
+        };
+        p.line_segment([pos2(a.x, a.y), corner], Stroke::new(1.0, col));
+        p.line_segment([corner, pos2(b.x, b.y)], Stroke::new(1.0, col));
+        if response.clicked() {
+            app.set_props(&ids, json!({"strokeJoin": value}));
         }
     }
+
+    let angle_rect = Rect::from_min_size(pos2(field_x, content_y + 100.0), vec2(128.0, 24.0));
+    let mut angle_ui = ui.new_child(egui::UiBuilder::new().max_rect(angle_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let angle = stroke.as_ref().map(|s| (s.miter_angle() * 100.0).round() / 100.0);
+    let edit = widgets::number_field(&mut angle_ui, Id::new("stroke_settings_miter"), Lead::Text("∟"), angle, "°", 128.0, 1.0);
+    app.field(&ids, "miterAngle", edit, |v| json!(v));
+}
+
+fn paint_section_header(ui: &mut Ui, title: &str, dim: bool, fills: bool) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(
+        pos2(rect.left() + 16.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        semibold(11.0),
+        if dim { t.text_secondary } else { t.text },
+    );
+    let mut picked = None;
+    for (index, x, tip) in [(0, rect.right() - 60.0, tr("Styles")), (1, rect.right() - 32.0, if fills { tr("Add fill") } else { tr("Add stroke") })] {
+        let button = Rect::from_min_size(pos2(x, rect.top() + 8.0), vec2(24.0, 24.0));
+        let response = ui.interact(button, ui.id().with(("paint_header", fills, index)), Sense::click()).tip(tip);
+        if response.hovered() {
+            ui.painter().rect_filled(button, CornerRadius::same(5), t.hover);
+        }
+        let icon = Rect::from_center_size(button.center(), vec2(12.0, 12.0));
+        if index == 0 {
+            icons::paint_property(ui.painter(), icon, 0, t.icon);
+        } else {
+            icons::paint_colorpicker(ui.painter(), icon, 8, t.icon);
+        }
+        if response.clicked() {
+            picked = Some(index);
+        }
+    }
+    picked
+}
+
+fn property_icon_response(ui: &mut Ui, rect: Rect, icon: usize, tip: &str, active: bool, enabled: bool) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.interact(rect, ui.id().with(("property_icon", icon, tip)), if enabled { Sense::click() } else { Sense::hover() }).tip(tip);
+    if active || (enabled && response.hovered()) {
+        ui.painter().rect_filled(rect, CornerRadius::same(5), if active { t.selected_row } else { t.hover });
+    }
+    icons::paint_property(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), vec2(12.0, 12.0)),
+        icon,
+        if !enabled {
+            t.icon_secondary
+        } else if active {
+            t.accent_text
+        } else {
+            t.icon
+        },
+    );
+    response
 }
 
 /// A width profile drawn as a filled band across `rect` (thickest point = full height); `None`
@@ -1527,90 +2005,105 @@ fn paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint,
     let t = Tokens::get(ui.ctx());
     let ids = ids.to_vec();
     let cmd = if fills { "fill.set" } else { "stroke.set" };
-    row_rect(ui, 32.0, |ui| {
-        let w = ui.available_width() - 56.0;
-        let (r, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
-        ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
-        let sw = Rect::from_min_size(pos2(r.min.x + 4.0, r.center().y - 8.0), vec2(16.0, 16.0));
-        widgets::paint_swatch(ui.painter(), sw, p);
-        let sresp = ui.interact(sw.expand(2.0), Id::new(("swatch", fills, i)), Sense::click());
-        if sresp.clicked() {
-            app.ui.picker = Some(crate::colorpicker::PickerTarget::Paint { fills, index: i, ids: ids.clone() });
-        }
-        let text_r = Rect::from_min_max(pos2(sw.max.x + 8.0, r.min.y), pos2(r.max.x - 52.0, r.max.y));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_r));
-        // The variable bound to this paint's colour (its key on the layers: `fill` or `fills/<i>/color`).
-        let bound = app.session.doc().ok().and_then(|d| {
-            let key = ids.first().and_then(|id| d.node(*id)).and_then(|n| figcraft_engine::cmd::lists::paint_binding_key(n, fills, i))?;
-            Some((key.to_string(), crate::variable_ui::bound_name(d, &ids, key)?))
-        });
-        match &p.kind {
-            PaintKind::Solid { .. } if bound.is_some() => {
-                let (key, name) = bound.clone().unwrap_or_default();
-                let chip = Rect::from_min_max(pos2(text_r.min.x - 2.0, r.min.y + 3.0), pos2(text_r.max.x - 20.0, r.max.y - 3.0));
-                child.painter().rect_filled(chip, CornerRadius::same(4), t.hover);
-                child.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                let short = name.rsplit('/').next().unwrap_or(&name).to_string();
-                child.painter().with_clip_rect(chip.shrink2(vec2(5.0, 0.0))).text(
-                    pos2(chip.min.x + 5.0, r.center().y),
-                    Align2::LEFT_CENTER,
-                    short,
-                    regular(11.0),
-                    t.text,
-                );
-                let _ = ui.interact(chip, Id::new(("bound_paint", fills, i)), Sense::hover()).on_hover_text(&name);
-                let dr = Rect::from_center_size(pos2(text_r.max.x - 9.0, r.center().y), vec2(18.0, 18.0));
-                let dresp = ui.interact(dr, Id::new(("detach_paint", fills, i)), Sense::click()).tip(tr("Detach variable"));
-                icons::paint(ui.painter(), dr.shrink(3.0), Icon::Detach, t.icon_secondary);
-                if dresp.clicked() {
-                    app.run("variable.bind", json!({"ids": ids, "field": key, "variable": null}));
-                }
-            }
-            PaintKind::Solid { color } => {
-                if let Some(h) =
-                    widgets::text_field_inline(&mut child, Id::new(("hex", fills, i)), &color.to_hex(), text_r.shrink2(vec2(0.0, 4.0)), regular(11.0))
-                    && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
-                {
-                    app.run(cmd, json!({"ids": ids, "index": i, "color": c.to_css_hex()}));
-                }
-            }
-            _ => {
-                child.painter().text(pos2(text_r.min.x, r.center().y), Align2::LEFT_CENTER, paint_label(p), regular(11.0), t.text);
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+    let r = Rect::from_min_size(pos2(row.left() + 16.0, row.top() + 4.0), vec2((row.width() - 84.0).max(64.0), 24.0));
+    ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
+    ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.field), egui::StrokeKind::Inside);
+    let sw = Rect::from_min_size(pos2(r.min.x + 4.0, r.center().y - 7.0), vec2(14.0, 14.0));
+    widgets::paint_swatch(ui.painter(), sw, p);
+    let sresp = ui.interact(sw.expand(2.0), Id::new(("swatch", fills, i)), Sense::click());
+    if sresp.clicked() {
+        app.ui.picker = Some(crate::colorpicker::PickerTarget::Paint { fills, index: i, ids: ids.clone() });
+    }
+    let text_r = Rect::from_min_max(pos2(sw.max.x + 5.0, r.min.y), pos2(r.max.x - 52.0, r.max.y));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_r));
+    // The variable bound to this paint's colour (its key on the layers: `fill` or `fills/<i>/color`).
+    let bound = app.session.doc().ok().and_then(|d| {
+        let key = ids.first().and_then(|id| d.node(*id)).and_then(|n| figcraft_engine::cmd::lists::paint_binding_key(n, fills, i))?;
+        Some((key.to_string(), crate::variable_ui::bound_name(d, &ids, key)?))
+    });
+    match &p.kind {
+        PaintKind::Solid { .. } if bound.is_some() => {
+            let (key, name) = bound.clone().unwrap_or_default();
+            let chip = Rect::from_min_max(pos2(text_r.min.x - 2.0, r.min.y + 3.0), pos2(text_r.max.x - 20.0, r.max.y - 3.0));
+            child.painter().rect_filled(chip, CornerRadius::same(4), t.hover);
+            child.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            let short = name.rsplit('/').next().unwrap_or(&name).to_string();
+            child.painter().with_clip_rect(chip.shrink2(vec2(5.0, 0.0))).text(
+                pos2(chip.min.x + 5.0, r.center().y),
+                Align2::LEFT_CENTER,
+                short,
+                regular(11.0),
+                t.text,
+            );
+            let _ = ui.interact(chip, Id::new(("bound_paint", fills, i)), Sense::hover()).on_hover_text(&name);
+            let dr = Rect::from_center_size(pos2(text_r.max.x - 9.0, r.center().y), vec2(18.0, 18.0));
+            let dresp = ui.interact(dr, Id::new(("detach_paint", fills, i)), Sense::click()).tip(tr("Detach variable"));
+            icons::paint(ui.painter(), dr.shrink(3.0), Icon::Detach, t.icon_secondary);
+            if dresp.clicked() {
+                app.run("variable.bind", json!({"ids": ids, "field": key, "variable": null}));
             }
         }
-        let op_r = Rect::from_min_max(pos2(r.max.x - 48.0, r.min.y), r.max);
-        ui.painter().line_segment([pos2(op_r.min.x, r.min.y + 4.0), pos2(op_r.min.x, r.max.y - 4.0)], Stroke::new(1.0, t.panel));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(op_r));
-        let e =
-            widgets::number_field(&mut child, Id::new(("pop", fills, i)), Lead::None, Some((f64::from(p.opacity) * 100.0).round()), "%", 48.0, 1.0);
-        match e {
-            Some(FieldEdit::Set(v)) => {
-                app.run(cmd, json!({"ids": ids, "index": i, "opacity": (v / 100.0).clamp(0.0, 1.0)}));
-            }
-            Some(FieldEdit::Scrub(v, done)) => {
-                let _ = app.session.begin_interaction("Opacity");
-                let _ = app.session.execute(cmd, &json!({"ids": ids, "index": i, "opacity": (v / 100.0).clamp(0.0, 1.0)}));
-                if done {
-                    let _ = app.session.commit_interaction();
-                }
-            }
-            None => {}
-        }
-        if icons::button(ui, if p.visible { Icon::Eye } else { Icon::EyeOff }, 24.0, false, tr("Toggle visibility")).clicked() {
-            app.run(cmd, json!({"ids": ids, "index": i, "visible": !p.visible}));
-        }
-        if icons::button(ui, Icon::Minus, 24.0, false, tr("Remove")).clicked()
-            && app.run(if fills { "fill.remove" } else { "stroke.remove" }, json!({"ids": ids, "index": i})).is_some()
-            && let Some(crate::colorpicker::PickerTarget::Paint { fills: f, index, .. }) = &mut app.ui.picker
-            && *f == fills
-        {
-            // An open colour picker keeps editing the paint it was on, or closes with it.
-            match removed_index(*index, i) {
-                Some(k) => *index = k,
-                None => app.ui.picker = None,
+        PaintKind::Solid { color } => {
+            if let Some(h) =
+                widgets::text_field_inline(&mut child, Id::new(("hex", fills, i)), &color.to_hex(), text_r.shrink2(vec2(0.0, 4.0)), regular(11.0))
+                && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+            {
+                app.run(cmd, json!({"ids": ids, "index": i, "color": c.to_css_hex()}));
             }
         }
-    })
+        _ => {
+            child.painter().text(pos2(text_r.min.x, r.center().y), Align2::LEFT_CENTER, paint_label(p), regular(11.0), t.text);
+        }
+    }
+    let op_r = Rect::from_min_max(pos2(r.max.x - 52.0, r.min.y), r.max);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(op_r));
+    let e = widgets::number_field(&mut child, Id::new(("pop", fills, i)), Lead::None, Some((f64::from(p.opacity) * 100.0).round()), "%", 48.0, 1.0);
+    match e {
+        Some(FieldEdit::Set(v)) => {
+            app.run(cmd, json!({"ids": ids, "index": i, "opacity": (v / 100.0).clamp(0.0, 1.0)}));
+        }
+        Some(FieldEdit::Scrub(v, done)) => {
+            let _ = app.session.begin_interaction("Opacity");
+            let _ = app.session.execute(cmd, &json!({"ids": ids, "index": i, "opacity": (v / 100.0).clamp(0.0, 1.0)}));
+            if done {
+                let _ = app.session.commit_interaction();
+            }
+        }
+        None => {}
+    }
+    ui.painter().line_segment([pos2(op_r.min.x, r.min.y + 1.0), pos2(op_r.min.x, r.max.y - 1.0)], Stroke::new(1.0, t.panel));
+    let eye = Rect::from_min_size(pos2(r.right() + 8.0, r.top()), vec2(24.0, 24.0));
+    let eye_response = ui.interact(eye, Id::new(("paint_visibility", fills, i)), Sense::click()).tip(tr("Toggle visibility"));
+    if eye_response.hovered() {
+        ui.painter().rect_filled(eye, CornerRadius::same(5), t.hover);
+    }
+    if p.visible {
+        icons::paint_appearance(ui.painter(), eye, AppearanceIcon::Visible, t.icon);
+    } else {
+        icons::paint(ui.painter(), Rect::from_center_size(eye.center(), vec2(14.0, 14.0)), Icon::EyeOff, t.icon);
+    }
+    if eye_response.clicked() {
+        app.run(cmd, json!({"ids": ids, "index": i, "visible": !p.visible}));
+    }
+    let remove = Rect::from_min_size(pos2(row.right() - 32.0, r.top()), vec2(24.0, 24.0));
+    let remove_response = ui.interact(remove, Id::new(("paint_remove", fills, i)), Sense::click()).tip(tr("Remove"));
+    if remove_response.hovered() {
+        ui.painter().rect_filled(remove, CornerRadius::same(5), t.hover);
+    }
+    icons::paint_colorpicker(ui.painter(), Rect::from_center_size(remove.center(), vec2(12.0, 1.0)), 13, t.icon);
+    if remove_response.clicked()
+        && app.run(if fills { "fill.remove" } else { "stroke.remove" }, json!({"ids": ids, "index": i})).is_some()
+        && let Some(crate::colorpicker::PickerTarget::Paint { fills: f, index, .. }) = &mut app.ui.picker
+        && *f == fills
+    {
+        // An open colour picker keeps editing the paint it was on, or closes with it.
+        match removed_index(*index, i) {
+            Some(k) => *index = k,
+            None => app.ui.picker = None,
+        }
+    }
+    row
 }
 
 /// A paint row's label (also what a drag of it carries): its colour, gradient kind or "Image".

@@ -245,7 +245,7 @@ const TABLE_ROW_H: f32 = 22.0;
 /// Room for the sort arrow in every header, so the columns don't move when the sort does.
 const SORT_ARROW_W: f32 = 12.0;
 /// Padding inside each cell, on each side.
-const CELL_PAD: f32 = 6.0;
+const CELL_PAD: f32 = 5.0;
 const NAME_MIN_W: f32 = 110.0;
 
 /// About ▸ Contributors: a name toggle, a sort, and the list as a grab bag or a table.

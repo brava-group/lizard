@@ -539,11 +539,10 @@ pub fn preview_banner(app: &mut FigApp, ctx: &egui::Context, canvas: Rect) {
         action
     });
     match action {
-        Some(true) => {
-            if app.run("version.restore", json!({"id": id})).is_some() {
-                app.toast(trf("Restored “{name}”", &[("name", &name)]));
-            }
+        Some(true) if app.run("version.restore", json!({"id": id})).is_some() => {
+            app.toast(trf("Restored “{name}”", &[("name", &name)]));
         }
+        Some(true) => {}
         Some(false) => {
             app.run("version.exitPreview", json!({}));
         }

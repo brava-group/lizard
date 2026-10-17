@@ -6,7 +6,7 @@ use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, Str
 use crate::a11y::{self, Tip};
 pub use crate::field_math::{Rel, Typed, eval, parse, stepped};
 use crate::i18n::tr;
-use crate::icons::{self, Icon};
+use crate::icons::{self, AppearanceIcon, Icon, LayoutIcon, PositionIcon};
 use crate::theme::{Tokens, regular, semibold};
 
 pub const ROW_H: f32 = 32.0;
@@ -19,6 +19,10 @@ pub const PAD: f32 = 16.0;
 pub enum Lead<'a> {
     Text(&'a str),
     Icon(Icon, &'a str),
+    PositionIcon(PositionIcon, &'a str),
+    LayoutIcon(LayoutIcon, &'a str),
+    AppearanceIcon(AppearanceIcon, &'a str),
+    PropertyIcon(usize, &'a str),
     None,
     /// No lead, only a name for screen readers (the label is beside the field).
     Named(&'a str),
@@ -31,7 +35,12 @@ impl Lead<'_> {
             Lead::Text("W") => tr("Width"),
             Lead::Text("H") => tr("Height"),
             Lead::Text(s) => s,
-            Lead::Icon(_, name) | Lead::Named(name) => name,
+            Lead::Icon(_, name)
+            | Lead::PositionIcon(_, name)
+            | Lead::LayoutIcon(_, name)
+            | Lead::AppearanceIcon(_, name)
+            | Lead::PropertyIcon(_, name)
+            | Lead::Named(name) => name,
             Lead::None => "",
         }
     }
@@ -163,7 +172,7 @@ pub fn number_field_mixed(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, s
 /// [`number_field`] that shows `empty` (dim) for no value instead of "Mixed" (e.g. "Auto"): there
 /// is no value to edit relative to, so `+4` is 4.
 pub fn number_field_or(ui: &mut Ui, id: Id, value: Option<f64>, empty: &str, width: f32, step: f64) -> Option<FieldEdit> {
-    number_field_impl(ui, id, Lead::None, value, "", width, step, None, empty).0?.settled()
+    number_field_impl(ui, id, Lead::None, value, "", width, step, None, empty, None).0?.settled()
 }
 
 /// [`number_field`] that can bind a variable: `binding` None = not bindable, `Some(None)` = shows
@@ -180,7 +189,24 @@ pub fn number_field_bindable(
     binding: Option<Option<&str>>,
     empty: &str,
 ) -> (Option<Edit>, Option<BindEvent>) {
-    number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty)
+    let (edit, bind, _) = number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty, None);
+    (edit, bind)
+}
+
+/// Number input with a sizing selector inside the same 24 pt field. The value retains the
+/// ordinary edit and label scrub behavior; the selector owns only the trailing part.
+pub fn number_field_with_sizing(
+    ui: &mut Ui,
+    id: Id,
+    lead: Lead,
+    value: Option<f64>,
+    width: f32,
+    binding: Option<Option<&str>>,
+    label: &str,
+) -> (Option<Edit>, Option<BindEvent>, egui::Response) {
+    let (edit, bind, selector) = number_field_impl(ui, id, lead, value, "", width, 1.0, binding, tr("Mixed"), Some(label));
+    let selector = selector.unwrap_or_else(|| ui.interact(Rect::NOTHING, id.with("sizing_fallback"), Sense::hover()));
+    (edit, bind, selector)
 }
 
 fn number_field_impl(
@@ -193,23 +219,27 @@ fn number_field_impl(
     step: f64,
     binding: Option<Option<&str>>,
     empty: &str,
-) -> (Option<Edit>, Option<BindEvent>) {
+    sizing: Option<&str>,
+) -> (Option<Edit>, Option<BindEvent>, Option<egui::Response>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
-    if let Some(Some(name)) = binding {
-        return (None, bound_field(ui, id, lead, rect, name));
-    }
     let mut out: Option<Edit> = None;
     let lead_w = match lead {
         Lead::None | Lead::Named(_) => 6.0,
         Lead::Text(s) => (12.0 + s.chars().count() as f32 * 7.0).max(24.0),
-        Lead::Icon(..) => 24.0,
+        Lead::Icon(..) | Lead::PositionIcon(..) | Lead::LayoutIcon(..) | Lead::AppearanceIcon(..) | Lead::PropertyIcon(..) => 24.0,
     };
     let lead_rect = Rect::from_min_size(rect.min, vec2(lead_w, FIELD_H));
-    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), rect.max);
+    let selector_x = sizing.map(|_| (rect.min.x + 56.0).min(rect.max.x - 24.0));
+    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), pos2(selector_x.unwrap_or(rect.max.x), rect.max.y));
+    if let Some(Some(name)) = binding {
+        let bind = bound_field(ui, id, lead, Rect::from_min_max(rect.min, edit_rect.max), name);
+        let selector = sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t));
+        return (None, bind, selector);
+    }
     let editing_id = id.with("editing");
     let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
-    let field_resp = ui.interact(edit_rect, id.with("field"), Sense::click());
+    let field_resp = ui.interact(edit_rect, id.with("field"), if sizing.is_some() { Sense::CLICK | Sense::DRAG } else { Sense::click() });
     a11y::number(&field_resp, lead.name(), value, suffix, empty);
     a11y::ring_around(ui, rect, &field_resp);
     // The label scrubs with the pointer; the keyboard stops at the value only.
@@ -228,6 +258,22 @@ fn number_field_impl(
         Lead::Icon(i, _) => {
             icons::paint(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(14.0, 14.0)), i, t.icon_secondary)
         }
+        Lead::PositionIcon(i, _) => icons::paint_position(
+            ui.painter(),
+            Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)),
+            i,
+            t.icon_secondary,
+            t.text_tertiary,
+        ),
+        Lead::LayoutIcon(i, _) => {
+            icons::paint_layout(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)), i, t.icon_secondary)
+        }
+        Lead::AppearanceIcon(i, _) => {
+            icons::paint_appearance(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)), i, t.icon_secondary)
+        }
+        Lead::PropertyIcon(i, _) => {
+            icons::paint_property(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(12.0, 12.0)), i, t.icon_secondary)
+        }
         Lead::None | Lead::Named(_) => {}
     }
     if lead_resp.hovered() || lead_resp.dragged() {
@@ -235,6 +281,14 @@ fn number_field_impl(
     }
     if let Some(edit) = scrub(ui, id, &lead_resp, value, step) {
         out = Some(Edit::All(edit));
+    }
+    if sizing.is_some() && editing.is_none() {
+        if field_resp.hovered() || field_resp.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if let Some(edit) = scrub(ui, id, &field_resp, value, step) {
+            out = Some(Edit::All(edit));
+        }
     }
     let (key_step, key_big) = key_steps(ui.ctx(), suffix, step);
     // The keyboard is on the field (also in a window that isn't in front: keys reach one only
@@ -347,12 +401,12 @@ fn number_field_impl(
                 None => empty.to_string(),
             };
             let col = if value.is_some() { t.text } else { t.text_secondary };
-            ui.painter().text(pos2(edit_rect.min.x, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), col);
+            ui.painter().with_clip_rect(edit_rect).text(pos2(edit_rect.min.x, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), col);
         }
     }
     // The variable button shows while the pointer is over a bindable field.
     let mut bind = None;
-    if binding.is_some() && ui.data(|d| d.get_temp::<String>(editing_id)).is_none() {
+    if binding.is_some() && sizing.is_none() && ui.data(|d| d.get_temp::<String>(editing_id)).is_none() {
         let br = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, 18.0));
         let bresp = ui.interact(br, id.with("bind"), Sense::click());
         if bresp.has_focus() || rect.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN))) {
@@ -366,7 +420,22 @@ fn number_field_impl(
             bind = Some(BindEvent::Open(rect.left_bottom()));
         }
     }
-    (out, bind)
+    let selector = sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t));
+    (out, bind, selector)
+}
+
+fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, t: Tokens) -> egui::Response {
+    let rect = Rect::from_min_max(pos2(start_x, field.min.y), field.max);
+    let response = ui.interact(rect, id.with("sizing"), Sense::click());
+    let hovered = field.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN)));
+    if hovered || response.has_focus() {
+        ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
+        icons::paint(ui.painter(), Rect::from_center_size(pos2(field.max.x - 12.0, field.center().y), vec2(24.0, 24.0)), Icon::Chevron, t.icon);
+    } else {
+        let text = elide(ui, label, (rect.width() - 8.0).max(0.0));
+        ui.painter().with_clip_rect(rect).text(pos2(rect.max.x - 8.0, rect.center().y), Align2::RIGHT_CENTER, text, regular(11.0), t.text);
+    }
+    response
 }
 
 /// A field bound to a variable: the lead, then the variable's name in a chip; the chip opens the
@@ -388,6 +457,43 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
         }
         Lead::Icon(i, _) => {
             icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(14.0, 14.0)), i, t.icon_secondary);
+            24.0
+        }
+        Lead::PositionIcon(i, _) => {
+            icons::paint_position(
+                ui.painter(),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                i,
+                t.icon_secondary,
+                t.text_tertiary,
+            );
+            24.0
+        }
+        Lead::LayoutIcon(i, _) => {
+            icons::paint_layout(
+                ui.painter(),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                i,
+                t.icon_secondary,
+            );
+            24.0
+        }
+        Lead::AppearanceIcon(i, _) => {
+            icons::paint_appearance(
+                ui.painter(),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                i,
+                t.icon_secondary,
+            );
+            24.0
+        }
+        Lead::PropertyIcon(i, _) => {
+            icons::paint_property(
+                ui.painter(),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(12.0, 12.0)),
+                i,
+                t.icon_secondary,
+            );
             24.0
         }
     };
@@ -787,11 +893,16 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
         }
-        icons::paint(ui.painter(), r.shrink(5.0), *icon, t.icon);
+        let glyph = Rect::from_center_size(r.center(), vec2(12.0, 12.0));
+        match icon {
+            Icon::Styles => icons::paint_property(ui.painter(), glyph, 0, t.icon),
+            Icon::Plus => icons::paint_colorpicker(ui.painter(), glyph, 8, t.icon),
+            _ => icons::paint(ui.painter(), r.shrink(5.0), *icon, t.icon),
+        }
         if resp.clicked() {
             out = Some(i);
         }
-        x -= 24.0;
+        x -= 28.0;
     }
     out
 }
@@ -909,17 +1020,32 @@ pub fn paint_name(paint: &figcraft_color::Paint) -> String {
 pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &figcraft_color::Paint) {
     let t = Tokens::get(painter.ctx());
     use figcraft_color::PaintKind;
-    let clip = painter.with_clip_rect(rect);
-    checker(&clip, rect, rect.width() / 4.0);
+    // A rectangular painter clip leaves the checkerboard and colour visible outside the
+    // rounded outline. Clip each painted region to the same rounded silhouette instead.
+    let rounded = swatch_outline(rect.shrink(0.5), 2.5);
+    let opaque_solid = matches!(&paint.kind, PaintKind::Solid { color } if paint.opacity >= 0.999 && color.a >= 0.999);
+    if !opaque_solid && !matches!(paint.kind, PaintKind::Image(_) | PaintKind::Pattern(_)) {
+        swatch_region(painter, &rounded, rect, Color32::WHITE);
+        let cell = rect.width() / 4.0;
+        for y in 0..(rect.height() / cell).ceil() as i32 {
+            for x in 0..4 {
+                if (x + y) % 2 != 0 {
+                    let square = Rect::from_min_size(pos2(rect.min.x + x as f32 * cell, rect.min.y + y as f32 * cell), vec2(cell, cell));
+                    swatch_region(painter, &rounded, square, Color32::from_gray(0xE6));
+                }
+            }
+        }
+    }
     match &paint.kind {
         PaintKind::Solid { color } => {
             // Left half opaque, right half with alpha (like Figma's swatches).
             let c = crate::theme::doc_c32(painter.ctx(), color.with_alpha(color.a * paint.opacity));
             let opaque = crate::theme::doc_c32(painter.ctx(), color.with_alpha(1.0));
-            clip.rect_filled(Rect::from_min_max(rect.min, pos2(rect.center().x, rect.max.y)), CornerRadius::ZERO, opaque);
-            clip.rect_filled(Rect::from_min_max(pos2(rect.center().x, rect.min.y), rect.max), CornerRadius::ZERO, c);
             if paint.opacity >= 0.999 && color.a >= 0.999 {
-                clip.rect_filled(rect, CornerRadius::ZERO, opaque);
+                swatch_region(painter, &rounded, rect, opaque);
+            } else {
+                swatch_region(painter, &rounded, Rect::from_min_max(rect.min, pos2(rect.center().x, rect.max.y)), opaque);
+                swatch_region(painter, &rounded, Rect::from_min_max(pos2(rect.center().x, rect.min.y), rect.max), c);
             }
         }
         PaintKind::Gradient(g) => {
@@ -928,16 +1054,77 @@ pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &figcraft_color:
                 let c = crate::theme::doc_c32(painter.ctx(), g.sample(i as f32 / (n - 1) as f32));
                 let x0 = rect.min.x + rect.width() * i as f32 / n as f32;
                 let x1 = rect.min.x + rect.width() * (i + 1) as f32 / n as f32;
-                clip.rect_filled(Rect::from_min_max(pos2(x0, rect.min.y), pos2(x1, rect.max.y)), CornerRadius::ZERO, c);
+                swatch_region(painter, &rounded, Rect::from_min_max(pos2(x0, rect.min.y), pos2(x1, rect.max.y)), c);
             }
         }
         PaintKind::Image(_) | PaintKind::Pattern(_) => {
             let icon = if matches!(paint.kind, PaintKind::Image(_)) { Icon::Image } else { Icon::ViewGrid };
-            clip.rect_filled(rect, CornerRadius::ZERO, Color32::from_gray(0xB3));
-            icons::paint(&clip, rect.shrink(2.0), icon, Color32::WHITE);
+            swatch_region(painter, &rounded, rect, Color32::from_gray(0xB3));
+            icons::paint(painter, rect.shrink(2.0), icon, Color32::WHITE);
         }
     }
-    painter.rect_stroke(rect, CornerRadius::same(2), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    painter.rect_stroke(rect, CornerRadius::same(3), Stroke::new(1.0, t.border), StrokeKind::Inside);
+}
+
+fn swatch_outline(rect: Rect, radius: f32) -> Vec<egui::Pos2> {
+    let mut points = Vec::with_capacity(28);
+    let corners = [
+        (pos2(rect.max.x - radius, rect.min.y + radius), -std::f32::consts::FRAC_PI_2),
+        (pos2(rect.max.x - radius, rect.max.y - radius), 0.0),
+        (pos2(rect.min.x + radius, rect.max.y - radius), std::f32::consts::FRAC_PI_2),
+        (pos2(rect.min.x + radius, rect.min.y + radius), std::f32::consts::PI),
+    ];
+    for (center, start) in corners {
+        for step in 0..=6 {
+            let angle = start + step as f32 * std::f32::consts::FRAC_PI_2 / 6.0;
+            points.push(center + vec2(angle.cos(), angle.sin()) * radius);
+        }
+    }
+    points
+}
+
+fn swatch_region(painter: &egui::Painter, silhouette: &[egui::Pos2], region: Rect, color: Color32) {
+    let mut polygon = silhouette.to_vec();
+    // Sutherland-Hodgman clipping keeps checker cells, split colours and gradient bands
+    // inside the rounded swatch without relying on a rectangular painter clip.
+    for edge in 0..4 {
+        let previous = std::mem::take(&mut polygon);
+        if previous.is_empty() {
+            return;
+        }
+        let inside = |p: egui::Pos2| match edge {
+            0 => p.x >= region.min.x,
+            1 => p.x <= region.max.x,
+            2 => p.y >= region.min.y,
+            _ => p.y <= region.max.y,
+        };
+        let intersect = |a: egui::Pos2, b: egui::Pos2| {
+            let (from, to, bound) = match edge {
+                0 => (a.x, b.x, region.min.x),
+                1 => (a.x, b.x, region.max.x),
+                2 => (a.y, b.y, region.min.y),
+                _ => (a.y, b.y, region.max.y),
+            };
+            let fraction = if (to - from).abs() > f32::EPSILON { (bound - from) / (to - from) } else { 0.0 };
+            a + (b - a) * fraction
+        };
+        let Some(&mut_a) = previous.last() else { return };
+        let mut a = mut_a;
+        for b in previous {
+            let a_inside = inside(a);
+            let b_inside = inside(b);
+            if a_inside != b_inside {
+                polygon.push(intersect(a, b));
+            }
+            if b_inside {
+                polygon.push(b);
+            }
+            a = b;
+        }
+    }
+    if polygon.len() >= 3 {
+        painter.add(egui::Shape::convex_polygon(polygon, color, Stroke::NONE));
+    }
 }
 
 /// A small checkbox with label.

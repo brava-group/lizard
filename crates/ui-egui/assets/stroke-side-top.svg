@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="12" height="11" viewBox="0 0 12 11" fill="#fff">
+  <path fill-rule="evenodd" d="M1 0h10a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V1a1 1 0 0 1 1-1Zm0 1v1h10V1H1Z"/>
+  <rect x="1" y="3.5" width="1" height="2" rx=".5"/><rect x="1" y="6.5" width="1" height="2" rx=".5"/>
+  <rect x="10" y="3.5" width="1" height="2" rx=".5"/><rect x="10" y="6.5" width="1" height="2" rx=".5"/>
+  <rect x="1" y="9.5" width="1.5" height="1" rx=".5"/><rect x="3.5" y="10" width="2" height="1" rx=".5"/>
+  <rect x="6.5" y="10" width="2" height="1" rx=".5"/><rect x="9.5" y="9.5" width="1.5" height="1" rx=".5"/>
+</svg>

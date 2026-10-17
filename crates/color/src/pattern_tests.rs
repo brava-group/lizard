@@ -22,6 +22,13 @@ fn cells_tile_grids_and_shifted_rows() {
     assert_eq!((c.size, c.origin, c.scale), ((45.0, 30.0), (30.0, 40.0), 2.0));
     p.align = PatternAlign::End;
     assert_eq!(p.cell(20.0, 10.0, 100.0, 100.0).unwrap().origin, (60.0, 80.0));
+    p.align_x = Some(PatternAlign::Start);
+    p.align_y = Some(PatternAlign::Center);
+    assert_eq!(p.cell(20.0, 10.0, 100.0, 100.0).unwrap().origin, (0.0, 40.0));
+    let json = serde_json::to_value(&p).unwrap();
+    assert_eq!(json["alignX"], "start");
+    assert_eq!(json["alignY"], "center");
+    assert_eq!(serde_json::from_value::<PatternPaint>(json).unwrap(), p);
 }
 
 #[test]

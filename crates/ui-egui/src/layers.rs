@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
-use crate::icons::{self, Icon};
+use crate::icons::{self, Icon, NavIcon};
 use crate::theme::{ACCENT, COMPONENT, Tokens, regular, semibold};
 use crate::{FigApp, LeftTab};
 
@@ -74,45 +74,63 @@ pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
     }
 }
 
-/// The slim icon rail at the far left: main menu, File, Assets, Variables.
+/// The slim icon rail at the far left: main menu, File, Agent, Assets, Variables.
 pub fn rail(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let r = ui.max_rect();
     let mut y = r.min.y + 8.0;
+    let ink = if t.dark { Color32::WHITE } else { t.icon };
     // Main menu (logo).
-    let lr = Rect::from_center_size(pos2(r.center().x, y + 16.0), vec2(36.0, 32.0));
+    let lr = Rect::from_min_size(pos2(r.min.x, y), vec2(r.width(), 32.0));
     let lresp = ui.interact(lr, ui.id().with("rail_menu"), Sense::click()).tip(tr("Main menu"));
     if lresp.hovered() || app.ui.main_menu {
-        ui.painter().rect_filled(lr, CornerRadius::same(6), t.hover);
+        ui.painter().rect_filled(Rect::from_center_size(lr.center(), vec2(32.0, 32.0)), CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), Rect::from_center_size(lr.center(), vec2(18.0, 18.0)), Icon::Logo, t.icon);
+    icons::paint_nav(ui.painter(), Rect::from_center_size(lr.center(), vec2(18.0, 20.0)), NavIcon::Logo, ink);
     if lresp.clicked() {
         app.ui.main_menu = !app.ui.main_menu;
     }
     if app.ui.main_menu {
         a11y::popup(&mut app.ui.nav, lresp.id, crate::menus::main_menu_id());
     }
-    y += 44.0;
-    ui.painter().line_segment([pos2(r.min.x + 18.0, y), pos2(r.max.x - 18.0, y)], Stroke::new(1.0, t.border));
-    y += 12.0;
-    let items =
-        [(Icon::Page, tr("File"), Some(LeftTab::File)), (Icon::Assets, tr("Assets"), Some(LeftTab::Assets)), (Icon::Styles, tr("Variables"), None)];
+    y += 32.0;
+    let separator = |ui: &Ui, y: f32| {
+        ui.painter().line_segment([pos2(r.center().x - 8.0, y + 8.0), pos2(r.center().x + 8.0, y + 8.0)], Stroke::new(1.0, t.border));
+    };
+    separator(ui, y);
+    y += 16.0;
+    let items = [
+        (NavIcon::File, tr("File"), Some(LeftTab::File)),
+        (NavIcon::Agent, tr("Agent"), None),
+        (NavIcon::Assets, tr("Assets"), Some(LeftTab::Assets)),
+        (NavIcon::Variables, tr("Variables"), None),
+    ];
     for (icon, label, tab) in items {
-        let ir = Rect::from_center_size(pos2(r.center().x, y + 14.0), vec2(36.0, 28.0));
-        let hit = Rect::from_min_max(pos2(r.min.x, y), pos2(r.max.x, y + 48.0));
-        let resp = ui.interact(hit, ui.id().with(("rail", label)), Sense::click()).tip(label);
+        if icon == NavIcon::Variables {
+            separator(ui, y);
+            y += 16.0;
+        }
+        let hit = Rect::from_min_size(pos2(r.min.x, y), vec2(r.width(), 40.0));
+        let ir = Rect::from_center_size(hit.center(), vec2(32.0, 32.0));
+        let sense = if icon == NavIcon::Agent { Sense::hover() } else { Sense::click() };
+        let resp = ui.interact(hit, ui.id().with(("rail", label)), sense).tip(label);
         let active = tab.is_some_and(|tb| tb == app.ui.left_tab && !app.ui.left_collapsed && !app.ui.versions.open);
         if tab.is_some() {
             a11y::tab(&resp, label, active);
         }
         if active {
-            ui.painter().rect_filled(ir, CornerRadius::same(6), t.selected_row);
+            let color = if t.dark { Color32::from_rgb(0x39, 0x43, 0x60) } else { t.selected_row };
+            ui.painter().rect_filled(ir, CornerRadius::same(5), color);
         } else if resp.hovered() {
-            ui.painter().rect_filled(ir, CornerRadius::same(6), t.hover);
+            ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
         }
-        icons::paint(ui.painter(), Rect::from_center_size(ir.center(), vec2(16.0, 16.0)), icon, if active { t.accent_text } else { t.icon });
-        let shown = crate::widgets::elide_font(ui, label, (r.width() - 6.0).max(0.0), regular(10.0));
-        ui.painter().text(pos2(r.center().x, y + 38.0), Align2::CENTER_CENTER, shown, regular(10.0), t.text);
+        let size = match icon {
+            NavIcon::File => vec2(10.0, 14.0),
+            NavIcon::Agent | NavIcon::Assets => vec2(14.0, 14.0),
+            NavIcon::Variables => vec2(12.0, 13.23847),
+            NavIcon::Logo => vec2(18.0, 20.0),
+        };
+        icons::paint_nav(ui.painter(), Rect::from_center_size(ir.center(), size), icon, if active { t.accent_text } else { ink });
         if resp.clicked() {
             match tab {
                 Some(tb) => {
@@ -126,11 +144,13 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
                     app.ui.versions = Default::default();
                 }
                 None => {
-                    app.ui.variables.get_or_insert_with(Default::default);
+                    if icon == NavIcon::Variables {
+                        app.ui.variables.get_or_insert_with(Default::default);
+                    }
                 }
             }
         }
-        y += 60.0;
+        y += 40.0;
     }
 }
 
@@ -138,6 +158,10 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
     if app.ui.versions.open {
         crate::versions::panel(app, ui);
         return;
+    }
+    if app.ui.left_tab == LeftTab::File {
+        // The file header, page rows and layer tree share edges without egui's default item gap.
+        ui.spacing_mut().item_spacing.y = 0.0;
     }
     let t = Tokens::get(ui.ctx());
     let full = ui.max_rect();
@@ -176,31 +200,32 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    let tresp = ui.interact(Rect::from_min_size(hr.min, vec2(w - 40.0, 40.0)), ui.id().with("pages_toggle"), Sense::click());
+    let tresp = ui.interact(Rect::from_min_size(hr.min, vec2((w - 56.0).max(0.0), 40.0)), ui.id().with("pages_toggle"), Sense::click());
     a11y::toggle(&tresp, tr("Pages"), app.ui.pages_open);
     ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Pages"), semibold(11.0), t.text);
     if tresp.clicked() {
         app.ui.pages_open = !app.ui.pages_open;
     }
-    let sr = Rect::from_center_size(pos2(hr.max.x - 50.0, hr.center().y), vec2(24.0, 24.0));
+    let sr = Rect::from_min_size(pos2(hr.max.x - 56.0, hr.center().y - 12.0), vec2(24.0, 24.0));
     let sresp = ui.interact(sr, ui.id().with("lsearch"), Sense::click()).tip(crate::shortcuts::tip(tr("Find"), "edit.findReplace"));
     if sresp.hovered() {
         ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), sr.shrink(5.0), Icon::Search, t.icon);
+    icons::paint(ui.painter(), Rect::from_center_size(sr.center(), vec2(18.0, 18.0)), Icon::Search, t.icon);
     if sresp.clicked() {
         app.ui.find = Some((String::new(), String::new()));
     }
-    let ar = Rect::from_center_size(pos2(hr.max.x - 22.0, hr.center().y), vec2(24.0, 24.0));
+    let ar = Rect::from_min_size(pos2(hr.max.x - 32.0, hr.center().y - 12.0), vec2(24.0, 24.0));
     let aresp = ui.interact(ar, ui.id().with("addpage"), Sense::click()).tip(tr("Add new page"));
     if aresp.hovered() {
         ui.painter().rect_filled(ar, CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), ar.shrink(5.0), Icon::Plus, t.icon);
+    icons::paint(ui.painter(), ar, Icon::Plus, t.icon);
     if aresp.clicked() {
         app.run("page.add", json!({}));
     }
     if !app.ui.pages_open {
+        crate::widgets::separator(ui);
         return;
     }
     let Ok(ds) = app.session.ds() else { return };
@@ -217,13 +242,14 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     // Pages are dragged up and down the list to reorder them.
     let mut reorder = crate::list_drag::ListDrag::in_order(ui, "pages");
     // A long list scrolls in its own area, so the layers keep their room below it.
-    let max_h = (ui.available_height() * 0.4).max(3.0 * ROW);
+    const PAGE_ROW: f32 = 32.0;
+    let max_h = (ui.available_height() * 0.4).max(3.0 * PAGE_ROW);
     let mut moved = egui::ScrollArea::vertical().id_salt("pages_list").max_height(max_h).show(ui, |ui| {
         for (k, (id, name, divider)) in pages.iter().cloned().enumerate() {
-            let (r, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click_and_drag());
+            let (r, resp) = ui.allocate_exact_size(vec2(w, PAGE_ROW), Sense::click_and_drag());
             reorder.row_by(&resp, k, r, || if divider { tr("Divider").to_string() } else { name.clone() });
             a11y::list_item(&resp, if divider { tr("Divider") } else { &name }, id == cur);
-            let r = r.shrink2(vec2(8.0, 0.0));
+            let r = r.shrink2(vec2(8.0, 4.0));
             a11y::ring_around(ui, r, &resp);
             let renaming = app.ui.rename_page.as_ref().is_some_and(|(i, _)| *i == id);
             if divider && !renaming {
@@ -244,7 +270,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
                 }
             }
             if renaming {
-                let tr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y + 4.0), pos2(r.max.x - 4.0, r.max.y - 4.0));
+                let tr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 4.0, r.max.y));
                 let start = ui.data_mut(|d| d.remove_temp::<bool>(page_rename_start_id())).unwrap_or(false);
                 let font = if id == cur { semibold(11.0) } else { regular(11.0) };
                 if let (Some(new), _) = crate::widgets::rename_field(ui, Id::new(("pagename", id)), &name, tr, font, start) {
@@ -252,7 +278,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
                 }
             } else if !divider {
                 let font = if id == cur { semibold(11.0) } else { regular(11.0) };
-                crate::bidi::paint_name(ui.painter(), pos2(r.min.x + 10.0, r.center().y), &name, font, t.text, r.width() - 14.0);
+                crate::bidi::paint_name(ui.painter(), pos2(r.min.x + 8.0, r.center().y), &name, font, t.text, r.width() - 12.0);
             }
             if resp.clicked() && !divider {
                 select = Some(id);
@@ -306,6 +332,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     {
         app.run("page.select", json!({"id": p}));
     }
+    ui.add_space(12.0);
     crate::widgets::separator(ui);
 }
 
@@ -543,16 +570,16 @@ fn rename_id(id: NodeId) -> Id {
     Id::new(("rename", id))
 }
 
-/// Left edge of a row's contents (disclosure triangle) in the row's inner rect `rr`.
+/// Left edge of a row's contents. Each tree level takes one 24-point column.
 fn row_x0(rr: Rect, depth: usize) -> f32 {
-    rr.min.x + 4.0 + depth as f32 * 16.0
+    rr.min.x + depth as f32 * 24.0
 }
 
 /// The name field of the row being renamed (row rect `r`): the new name once committed. The
 /// rename ends when the field lets go of the keyboard.
 fn rename_field(app: &mut FigApp, ui: &mut Ui, id: NodeId, depth: usize, name: &str, r: Rect) -> Option<String> {
-    let rr = r.shrink2(vec2(8.0, 0.0));
-    let rect = Rect::from_min_max(pos2(row_x0(rr, depth) + 32.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0));
+    let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), r.max);
+    let rect = Rect::from_min_max(pos2(row_x0(rr, depth) + 36.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0));
     let start = app.ui.rename.is_some_and(|x| x.start);
     let (out, open) = crate::widgets::rename_field(ui, rename_id(id), name, rect, regular(11.0), start);
     app.ui.rename = open.then_some(Rename { id, start: false });
@@ -685,6 +712,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     let mut refused = false;
     // Only the rows in view are laid out and drawn; the rest is empty scroll space.
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         let pitch = ROW + ui.spacing().item_spacing.y;
         let top = ui.max_rect().top();
         let total = rows.len() as f32 * pitch;
@@ -744,34 +772,47 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             a11y::tree_item(&resp, if n.name.is_empty() { tr(n.kind.label()) } else { &n.name }, &info);
             let in_selected = !selected && doc.ancestors(row.id).iter().any(|a| sel.contains(a));
             let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. });
-            let rr = r.shrink2(vec2(8.0, 0.0));
+            let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), r.max);
+            let hover_rect = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y + 4.0), pos2(r.max.x - 8.0, r.max.y - 4.0));
             a11y::ring_around(ui, rr, &resp);
             // Over the row, its eye and padlock included (they sit on top of it).
             let over = resp.contains_pointer();
+            let hover_brightness = if t.dark { 1.12 } else { 1.015 };
             if selected {
-                ui.painter().rect_filled(rr, CornerRadius::same(5), if is_comp { t.component_row } else { t.selected_row });
+                let base = if t.dark {
+                    Color32::from_rgb(0x39, 0x43, 0x60)
+                } else if is_comp {
+                    t.component_row
+                } else {
+                    t.selected_row
+                };
+                let fill = if over { base.gamma_multiply(hover_brightness) } else { base };
+                ui.painter().rect_filled(rr, CornerRadius::same(5), fill);
             } else if in_selected {
-                ui.painter().rect_filled(rr, CornerRadius::ZERO, t.selected_row_child);
-            } else if over || hover == Some(row.id) {
-                ui.painter().rect_stroke(
-                    rr,
-                    CornerRadius::same(5),
-                    Stroke::new(1.0, if is_comp { COMPONENT } else { ACCENT }),
-                    egui::StrokeKind::Inside,
-                );
+                let base = if t.dark { Color32::from_rgb(0x32, 0x39, 0x4D) } else { t.selected_row_child };
+                let fill = if over || hover == Some(row.id) { base.gamma_multiply(hover_brightness) } else { base };
+                ui.painter().rect_filled(rr, CornerRadius::ZERO, fill);
+            } else {
+                if over || hover == Some(row.id) {
+                    ui.painter().rect_filled(hover_rect, CornerRadius::same(5), t.hover);
+                }
             }
             if over {
                 hovered_row = Some(row.id);
             }
             let x0 = row_x0(rr, row.depth);
+            let layer_secondary = if t.dark { Color32::from_white_alpha(102) } else { t.icon_secondary };
             // Expand triangle.
             if row.has_kids {
-                let tri = Rect::from_center_size(pos2(x0 + 6.0, r.center().y), vec2(14.0, 14.0));
+                let tri = Rect::from_center_size(pos2(x0 + 4.0, r.center().y), vec2(16.0, 24.0));
                 let tresp = ui.interact(tri, ui.id().with(("tri", row.id)), Sense::click());
                 let open = app.ui.expanded.contains(&row.id);
                 a11y::button(&tresp, if open { tr("Collapse") } else { tr("Expand") });
-                icons::paint(ui.painter(), tri.shrink(1.0), if open { Icon::Chevron } else { Icon::ChevronRight }, t.icon_secondary);
+                let glyph = if open { icons::LayerIcon::ChevronDown } else { icons::LayerIcon::ChevronRight };
+                let size = if open { vec2(5.24, 3.12) } else { vec2(3.12, 5.24) };
+                icons::paint_layer(ui.painter(), Rect::from_center_size(tri.center(), size), glyph, if selected { t.text } else { layer_secondary });
                 if tresp.clicked() {
+                    clicked = Some((row.id, ui.input(|i| i.modifiers)));
                     if ui.input(|i| i.modifiers.alt) {
                         deep = Some((row.id, !open));
                     } else {
@@ -783,12 +824,32 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             let shown = n.visible && !row.dimmed;
             let icon_col = if is_comp || icon == Icon::Slot {
                 COMPONENT.gamma_multiply(if shown { 1.0 } else { 0.5 })
+            } else if selected {
+                t.text
             } else if shown {
-                t.icon
+                layer_secondary
             } else {
                 t.text_tertiary
             };
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(x0 + 22.0, r.center().y), vec2(14.0, 14.0)), icon, icon_col);
+            let icon_center = pos2(x0 + 20.0, r.center().y);
+            let absolute = n.child_layout.absolute && n.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.layout.is_some());
+            if absolute {
+                icons::paint_layer(ui.painter(), Rect::from_center_size(icon_center, vec2(16.0, 16.0)), icons::LayerIcon::Absolute, icon_col);
+            }
+            let layer_icon = match icon {
+                Icon::Frame => Some(icons::LayerIcon::Frame),
+                Icon::LayoutH => Some(icons::LayerIcon::LayoutH),
+                Icon::LayoutV => Some(icons::LayerIcon::LayoutV),
+                Icon::LayoutGrid => Some(icons::LayerIcon::LayoutGrid),
+                Icon::Text => Some(icons::LayerIcon::Text),
+                _ => None,
+            };
+            let glyph_rect = Rect::from_center_size(icon_center, vec2(10.0, 10.0));
+            if let Some(layer_icon) = layer_icon {
+                icons::paint_layer(ui.painter(), glyph_rect, layer_icon, icon_col);
+            } else {
+                icons::paint(ui.painter(), glyph_rect, icon, icon_col);
+            }
             let name_x = x0 + 36.0;
             if app.ui.rename.is_some_and(|rn| rn.id == row.id) {
                 if let Some(new) = rename_field(app, ui, row.id, row.depth, &n.name, r) {
@@ -802,13 +863,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 } else {
                     t.text_tertiary
                 };
-                let font = if doc.node(n.parent.unwrap_or(page)).is_some_and(|p| p.is_page())
-                    && (n.kind.is_frame_like() || matches!(n.kind, NodeKind::Section { .. }))
-                {
-                    semibold(11.0)
-                } else {
-                    regular(11.0)
-                };
+                let font = regular(11.0);
                 let name = if n.name.is_empty() { tr(n.kind.label()).to_string() } else { n.name.clone() };
                 // Room left of the lock and eye buttons.
                 let max_w = (rr.max.x - 56.0 - name_x).max(20.0);
@@ -827,8 +882,8 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             let locked = swept(true).unwrap_or(n.locked);
             let show_lock = over || locked || row.locked_above;
             let show_eye = over || hidden;
-            let er = Rect::from_center_size(pos2(rr.max.x - 14.0, r.center().y), vec2(20.0, 20.0));
-            let lr = Rect::from_center_size(pos2(rr.max.x - 36.0, r.center().y), vec2(20.0, 20.0));
+            let er = Rect::from_center_size(pos2(r.max.x - 20.0, r.center().y), vec2(20.0, 20.0));
+            let lr = Rect::from_center_size(pos2(r.max.x - 44.0, r.center().y), vec2(20.0, 20.0));
             if show_eye {
                 let eresp = ui.interact(er, ui.id().with(("eye", row.id)), Sense::click_and_drag());
                 a11y::toggle(&eresp, tr("Hidden"), hidden);

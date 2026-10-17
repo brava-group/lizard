@@ -49,6 +49,8 @@ pub struct Job {
 pub struct Done {
     /// The image, ready for a texture (converted off the UI thread).
     pub image: egui::ColorImage,
+    /// The document rendered, so a later preview cannot replace newer pixels.
+    pub doc: Arc<Document>,
     /// The view the image shows (the requested one snapped outwards to whole device pixels).
     pub view: View,
     pub ms: f64,
@@ -103,7 +105,7 @@ fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool) -> Option<
         mark_outside_srgb(&mut image, pix, job.doc.color_profile);
     }
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
-    Some(Done { image, view, ms, work, uid: job.uid, page: job.page, coarse, at: job.at })
+    Some(Done { image, doc: job.doc.clone(), view, ms, work, uid: job.uid, page: job.page, coarse, at: job.at })
 }
 
 /// `view` with [`PREVIEW_FACTOR`] times fewer pixels each way, showing at least the same area.
@@ -113,7 +115,7 @@ pub fn coarse_view(view: &View) -> View {
 }
 
 /// What the render thread keeps between jobs: the canvas image, the previews standing in for it
-/// while the zoom changes, and what the last full render drew and took.
+/// while the zoom changes, and how long the last full render took.
 pub struct Renders {
     full: Retained,
     preview: Retained,

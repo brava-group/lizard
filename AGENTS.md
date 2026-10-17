@@ -36,6 +36,10 @@ code.
   template, UI kit, preset library, font file or screenshot from Figma, Adobe, Avid, Autodesk or any
   other product, or from any source whose licence doesn't allow it.** This includes "lookalike"
   redraws of their icons. Breaking this rule is the worst thing you can do in this repo.
+- Exception requested on 2026-10-16: the [UI3 Icons](https://3icons.pages.dev/)
+  set may be used for FigCraft's interface controls. Its Figma Community source and the icon
+  package are credited in [`ATTRIBUTION.md`](ATTRIBUTION.md). This exception does not extend to
+  product logos, screenshots, templates or other third-party assets.
 - Every image, icon, font or other asset must be one of:
   - original work created for FigCraft by a contributor (licensed MIT OR Apache-2.0);
   - OSI open source;
@@ -44,8 +48,8 @@ code.
 - **Every asset file must have a row in [`ATTRIBUTION.md`](ATTRIBUTION.md)** (path, author, source,
   licence, notes). `cargo xtask assets` (part of `cargo xtask ci`) fails on any unlisted file under
   `assets/`, `docs/brand/` or `docs/images/`.
-- FigCraft's UI icons are drawn in code (`crates/ui-egui/src/icons.rs`) from simple primitives and
-  are original. Keep it that way: new icons are new code, designed from scratch.
+- FigCraft's UI controls use the credited UI3 vector icons. The brand mark and fallback icons in
+  `crates/ui-egui/src/icons.rs` are original code drawings.
 - The app icon is the owner's chameleon drawing, vectorised (`assets/app-icon/README.md`); `cargo xtask icon`
   renders the PNGs and `.ico` from `assets/app-icon/figcraft.svg`.
 - **Fonts live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), never in this

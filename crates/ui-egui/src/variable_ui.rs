@@ -277,6 +277,24 @@ pub fn number_field_mixed(
     number_field_edit(app, ui, ids, field, id, value, width, tr("Mixed"), lead, suffix)
 }
 
+/// A bindable dimension value with a sizing mode selector sharing its 24 pt field.
+pub fn dimension_field(
+    app: &mut FigApp,
+    ui: &mut Ui,
+    ids: &[NodeId],
+    field: &str,
+    id: Id,
+    lead: Lead,
+    value: Option<f64>,
+    width: f32,
+    sizing_label: &str,
+) -> (Option<Edit>, egui::Response) {
+    let name = app.session.doc().ok().and_then(|d| bound_name(d, ids, field));
+    let (edit, ev, selector) = widgets::number_field_with_sizing(ui, id, lead, value, width, Some(name.as_deref()), sizing_label);
+    handle(app, ui, ids, field, VariableType::Number, ev);
+    (edit, selector)
+}
+
 fn number_field_edit(
     app: &mut FigApp,
     ui: &mut Ui,

@@ -26,6 +26,9 @@ base64 = { workspace = true }
 image = { workspace = true }
 egui_extras = { workspace = true }
 web-time = "1.1.0"
+lyon_tessellation = "1.0"
+usvg = "0.48"
+tiny-skia = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }

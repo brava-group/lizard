@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 # The plugin SDK and examples build for wasm32 in a workspace of their own (`cargo xtask plugins`).
-exclude = ["plugins"]
+exclude = ["plugins", "vendor/egui-winit"]
 # default-members = ["crates/*", "apps/figcraft", "apps/figcraft-cli", "xtask"]
 
 [workspace.package]
@@ -116,3 +116,7 @@ codegen-units = 1
 debug = false
 strip = true
 panic = "abort"
+
+# egui-winit 0.36.2 drops Cmd+V when the clipboard holds only an image.
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }

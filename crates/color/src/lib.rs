@@ -478,6 +478,12 @@ pub struct PatternPaint {
     pub spacing: (f64, f64),
     #[serde(default)]
     pub align: PatternAlign,
+    /// Horizontal alignment; old paints fall back to `align`.
+    #[serde(default, rename = "alignX", alias = "align_x", skip_serializing_if = "Option::is_none")]
+    pub align_x: Option<PatternAlign>,
+    /// Vertical alignment; old paints fall back to `align`.
+    #[serde(default, rename = "alignY", alias = "align_y", skip_serializing_if = "Option::is_none")]
+    pub align_y: Option<PatternAlign>,
 }
 
 /// One repeating cell of a pattern in the filled box's space: `size` repeats from `origin`, and
@@ -497,7 +503,7 @@ impl PatternPaint {
     pub const MAX_SPACING: f64 = 10_000.0;
 
     pub fn new(source: u64) -> Self {
-        Self { source, tile: PatternTile::Grid, scale: 1.0, spacing: (0.0, 0.0), align: PatternAlign::Start }
+        Self { source, tile: PatternTile::Grid, scale: 1.0, spacing: (0.0, 0.0), align: PatternAlign::Start, align_x: None, align_y: None }
     }
 
     /// The cell for a `tw`×`th` source filling a `w`×`h` box; `None` when the source has no size.
@@ -516,13 +522,15 @@ impl PatternPaint {
             PatternTile::HorizontalHex => ((px, py * 2.0), vec![(0.0, 0.0), (px / 2.0, py), (-px / 2.0, py)]),
             PatternTile::VerticalHex => ((px * 2.0, py), vec![(0.0, 0.0), (px, py / 2.0), (px, -py / 2.0)]),
         };
-        let k = match self.align {
+        let factor = |align| match align {
             PatternAlign::Start => 0.0,
             PatternAlign::Center => 0.5,
             PatternAlign::End => 1.0,
         };
+        let kx = factor(self.align_x.unwrap_or(self.align));
+        let ky = factor(self.align_y.unwrap_or(self.align));
         let fin = |v: f64| if v.is_finite() { v } else { 0.0 };
-        Some(PatternCell { size, origin: (fin((w - tw) * k), fin((h - th) * k)), tiles, scale })
+        Some(PatternCell { size, origin: (fin((w - tw) * kx), fin((h - th) * ky)), tiles, scale })
     }
 }
 

@@ -80,6 +80,8 @@ mod canvas_drag_tests;
 #[cfg(test)]
 mod canvas_fixes_tests;
 #[cfg(test)]
+mod clipboard_image_tests;
+#[cfg(test)]
 mod colorpicker_selection_tests;
 #[cfg(test)]
 mod comments_tests;
@@ -1319,14 +1321,10 @@ impl FigApp {
         let hidden = self.session.ds().map(|d| d.view.ui_hidden).unwrap_or(false);
         tabs::tab_bar(self, ui);
         if !hidden {
-            egui::Panel::left("left_rail")
-                .exact_size(56.0)
-                .resizable(false)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Navigation, i18n::tr("Sidebar"));
-                    layers::rail(self, ui)
-                });
+            egui::Panel::left("left_rail").exact_size(49.0).resizable(false).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+                a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Navigation, i18n::tr("Sidebar"));
+                layers::rail(self, ui)
+            });
         }
         // The panels are as wide as asked, less in a window too small for them and the canvas.
         let left_open = !hidden && !self.ui.left_collapsed;
@@ -1335,35 +1333,27 @@ impl FigApp {
         let mut edges: Vec<(&str, f32, f32, f32)> = Vec::new();
         if left_open {
             edges.push(("left", ui.available_rect_before_wrap().min.x + left_w, left_w, 1.0));
-            egui::Panel::left("left_panel")
-                .resizable(false)
-                .exact_size(left_w)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    let label = match self.ui.left_tab {
-                        _ if self.ui.versions.open => i18n::tr("Version history"),
-                        LeftTab::File => i18n::tr("Layers"),
-                        LeftTab::Assets => i18n::tr("Assets"),
-                    };
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
-                    layers::left_panel(self, ui)
-                });
+            egui::Panel::left("left_panel").resizable(false).exact_size(left_w).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+                let label = match self.ui.left_tab {
+                    _ if self.ui.versions.open => i18n::tr("Version history"),
+                    LeftTab::File => i18n::tr("Layers"),
+                    LeftTab::Assets => i18n::tr("Assets"),
+                };
+                a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
+                layers::left_panel(self, ui)
+            });
         }
         if !hidden {
             edges.push(("right", ui.available_rect_before_wrap().max.x - right_w, right_w, -1.0));
-            egui::Panel::right("right_panel")
-                .resizable(false)
-                .exact_size(right_w)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    let label = match self.ui.right_tab {
-                        RightTab::Design => i18n::tr("Design"),
-                        RightTab::Prototype => i18n::tr("Prototype"),
-                        RightTab::Inspect => i18n::tr("Dev Mode"),
-                    };
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Properties, egui::accesskit::Role::Pane, label);
-                    right::right_panel(self, ui)
-                });
+            egui::Panel::right("right_panel").resizable(false).exact_size(right_w).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+                let label = match self.ui.right_tab {
+                    RightTab::Design => i18n::tr("Design"),
+                    RightTab::Prototype => i18n::tr("Prototype"),
+                    RightTab::Inspect => i18n::tr("Dev Mode"),
+                };
+                a11y::region(&mut self.ui.nav, ui, a11y::Region::Properties, egui::accesskit::Role::Pane, label);
+                right::right_panel(self, ui)
+            });
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             let worker = self.worker.take();
@@ -1518,6 +1508,7 @@ impl FigApp {
                 "quality": if self.canvas.tex_coarse { "preview" } else { "refined" },
                 "previewLatencyMs": self.canvas.preview_latency_ms,
                 "refineLatencyMs": self.canvas.refine_latency_ms,
+                "dragMode": "render",
             },
             "live": live::inspect(self),
             "window": self.windows.current,

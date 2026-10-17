@@ -567,11 +567,8 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     };
     action = action.or(chosen);
     match action {
-        Some(Action::Open(path)) => {
-            if app.run("file.open", json!({"path": path})).is_some() {
-                app.ui.home = false;
-            }
-        }
+        Some(Action::Open(path)) if app.run("file.open", json!({"path": path})).is_some() => app.ui.home = false,
+        Some(Action::Open(_)) => {}
         Some(Action::Reveal(path)) => app.services.reveal_path(Path::new(&path)),
         Some(Action::Remove(path)) => {
             app.run("file.openRecent", json!({"remove": path}));

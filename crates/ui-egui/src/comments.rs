@@ -939,11 +939,10 @@ pub fn thread(app: &mut FigApp, ctx: &egui::Context, id: u64, anchor: Pos2, boun
             }
         }
         // It closes: an open thread reads itself again.
-        Some(Act::MarkUnread) => {
-            if app.run("comment.markRead", json!({"id": id, "read": false})).is_some() {
-                app.ui.comments.close();
-            }
+        Some(Act::MarkUnread) if app.run("comment.markRead", json!({"id": id, "read": false})).is_some() => {
+            app.ui.comments.close();
         }
+        Some(Act::MarkUnread) => {}
         Some(Act::Run(cmd, p)) => {
             let thread_deleted = cmd == "comment.delete" && p.get("reply").is_none();
             if app.run(cmd, p).is_some() {

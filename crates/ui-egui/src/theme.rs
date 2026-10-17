@@ -121,7 +121,7 @@ impl Tokens {
             success: Color32::from_rgb(0x14, 0xAE, 0x5C),
             warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
             guide: Color32::from_rgb(0xF2, 0x48, 0x22),
-            tab_bar: Color32::from_rgb(0x1E, 0x1E, 0x1E),
+            tab_bar: Color32::from_rgb(0x3A, 0x3B, 0x40),
             tab_active: Color32::from_rgb(0x2C, 0x2C, 0x2C),
             shadow: Color32::from_black_alpha(90),
             menu: Color32::from_rgb(0x1E, 0x1E, 0x1E),
@@ -226,29 +226,30 @@ pub fn on_dark<R>(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     r
 }
 
-/// UI fonts: Inter (from the craft-fonts build input) when present, else egui's defaults; with
-/// `system`, also system faces for scripts those lack (Hebrew, joined Arabic) so names in them show,
+/// UI fonts: Inter from the optional craft-fonts build input or the system when available. With
+/// `system`, also system faces for scripts Inter lacks (Hebrew, joined Arabic) so names in them show,
 /// and faces for the CJK scripts in `cjk` ([`crate::cjk`]).
 pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     let mut fonts = FontDefinitions::default();
     let find = |family: &str, style: &str| figcraft_text::CRAFT_FONTS.iter().find(|f| f.family == family && f.style == style).map(|f| f.bytes);
-    let regular = find("Inter", "Regular");
-    let semibold = find("Inter", "SemiBold").or_else(|| find("Inter", "Bold"));
-    if let Some(r) = regular {
-        fonts.font_data.insert("inter".into(), Arc::new(FontData::from_static(r)));
+    let regular =
+        find("Inter", "Regular").map(FontData::from_static).or_else(|| figcraft_text::find_face("Inter", "Regular").map(|face| font_data(&face)));
+    let semibold = find("Inter", "SemiBold")
+        .or_else(|| find("Inter", "Bold"))
+        .map(FontData::from_static)
+        .or_else(|| figcraft_text::find_face("Inter", "SemiBold").or_else(|| figcraft_text::find_face("Inter", "Bold")).map(|face| font_data(&face)));
+    if let Some(regular) = regular {
+        fonts.font_data.insert("inter".into(), Arc::new(regular));
         if let Some(list) = fonts.families.get_mut(&FontFamily::Proportional) {
             list.insert(0, "inter".into());
         }
     }
-    let sb_name = if let Some(sb) = semibold {
-        fonts.font_data.insert("inter-semibold".into(), Arc::new(FontData::from_static(sb)));
-        "inter-semibold"
-    } else {
-        "inter"
-    };
-    let mut semi: Vec<String> = Vec::new();
-    if fonts.font_data.contains_key(sb_name) {
-        semi.push(sb_name.into());
+    let mut semi = Vec::new();
+    if let Some(semibold) = semibold {
+        fonts.font_data.insert("inter-semibold".into(), Arc::new(semibold));
+        semi.push("inter-semibold".into());
+    } else if fonts.font_data.contains_key("inter") {
+        semi.push("inter".into());
     }
     semi.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
     fonts.families.insert(FontFamily::Name("semibold".into()), semi);
@@ -330,4 +331,25 @@ pub fn set_doc_profile(ctx: &Context, profile: figcraft_color::ColorProfile) {
 pub fn doc_c32(ctx: &Context, c: figcraft_color::Color) -> Color32 {
     let conv = ctx.data(|d| d.get_temp::<figcraft_color::ProfileConversion>(screen_conversion_id()));
     c32(conv.map_or(c, |k| k.apply(c)))
+}
+
+#[cfg(test)]
+mod ui_font_tests {
+    use super::*;
+
+    #[test]
+    fn available_ui_fonts_render_antialiased_glyphs() {
+        let ctx = Context::default();
+        install_fonts(&ctx, false, 0);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.label("Ag 123");
+        });
+        output.textures_delta.clear();
+        ctx.fonts(|fonts| {
+            let defs = fonts.definitions();
+            assert!(!defs.families[&FontFamily::Proportional].is_empty());
+            assert!(!defs.families[&FontFamily::Name("semibold".into())].is_empty());
+            assert!(fonts.image().pixels.iter().any(|p| (1..255).contains(&p.a())));
+        });
+    }
 }

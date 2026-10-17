@@ -50,6 +50,7 @@ fn a_drag_shows_on_the_canvas_while_it_moves() {
     }
     assert!(!Arc::ptr_eq(&before, &u.app.session.ds().unwrap().doc), "the drag moved the layer");
     assert!(u.app.canvas.render_work.is_some(), "renders finished during the drag are shown");
+    assert!(!u.app.canvas.tex_coarse, "the moved layer stays at the canvas's full resolution");
     // Held still: the same move each frame keeps the preview, and the canvas settles.
     let held = u.app.session.ds().unwrap().doc.clone();
     // Frames until the last render lands (slow machines take a while): a drag held still makes

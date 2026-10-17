@@ -50,6 +50,9 @@ const GROUPS: &[Group] = &[
     Group { key: "comment", name: tr_noop("Comment"), tools: &[(ToolId::Comment, Icon::Comment)] },
 ];
 
+const MODE_CELL: f32 = 30.0;
+const MODE_SEGMENT_WIDTH: f32 = 4.0 * MODE_CELL + 4.0;
+
 fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
     ui.data(|d| d.get_temp::<u8>(egui::Id::new(("tb_last", key)))).and_then(|i| ToolId::ALL.get(i as usize).copied()).unwrap_or(default)
 }
@@ -74,7 +77,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
     let cell = 32.0;
     let gap = 4.0;
-    let width = GROUPS.len() as f32 * (cell + 4.0) + 4.0 * 10.0 + 2.0 * (cell + 4.0) + 16.0 + 4.0 * 34.0 + 24.0;
+    let width = 8.0 + GROUPS.len() as f32 * (cell + gap) + 4.0 * 10.0 + 2.0 * (cell + 4.0) + 8.0 + MODE_SEGMENT_WIDTH + 8.0;
     let rect = pill(ui, &mut app.ui.nav, canvas, width, &t);
     let current = app.session.tool.tool;
     let mut x = rect.min.x + 8.0;
@@ -111,7 +114,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             if cresp.hovered() {
                 ui.painter().rect_filled(cr, CornerRadius::same(4), t.hover);
             }
-            icons::paint(ui.painter(), Rect::from_center_size(cr.center(), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
+            icons::paint(ui.painter(), Rect::from_center_size(cr.center(), vec2(24.0, 24.0)), Icon::Chevron, t.icon_secondary);
             if cresp.clicked() {
                 app.ui.tool_flyout = if app.ui.tool_flyout == Some(g.key) { None } else { Some(g.key) };
             }
@@ -132,7 +135,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
         }
-        icons::paint(ui.painter(), r.shrink(7.0), icon, t.icon);
+        icons::paint(ui.painter(), r.shrink(6.0), icon, t.icon);
         if resp.clicked() {
             if id == "actions" {
                 app.ui.palette = Some(String::new());
@@ -146,26 +149,41 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     divider(ui, &t, x, cy);
     x += 8.0;
     // Mode switcher: Draw · Design · Prototype · Inspect (code).
-    let modes = [(Icon::Pencil, tr("Draw")), (Icon::Frame, tr("Design")), (Icon::Prototype, tr("Prototype")), (Icon::Code, tr("Inspect"))];
+    let modes = [tr("Draw"), tr("Design"), tr("Prototype"), tr("Inspect")];
     let active = match app.ui.right_tab {
         crate::RightTab::Design if app.session.tool.tool == ToolId::Pencil => 0,
         crate::RightTab::Design => 1,
         crate::RightTab::Prototype => 2,
         crate::RightTab::Inspect => 3,
     };
-    let seg = Rect::from_min_size(pos2(x, cy - 18.0), vec2(4.0 * 34.0 + 4.0, 36.0));
+    let seg = Rect::from_min_size(pos2(x, cy - 16.0), vec2(MODE_SEGMENT_WIDTH, 32.0));
     ui.painter().rect_filled(seg, CornerRadius::same(8), t.field);
-    for (i, (icon, tip)) in modes.iter().enumerate() {
-        let r = Rect::from_min_size(pos2(seg.min.x + 2.0 + i as f32 * 34.0, seg.min.y + 2.0), vec2(34.0, 32.0));
-        let resp = ui.interact(r, ui.id().with(("mode", i)), Sense::click()).on_hover_text(*tip);
-        a11y::toggle(&resp, tip, i == active);
-        if i == active {
-            ui.painter().rect_filled(r, CornerRadius::same(6), t.panel);
-            ui.painter().rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r, CornerRadius::same(6), t.hover);
+    let mode_rect = |i: f32| Rect::from_min_size(pos2(seg.min.x + 2.0 + i * MODE_CELL, seg.min.y + 1.0), vec2(MODE_CELL, MODE_CELL));
+    let responses =
+        std::array::from_fn::<_, 4, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).on_hover_text(modes[i]));
+    for (i, resp) in responses.iter().enumerate() {
+        if resp.hovered() && i != active {
+            let r = mode_rect(i as f32);
+            ui.painter().rect_filled(r, CornerRadius::same(6), t.pressed);
         }
-        icons::paint(ui.painter(), r.shrink(9.0), *icon, if i == active { t.accent_text } else { t.icon_secondary });
+    }
+    // One shared selected surface slides between the four radio options.
+    let selected = ui.ctx().animate_value_with_time(ui.id().with("mode_selected_position"), active as f32, 0.18);
+    let selected_rect = mode_rect(selected);
+    ui.painter().rect_filled(selected_rect, CornerRadius::same(6), t.panel);
+    ui.painter().rect_stroke(selected_rect, CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    if responses[active].hovered() {
+        ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(5), t.pressed);
+    }
+    for (i, (tip, resp)) in modes.iter().zip(responses.iter()).enumerate() {
+        let r = mode_rect(i as f32);
+        a11y::toggle(resp, tip, i == active);
+        icons::paint_mode(
+            ui.painter(),
+            Rect::from_center_size(r.center(), vec2(24.0, 24.0)),
+            i,
+            if i == active { t.accent_text } else { t.icon_secondary },
+        );
         if resp.clicked() {
             match i {
                 0 => {
@@ -358,7 +376,7 @@ fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Ic
         Color32::TRANSPARENT
     };
     ui.painter().rect_filled(r, CornerRadius::same(5), bg);
-    icons::paint(ui.painter(), r.shrink(7.0), icon, if active { Color32::WHITE } else { t.icon });
+    icons::paint(ui.painter(), r.shrink(6.0), icon, if active { Color32::WHITE } else { t.icon });
     resp
 }
 
