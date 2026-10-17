@@ -475,7 +475,7 @@ impl Session {
         let arr = arrangement(self, &sel).ok();
         let at = |p: Point| arr.as_ref().and_then(|a| a.region_at(p));
         let remove = ev.alt != self.tool.builder_remove;
-        self.tool.overlay.cursor = Cursor::Crosshair;
+        self.tool.overlay.cursor = Cursor::PaintBucket;
         let before = (self.tool.overlay.builder_regions.clone(), self.tool.overlay.builder_remove);
         match ev.kind {
             // While a gesture runs, the collected regions stay highlighted.

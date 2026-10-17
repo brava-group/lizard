@@ -11,6 +11,15 @@ use crate::icons::{self, Icon};
 /// A cursor FigCraft draws.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Glyph {
+    Arrow,
+    Move,
+    Crosshair,
+    Resize(f32),
+    Hand(bool),
+    Copy,
+    Zoom(bool),
+    Pencil,
+    PaintBucket,
     /// A curved double arrow about the direction (degrees, 0 = right, 90 = down) from the box's
     /// centre to the corner.
     Rotate(f32),
@@ -45,17 +54,19 @@ pub fn resize_icon(degrees: f64) -> CursorIcon {
 pub fn of(cursor: Cursor) -> Shown {
     use Shown::{Drawn, System};
     match cursor {
-        Cursor::Default => System(CursorIcon::Default),
-        Cursor::Crosshair => System(CursorIcon::Crosshair),
-        Cursor::Move => System(CursorIcon::Move),
-        Cursor::Resize(a) if a.is_finite() => System(resize_icon(a)),
+        Cursor::Default => Drawn(Glyph::Arrow),
+        Cursor::Move => Drawn(Glyph::Move),
+        Cursor::Crosshair => Drawn(Glyph::Crosshair),
+        Cursor::Resize(a) if a.is_finite() => Drawn(Glyph::Resize(a.rem_euclid(180.0) as f32)),
         Cursor::Resize(_) => System(CursorIcon::Default),
         Cursor::Rotate(a) => Drawn(Glyph::Rotate(if a.is_finite() { a.rem_euclid(360.0) as f32 } else { 0.0 })),
-        Cursor::Grab => System(CursorIcon::Grab),
-        Cursor::Grabbing => System(CursorIcon::Grabbing),
+        Cursor::Grab => Drawn(Glyph::Hand(false)),
+        Cursor::Grabbing => Drawn(Glyph::Hand(true)),
         Cursor::Text => System(CursorIcon::Text),
         Cursor::Pen(p) => Drawn(Glyph::Pen(p)),
-        Cursor::Copy => System(CursorIcon::Copy),
+        Cursor::Pencil => Drawn(Glyph::Pencil),
+        Cursor::PaintBucket => Drawn(Glyph::PaintBucket),
+        Cursor::Copy => Drawn(Glyph::Copy),
         Cursor::Pointer => System(CursorIcon::PointingHand),
         Cursor::Eyedropper => Drawn(Glyph::Eyedropper),
         Cursor::Comment => Drawn(Glyph::Comment),
@@ -68,8 +79,8 @@ pub fn of(cursor: Cursor) -> Shown {
 /// cursor.
 pub fn on_canvas(panning: bool, button_down: bool, zoom_out: Option<bool>, cursor: Cursor) -> Shown {
     match (panning, zoom_out) {
-        (true, _) => Shown::System(if button_down { CursorIcon::Grabbing } else { CursorIcon::Grab }),
-        (false, Some(out)) => Shown::System(if out { CursorIcon::ZoomOut } else { CursorIcon::ZoomIn }),
+        (true, _) => Shown::Drawn(Glyph::Hand(button_down)),
+        (false, Some(out)) => Shown::Drawn(Glyph::Zoom(out)),
         (false, None) => of(cursor),
     }
 }
@@ -107,6 +118,23 @@ impl Shown {
                 _ => "other",
             }
             .to_string(),
+            Shown::Drawn(Glyph::Arrow) => "default".into(),
+            Shown::Drawn(Glyph::Move) => "move".into(),
+            Shown::Drawn(Glyph::Crosshair) => "crosshair".into(),
+            Shown::Drawn(Glyph::Resize(a)) => match resize_icon(f64::from(a)) {
+                CursorIcon::ResizeHorizontal => "ew-resize",
+                CursorIcon::ResizeVertical => "ns-resize",
+                CursorIcon::ResizeNwSe => "nwse-resize",
+                _ => "nesw-resize",
+            }
+            .into(),
+            Shown::Drawn(Glyph::Hand(false)) => "grab".into(),
+            Shown::Drawn(Glyph::Hand(true)) => "grabbing".into(),
+            Shown::Drawn(Glyph::Copy) => "copy".into(),
+            Shown::Drawn(Glyph::Zoom(false)) => "zoom-in".into(),
+            Shown::Drawn(Glyph::Zoom(true)) => "zoom-out".into(),
+            Shown::Drawn(Glyph::Pencil) => "pencil".into(),
+            Shown::Drawn(Glyph::PaintBucket) => "paint-bucket".into(),
             Shown::Drawn(Glyph::Rotate(a)) => format!("rotate {}", a.round()),
             Shown::Drawn(Glyph::Pen(PenCursor::New)) => "pen".into(),
             Shown::Drawn(Glyph::Pen(PenCursor::Close)) => "pen-close".into(),
@@ -153,6 +181,47 @@ fn arc(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 /// Draw `glyph` with its hot spot at `at`.
 pub fn paint(painter: &Painter, at: Pos2, glyph: Glyph) {
     match glyph {
+        Glyph::Arrow | Glyph::Move => icon(painter, at - vec2(4.0, 2.0), Icon::Move),
+        Glyph::Crosshair => {
+            line(painter, &[at - vec2(8.0, 0.0), at + vec2(8.0, 0.0)]);
+            line(painter, &[at - vec2(0.0, 8.0), at + vec2(0.0, 8.0)]);
+        }
+        Glyph::Resize(degrees) => {
+            let angle = degrees.to_radians();
+            let dir = vec2(angle.cos(), angle.sin());
+            let side = vec2(-dir.y, dir.x);
+            let a = at - dir * 8.5;
+            let b = at + dir * 8.5;
+            line(painter, &[a, b]);
+            for (tip, inward) in [(a, dir), (b, -dir)] {
+                line(painter, &[tip + inward * 5.0 + side * 3.0, tip, tip + inward * 5.0 - side * 3.0]);
+            }
+        }
+        Glyph::Hand(closed) => {
+            icon(painter, at - vec2(8.0, 8.0), Icon::Hand);
+            if closed {
+                line(painter, &[at - vec2(4.0, 1.0), at + vec2(4.0, 1.0)]);
+            }
+        }
+        Glyph::Copy => {
+            icon(painter, at - vec2(4.0, 2.0), Icon::Move);
+            let badge = at + vec2(11.0, 12.0);
+            painter.circle_filled(badge, 5.5, EDGE);
+            painter.circle_stroke(badge, 5.5, Stroke::new(1.0, INK));
+            painter.line_segment([badge - vec2(2.5, 0.0), badge + vec2(2.5, 0.0)], Stroke::new(1.2, INK));
+            painter.line_segment([badge - vec2(0.0, 2.5), badge + vec2(0.0, 2.5)], Stroke::new(1.2, INK));
+        }
+        Glyph::Zoom(out) => {
+            painter.circle_stroke(at, 5.5, Stroke::new(3.5, EDGE));
+            painter.circle_stroke(at, 5.5, Stroke::new(1.5, INK));
+            line(painter, &[at + vec2(4.0, 4.0), at + vec2(10.0, 10.0)]);
+            painter.line_segment([at - vec2(2.5, 0.0), at + vec2(2.5, 0.0)], Stroke::new(1.3, INK));
+            if !out {
+                painter.line_segment([at - vec2(0.0, 2.5), at + vec2(0.0, 2.5)], Stroke::new(1.3, INK));
+            }
+        }
+        Glyph::Pencil => icon(painter, at - vec2(2.5, 13.5), Icon::Pencil),
+        Glyph::PaintBucket => icon(painter, at - vec2(7.5, 8.0), Icon::PaintBucket),
         Glyph::Rotate(degrees) => {
             // An arc bulging away from the box, through the pointer, with an arrowhead at each end.
             let (dir, r, half) = (degrees.to_radians(), 11.0, 0.8);

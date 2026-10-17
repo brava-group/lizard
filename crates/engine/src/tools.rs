@@ -213,6 +213,8 @@ pub enum Cursor {
     Pointer,
     Eyedropper,
     Comment,
+    Pencil,
+    PaintBucket,
     /// What the gesture is doing will be undone when it ends (an edit only a main component can
     /// make).
     NotAllowed,
@@ -238,11 +240,13 @@ impl ToolId {
         match self {
             ToolId::Hand => Cursor::Grab,
             ToolId::Pen => Cursor::Pen(PenCursor::New),
+            ToolId::Pencil => Cursor::Pencil,
+            ToolId::ShapeBuilder => Cursor::PaintBucket,
             ToolId::Comment => Cursor::Comment,
             ToolId::Eyedropper => Cursor::Eyedropper,
             ToolId::Move | ToolId::Scale => Cursor::Default,
-            // The other tools make something where they are pressed: shapes, frames, slices, pencil
-            // strokes, a new text (over a text the Text tool shows the I-beam instead).
+            // The other tools make something where they are pressed: shapes, frames, slices and a
+            // new text (over a text the Text tool shows the I-beam instead).
             _ => Cursor::Crosshair,
         }
     }

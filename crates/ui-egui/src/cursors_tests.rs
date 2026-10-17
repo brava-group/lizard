@@ -21,23 +21,25 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
     use Shown::{Drawn, System};
     // (engine cursor, what shows, its name in `ui.inspect`)
     let rows: Vec<(Cursor, Shown, &str)> = vec![
-        (Cursor::Default, System(CursorIcon::Default), "default"),
-        (Cursor::Crosshair, System(CursorIcon::Crosshair), "crosshair"),
-        (Cursor::Move, System(CursorIcon::Move), "move"),
-        (Cursor::Resize(0.0), System(CursorIcon::ResizeHorizontal), "ew-resize"),
-        (Cursor::Resize(90.0), System(CursorIcon::ResizeVertical), "ns-resize"),
-        (Cursor::Resize(45.0), System(CursorIcon::ResizeNwSe), "nwse-resize"),
-        (Cursor::Resize(135.0), System(CursorIcon::ResizeNeSw), "nesw-resize"),
+        (Cursor::Default, Drawn(Glyph::Arrow), "default"),
+        (Cursor::Crosshair, Drawn(Glyph::Crosshair), "crosshair"),
+        (Cursor::Move, Drawn(Glyph::Move), "move"),
+        (Cursor::Resize(0.0), Drawn(Glyph::Resize(0.0)), "ew-resize"),
+        (Cursor::Resize(90.0), Drawn(Glyph::Resize(90.0)), "ns-resize"),
+        (Cursor::Resize(45.0), Drawn(Glyph::Resize(45.0)), "nwse-resize"),
+        (Cursor::Resize(135.0), Drawn(Glyph::Resize(135.0)), "nesw-resize"),
         (Cursor::Rotate(45.0), Drawn(Glyph::Rotate(45.0)), "rotate 45"),
         (Cursor::Rotate(-45.0), Drawn(Glyph::Rotate(315.0)), "rotate 315"),
-        (Cursor::Grab, System(CursorIcon::Grab), "grab"),
-        (Cursor::Grabbing, System(CursorIcon::Grabbing), "grabbing"),
+        (Cursor::Grab, Drawn(Glyph::Hand(false)), "grab"),
+        (Cursor::Grabbing, Drawn(Glyph::Hand(true)), "grabbing"),
         (Cursor::Text, System(CursorIcon::Text), "text"),
         (Cursor::Pen(PenCursor::New), Drawn(Glyph::Pen(PenCursor::New)), "pen"),
         (Cursor::Pen(PenCursor::Close), Drawn(Glyph::Pen(PenCursor::Close)), "pen-close"),
         (Cursor::Pen(PenCursor::Add), Drawn(Glyph::Pen(PenCursor::Add)), "pen-add"),
         (Cursor::Pen(PenCursor::Bend), Drawn(Glyph::Pen(PenCursor::Bend)), "pen-bend"),
-        (Cursor::Copy, System(CursorIcon::Copy), "copy"),
+        (Cursor::Pencil, Drawn(Glyph::Pencil), "pencil"),
+        (Cursor::PaintBucket, Drawn(Glyph::PaintBucket), "paint-bucket"),
+        (Cursor::Copy, Drawn(Glyph::Copy), "copy"),
         (Cursor::Pointer, System(CursorIcon::PointingHand), "pointer"),
         (Cursor::Eyedropper, Drawn(Glyph::Eyedropper), "eyedropper"),
         (Cursor::Comment, Drawn(Glyph::Comment), "comment"),
@@ -85,15 +87,15 @@ fn resize_arrows_follow_the_angle_in_eighths() {
 
 #[test]
 fn panning_and_the_zoom_tool_come_before_the_tools_cursor() {
-    use Shown::System;
+    use Shown::Drawn;
     // (panning, a button down, zoom tool, tool cursor) → shown
     let rows = [
-        ((true, false, None, Cursor::Crosshair), System(CursorIcon::Grab)),
-        ((true, true, None, Cursor::Crosshair), System(CursorIcon::Grabbing)),
-        ((true, true, Some(false), Cursor::Default), System(CursorIcon::Grabbing)),
-        ((false, false, Some(false), Cursor::Crosshair), System(CursorIcon::ZoomIn)),
-        ((false, true, Some(true), Cursor::Default), System(CursorIcon::ZoomOut)),
-        ((false, true, None, Cursor::Copy), System(CursorIcon::Copy)),
+        ((true, false, None, Cursor::Crosshair), Drawn(Glyph::Hand(false))),
+        ((true, true, None, Cursor::Crosshair), Drawn(Glyph::Hand(true))),
+        ((true, true, Some(false), Cursor::Default), Drawn(Glyph::Hand(true))),
+        ((false, false, Some(false), Cursor::Crosshair), Drawn(Glyph::Zoom(false))),
+        ((false, true, Some(true), Cursor::Default), Drawn(Glyph::Zoom(true))),
+        ((false, true, None, Cursor::Copy), Drawn(Glyph::Copy)),
     ];
     for ((pan, down, zoom, cursor), want) in rows {
         assert_eq!(on_canvas(pan, down, zoom, cursor), want, "pan {pan}, down {down}, zoom {zoom:?}, {cursor:?}");
@@ -130,20 +132,22 @@ fn the_window_asks_for_the_cursor_of_the_tool_under_the_pointer() {
     // (tool, where, keys held, modifiers) → (system cursor, the canvas's cursor by name)
     type Row<'a> = (&'a str, Pos2, &'a [Key], Modifiers, CursorIcon, &'a str);
     let rows: Vec<Row> = vec![
-        ("move", empty, &[], no, CursorIcon::Default, "default"),
-        ("move", edge, &[], no, CursorIcon::ResizeHorizontal, "ew-resize"),
-        ("move", on, &[], alt, CursorIcon::Copy, "copy"),
-        ("hand", empty, &[], no, CursorIcon::Grab, "grab"),
-        ("rectangle", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
-        ("frame", on, &[], no, CursorIcon::Crosshair, "crosshair"),
-        ("slice", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
-        ("text", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
+        ("move", empty, &[], no, CursorIcon::None, "default"),
+        ("move", edge, &[], no, CursorIcon::None, "ew-resize"),
+        ("move", on, &[], alt, CursorIcon::None, "copy"),
+        ("hand", empty, &[], no, CursorIcon::None, "grab"),
+        ("rectangle", empty, &[], no, CursorIcon::None, "crosshair"),
+        ("frame", on, &[], no, CursorIcon::None, "crosshair"),
+        ("slice", empty, &[], no, CursorIcon::None, "crosshair"),
+        ("text", empty, &[], no, CursorIcon::None, "crosshair"),
         ("pen", empty, &[], no, CursorIcon::None, "pen"),
+        ("pencil", empty, &[], no, CursorIcon::None, "pencil"),
+        ("shapeBuilder", empty, &[], no, CursorIcon::None, "paint-bucket"),
         ("comment", empty, &[], no, CursorIcon::None, "comment"),
-        ("move", empty, &[Key::Space], no, CursorIcon::Grab, "grab"),
-        ("rectangle", empty, &[Key::Space], no, CursorIcon::Grab, "grab"),
-        ("move", empty, &[Key::Z], no, CursorIcon::ZoomIn, "zoom-in"),
-        ("move", empty, &[Key::Z], alt, CursorIcon::ZoomOut, "zoom-out"),
+        ("move", empty, &[Key::Space], no, CursorIcon::None, "grab"),
+        ("rectangle", empty, &[Key::Space], no, CursorIcon::None, "grab"),
+        ("move", empty, &[Key::Z], no, CursorIcon::None, "zoom-in"),
+        ("move", empty, &[Key::Z], alt, CursorIcon::None, "zoom-out"),
     ];
     for (tool, p, keys, mods, icon, name) in rows {
         u.app.run("tool.set", json!({"tool": tool}));
@@ -174,7 +178,7 @@ fn a_ruler_guide_keeps_its_own_cursor_under_the_tools() {
     assert!(u.app.canvas.cursor.is_none(), "the tool's cursor stays out of it");
     u.frame(vec![Event::PointerMoved(away)]);
     let out = u.frame_output(vec![Event::PointerMoved(away)]);
-    assert_eq!(out.platform_output.cursor_icon, CursorIcon::Default);
+    assert_eq!(out.platform_output.cursor_icon, CursorIcon::None);
     assert_eq!(u.app.canvas.cursor.map(Shown::name).as_deref(), Some("default"));
 }
 
