@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -16,7 +16,7 @@ since 2025). FigCraft renders the canvas on the CPU and presents it through wgpu
 | Effects (blurs, glass, noise) | GPU | CPU | in the above |
 | HiDPI / Retina | yes | yes (all) | — |
 | Wide-gamut display (Display P3) | yes, on capable displays | colours stored and exported in P3; the screen shows sRGB: eframe/egui-wgpu 0.36 configure an 8-bit sRGB surface with no colour space option, although wgpu 30 can present Display P3 or extended sRGB on Metal, DX12, Vulkan and WebGPU (see gaps #18). The colour picker warns about colours outside sRGB and View ▸ Soft-proof sRGB stripes them on the canvas | 2–5 |
-| Trackpad pinch zoom and two-finger pan | yes | yes (egui zoom delta, smooth scroll) | — |
+| Trackpad pinch zoom and two-finger pan | yes | yes (raw pixel-wheel zoom on macOS/browser; explicit pinch events and smooth pan) | — |
 | Pen tablet pressure (pencil, Figma Draw brushes) | yes (forum reports of regressions in 2025) | Windows pens (winit pointer input) and browser styluses that send touch events with a force (an Apple Pencil in Safari); the Pencil records it as the stroke's width profile. A mouse, macOS and Linux tablets and pens sending only pointer events in a browser report none: constant width | 1–3 |
 | Several windows / multi-monitor | yes (a window per file; presenter in its own window) | desktop: File ▸ New window, a tab's Open in new window or a tab dragged off the strip; each window has its own tabs, panels and canvas, draws only when it needs to and asks about unsaved changes when it closes. Only the main window has a screen-reader tree (eframe 0.36), so files stay tabs while a screen reader runs; positions aren't restored at the next start; the presenter stays inside its window; one window in the browser | 1–2 |
 | Screen readers | partial | AccessKit tree on desktop (names, roles, states), never tested with a real screen reader; none in the browser | 4–8 + human QA |
@@ -85,6 +85,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Canvas zoom reads each modified pixel-wheel event before egui smoothing on macOS/browser; explicit pinch events retain their existing gain. Browser/platform gesture equivalence beyond the measured Chrome/macOS case remains unverified. |
 | 2026-10-17 | minor | Smooth zoom keeps an existing full-resolution texture when it covers a nearby view; zoom-out that exposes uncached area renders a full-viewport half-resolution vector preview in the input frame. Stationary drags avoid redundant engine work. Cheap vector drags can finish in the pointer's UI frame with a 10 ms wait; heavier work remains off thread. The 142-node synthetic benchmark above records the practical limit; no GPU path or parity estimate change. |
 | 2026-10-16 | minor | Same-view canvas edits and live drags convert and upload damaged pixel regions only, even when intermediate positions were skipped. Cached text outlines and a direct copy of rendered patch rows reduce CPU work. Pan, zoom, soft proof and changes that cannot safely use a patch send full textures. `ui.inspect.canvas.uploadPixels` and `textureCurrent` make the transfer observable. The document and undo remain vector based; GPU canvas rendering is still missing. |
 | 2026-10-14 | minor | Copy and paste in the browser: the web build never wrote to the system clipboard, so Cmd+V after Cmd+C pasted whatever text the clipboard held before (as a text layer) instead of the copied layers. Copies (layers, Copy as SVG/CSS/text/PNG, links) now go out through egui's output, which eframe writes during the copy event (`web_clipboard_tests`). Numbers unchanged. |

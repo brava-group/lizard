@@ -238,7 +238,7 @@ impl Default for ViewState {
 }
 
 impl ViewState {
-    pub const MIN_ZOOM: f64 = 0.02;
+    pub const MIN_ZOOM: f64 = 1.0 / 64.0;
     pub const MAX_ZOOM: f64 = 256.0;
     /// Page coordinate at the viewport's top-left.
     pub fn origin(&self) -> (f64, f64) {
@@ -255,14 +255,17 @@ impl ViewState {
     }
     /// Fit a page rectangle into the viewport with margin.
     pub fn fit(&mut self, r: figcraft_geom::Rect, max_zoom: f64) {
+        self.fit_with_margins(r, max_zoom, 128.0, 128.0);
+    }
+    /// Fit with total horizontal and vertical breathing room in viewport points.
+    pub fn fit_with_margins(&mut self, r: figcraft_geom::Rect, max_zoom: f64, horizontal: f64, vertical: f64) {
         if !(r.width() > 0.0 || r.height() > 0.0) || !r.x0.is_finite() {
             self.cx = r.center().x;
             self.cy = r.center().y;
             return;
         }
-        let margin = 64.0;
-        let zx = (self.vw - margin * 2.0).max(50.0) / r.width().max(1e-6);
-        let zy = (self.vh - margin * 2.0).max(50.0) / r.height().max(1e-6);
+        let zx = (self.vw - horizontal).max(50.0) / r.width().max(1e-6);
+        let zy = (self.vh - vertical).max(50.0) / r.height().max(1e-6);
         self.zoom = zx.min(zy).clamp(Self::MIN_ZOOM, max_zoom);
         self.cx = r.center().x;
         self.cy = r.center().y;

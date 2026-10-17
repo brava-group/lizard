@@ -183,12 +183,62 @@ fn pointer_event(app: &FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers
     }
 }
 
-/// Ease continuous pinch/Cmd-scroll input in logarithmic zoom space. A factor such as 1.25
+/// Ease pinch and unmeasured wheel input in logarithmic zoom space. A factor such as 1.25
 /// becomes about 1.20, and its reciprocal stays reciprocal, so zoom in and out feel alike.
 const ZOOM_GESTURE_GAIN: f64 = 0.8;
 
 fn canvas_zoom_delta(raw: f32) -> Option<f64> {
     (raw.is_finite() && raw > 0.0).then(|| f64::from(raw).powf(ZOOM_GESTURE_GAIN))
+}
+
+/// The measured Chrome/macOS Design wheel path uses the unsmoothed per-event delta.
+/// `egui::Event::MouseWheel` already negates the browser's `WheelEvent.deltaY`.
+fn measured_wheel_zoom(delta_y: f32, modifiers: egui::Modifiers) -> Option<f64> {
+    let delta = f64::from(delta_y);
+    if !delta.is_finite() || delta == 0.0 {
+        return None;
+    }
+    let factor = if modifiers.ctrl {
+        4.0_f64.powf(delta / 100.0)
+    } else if modifiers.mac_cmd {
+        let magnitude = delta.abs();
+        let compressed = magnitude.min(30.0 * (magnitude / 30.0).cbrt());
+        0.995_f64.powf(-delta.signum() * compressed)
+    } else {
+        return None;
+    };
+    Some(factor.clamp(0.1, 10.0))
+}
+
+/// Bypass egui's delayed wheel smoothing for zoom; it would otherwise apply the
+/// same raw wheel event again in later frames. Keep explicit pinch/gesture zoom.
+fn canvas_zoom_events(input: &egui::InputState) -> Vec<f64> {
+    if let Some(touch) = input.multi_touch() {
+        return canvas_zoom_delta(touch.zoom_delta).into_iter().collect();
+    }
+    let mut factors = Vec::new();
+    for event in &input.raw.events {
+        match event {
+            egui::Event::Zoom(factor) => factors.extend(canvas_zoom_delta(*factor)),
+            egui::Event::MouseWheel { unit, delta, modifiers, .. } if modifiers.ctrl || modifiers.command || modifiers.mac_cmd => {
+                let factor = if *unit == egui::MouseWheelUnit::Point && delta.y != 0.0 && cfg!(any(target_os = "macos", target_arch = "wasm32")) {
+                    measured_wheel_zoom(delta.y, *modifiers)
+                } else {
+                    // Line/page wheel and other platforms have not been measured against the
+                    // browser recipe; retain the old gain without egui's delayed smoothing.
+                    let points = match unit {
+                        egui::MouseWheelUnit::Point => delta.x + delta.y,
+                        egui::MouseWheelUnit::Line => (delta.x + delta.y) * if cfg!(target_arch = "wasm32") { 8.0 } else { 40.0 },
+                        egui::MouseWheelUnit::Page => (delta.x + delta.y) * input.viewport_rect().height(),
+                    };
+                    canvas_zoom_delta((points / 200.0).exp())
+                };
+                factors.extend(factor);
+            }
+            _ => {}
+        }
+    }
+    factors
 }
 
 pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
@@ -584,8 +634,8 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         return true;
     }
     let ctx = ui.ctx().clone();
-    let (mods, scroll, zoom_delta, hover_pos, space) =
-        ctx.input(|i| (i.modifiers, i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos(), i.key_down(egui::Key::Space)));
+    let (mods, scroll, zoom_events, hover_pos, space) =
+        ctx.input(|i| (i.modifiers, i.smooth_scroll_delta, canvas_zoom_events(i), i.pointer.hover_pos(), i.key_down(egui::Key::Space)));
     let editing_text = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
     let typing_elsewhere = crate::a11y::field_focused(&ctx);
     app.canvas.space_pan = space && !editing_text && !typing_elsewhere;
@@ -637,11 +687,12 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     }
     // Zoom (pinch, Cmd/Ctrl+scroll) about the pointer; plain scroll pans.
     if resp.hovered() {
-        if (zoom_delta - 1.0).abs() > 1e-4 {
+        if !zoom_events.is_empty() {
             let anchor = app.to_page(pos);
-            if let (Some(delta), Ok(ds)) = (canvas_zoom_delta(zoom_delta), app.session.ds_mut()) {
-                let z = ds.view.zoom * delta;
-                ds.view.set_zoom_at(z, (anchor.x, anchor.y));
+            if let Ok(ds) = app.session.ds_mut() {
+                for factor in zoom_events {
+                    ds.view.set_zoom_at(ds.view.zoom * factor, (anchor.x, anchor.y));
+                }
                 ds.revision += 1;
                 app.canvas.last_drag_input = None;
             }

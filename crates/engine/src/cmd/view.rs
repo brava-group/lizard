@@ -83,14 +83,14 @@ fn pan(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"cx": v.cx, "cy": v.cy}))
 }
 
-/// Figma's zoom steps.
-const STEPS: &[f64] = &[0.02, 0.03, 0.06, 0.13, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
+/// Measured Design zoom levels are exact powers of two; the UI rounds the low percentages.
+const STEPS: &[f64] = &[1.0 / 64.0, 1.0 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 2.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
 
 fn step(z: f64, up: bool) -> f64 {
     if up {
-        STEPS.iter().copied().find(|s| *s > z * 1.001).unwrap_or(256.0)
+        STEPS.iter().copied().find(|s| *s > z).unwrap_or(ViewState::MAX_ZOOM)
     } else {
-        STEPS.iter().rev().copied().find(|s| *s < z * 0.999).unwrap_or(0.02)
+        STEPS.iter().rev().copied().find(|s| *s < z).unwrap_or(ViewState::MIN_ZOOM)
     }
 }
 
@@ -197,14 +197,14 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("view.zoomFit", "Zoom to fit", "{}", false, |s, _| {
             let ds = s.ds_mut()?;
             if let Some(b) = ds.doc.page_content_bounds(ds.page) {
-                ds.view.fit(b, 256.0);
+                ds.view.fit(b, ViewState::MAX_ZOOM);
             }
             Ok(json!({"zoom": ds.view.zoom}))
         }),
         spec!("view.zoomSelection", "Zoom to selection", "{}", false, |s, _| {
             let ds = s.ds_mut()?;
             if let Some(b) = ds.doc.bounds_of(&ds.selection) {
-                ds.view.fit(b, 256.0);
+                ds.view.fit_with_margins(b, ViewState::MAX_ZOOM, 80.0, 140.0);
             }
             Ok(json!({"zoom": ds.view.zoom}))
         }),

@@ -12,7 +12,7 @@ use figcraft_engine::params::id_of;
 use figcraft_render::{View, Work};
 use serde_json::json;
 
-use super::{CanvasState, canvas_zoom_delta, shows};
+use super::{CanvasState, canvas_zoom_delta, canvas_zoom_events, measured_wheel_zoom, shows};
 use crate::render_worker::{Done, Inline, Job, PREVIEW_AFTER_MS, PREVIEW_FACTOR, Renders, TextureUpdate, coarse_view, preview_now, render_now};
 
 /// A page of ellipses with a rectangle on top; the session and the rectangle.
@@ -96,6 +96,61 @@ fn continuous_zoom_moves_less_per_gesture_and_is_symmetric() {
     assert_eq!(canvas_zoom_delta(1.0), Some(1.0));
     assert_eq!(canvas_zoom_delta(0.0), None);
     assert_eq!(canvas_zoom_delta(f32::NAN), None);
+}
+
+#[test]
+fn measured_pixel_wheel_zoom_matches_browser_fixtures() {
+    let meta = egui::Modifiers { mac_cmd: true, ..Default::default() };
+    let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+    for (delta, percent) in [(1.0, 101.0), (5.0, 103.0), (10.0, 105.0), (20.0, 111.0), (30.0, 116.0), (60.0, 121.0), (120.0, 127.0), (240.0, 135.0)] {
+        let factor = measured_wheel_zoom(delta, meta).unwrap();
+        assert_eq!((factor * 100.0).round(), percent, "Meta wheel delta {delta}");
+        let inverse = measured_wheel_zoom(-delta, meta).unwrap();
+        assert!((factor * inverse - 1.0).abs() < 1e-10);
+    }
+    for (delta, percent) in [(1.0, 101.0), (5.0, 107.0), (10.0, 115.0), (20.0, 132.0), (30.0, 152.0), (60.0, 230.0), (120.0, 528.0)] {
+        let factor = measured_wheel_zoom(delta, ctrl).unwrap();
+        assert_eq!((factor * 100.0).round(), percent, "Ctrl wheel delta {delta}");
+    }
+    assert_eq!(measured_wheel_zoom(120.0, egui::Modifiers::default()), None);
+    assert_eq!(measured_wheel_zoom(f32::NAN, ctrl), None);
+    assert_eq!(measured_wheel_zoom(100_000.0, ctrl), Some(10.0));
+}
+
+#[test]
+fn explicit_pinch_zoom_is_not_doubled_by_egui_wheel_smoothing() {
+    let ctx = egui::Context::default();
+    let mut raw = egui::RawInput::default();
+    raw.events.push(egui::Event::Zoom(1.25));
+    ctx.begin_pass(raw);
+    let factors = ctx.input(canvas_zoom_events);
+    ctx.end_pass().textures_delta.clear();
+    assert_eq!(factors, vec![canvas_zoom_delta(1.25).unwrap()]);
+    ctx.begin_pass(egui::RawInput::default());
+    assert!(ctx.input(canvas_zoom_events).is_empty());
+    ctx.end_pass().textures_delta.clear();
+}
+
+#[test]
+fn pixel_wheel_zoom_is_processed_once_per_raw_event() {
+    let ctx = egui::Context::default();
+    let mut raw = egui::RawInput::default();
+    raw.events.push(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, 120.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers { ctrl: true, ..Default::default() },
+    });
+    ctx.begin_pass(raw);
+    let factors = ctx.input(canvas_zoom_events);
+    assert_eq!(factors.len(), 1);
+    if cfg!(any(target_os = "macos", target_arch = "wasm32")) {
+        assert!((factors[0] - 4.0_f64.powf(1.2)).abs() < 1e-9);
+    }
+    ctx.end_pass().textures_delta.clear();
+    ctx.begin_pass(egui::RawInput::default());
+    assert!(ctx.input(canvas_zoom_events).is_empty(), "egui may still be smoothing, but the raw wheel event is gone");
+    ctx.end_pass().textures_delta.clear();
 }
 
 #[test]

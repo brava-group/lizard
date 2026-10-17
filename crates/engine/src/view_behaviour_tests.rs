@@ -100,9 +100,14 @@ fn zoom_steps_presets_and_limits() {
         ("view.zoomIn", 1.0, 2.0, "docs silent on the step: zooming in doubles (pinned)"),
         ("view.zoomOut", 1.0, 0.5, "docs silent on the step: zooming out halves (pinned)"),
         ("view.zoomIn", 1.5, 2.0, "docs silent: between steps, zooming in goes to the next step up (pinned)"),
-        ("view.zoomOut", 0.25, 0.13, "docs silent: below 25% the steps are rounded to whole percents (pinned)"),
+        ("view.zoomOut", 0.25, 0.125, "measured: the displayed 13% step is exactly one eighth"),
+        ("view.zoomIn", 0.31, 0.5, "measured: 31% goes to the next power of two"),
+        ("view.zoomOut", 0.31, 0.25, "measured: 31% goes to the previous power of two"),
+        ("view.zoomIn", 0.87, 1.0, "measured: 87% goes to 100%"),
+        ("view.zoomOut", 0.87, 0.5, "measured: 87% goes to 50%"),
+        ("view.zoomOut", 1.5, 1.0, "measured: 150% goes to 100%"),
         ("view.zoomIn", 256.0, 256.0, "docs silent: the most is 25,600% (pinned)"),
-        ("view.zoomOut", 0.02, 0.02, "docs silent: the least is 2% (pinned)"),
+        ("view.zoomOut", 1.0 / 64.0, 1.0 / 64.0, "measured: the displayed 2% floor is exactly one sixty-fourth"),
         ("view.zoom100", 3.0, 1.0, "the zoom presets include 100% (Shift+0)"),
         ("view.zoom50", 3.0, 0.5, "the zoom presets include 50%"),
         ("view.zoom200", 0.3, 2.0, "the zoom presets include 200%"),
@@ -125,13 +130,14 @@ fn zoom_to_fit_selection_and_frames() {
     let f3 = frame(&mut s, 0.0, 500.0, 100.0, 100.0, None);
     let r = rect(&mut s, 900.0, 0.0, 40.0, 40.0, None);
     ex(&mut s, "view.set", json!({"vw": 1200, "vh": 800}));
-    // The zoom that fits a box with the view's 64-point margin.
+    // Fit all keeps its existing 64-point margin; selection uses measured axis margins.
     let fit = |b: Rect| ((1200.0 - 128.0) / b.width()).min((800.0 - 128.0) / b.height());
+    let fit_selection = |b: Rect| ((1200.0 - 80.0) / b.width()).min((800.0 - 140.0) / b.height());
     let content = Rect::new(0.0, 0.0, 940.0, 600.0);
     // (command, selection before, zoom, centre, selection after, derivation)
     let rows: Vec<(&str, Vec<NodeId>, f64, (f64, f64), Vec<NodeId>, &str)> = vec![
         ("view.zoomFit", vec![], fit(content), (470.0, 300.0), vec![], "Shift+1 fits everything on the page into the view"),
-        ("view.zoomSelection", vec![r], fit(Rect::new(0.0, 0.0, 40.0, 40.0)), (920.0, 20.0), vec![r], "Shift+2 zooms to the selection"),
+        ("view.zoomSelection", vec![r], fit_selection(Rect::new(0.0, 0.0, 40.0, 40.0)), (920.0, 20.0), vec![r], "Shift+2 zooms to the selection"),
         (
             "view.nextFrame",
             vec![],
@@ -183,6 +189,15 @@ fn zoom_to_fit_selection_and_frames() {
 }
 
 #[test]
+fn measured_selection_fit_preserves_the_axis_margins() {
+    let mut view = ViewState { vw: 669.0, vh: 739.0, ..ViewState::default() };
+    for (width, height, displayed_percent) in [(300.0, 143.0, 196.0), (190.0, 481.0, 125.0), (178.0, 273.0, 219.0), (442.0, 273.0, 133.0)] {
+        view.fit_with_margins(Rect::new(0.0, 0.0, width, height), ViewState::MAX_ZOOM, 80.0, 140.0);
+        assert_eq!((view.zoom * 100.0).round(), displayed_percent, "selection {width} × {height}");
+    }
+}
+
+#[test]
 fn the_zoom_tool_and_pointer_zoom_keep_the_point_under_the_pointer() {
     let mut s = Session::new();
     ex(&mut s, "view.set", json!({"zoom": 1, "cx": 0, "cy": 0, "vw": 1200, "vh": 800}));
@@ -214,6 +229,11 @@ fn the_zoom_tool_and_pointer_zoom_keep_the_point_under_the_pointer() {
     assert!(near(v.zoom, ViewState::MAX_ZOOM), "pointer zoom stops at the most");
     v.set_zoom_at(f64::NAN, (0.0, 0.0));
     assert!(near(v.zoom, ViewState::MAX_ZOOM), "a junk zoom is ignored");
+    let before_floor = v.page_to_screen(300.0, -40.0);
+    v.set_zoom_at(0.0, (300.0, -40.0));
+    let after_floor = v.page_to_screen(300.0, -40.0);
+    assert_eq!(v.zoom, ViewState::MIN_ZOOM);
+    assert!(near(before_floor.0, after_floor.0) && near(before_floor.1, after_floor.1), "the clamped floor keeps the pointer anchor");
 }
 
 #[test]
