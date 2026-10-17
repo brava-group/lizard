@@ -1,6 +1,8 @@
 //! The canvas: the rendered page plus selection, hover, guides, labels and text-editing overlays.
 
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::Receiver;
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_doc::{Document, NodeId, NodeKind};
@@ -38,6 +40,8 @@ pub struct CanvasState {
     pub preview_latency_ms: Option<f64>,
     pub refine_latency_ms: Option<f64>,
     dragging: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    drag_visual: Option<DragVisual>,
     /// Last drag input sent to the engine. Repainting a stationary pointer must not clone and
     /// normalize a complex document again; modifiers and pen pressure can still change it.
     last_drag_input: Option<(Pos2, egui::Modifiers, Option<f32>)>,
@@ -76,6 +80,8 @@ impl Default for CanvasState {
             preview_latency_ms: None,
             refine_latency_ms: None,
             dragging: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            drag_visual: None,
             last_drag_input: None,
             space_pan: false,
             middle_pan: None,
@@ -94,6 +100,280 @@ impl Default for CanvasState {
 impl CanvasState {
     pub(crate) fn texture_current(&self, ds: &figcraft_engine::DocState) -> bool {
         self.tex_of == Some((ds.uid, ds.page)) && !self.tex_coarse && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
+    }
+}
+
+/// A frame can be composited separately only while its move is a pure translation. Keeping the
+/// page without it avoids an image of the frame at its old position during a fast drag.
+#[cfg(not(target_arch = "wasm32"))]
+struct DragVisual {
+    uid: u64,
+    page: NodeId,
+    root: NodeId,
+    source: Arc<Document>,
+    base_view: figcraft_render::View,
+    root_view: figcraft_render::View,
+    start_transform: [f64; 6],
+    zoom: f64,
+    center: (f64, f64),
+    canvas_size: egui::Vec2,
+    ready: Option<(egui::TextureHandle, egui::TextureHandle)>,
+    pending: Option<Receiver<(egui::ColorImage, egui::ColorImage, f64)>>,
+    prepare_ms: Option<f64>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool {
+    let Some(node) = doc.node(root) else { return false };
+    if node.parent != Some(page) || !matches!(node.kind, NodeKind::Frame) || !node.visible || node.is_mask {
+        return false;
+    }
+    // Painting the drag layer above the background preserves z-order only when no visible page
+    // sibling is above it. Blend modes or backdrop filters can depend on pixels outside it.
+    if doc.node(page).and_then(|p| p.children.iter().rev().find(|id| doc.node(**id).is_some_and(|n| n.visible))).copied() != Some(root) {
+        return false;
+    }
+    let mut pending = vec![root];
+    let mut visited = 0;
+    while let Some(id) = pending.pop() {
+        let Some(n) = doc.node(id) else { return false };
+        if n.effects.iter().any(|e| e.visible && e.backdrop_radius() > 0.0)
+            || !matches!(n.blend, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough)
+        {
+            return false;
+        }
+        visited += 1;
+        if visited > 20_000 {
+            return false;
+        }
+        pending.extend(n.children.iter().copied());
+    }
+    true
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View) -> Option<figcraft_render::View> {
+    let bounds = doc.world_render_bounds(root)?;
+    let scale = base.scale;
+    if !scale.is_finite() || scale <= 0.0 || ![bounds.x0, bounds.y0, bounds.x1, bounds.y1].iter().all(|n| n.is_finite()) {
+        return None;
+    }
+    let x0 = ((bounds.x0 - base.origin.0) * scale).floor() - 2.0;
+    let y0 = ((bounds.y0 - base.origin.1) * scale).floor() - 2.0;
+    let x1 = ((bounds.x1 - base.origin.0) * scale).ceil() + 2.0;
+    let y1 = ((bounds.y1 - base.origin.1) * scale).ceil() + 2.0;
+    let (w, h) = (x1 - x0, y1 - y0);
+    // Bound both CPU allocations and the GPU upload. Very large frames use the normal renderer.
+    if !w.is_finite() || !h.is_finite() || !(1.0..=4096.0).contains(&w) || !(1.0..=4096.0).contains(&h) || w * h > 8_000_000.0 {
+        return None;
+    }
+    Some(figcraft_render::View { origin: (base.origin.0 + x0 / scale, base.origin.1 + y0 / scale), scale, width: w as u32, height: h as u32 })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
+    app.canvas.drag_visual = None;
+    if app.session.tool.tool != ToolId::Move {
+        return;
+    }
+    let Ok(ds) = app.session.ds() else { return };
+    let [root] = ds.selection.as_slice() else { return };
+    let root = *root;
+    if ds.view.outlines
+        || ds.view.outlines_selection
+        || ds.view.proof_srgb
+        || ds.text_edit.is_some()
+        || !ds.doc.color_profile.is_srgb()
+        || ds.focused().is_some()
+        || !drag_root_is_independent(&ds.doc, ds.page, root)
+    {
+        return;
+    }
+    let Some(base_view) = app.canvas.tex_view.as_ref() else { return };
+    if app.canvas.tex_coarse
+        || app.canvas.tex_of != Some((ds.uid, ds.page))
+        || !app.canvas.tex_doc.as_ref().is_some_and(|shown| Arc::ptr_eq(shown, &ds.doc))
+        || app.canvas.texture.is_none()
+    {
+        return;
+    }
+    let target_scale = ds.view.zoom * f64::from(ctx.pixels_per_point());
+    if (base_view.scale - target_scale).abs() > target_scale * 1e-4 {
+        return;
+    }
+    let visible = figcraft_render::View {
+        origin: ds.view.origin(),
+        scale: target_scale,
+        width: (app.canvas.rect.width() * ctx.pixels_per_point()).ceil().max(1.0) as u32,
+        height: (app.canvas.rect.height() * ctx.pixels_per_point()).ceil().max(1.0) as u32,
+    };
+    if !covers(base_view, &visible) || u64::from(base_view.width) * u64::from(base_view.height) > 8_000_000 {
+        return;
+    }
+    let Some(root_view) = cropped_drag_view(&ds.doc, root, base_view) else { return };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let source = ds.doc.clone();
+    let job_doc = source.clone();
+    let page = ds.page;
+    let base_for_job = base_view.clone();
+    let root_for_job = root_view.clone();
+    let repaint = ctx.clone();
+    let viewport = ctx.viewport_id();
+    let spawned = std::thread::Builder::new().name("figcraft-drag-layers".into()).spawn(move || {
+        let started = web_time::Instant::now();
+        let opts = figcraft_render::Options { skip: vec![root], lod: true, ..Default::default() };
+        let Some(base) = figcraft_render::render_view(&job_doc, page, &base_for_job, &opts) else { return };
+        let Some(mut moving) = figcraft_render::Pixmap::new(root_for_job.width, root_for_job.height) else { return };
+        figcraft_render::render_nodes_into_preview(&job_doc, &[root], &root_for_job, &mut moving, true);
+        let images = (
+            crate::render_worker::screen_image(&base, job_doc.color_profile),
+            crate::render_worker::screen_image(&moving, job_doc.color_profile),
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+        if tx.send(images).is_ok() {
+            repaint.request_repaint_of(viewport);
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("drag layer worker: {e}");
+        return;
+    }
+    app.canvas.drag_visual = Some(DragVisual {
+        uid: ds.uid,
+        page: ds.page,
+        root,
+        source,
+        base_view: base_view.clone(),
+        root_view,
+        start_transform: ds.doc.world_transform(root).as_coeffs(),
+        zoom: ds.view.zoom,
+        center: (ds.view.cx, ds.view.cy),
+        canvas_size: app.canvas.rect.size(),
+        ready: None,
+        pending: Some(rx),
+        prepare_ms: None,
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
+    let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
+    let Some(rx) = visual.pending.as_ref() else { return };
+    match rx.try_recv() {
+        Ok((base, moving, ms)) => {
+            visual.ready = Some((
+                ctx.load_texture("figcraft-drag-base", base, egui::TextureOptions::LINEAR),
+                ctx.load_texture("figcraft-drag-frame", moving, egui::TextureOptions::LINEAR),
+            ));
+            visual.pending = None;
+            visual.prepare_ms = Some(ms);
+        }
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => app.canvas.drag_visual = None,
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+    }
+}
+
+pub(crate) fn drag_mode(app: &FigApp) -> &'static str {
+    #[cfg(not(target_arch = "wasm32"))]
+    if drag_visual_delta(app).is_some() {
+        return "composited";
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = app;
+    "render"
+}
+
+pub(crate) fn drag_prepare_ms(app: &FigApp) -> Option<f64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        app.canvas.drag_visual.as_ref().and_then(|v| v.prepare_ms)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app;
+        None
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drag_visual_delta(app: &FigApp) -> Option<(f64, f64)> {
+    let visual = app.canvas.drag_visual.as_ref()?;
+    visual.ready.as_ref()?;
+    let ds = app.session.ds().ok()?;
+    if ds.uid != visual.uid
+        || ds.page != visual.page
+        || ds.selection.as_slice() != [visual.root]
+        || ds.view.zoom.to_bits() != visual.zoom.to_bits()
+        || (ds.view.cx, ds.view.cy) != visual.center
+        || app.canvas.rect.size() != visual.canvas_size
+    {
+        return None;
+    }
+    let before = visual.source.node(visual.root)?;
+    let now = ds.doc.node(visual.root)?;
+    if now.parent != before.parent
+        || now.children != before.children
+        || now.width != before.width
+        || now.height != before.height
+        || now.layout != before.layout
+    {
+        return None;
+    }
+    let xf = ds.doc.world_transform(visual.root).as_coeffs();
+    if xf[..4] != visual.start_transform[..4] {
+        return None;
+    }
+    let dx = xf[4] - visual.start_transform[4];
+    let dy = xf[5] - visual.start_transform[5];
+    (dx.is_finite() && dy.is_finite()).then_some((dx, dy))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn paint_drag_visual(app: &FigApp, painter: &egui::Painter) -> bool {
+    let Some((dx, dy)) = drag_visual_delta(app) else { return false };
+    let Some(visual) = app.canvas.drag_visual.as_ref() else { return false };
+    let Some((base, moving)) = visual.ready.as_ref() else { return false };
+    let draw = |tex: &egui::TextureHandle, view: &figcraft_render::View, delta: (f64, f64)| {
+        let tl = app.to_screen(view.origin.0 + delta.0, view.origin.1 + delta.1);
+        let zoom = app.session.ds().map(|ds| ds.view.zoom).unwrap_or(1.0);
+        let size = vec2((f64::from(view.width) / view.scale * zoom) as f32, (f64::from(view.height) / view.scale * zoom) as f32);
+        painter.image(tex.id(), Rect::from_min_size(tl, size), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    };
+    draw(base, &visual.base_view, (0.0, 0.0));
+    draw(moving, &visual.root_view, (dx, dy));
+    true
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod drag_visual_tests {
+    use super::*;
+    use serde_json::json;
+    use tiny_skia::{PixmapPaint, Transform};
+
+    #[test]
+    fn isolated_top_frame_matches_full_page_at_rest() {
+        let mut session = figcraft_engine::Session::new();
+        let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+        session.execute("shape.rectangle", &json!({"x": 135, "y": 90, "width": 250, "height": 200, "props": {"fill": "#406080"}})).unwrap();
+        let frame =
+            id(session.execute("frame.create", &json!({"x": 150, "y": 100, "width": 200, "height": 150, "props": {"fill": "#203040"}})).unwrap());
+        session
+            .execute("shape.rectangle", &json!({"x": 20, "y": 25, "width": 80, "height": 60, "parent": frame, "props": {"fill": "#e03030"}}))
+            .unwrap();
+        let ds = session.ds().unwrap();
+        assert!(drag_root_is_independent(&ds.doc, ds.page, frame));
+        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 512, height: 400 };
+        let opts = figcraft_render::Options { lod: true, ..Default::default() };
+        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let opts = figcraft_render::Options { skip: vec![frame], lod: true, ..Default::default() };
+        let mut base = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let crop = cropped_drag_view(&ds.doc, frame, &view).unwrap();
+        let mut moving = figcraft_render::Pixmap::new(crop.width, crop.height).unwrap();
+        figcraft_render::render_nodes_into_preview(&ds.doc, &[frame], &crop, &mut moving, true);
+        let x = ((crop.origin.0 - view.origin.0) * view.scale).round() as i32;
+        let y = ((crop.origin.1 - view.origin.1) * view.scale).round() as i32;
+        base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        assert_eq!(base.data(), full.data(), "separate background and frame must have the same pixels at rest");
     }
 }
 
@@ -273,10 +553,23 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     if let Some(done) = worker.poll() {
         apply_render(app, &ctx, done, shown);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        poll_drag_visual(app, &ctx);
+        if !app.canvas.dragging && app.session.ds().ok().is_some_and(|ds| app.canvas.texture_current(ds)) {
+            app.canvas.drag_visual = None;
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let composing_drag = drag_visual_delta(app).is_some();
+    #[cfg(target_arch = "wasm32")]
+    let composing_drag = false;
     // Observe the latest completed texture before submitting the next document preview. During a
     // fast drag this lets the worker produce a small patch against the frame actually on screen.
-    let fast_drag = app.canvas.dragging && !worker.in_flight() && (0.0..=10.0).contains(&app.ui.render_ms);
-    request_render(app, worker, &ctx, ppp, max_texture_side);
+    let fast_drag = app.canvas.dragging && !composing_drag && !worker.in_flight() && (0.0..=10.0).contains(&app.ui.render_ms);
+    if !app.canvas.dragging || !composing_drag {
+        request_render(app, worker, &ctx, ppp, max_texture_side);
+    }
     if fast_drag
         && worker.in_flight()
         && let Some(done) = worker.poll_for(std::time::Duration::from_millis(10))
@@ -296,7 +589,11 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         })
         .unwrap_or(t.canvas);
     painter.rect_filled(rect, CornerRadius::ZERO, bg);
-    if let (Some(tex), Some(v), true) = (&app.canvas.texture, &app.canvas.tex_view, shown.is_some() && app.canvas.tex_of == shown) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let painted_drag = paint_drag_visual(app, &painter);
+    #[cfg(target_arch = "wasm32")]
+    let painted_drag = false;
+    if let (Some(tex), Some(v), true) = (&app.canvas.texture, &app.canvas.tex_view, !painted_drag && shown.is_some() && app.canvas.tex_of == shown) {
         // Re-project the last render onto the current view.
         let tl = app.to_screen(v.origin.0, v.origin.1);
         let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
@@ -792,6 +1089,10 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         let input = (pos, mods, app.canvas.pressure);
         if k != PointerKind::Move || app.canvas.last_drag_input != Some(input) {
             send(app, k, pos, &mods);
+            #[cfg(not(target_arch = "wasm32"))]
+            if k == PointerKind::Down {
+                start_drag_visual(app, &ctx);
+            }
         }
         app.canvas.last_drag_input = if k == PointerKind::Up { None } else { Some(input) };
     }

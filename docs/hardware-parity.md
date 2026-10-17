@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (native composited drags for eligible topmost frames; measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -45,8 +45,13 @@ multi-base patch, and 53 ms after it (three runs each, 2880×1800 Retina desktop
 The final update transferred about 1.33 million pixels instead of the full 3.79 million.
 Settled moves of 20–900 page units took a median 53 ms from pointer request to current texture,
 versus about 66 ms before text-path caching and direct patch copying. These timings end when egui
-receives the texture; GPU upload and display presentation come later. Fast frame dragging can
-still visibly trail the cursor because vector paths and effects render on the CPU.
+receives the texture; GPU upload and display presentation come later. This remains the path for
+frames that cannot be composited independently. A native drag of a single, topmost sRGB frame
+without backdrop-dependent effects now prepares a separate frame layer and background once, then
+translates that layer with the pointer while the vector document updates. On the 248-node
+BetterDeck document, preparing both layers took 33 ms in one release build run; subsequent control
+requests took about 12 ms median, including UI and control overhead. Screen presentation latency
+and a direct comparison with Figma were not measured. The vector render returns after release.
 
 A second synthetic dashboard benchmark (142 nested frame, shape and text nodes) at 2880×1800
 rendered 10 alternating large moves with a median of 16.9–18.6 ms for vector rendering plus
@@ -85,6 +90,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | Native drags of eligible topmost frames composite a prepared frame layer over a background without that frame, following the pointer while the vector document changes. The 248-node BetterDeck release run prepared in 33 ms and 10 rapid control moves took about 12 ms median per request; pixel equivalence and drag/refinement tests pass. Unsupported frames and browser builds keep the existing render path; GPU canvas work and estimates remain. |
 | 2026-10-17 | minor | Canvas zoom reads each modified pixel-wheel event before egui smoothing on macOS/browser; explicit pinch events retain their existing gain. Browser/platform gesture equivalence beyond the measured Chrome/macOS case remains unverified. |
 | 2026-10-17 | minor | Smooth zoom keeps an existing full-resolution texture when it covers a nearby view; zoom-out that exposes uncached area renders a full-viewport half-resolution vector preview in the input frame. Stationary drags avoid redundant engine work. Cheap vector drags can finish in the pointer's UI frame with a 10 ms wait; heavier work remains off thread. The 142-node synthetic benchmark above records the practical limit; no GPU path or parity estimate change. |
 | 2026-10-16 | minor | Same-view canvas edits and live drags convert and upload damaged pixel regions only, even when intermediate positions were skipped. Cached text outlines and a direct copy of rendered patch rows reduce CPU work. Pan, zoom, soft proof and changes that cannot safely use a patch send full textures. `ui.inspect.canvas.uploadPixels` and `textureCurrent` make the transfer observable. The document and undo remain vector based; GPU canvas rendering is still missing. |

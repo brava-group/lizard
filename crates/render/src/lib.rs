@@ -219,11 +219,21 @@ fn render_one(doc: &Document, page: NodeId, view: &View, opts: &Options) -> Opti
 
 /// Render several nodes (in z-order) into an existing pixmap through `view`.
 pub fn render_nodes_into(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap) {
-    nodes_into(doc, ids, view, pix, 0.0);
+    render_nodes_into_preview(doc, ids, view, pix, false);
+}
+
+/// Draw nodes over a transparent pixmap with the canvas's level of detail. This keeps a
+/// separately composited drag layer consistent with the page render at small zoom levels.
+pub fn render_nodes_into_preview(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap, lod: bool) {
+    nodes_into_with_lod(doc, ids, view, pix, 0.0, lod);
 }
 
 /// [`render_nodes_into`] `time` seconds into animated GIFs.
 fn nodes_into(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap, time: f64) {
+    nodes_into_with_lod(doc, ids, view, pix, time, false);
+}
+
+fn nodes_into_with_lod(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap, time: f64, lod: bool) {
     let bounds = draw::Bounds::default();
     let ctx = draw::Ctx {
         doc,
@@ -232,7 +242,7 @@ fn nodes_into(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap, tim
         outline: Outline::default(),
         outlined: &[],
         skip: &[],
-        lod: false,
+        lod: lod && view.scale <= lod::MAX_SCALE,
         under: None,
         time,
         bounds: &bounds,

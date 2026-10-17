@@ -132,7 +132,7 @@ impl CursorTextures {
         let pixels = (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32;
         let quarter_turns = if asset == Asset::Rotate { quarter_turns % 4 } else { 0 };
         let key = (asset, pixels, quarter_turns);
-        if !self.loaded.contains_key(&key) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.loaded.entry(key) {
             let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).ok()?.into_rgba8();
             // egui's linear sampler has no mip levels. Downsample with a proper reconstruction
             // filter so the 256 px source stays crisp at its 32 pt display size.
@@ -146,7 +146,7 @@ impl CursorTextures {
             let side = usize::try_from(pixels).ok()?;
             let image = egui::ColorImage::from_rgba_unmultiplied([side, side], rgba.as_raw());
             let texture = ctx.load_texture(format!("canvas-cursor-{}-{pixels}-{quarter_turns}", asset.name()), image, TextureOptions::LINEAR);
-            self.loaded.insert(key, texture);
+            entry.insert(texture);
         }
         self.loaded.get(&key)
     }

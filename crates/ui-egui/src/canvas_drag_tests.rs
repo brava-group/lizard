@@ -61,6 +61,45 @@ fn a_drag_shows_on_the_canvas_while_it_moves() {
     u.button(p + vec2(30.0, 10.0), false);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn topmost_frame_uses_composited_drag_and_returns_to_refined_vector_image() {
+    let mut s = Session::new();
+    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let frame = id(s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 420, "height": 300, "props": {"fill": "#192736"}})).unwrap());
+    let child = id(s
+        .execute("shape.rectangle", &json!({"x": 20, "y": 25, "width": 80, "height": 60, "parent": frame, "props": {"fill": "#e03030"}}))
+        .unwrap());
+    s.execute("select.set", &json!({"ids": [frame]})).unwrap();
+    let mut ui = Ui::new(s);
+    settle(&mut ui);
+    let p = ui.app.to_screen(300.0, 200.0);
+    let child_before = ui.app.session.doc().unwrap().node(child).unwrap().transform;
+    ui.button(p, true);
+    ui.frame(vec![Event::PointerMoved(p + vec2(140.0, 80.0))]);
+    let mut composited = false;
+    for _ in 0..300 {
+        ui.frame(vec![]);
+        if crate::canvas::drag_mode(&ui.app) == "composited" {
+            composited = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(composited, "the topmost frame should get a separate drag layer");
+    assert_eq!(ui.app.session.doc().unwrap().node(child).unwrap().transform, child_before, "moving the frame keeps child coordinates local");
+    ui.button(p + vec2(140.0, 80.0), false);
+    for _ in 0..300 {
+        ui.frame(vec![]);
+        if ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(crate::canvas::drag_mode(&ui.app), "render");
+    assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "the final texture must replace the drag layer");
+}
+
 /// A synthetic dashboard with nested cards, shapes and text. It exercises the same large-frame
 /// redraw and texture conversion as a real design without depending on a proprietary file.
 #[test]
