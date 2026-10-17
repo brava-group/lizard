@@ -28,7 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "edit.pasteDesignLayers",
             "Paste design layers",
-            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
+            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), preview? (base64 PNG of the same clipboard selection), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
             true,
             paste_design_layers
         ),
@@ -550,16 +550,19 @@ pub const CLIP_CLOSE: &str = "(/figma)";
 /// Largest design data read from the clipboard: the `.fig` import's own canvas cap (256 MB). Its
 /// base64 is checked first, so neither the text nor the decoded bytes can pass it.
 const MAX_CLIP_DATA: usize = 256 * 1024 * 1024;
-const MAX_CLIP_BASE64: usize = MAX_CLIP_DATA.div_ceil(3) * 4;
 
 /// Base64 `text` (whitespace ignored, padding optional) when it fits [`MAX_CLIP_DATA`].
-fn clip_base64(text: &str) -> Option<Vec<u8>> {
+fn clip_base64_limited(text: &str, max_bytes: usize) -> Option<Vec<u8>> {
     use base64::Engine as _;
-    if text.bytes().filter(|b| !b.is_ascii_whitespace()).count() > MAX_CLIP_BASE64 {
+    if text.bytes().filter(|b| !b.is_ascii_whitespace()).count() > max_bytes.div_ceil(3) * 4 {
         return None;
     }
     let b64: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
     base64::engine::general_purpose::STANDARD.decode(&b64).or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(&b64)).ok()
+}
+
+fn clip_base64(text: &str) -> Option<Vec<u8>> {
+    clip_base64_limited(text, MAX_CLIP_DATA)
 }
 
 /// Layers copied from another design app travel in the clipboard's HTML as a `.fig` canvas in
@@ -580,20 +583,122 @@ fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad(CMD, "pass `html` or `data`")),
     };
     let other = super::file::load_fig(&bytes, "Pasted layers").ok_or_else(|| bad(CMD, "the data is not copied design layers"))??;
-    let doc = std::sync::Arc::new(other.doc);
+    let mut doc = other.doc;
+    let mut issues = other.issues;
     let tops: Vec<NodeId> = doc.pages.iter().filter_map(|pg| doc.node(*pg)).flat_map(|pg| pg.children.iter().copied()).collect();
     if tops.is_empty() {
         return Err(EngineError::Disabled(CMD.into(), "the copied layers came in empty".into()));
     }
+    // A real clipboard canvas often has image hashes but no image bytes. Its PNG preview is the
+    // only local copy of those pixels. Recover each missing image paint from its corresponding
+    // region of that preview while keeping the surrounding layers editable.
+    if let Some(preview) = string(p, "preview").and_then(|v| clip_base64_limited(&v, MAX_PREVIEW_BYTES)) {
+        restore_preview_images(&mut doc, &tops, &preview);
+        if !tops.iter().flat_map(|id| doc.subtree(*id)).any(|id| {
+            doc.node(id).is_some_and(|n| {
+                n.fills.iter().chain(&n.strokes).any(|p| {
+                    let figcraft_color::PaintKind::Image(img) = &p.kind else { return false };
+                    image_is_placeholder(&doc, &img.image)
+                })
+            })
+        }) {
+            issues.retain(|issue| !issue.contains("image fill(s) whose image isn't in the file"));
+        }
+    }
+    let doc = std::sync::Arc::new(doc);
     let (nodes, images, bounds) = copied(&doc, &tops);
     let props = s.clipboard.props.take();
     // No open file has id 0. So paste treats this copy as a copy from a different file.
     s.clipboard = crate::Clipboard { nodes, images, props, bounds, source_doc: 0, source: Some(doc), source_path: None };
     let mut out = paste(s, p)?;
-    if !other.issues.is_empty() {
-        out["warnings"] = json!(other.issues);
+    if !issues.is_empty() {
+        out["warnings"] = json!(issues);
     }
     Ok(out)
+}
+
+fn image_is_placeholder(doc: &Document, key: &str) -> bool {
+    doc.images.get(key).is_some_and(|data| figcraft_format::image_hash(&data.bytes) != key)
+}
+
+/// Recover image fills omitted from a bare clipboard canvas using the selection's PNG preview.
+/// The preview is treated as a rendering of the selected nodes' combined page-space bounds. We
+/// only use it when that aspect ratio matches and a fill points at an importer placeholder.
+const MAX_PREVIEW_BYTES: usize = 80 * 1024 * 1024;
+
+fn restore_preview_images(doc: &mut Document, tops: &[NodeId], png: &[u8]) {
+    use image::GenericImageView as _;
+
+    if png.len() > MAX_PREVIEW_BYTES {
+        return;
+    }
+    let Some(bounds) = doc.bounds_of(tops).filter(|b| b.width() > 0.0 && b.height() > 0.0 && b.is_finite()) else { return };
+    let ids: Vec<_> = tops.iter().flat_map(|id| doc.subtree(*id)).collect();
+    if !ids.iter().any(|id| {
+        doc.node(*id).is_some_and(|n| {
+            n.fills.iter().any(|paint| {
+                let figcraft_color::PaintKind::Image(img) = &paint.kind else { return false };
+                image_is_placeholder(doc, &img.image)
+            })
+        })
+    }) {
+        return;
+    }
+    let Ok(reader) = image::ImageReader::new(std::io::Cursor::new(png)).with_guessed_format() else { return };
+    let Ok((pw, ph)) = reader.into_dimensions() else { return };
+    if pw < 2 || ph < 2 || u64::from(pw) * u64::from(ph) > 32_000_000 {
+        return;
+    }
+    let expected = bounds.width() / bounds.height();
+    let actual = f64::from(pw) / f64::from(ph);
+    if !expected.is_finite() || (expected / actual - 1.0).abs() > 0.08 {
+        return;
+    }
+    let Ok(preview) = image::load_from_memory(png).map(|i| i.to_rgba8()) else { return };
+    for id in ids {
+        let Some(node) = doc.node(id) else { continue };
+        let [a, b, c, d, _, _] = doc.world_transform(id).as_coeffs();
+        // Axis-aligned layers can be recovered exactly from a rectangular preview crop.
+        if b.abs() > 1e-6 || c.abs() > 1e-6 || a.abs() < 1e-9 || d.abs() < 1e-9 {
+            continue;
+        }
+        let missing: BTreeSet<String> = node
+            .fills
+            .iter()
+            .filter_map(|paint| {
+                let figcraft_color::PaintKind::Image(img) = &paint.kind else { return None };
+                image_is_placeholder(doc, &img.image).then(|| img.image.clone())
+            })
+            .collect();
+        if missing.is_empty() {
+            continue;
+        }
+        let Some(rect) = doc.world_bounds(id) else { continue };
+        let x0 = ((rect.x0 - bounds.x0) / bounds.width() * f64::from(pw)).floor().max(0.0) as u32;
+        let y0 = ((rect.y0 - bounds.y0) / bounds.height() * f64::from(ph)).floor().max(0.0) as u32;
+        let x1 = ((rect.x1 - bounds.x0) / bounds.width() * f64::from(pw)).ceil().min(f64::from(pw)) as u32;
+        let y1 = ((rect.y1 - bounds.y0) / bounds.height() * f64::from(ph)).ceil().min(f64::from(ph)) as u32;
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let cropped = preview.view(x0, y0, x1 - x0, y1 - y0).to_image();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        if cropped.write_to(&mut encoded, image::ImageFormat::Png).is_err() {
+            continue;
+        }
+        let Ok((key, _, _)) = figcraft_format::add_image(doc, encoded.into_inner()) else { continue };
+        let Some(node) = doc.node_mut(id) else { continue };
+        for paint in &mut node.fills {
+            let figcraft_color::PaintKind::Image(img) = &mut paint.kind else { continue };
+            if missing.contains(&img.image) {
+                img.image = key.clone();
+                img.scale_mode = figcraft_color::ImageScaleMode::Fill;
+                img.crop = None;
+                img.rotation = 0;
+                img.filters = figcraft_color::ImageFilters::NONE;
+            }
+        }
+    }
 }
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {

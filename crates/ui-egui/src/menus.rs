@@ -37,7 +37,12 @@ pub const UI_COMMANDS: &[&str] = &[
 pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
     // Only HTML that holds readable design data takes this path; other HTML pastes as before.
     if let Some(html) = app.services.clipboard_get_html().filter(|h| figcraft_engine::cmd::edit::design_clipboard_buffer(h).is_some()) {
-        if let Some(r) = app.run("edit.pasteDesignLayers", json!({"html": html})) {
+        let mut params = json!({"html": html});
+        if let Some((png, _, _)) = clipboard_png_with_limit(app, 8192, 16_000_000) {
+            use base64::Engine as _;
+            params["preview"] = json!(base64::engine::general_purpose::STANDARD.encode(png));
+        }
+        if let Some(r) = app.run("edit.pasteDesignLayers", params) {
             // The pasted layers are now our copy: text another app puts on the clipboard later is newer.
             app.ui.last_copy = Some(app.services.clipboard_get_text().unwrap_or_default());
             let left_out = r["warnings"].as_array().map_or(0, Vec::len);
@@ -79,11 +84,21 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
 
 /// The system clipboard's image as PNG bytes, with its size.
 fn clipboard_png(app: &mut FigApp) -> Option<(Vec<u8>, u32, u32)> {
+    clipboard_png_with_limit(app, 4096, 4096 * 4096)
+}
+
+fn clipboard_png_with_limit(app: &mut FigApp, max_side: u32, max_pixels: u64) -> Option<(Vec<u8>, u32, u32)> {
     let (w, h, rgba) = app.services.clipboard_get_image()?;
     let mut img = image::RgbaImage::from_raw(w, h, rgba)?;
-    // Match Figma's clipboard limit while preserving the image's aspect ratio.
-    if w > 4096 || h > 4096 {
-        img = image::DynamicImage::ImageRgba8(img).resize(4096, 4096, image::imageops::FilterType::Lanczos3).to_rgba8();
+    // The editable-layer preview can keep more detail than a plain pasted image, but both
+    // paths cap decoded pixels and preserve the aspect ratio.
+    if w > max_side || h > max_side || u64::from(w) * u64::from(h) > max_pixels {
+        let side_scale = f64::from(max_side) / f64::from(w.max(h));
+        let area_scale = (max_pixels as f64 / (f64::from(w) * f64::from(h))).sqrt();
+        let scale = side_scale.min(area_scale).min(1.0);
+        let nw = (f64::from(w) * scale).floor().max(1.0) as u32;
+        let nh = (f64::from(h) * scale).floor().max(1.0) as u32;
+        img = image::DynamicImage::ImageRgba8(img).resize_exact(nw, nh, image::imageops::FilterType::Lanczos3).to_rgba8();
     }
     let (w, h) = img.dimensions();
     let mut out = std::io::Cursor::new(Vec::new());
