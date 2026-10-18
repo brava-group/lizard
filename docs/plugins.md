@@ -80,7 +80,8 @@ manifest declares HTML UI, and a link to the original page. Searches use Figma's
 stop working. Requests have a timeout and size cap; responses are validated and never executed.
 The listing does not include a verified downloadable package. Community results therefore cannot
 be installed or opened as working plugin UI in FigCraft. The separate **Figma local** tab accepts
-packages supplied by the plugin author or user; HTML UI support remains future work.
+packages supplied by the plugin author or user. On macOS, a supported local plugin can open a
+self-contained HTML UI preview.
 
 `plugin.figma.inspect {"path":"/path/to/manifest.json"}` checks a local Figma plugin manifest,
 its `main` JavaScript and declared `ui` files, without running them. It reports the editor types,
@@ -102,9 +103,23 @@ changed package or expired worker leaves the document unchanged. The worker has 
 clock limit, loop/stack/recursion limits, 1,024 typed writes, and bounded request and response
 sizes. It exposes no file, network or DOM host functions. **It does not yet enforce an OS memory
 limit**, so this is a local development preview for plugins you trust, not a general sandbox for
-untrusted packages. HTML UI, arbitrary node methods, creation, storage, long-lived async sessions,
-browser execution and installed snapshots are still unsupported. The manager shows run controls
-for registered packages and reports unsupported manifests at run time.
+untrusted packages. Arbitrary node methods, creation, storage, browser execution and installed
+snapshots are still unsupported. The manager shows run controls for registered packages and
+reports unsupported manifests at run time.
+
+On macOS, a registered local plugin that declares a `ui` file can run through
+`plugin.figma.ui.start {"id":"…","command":"optional menu command"}`. A persistent Boa
+subprocess evaluates its `main` JavaScript, and a child WebView displays HTML passed to
+`figma.showUI`. The worker exposes `__html__` and named `__uiFiles__`, `figma.ui.onmessage`,
+`figma.ui.postMessage`, `figma.ui.resize` and `figma.closePlugin`. Messages from the page's
+`parent.postMessage({pluginMessage: value}, '*')` reach
+`plugin.figma.ui.message {"id":"…","payload":value}`; worker replies are delivered as page
+`message` events with `data.pluginMessage`. Closing the window calls `plugin.figma.ui.close`.
+Each successful message's opacity edits are one undo step. HTML and messages have byte limits;
+each callback has a 2-second wall-clock limit, and the worker ends after an error. The WebView
+blocks navigation, new windows, clipboard access and network loading; it accepts inline scripts,
+styles and data images. This preview is for trusted local development packages: it has no OS
+memory limit, is available only in the macOS desktop UI, and does not run Community listings.
 
 **Plugin panels.** A plugin written for API 2 can show a panel while it runs: a floating window,
 first placed beside the properties panel (drag its title bar to move it), with the plugin's notes,

@@ -2,16 +2,18 @@
 //! from `plugin.import`, which only accepts FigCraft's metered WebAssembly plugins.
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
 use figcraft_figma_plugin::worker::{self, Request, Response, SelectedNode};
-use figcraft_figma_plugin::{MANIFEST_FILE, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, ParsedManifest};
+#[cfg(not(target_arch = "wasm32"))]
+use figcraft_figma_plugin::worker_ui::{self, UiRequest, UiResponse};
+use figcraft_figma_plugin::{MANIFEST_FILE, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, ParsedManifest, UiFiles};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -61,7 +63,7 @@ fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
     }
     let digest = format!("{:x}", hasher.finalize());
     let mut diagnostics = parsed.diagnostics;
-    diagnostics.push("Execution supports only selection name/opacity reads, opacity writes and closePlugin; inspect never runs JavaScript".into());
+    diagnostics.push("Local execution supports selection name/opacity reads and opacity writes; a macOS HTML UI preview supports messages and closePlugin. Inspect never runs JavaScript".into());
     Ok(json!({
         "status": "diagnosticado",
         "executable": false,
@@ -72,6 +74,7 @@ fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
         "documentAccess": parsed.manifest.document_access,
         "networkAccess": parsed.manifest.network_access,
         "commands": parsed.commands,
+        "hasUi": parsed.manifest.ui.is_some(),
         "files": files,
         "digest": digest,
         "source": manifest_path,
@@ -121,11 +124,246 @@ fn status(s: &mut Session, params: &Value) -> Result<Value> {
 
 fn remove(s: &mut Session, params: &Value) -> Result<Value> {
     let id = string(params, "id").ok_or_else(|| bad("plugin.figma.remove", "`id` required"))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    if s.figma_ui.as_ref().is_some_and(|open| open.id == id) {
+        s.figma_ui = None;
+    }
     let before = s.prefs.figma_plugins.len();
     s.prefs.figma_plugins.retain(|p| p.id != id);
     let removed = before != s.prefs.figma_plugins.len();
     s.plugins.unsaved |= removed;
     Ok(json!({"removed": removed, "id": id}))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct UiProcess {
+    pub id: String,
+    doc_uid: u64,
+    allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+    child: Child,
+    stdin: ChildStdin,
+    replies: std::sync::mpsc::Receiver<std::result::Result<Vec<u8>, String>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for UiProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl UiProcess {
+    fn spawn(id: String, doc_uid: u64, allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>) -> std::result::Result<Self, String> {
+        let executable = std::env::current_exe().map_err(|e| format!("cannot locate plugin UI worker: {e}"))?;
+        let mut child = Command::new(executable)
+            .arg(worker_ui::WORKER_UI_ARG)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("cannot start plugin UI worker: {e}"))?;
+        let stdin = child.stdin.take().ok_or("plugin UI worker has no input")?;
+        let stdout = child.stdout.take().ok_or("plugin UI worker has no output")?;
+        let (sender, replies) = std::sync::mpsc::sync_channel(2);
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = Vec::new();
+                let result = (&mut reader)
+                    .take((worker_ui::MAX_UI_RESPONSE_BYTES + 2) as u64)
+                    .read_until(b'\n', &mut line)
+                    .map_err(|e| format!("cannot read plugin UI reply: {e}"))
+                    .and_then(|count| {
+                        if count == 0 {
+                            Err("plugin UI worker exited".into())
+                        } else if line.len() > worker_ui::MAX_UI_RESPONSE_BYTES + 1 {
+                            Err("plugin UI reply is too large".into())
+                        } else {
+                            Ok(line)
+                        }
+                    });
+                let failed = result.is_err();
+                if sender.send(result).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Ok(Self { id, doc_uid, allowed, child, stdin, replies })
+    }
+
+    fn exchange(&mut self, request: &UiRequest) -> std::result::Result<UiResponse, String> {
+        let mut bytes = serde_json::to_vec(request).map_err(|e| format!("cannot encode plugin UI request: {e}"))?;
+        if bytes.len() > worker_ui::MAX_UI_REQUEST_BYTES {
+            return Err("plugin UI request is too large".into());
+        }
+        bytes.push(b'\n');
+        self.stdin.write_all(&bytes).and_then(|_| self.stdin.flush()).map_err(|e| format!("cannot send plugin UI request: {e}"))?;
+        let line =
+            self.replies.recv_timeout(Duration::from_secs(2)).map_err(|_| "plugin UI callback exceeded the 2-second time limit".to_string())??;
+        serde_json::from_slice::<std::result::Result<UiResponse, String>>(&line).map_err(|e| format!("invalid plugin UI worker reply: {e}"))?
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ui_start(_s: &mut Session, _params: &Value) -> Result<Value> {
+    Err(crate::EngineError::Disabled("plugin.figma.ui.start".into(), "local Figma JavaScript UI workers are not available in the browser yet".into()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ui_message(_s: &mut Session, _params: &Value) -> Result<Value> {
+    Err(crate::EngineError::Disabled(
+        "plugin.figma.ui.message".into(),
+        "local Figma JavaScript UI workers are not available in the browser yet".into(),
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ui_close(_s: &mut Session, _params: &Value) -> Result<Value> {
+    Err(crate::EngineError::Disabled("plugin.figma.ui.close".into(), "local Figma JavaScript UI workers are not available in the browser yet".into()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ui_start(s: &mut Session, params: &Value) -> Result<Value> {
+    let command_id = "plugin.figma.ui.start";
+    let id = string(params, "id").ok_or_else(|| bad(command_id, "`id` required"))?;
+    let entry = s.prefs.figma_plugins.iter().find(|p| p.id == id).ok_or_else(|| bad(command_id, "no such local Figma plugin"))?.clone();
+    let report = inspect(s, &json!({"path": entry.path}))?;
+    if report["digest"].as_str() != Some(entry.digest.as_str()) {
+        return Err(bad(command_id, "plugin files changed since import; inspect and import again"));
+    }
+    let manifest_path = PathBuf::from(&entry.path);
+    let manifest_bytes = file_access::read_capped(&manifest_path, MAX_MANIFEST_BYTES)?;
+    let parsed = ParsedManifest::parse(&manifest_bytes).map_err(|e| bad(command_id, e))?;
+    if parsed.manifest.ui.is_none()
+        || !parsed.manifest.editor_type.iter().any(|v| v == "figma")
+        || parsed.manifest.document_access.as_deref() != Some("dynamic-page")
+        || parsed.manifest.api.split('.').next() != Some("1")
+        || !parsed.manifest.parameters.is_empty()
+        || parsed.manifest.network_access.as_ref().is_some_and(|n| n.allowed_domains.iter().any(|v| v != "none"))
+    {
+        return Err(bad(command_id, "this UI preview requires a Figma Design plugin with dynamic-page access, API 1 and no network or parameters"));
+    }
+    let menu_command = string(params, "command");
+    if let Some(command) = menu_command.as_deref()
+        && !parsed.commands.iter().any(|item| item.command == command)
+    {
+        return Err(bad(command_id, "unknown plugin menu command"));
+    }
+    let root = manifest_path.parent().ok_or_else(|| bad(command_id, "manifest has no parent folder"))?;
+    let main_path = checked_file(root, &parsed.manifest.main)?;
+    let source = String::from_utf8(file_access::read_capped(&main_path, (worker::MAX_REQUEST_BYTES / 2) as u64)?)
+        .map_err(|_| bad(command_id, "main JavaScript must be UTF-8"))?;
+    let mut html = None;
+    let mut named_html = std::collections::BTreeMap::new();
+    match parsed.manifest.ui.as_ref() {
+        Some(UiFiles::One(relative)) => {
+            html = Some(
+                String::from_utf8(file_access::read_capped(&checked_file(root, relative)?, worker_ui::MAX_UI_HTML_BYTES as u64)?)
+                    .map_err(|_| bad(command_id, "plugin HTML must be UTF-8"))?,
+            );
+        }
+        Some(UiFiles::Named(named)) => {
+            for (key, relative) in named {
+                let content = String::from_utf8(file_access::read_capped(&checked_file(root, relative)?, worker_ui::MAX_UI_HTML_BYTES as u64)?)
+                    .map_err(|_| bad(command_id, "plugin HTML must be UTF-8"))?;
+                named_html.insert(key.clone(), content);
+            }
+        }
+        None => return Err(bad(command_id, "plugin has no HTML UI")),
+    }
+    if inspect(s, &json!({"path": entry.path}))?["digest"].as_str() != Some(entry.digest.as_str()) {
+        return Err(bad(command_id, "plugin files changed while preparing execution"));
+    }
+    let doc_uid = s.ds()?.uid;
+    let selected: Vec<SelectedNode> = s
+        .selection()
+        .into_iter()
+        .filter_map(|node_id| {
+            s.doc().ok()?.node(node_id).map(|node| SelectedNode { id: node_id.to_string(), name: node.name.clone(), opacity: node.opacity })
+        })
+        .collect();
+    let allowed = selected.iter().filter_map(|node| node.id.parse::<figcraft_doc::NodeId>().ok().map(|id| (node.id.clone(), id))).collect();
+    let request = UiRequest::Start { source, command: menu_command, selection: selected, html, named_html };
+    s.figma_ui = None;
+    let mut process = UiProcess::spawn(id.clone(), doc_uid, allowed).map_err(|e| bad(command_id, e))?;
+    let reply = process.exchange(&request).map_err(|e| bad(command_id, e))?;
+    let result = apply_ui_response(s, &process, reply, command_id)?;
+    if result["closed"] != true {
+        s.figma_ui = Some(process);
+    }
+    Ok(result)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ui_message(s: &mut Session, params: &Value) -> Result<Value> {
+    let command_id = "plugin.figma.ui.message";
+    let id = string(params, "id").ok_or_else(|| bad(command_id, "`id` required"))?;
+    let payload = params.get("payload").ok_or_else(|| bad(command_id, "`payload` required"))?;
+    let mut process = s.figma_ui.take().ok_or_else(|| bad(command_id, "no plugin UI is open"))?;
+    if process.id != id {
+        s.figma_ui = Some(process);
+        return Err(bad(command_id, "another plugin UI is open"));
+    }
+    if s.ds()?.uid != process.doc_uid {
+        return Err(bad(command_id, "the plugin's document is no longer active"));
+    }
+    let reply = process.exchange(&UiRequest::Message { payload: payload.clone() }).map_err(|e| bad(command_id, e))?;
+    let result = apply_ui_response(s, &process, reply, command_id)?;
+    if result["closed"] != true {
+        s.figma_ui = Some(process);
+    }
+    Ok(result)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ui_close(s: &mut Session, _params: &Value) -> Result<Value> {
+    let closed = s.figma_ui.take().is_some();
+    Ok(json!({"closed": closed}))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_ui_response(s: &mut Session, process: &UiProcess, reply: UiResponse, command_id: &str) -> Result<Value> {
+    apply_ui_operations(s, &process.id, &process.allowed, reply, command_id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_ui_operations(
+    s: &mut Session,
+    id: &str,
+    allowed: &std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+    reply: UiResponse,
+    command_id: &str,
+) -> Result<Value> {
+    if reply.operations.len() > worker::MAX_OPERATIONS {
+        return Err(bad(command_id, "plugin operation limit exceeded"));
+    }
+    for op in &reply.operations {
+        if !op.opacity.is_finite() || !(0.0..=1.0).contains(&op.opacity) || !allowed.contains_key(&op.id) {
+            return Err(bad(command_id, "plugin returned an invalid or unauthorized opacity change"));
+        }
+        let node_id = allowed[&op.id];
+        if s.doc()?.node(node_id).is_none() {
+            return Err(bad(command_id, "plugin's selected node no longer exists"));
+        }
+    }
+    s.grouped(&format!("Figma plugin: {id}"), |s| {
+        for op in &reply.operations {
+            let node_id = allowed.get(&op.id).ok_or_else(|| bad(command_id, "plugin node ID is invalid"))?;
+            s.execute("node.set", &json!({"id": node_id, "props": {"opacity": op.opacity}}))?;
+        }
+        Ok(())
+    })?;
+    Ok(json!({
+        "status": if reply.closed { "closed" } else { "open" },
+        "id": id,
+        "show": reply.show,
+        "messages": reply.messages,
+        "operations": reply.operations.len(),
+        "closed": reply.closed,
+        "message": reply.message,
+    }))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -229,12 +467,12 @@ fn run_child(request: Request) -> std::result::Result<Response, String> {
         stdout.take((worker::MAX_RESPONSE_BYTES + 1) as u64).read_to_end(&mut output).map_err(|e| format!("cannot read plugin result: {e}"))?;
         Ok::<Vec<u8>, String>(output)
     });
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(&input) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("cannot send plugin request: {e}"));
-        }
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(e) = stdin.write_all(&input)
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("cannot send plugin request: {e}"));
     }
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -309,6 +547,15 @@ pub fn specs() -> Vec<CommandSpec> {
             false,
             run
         ),
+        spec!("plugin.figma.ui.start", "Open local Figma plugin UI", "{id, command?} → HTML UI and initial messages", false, ui_start),
+        spec!(
+            "plugin.figma.ui.message",
+            "Send message to local Figma plugin UI",
+            "{id, payload} → edits, messages and close state",
+            false,
+            ui_message
+        ),
+        spec!("plugin.figma.ui.close", "Close local Figma plugin UI", "{} → {closed}", false, ui_close),
     ]
 }
 
@@ -385,5 +632,38 @@ mod tests {
         assert!(run_with(&mut session, &json!({"id": "test.run"}), worker::execute).is_err());
         assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 1.0);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn ui_message_applies_one_undo_step_and_rejects_foreign_nodes() {
+        let mut session = Session::default();
+        let created = session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
+        let node_id = figcraft_doc::NodeId(created["id"].as_u64().unwrap());
+        let allowed = std::collections::BTreeMap::from([(node_id.to_string(), node_id)]);
+        let before = session.undo_depth().0;
+        let reply = UiResponse {
+            show: None,
+            messages: vec![json!({"done": true})],
+            operations: vec![worker::SetOpacity { id: node_id.to_string(), opacity: 0.25 }],
+            closed: false,
+            message: None,
+        };
+        let result = apply_ui_operations(&mut session, "test.ui", &allowed, reply, "plugin.figma.ui.message").unwrap();
+        assert_eq!(result["operations"], 1);
+        assert_eq!(session.undo_depth().0, before + 1);
+        assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 0.25);
+        session.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 1.0);
+
+        let bad_reply = UiResponse {
+            show: None,
+            messages: Vec::new(),
+            operations: vec![worker::SetOpacity { id: "999999".into(), opacity: 0.5 }],
+            closed: false,
+            message: None,
+        };
+        assert!(apply_ui_operations(&mut session, "test.ui", &allowed, bad_reply, "plugin.figma.ui.message").is_err());
+        assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 1.0);
     }
 }

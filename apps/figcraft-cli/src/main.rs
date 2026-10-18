@@ -59,6 +59,15 @@ fn main() -> ExitCode {
             }
         };
     }
+    if argv.first().is_some_and(|arg| arg == figcraft_figma_plugin::worker_ui::WORKER_UI_ARG) {
+        return match figcraft_figma_plugin::worker_ui::run_stdio() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("FigCraft plugin UI worker: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     match run(&argv) {
         Ok(code) => code,
         Err(CliError::Usage(msg)) => {

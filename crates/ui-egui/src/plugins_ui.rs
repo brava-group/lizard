@@ -67,6 +67,19 @@ pub struct PluginsWindow {
     pub community_loading: bool,
 }
 
+/// A local HTML plugin window. The desktop shell owns the native WebView; egui reserves its
+/// content rectangle and carries messages between it and engine commands.
+#[derive(Clone, Debug)]
+pub struct FigmaUiWindow {
+    pub id: String,
+    pub title: String,
+    pub html: String,
+    pub width: f32,
+    pub height: f32,
+    pub rect: Option<egui::Rect>,
+    pub outgoing: Vec<Value>,
+}
+
 /// Width of the plugin windows' fields.
 const FIELD_W: f32 = 220.0;
 /// How far apart plugin panels open, side by side (a panel and a gap).
@@ -203,6 +216,62 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
     if !app.session.plugins.panels.is_empty() {
         panel_windows(app, ctx);
     }
+    figma_ui_window(app, ctx);
+}
+
+fn figma_ui_window(app: &mut FigApp, ctx: &Context) {
+    let Some(open) = app.ui.figma_ui.as_mut() else { return };
+    let mut keep = true;
+    let mut rect = None;
+    let size = egui::vec2(open.width, open.height);
+    window(&open.title, ctx).id(Id::new(("figma_plugin_ui", &open.id))).default_size(size).resizable(false).open(&mut keep).show(ctx, |ui| {
+        rect = Some(ui.allocate_exact_size(size, egui::Sense::hover()).0);
+    });
+    if keep {
+        open.rect = rect;
+    } else {
+        app.run("plugin.figma.ui.close", json!({}));
+        app.ui.figma_ui = None;
+    }
+}
+
+/// Called by the desktop WebView bridge after a plugin page posts `pluginMessage`.
+pub fn figma_ui_message(app: &mut FigApp, payload: Value) {
+    let Some(id) = app.ui.figma_ui.as_ref().map(|open| open.id.clone()) else { return };
+    if let Some(reply) = app.run("plugin.figma.ui.message", json!({"id": id, "payload": payload})) {
+        accept_ui_reply(app, &id, &reply);
+    } else {
+        app.ui.figma_ui = None;
+    }
+}
+
+fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
+    if reply["closed"] == true {
+        if let Some(message) = reply["message"].as_str().filter(|text| !text.is_empty()) {
+            app.toast(message.to_string());
+        }
+        app.ui.figma_ui = None;
+        return;
+    }
+    if let Some(show) = reply.get("show").filter(|v| !v.is_null())
+        && let Some(html) = show["html"].as_str()
+    {
+        let title = show["title"].as_str().filter(|text| !text.is_empty()).unwrap_or(id).to_string();
+        app.ui.figma_ui = Some(FigmaUiWindow {
+            id: id.to_string(),
+            title,
+            html: html.to_string(),
+            width: show["width"].as_f64().unwrap_or(300.0) as f32,
+            height: show["height"].as_f64().unwrap_or(200.0) as f32,
+            rect: None,
+            outgoing: Vec::new(),
+        });
+    }
+    if let Some(open) = app.ui.figma_ui.as_mut()
+        && let Some(messages) = reply["messages"].as_array()
+    {
+        open.outgoing.extend(messages.iter().cloned());
+    }
 }
 
 /// The panels running plugins show, at first beside the properties panel and each other (they
@@ -309,9 +378,19 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
             if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
                 report["lastRun"] = Value::Null;
             }
-            if let Some(result) = app.run("plugin.figma.run", json!({"id": id, "command": command})) {
-                if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
-                    report["lastRun"] = result;
+            let has_ui = app.ui.plugins_manage.figma_report.as_ref().is_some_and(|report| report["hasUi"] == true);
+            if has_ui && !cfg!(target_os = "macos") {
+                app.toast("A prévia de HTML dos plugins locais está disponível no macOS por enquanto".to_string());
+            } else {
+                let command_id = if has_ui { "plugin.figma.ui.start" } else { "plugin.figma.run" };
+                if let Some(result) = app.run(command_id, json!({"id": id, "command": command})) {
+                    if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
+                        report["lastRun"] = result.clone();
+                    }
+                    if has_ui {
+                        accept_ui_reply(app, &id, &result);
+                        app.ui.plugins_window = false;
+                    }
                 }
             }
         }
@@ -352,7 +431,7 @@ fn inspect_figma_dialog(app: &mut FigApp) {
 fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     widgets::label(
         ui,
-        "Registre um plugin local confiável. A execução inicial aceita seleção, leitura de nome e opacidade, escrita de opacidade e closePlugin.",
+        "Registre um plugin local confiável. A prévia de UI aceita HTML autocontido, mensagens, seleção e alterações de opacidade.",
         t.text_secondary,
     );
     ui.add_space(8.0);
@@ -425,10 +504,10 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
             for command in commands {
                 if let (Some(label), Some(id)) = (command["label"].as_str(), command["command"].as_str()) {
                     if registered {
-                        if widgets::button(ui, label, false, true).clicked() {
-                            if let Some(plugin_id) = report["id"].as_str() {
-                                asked = Some(Manage::RunFigma(plugin_id.to_string(), Some(id.to_string())));
-                            }
+                        if widgets::button(ui, label, false, true).clicked()
+                            && let Some(plugin_id) = report["id"].as_str()
+                        {
+                            asked = Some(Manage::RunFigma(plugin_id.to_string(), Some(id.to_string())));
                         }
                     } else {
                         widgets::label(ui, &format!("• {label} ({id})"), t.text_secondary);

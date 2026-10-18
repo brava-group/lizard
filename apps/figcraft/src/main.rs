@@ -19,6 +19,8 @@ mod agent;
 mod apple_events;
 mod args;
 mod control_server;
+#[cfg(target_os = "macos")]
+mod figma_webview;
 mod gamepad;
 mod graphics;
 #[cfg(target_os = "linux")]
@@ -62,6 +64,10 @@ struct App {
     title: String,
     /// Shared with the services, which write the copies after a panic.
     recovery: recovery::Shared,
+    #[cfg(target_os = "macos")]
+    plugin_webview: Option<figma_webview::PluginWebView>,
+    #[cfg(target_os = "macos")]
+    plugin_webview_inbox: std::rc::Rc<std::cell::RefCell<Vec<figma_webview::Event>>>,
     /// Documents and quit requests from Finder, the Dock and Open With.
     #[cfg(target_os = "macos")]
     apple_events: fmv_macos_events::Inbox,
@@ -110,10 +116,55 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        #[cfg(target_os = "macos")]
+        {
+            let events: Vec<_> = self.plugin_webview_inbox.borrow_mut().drain(..).collect();
+            for event in events {
+                match event {
+                    figma_webview::Event::Ready => {
+                        if let Some(view) = self.plugin_webview.as_mut() {
+                            view.mark_ready();
+                        }
+                    }
+                    figma_webview::Event::Message(payload) => {
+                        with_app(|fig| figcraft_ui_egui::plugins_ui::figma_ui_message(fig, payload));
+                    }
+                }
+            }
+        }
         services::parented(frame, || with_app(|fig| figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui))));
+        #[cfg(target_os = "macos")]
+        {
+            let snapshot = with_app(|fig| {
+                fig.ui.figma_ui.as_mut().map(|open| figma_webview::Snapshot {
+                    id: open.id.clone(),
+                    html: open.html.clone(),
+                    rect: open.rect,
+                    outgoing: std::mem::take(&mut open.outgoing),
+                })
+            })
+            .flatten();
+            if let Err(error) = figma_webview::PluginWebView::sync(&mut self.plugin_webview, frame, &ctx, self.plugin_webview_inbox.clone(), snapshot)
+            {
+                self.plugin_webview = None;
+                with_app(|fig| {
+                    fig.run("plugin.figma.ui.close", json!({}));
+                    fig.ui.figma_ui = None;
+                    fig.toast(error);
+                });
+            }
+        }
     }
 
     fn on_exit(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            self.plugin_webview = None;
+            with_app(|fig| {
+                fig.run("plugin.figma.ui.close", json!({}));
+                fig.ui.figma_ui = None;
+            });
+        }
         with_app(|fig| services::save_state(fig));
         if let Some(r) = recovery::lock(&self.recovery).take() {
             r.finish();
@@ -126,6 +177,13 @@ fn main() -> eframe::Result {
     if args.first().is_some_and(|arg| arg == figcraft_figma_plugin::worker::WORKER_ARG) {
         if let Err(e) = figcraft_figma_plugin::worker::run_stdio() {
             eprintln!("FigCraft plugin worker: {e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| arg == figcraft_figma_plugin::worker_ui::WORKER_UI_ARG) {
+        if let Err(e) = figcraft_figma_plugin::worker_ui::run_stdio() {
+            eprintln!("FigCraft plugin UI worker: {e}");
             std::process::exit(1);
         }
         return Ok(());
@@ -258,6 +316,10 @@ fn main() -> eframe::Result {
                 ctx_slot,
                 title: String::new(),
                 recovery,
+                #[cfg(target_os = "macos")]
+                plugin_webview: None,
+                #[cfg(target_os = "macos")]
+                plugin_webview_inbox: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 #[cfg(target_os = "macos")]
                 apple_events: apple_events.connect(&_cc.egui_ctx),
             }))

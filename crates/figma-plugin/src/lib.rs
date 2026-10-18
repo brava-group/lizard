@@ -4,6 +4,8 @@
 pub mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod worker;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod worker_ui;
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
@@ -128,7 +130,7 @@ impl ParsedManifest {
             diagnostics.push("This plugin does not target the Figma design editor".into());
         }
         if manifest.ui.is_some() {
-            diagnostics.push("HTML plugin UI is not supported yet".into());
+            diagnostics.push("HTML UI preview supports local, self-contained files on macOS; browser and other desktop platforms are pending".into());
         }
         if manifest.network_access.as_ref().is_some_and(|v| !v.allowed_domains.is_empty() && v.allowed_domains != ["none"]) {
             diagnostics.push("Network access is not supported yet".into());
@@ -232,6 +234,6 @@ mod tests {
         let parsed = ParsedManifest::parse(input.as_bytes()).unwrap();
         assert_eq!(parsed.files.len(), 2);
         assert!(parsed.diagnostics.iter().any(|v| v.contains("build command")));
-        assert!(parsed.diagnostics.iter().any(|v| v.contains("HTML plugin UI")));
+        assert!(parsed.diagnostics.iter().any(|v| v.contains("HTML UI preview")));
     }
 }

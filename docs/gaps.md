@@ -231,10 +231,12 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
 - **Local branch (2026-10-18):** a separate Figma `manifest.json` inspector validates declared
   files, menu subcommands, paths, symlinks, size limits and a package digest. The Manage plugins
   window can register and recheck a development folder. A one-shot native worker runs a small
-  selection/opacity subset with a grouped undo step and rollback on failure. HTML UI, broad API
-  coverage, OS memory limits and a browser worker have not landed. A read-only Figma Community
-  search now lists plugin metadata and links to their original pages; the internal endpoint does
-  not provide a verified package for installation or HTML UI execution. Compatibility percentages stay unchanged.
+  selection/opacity subset with a grouped undo step and rollback on failure. A persistent worker
+  and macOS WebView now preview self-contained HTML UIs for trusted local packages, exchange
+  plugin messages, and group each successful message's edits into one undo step. Broad API
+  coverage, OS memory limits, a browser worker and other desktop WebViews remain open. A read-only
+  Figma Community search lists metadata and original-page links; its internal endpoint does not
+  provide a verified package for installation. Compatibility percentages stay unchanged.
 - **Impact:** teams that depend on specific Figma plugins (icons, content, accessibility checks)
   can't bring them. FigCraft's CLI, control channel and MCP server cover agent automation better
   than Figma does.

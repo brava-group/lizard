@@ -766,6 +766,9 @@ pub struct Session {
     pub libraries: library::Cache,
     /// Plugin modules loaded in this session and the last plugin run.
     pub plugins: plugins::Runtime,
+    /// One local Figma HTML plugin worker, scoped to its source document.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) figma_ui: Option<figma_plugins::UiProcess>,
     /// The live sessions (collaboration), one per document at most: status, peers, presence.
     /// [`Session::live`] is the active document's.
     pub live: live::Lives,
@@ -816,6 +819,8 @@ impl Session {
             message: None,
             libraries: library::Cache::default(),
             plugins: plugins::Runtime::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            figma_ui: None,
             live: live::Lives::default(),
             background: background::Background::default(),
         }

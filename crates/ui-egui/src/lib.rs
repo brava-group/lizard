@@ -589,6 +589,8 @@ pub struct UiState {
     pub plugins_window: bool,
     /// The Manage plugins window's tab, directory fields and pending install.
     pub plugins_manage: plugins_ui::PluginsWindow,
+    /// The local Figma plugin whose HTML is shown by the desktop shell.
+    pub figma_ui: Option<plugins_ui::FigmaUiWindow>,
     /// A plugin command's parameters form, when open.
     pub plugin_form: Option<plugins_ui::PluginForm>,
     /// Live sessions: remote cursors as drawn, the Join dialog.
@@ -690,6 +692,7 @@ impl Default for UiState {
             nav: a11y::Nav::default(),
             plugins_window: false,
             plugins_manage: plugins_ui::PluginsWindow::default(),
+            figma_ui: None,
             plugin_form: None,
             live: live::LiveUi::default(),
             online: online::OnlineUi::default(),
