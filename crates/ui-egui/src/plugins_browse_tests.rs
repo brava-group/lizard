@@ -11,6 +11,7 @@ use figcraft_engine::Session;
 use figcraft_engine::figcraft_collab::message::{ClientMsg, PluginEntry, PluginReply, PluginReq};
 use figcraft_engine::live::{Event, HostOptions, LiveLink, NetReply, NetRequest, Presence, SessionInfo};
 use figcraft_engine::plugin_directory::bundle::{Bundle, sha256_hex};
+use figcraft_figma_plugin::catalog::{Entry, Page};
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -225,4 +226,34 @@ fn browsing_and_installing_show_progress_and_never_wait() {
     assert!(u.app.ui.toast.as_ref().is_some_and(|(t, _)| t.contains("Installed Grid maker")), "{:?}", u.app.ui.toast);
     let kept = saved.lock().unwrap();
     assert_eq!(kept.last().map(|p| p.plugins.len()), Some(1), "the plugin list was saved at once, not at quit");
+}
+
+#[test]
+fn community_catalogue_shows_metadata_without_an_install_action() {
+    let mut u = Ui::new(Session::new());
+    u.app.ui.plugins_window = true;
+    u.app.ui.plugins_manage.tab = PluginsTab::FigmaCommunity;
+    u.app.ui.plugins_manage.community_page = Some(Page {
+        total: 1,
+        from: 0,
+        entries: vec![Entry {
+            resource_id: "resource-uuid".into(),
+            plugin_id: "12345".into(),
+            name: "Synthetic plugin".into(),
+            tagline: "Makes boxes".into(),
+            version_id: Some("7".into()),
+            page_url: "https://www.figma.com/community/plugin/12345".into(),
+            has_ui: Some(true),
+        }],
+    });
+    u.ctx.enable_accesskit();
+    u.frame(vec![]);
+    assert!(shows(&mut u, "Synthetic plugin"));
+    assert!(shows(&mut u, "Makes boxes"));
+    assert!(named(&mut u, "Install").is_empty());
+    let entry = centre(&named(&mut u, "Synthetic plugin")[0]);
+    click(&mut u, entry);
+    assert!(shows(&mut u, "Plugin ID: 12345"));
+    assert!(shows(&mut u, "Declara interface HTML"));
+    assert_eq!(named(&mut u, "Ver página original").len(), 1);
 }

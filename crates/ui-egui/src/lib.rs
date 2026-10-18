@@ -732,6 +732,8 @@ pub struct FigApp {
     /// Native dialogs complete asynchronously so their modal event loop never re-enters winit.
     pending_dialog: Option<PendingDialog>,
     pending_design_paste: Option<menus::PendingDesignPaste>,
+    /// Read-only Figma Community catalogue response, delivered after the request finishes.
+    pub(crate) figma_catalog_rx: Option<std::sync::mpsc::Receiver<Result<Vec<u8>, String>>>,
     /// The latest UI context schedules the first poll and wakes the app when a dialog completes.
     ui_context: Option<egui::Context>,
     /// The automation roots the app was started with: every frame and control request runs
@@ -767,6 +769,7 @@ impl FigApp {
             waiting: Vec::new(),
             pending_dialog: None,
             pending_design_paste: None,
+            figma_catalog_rx: None,
             ui_context: None,
             automation_roots: None,
         }

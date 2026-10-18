@@ -1962,6 +1962,7 @@ dependencies = [
  "figcraft-color",
  "figcraft-doc",
  "figcraft-engine",
+ "figcraft-figma-plugin",
  "figcraft-format",
  "figcraft-geom",
  "figcraft-layout",

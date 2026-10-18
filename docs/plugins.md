@@ -73,6 +73,15 @@ A message the plugin shows (`notify`) appears as a toast; so does a text result.
 
 ## Local Figma plugin diagnostics
 
+**Figma Community discovery.** Plugins ▸ Manage plugins ▸ Figma Community searches a read-only
+catalogue and shows names, taglines, the resource and plugin IDs, current version ID, whether the
+manifest declares HTML UI, and a link to the original page. Searches use Figma's internal
+`/api/search/resources` endpoint, which is not part of its public REST contract and can change or
+stop working. Requests have a timeout and size cap; responses are validated and never executed.
+The listing does not include a verified downloadable package. Community results therefore cannot
+be installed or opened as working plugin UI in FigCraft. The separate **Figma local** tab accepts
+packages supplied by the plugin author or user; HTML UI support remains future work.
+
 `plugin.figma.inspect {"path":"/path/to/manifest.json"}` checks a local Figma plugin manifest,
 its `main` JavaScript and declared `ui` files, without running them. It reports the editor types,
 menu commands (including nested submenus), declared network domains, file sizes, a SHA-256 digest

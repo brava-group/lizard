@@ -73,6 +73,7 @@ blockers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | M11: read-only Figma Community plugin discovery in Manage plugins, with search, pagination and details. Installation and HTML UI await a verified package source and a UI bridge; estimates unchanged. |
 | 2026-10-18 | minor | Local merge of upstream 0.7.0 through 47438dd: retained M1 canvas interaction and M12 Agent UI while incorporating compatible import, render and editor fixes. Estimates unchanged. |
 | 2026-10-18 | minor | M12: selection context chips, image prompts for capable ACP adapters and expandable tool work receipts landed in the Agent tab. Rich text and broader file context remain open; estimate unchanged. |
 | 2026-10-17 | minor | M1 interaction pass: pixel-wheel zoom factors, exact discrete steps and selection-fit margins now follow measured Chrome/macOS cases. Other gestures and platforms remain to be measured; estimates unchanged. |

@@ -207,7 +207,7 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   [`localization-parity.md`](localization-parity.md); how to add one in
   [`translating.md`](translating.md).
 
-### 6. Plugins: widgets take clicks only, a self-hosted directory but no public catalogue; Figma plugin compatibility is narrow
+### 6. Plugins: widgets take clicks only; Community discovery is read-only and Figma plugin compatibility is narrow
 - **Landed (#101):** sandboxed WebAssembly plugins (wasmi, metered, memory cap, no WASI, also in
   the browser) acting through the command registry, one undo step per run, manifest permissions,
   Plugins menu, Run last plugin, Manage plugins, `plugin.*` commands, a Rust SDK and two examples
@@ -224,7 +224,7 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   key and checked in full (`figcraft-cli plugin publish`), browsed, installed after a permissions
   confirmation and updated from Plugins ▸ Manage plugins ▸ Browse, downloads checked against their
   SHA-256, `plugin.directory.*` for scripts and MCP, moderation with `figcraft-server plugins`.
-- **Missing:** a public catalogue and Community files, publisher accounts and signatures, ratings
+- **Missing:** an installable public catalogue and Community files, publisher accounts and signatures, ratings
   and install counts, background update checks, the directory in the browser build; widgets take only clicks (no
   text input, property menus, hover or timers) and draw only frames, text, shapes and images;
   no images or sliders in panels. Most Figma plugins use APIs outside the local JavaScript preview.
@@ -232,7 +232,9 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   files, menu subcommands, paths, symlinks, size limits and a package digest. The Manage plugins
   window can register and recheck a development folder. A one-shot native worker runs a small
   selection/opacity subset with a grouped undo step and rollback on failure. HTML UI, broad API
-  coverage, OS memory limits and a browser worker have not landed. Compatibility percentages stay unchanged.
+  coverage, OS memory limits and a browser worker have not landed. A read-only Figma Community
+  search now lists plugin metadata and links to their original pages; the internal endpoint does
+  not provide a verified package for installation or HTML UI execution. Compatibility percentages stay unchanged.
 - **Impact:** teams that depend on specific Figma plugins (icons, content, accessibility checks)
   can't bring them. FigCraft's CLI, control channel and MCP server cover agent automation better
   than Figma does.

@@ -7,6 +7,7 @@
 use egui::{Align2, Context, Id, RichText, Ui};
 use figcraft_engine::plugin_directory::{PluginEntry, installed_version, newer_version};
 use figcraft_engine::plugins::{Access, InstalledPlugin, Param, ParamKind};
+use figcraft_figma_plugin::catalog::{self, Page};
 use serde_json::{Map, Value, json};
 
 use crate::FigApp;
@@ -31,16 +32,18 @@ pub enum PluginsTab {
     Installed,
     Browse,
     FigmaLocal,
+    FigmaCommunity,
 }
 
 impl PluginsTab {
-    pub const ALL: [PluginsTab; 3] = [PluginsTab::Installed, PluginsTab::Browse, PluginsTab::FigmaLocal];
+    pub const ALL: [PluginsTab; 4] = [PluginsTab::Installed, PluginsTab::Browse, PluginsTab::FigmaLocal, PluginsTab::FigmaCommunity];
 
     fn label(self) -> &'static str {
         match self {
             PluginsTab::Installed => tr("Installed"),
             PluginsTab::Browse => tr("Browse"),
             PluginsTab::FigmaLocal => "Figma local",
+            PluginsTab::FigmaCommunity => "Figma Community",
         }
     }
 }
@@ -56,6 +59,12 @@ pub struct PluginsWindow {
     pub confirm: Option<String>,
     /// Last read-only report; never marks a JavaScript plugin as runnable.
     pub figma_report: Option<Value>,
+    pub community_query: String,
+    pub community_page: Option<Page>,
+    pub community_error: Option<String>,
+    pub community_selected: Option<String>,
+    pub community_from: usize,
+    pub community_loading: bool,
 }
 
 /// Width of the plugin windows' fields.
@@ -244,6 +253,9 @@ enum Manage {
     Confirm(String),
     /// Stop waiting for the directory's listing.
     StopBrowsing,
+    SearchCommunity(usize),
+    SelectCommunity(String),
+    OpenCommunity(String),
 }
 
 /// The directory requests the window sends without waiting (the server answers later).
@@ -255,6 +267,7 @@ const MANAGE_W: f32 = 400.0;
 const ROW_TEXT_W: f32 = 300.0;
 
 fn manage_window(app: &mut FigApp, ctx: &Context) {
+    poll_community(app);
     let t = Tokens::get(ctx);
     let mut open = true;
     let mut asked = None;
@@ -267,6 +280,7 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
             PluginsTab::Installed => installed_tab(app, ui, &t),
             PluginsTab::Browse => browse_tab(app, ui, &t),
             PluginsTab::FigmaLocal => figma_local_tab(app, ui, &t),
+            PluginsTab::FigmaCommunity => community_tab(app, ui, &t),
         };
     });
     app.ui.plugins_manage.tab = tab;
@@ -308,6 +322,9 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
         }
         Some(Manage::Confirm(id)) => app.ui.plugins_manage.confirm = Some(id),
         Some(Manage::StopBrowsing) => app.cancel_background(LIST),
+        Some(Manage::SearchCommunity(from)) => search_community(app, ctx, from),
+        Some(Manage::SelectCommunity(id)) => app.ui.plugins_manage.community_selected = Some(id),
+        Some(Manage::OpenCommunity(url)) => ctx.open_url(egui::OpenUrl::new_tab(url)),
         None => {}
     }
     if !open {
@@ -315,6 +332,8 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
         app.cancel_background(LIST);
         app.cancel_background(INSTALL);
         app.ui.plugins_manage.confirm = None;
+        app.figma_catalog_rx = None;
+        app.ui.plugins_manage.community_loading = false;
     }
     if app.ui.plugins_manage.confirm.is_some() {
         confirm_window(app, ctx, &t);
@@ -439,6 +458,152 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
             }
         }
     });
+    asked
+}
+
+/// Search the read-only public catalogue. This is an internal endpoint: errors and schema changes
+/// are shown in the window, and the response never reaches the plugin runner.
+fn search_community(app: &mut FigApp, ctx: &Context, from: usize) {
+    let query = app.ui.plugins_manage.community_query.clone();
+    let url = match catalog::search_url(&query, from) {
+        Ok(url) => url,
+        Err(error) => {
+            app.ui.plugins_manage.community_error = Some(error);
+            return;
+        }
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.figma_catalog_rx = Some(receiver);
+    app.ui.plugins_manage.community_loading = true;
+    app.ui.plugins_manage.community_page = None;
+    app.ui.plugins_manage.community_error = None;
+    app.ui.plugins_manage.community_selected = None;
+    app.ui.plugins_manage.community_from = from;
+    let repaint = ctx.clone();
+    let mut request = ehttp::Request::get(&url);
+    request.headers.insert("Accept", "application/json");
+    request.timeout = Some(std::time::Duration::from_secs(12));
+    ehttp::fetch(request, move |response| {
+        let result = response.and_then(|response| {
+            if !response.url.starts_with("https://www.figma.com/api/search/resources?") {
+                return Err("Catálogo redirecionou a consulta para outro endereço.".into());
+            }
+            if !response.ok {
+                return Err(format!("Catálogo indisponível (HTTP {}).", response.status));
+            }
+            if response.bytes.len() > catalog::MAX_RESPONSE_BYTES {
+                return Err("Resposta do catálogo muito grande.".into());
+            }
+            Ok(response.bytes)
+        });
+        let _ = sender.send(result);
+        repaint.request_repaint();
+    });
+}
+
+fn poll_community(app: &mut FigApp) {
+    let Some(receiver) = app.figma_catalog_rx.as_ref() else { return };
+    let result = match receiver.try_recv() {
+        Ok(result) => result,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("A consulta ao catálogo foi interrompida.".into()),
+    };
+    app.figma_catalog_rx = None;
+    app.ui.plugins_manage.community_loading = false;
+    match result.and_then(|bytes| catalog::parse_page(&bytes, app.ui.plugins_manage.community_from)) {
+        Ok(page) => {
+            app.ui.plugins_manage.community_page = Some(page);
+            app.ui.plugins_manage.community_error = None;
+        }
+        Err(error) => {
+            app.ui.plugins_manage.community_page = None;
+            app.ui.plugins_manage.community_error = Some(error);
+        }
+    }
+}
+
+fn community_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+    let state = &mut app.ui.plugins_manage;
+    let mut asked = None;
+    ui.horizontal(|ui| {
+        let mut enter = false;
+        if let Some(query) = widgets::text_field(ui, Id::new("figma_community_query"), &state.community_query, MANAGE_W - 95.0, "Buscar plugins") {
+            enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            state.community_query = query;
+        }
+        let clicked = widgets::button(ui, "Buscar", true, !state.community_loading).clicked();
+        if !state.community_loading && (clicked || enter) && !state.community_query.trim().is_empty() {
+            asked = Some(Manage::SearchCommunity(0));
+        }
+    });
+    ui.add_space(8.0);
+    widgets::label(ui, "Catálogo somente para consulta. Os resultados não incluem um pacote executável para o FigCraft.", t.text_secondary);
+    if state.community_loading {
+        ui.add_space(8.0);
+        widgets::label(ui, "Buscando plugins…", t.text_secondary);
+    }
+    if let Some(error) = &state.community_error {
+        ui.add_space(8.0);
+        widgets::label(ui, error, t.text_secondary);
+    }
+    let Some(page) = &state.community_page else { return asked };
+    ui.add_space(10.0);
+    widgets::label(
+        ui,
+        &format!(
+            "{} resultados · exibindo {}–{}",
+            page.total,
+            page.from.saturating_add(1).min(page.total),
+            page.from.saturating_add(page.entries.len()).min(page.total)
+        ),
+        t.text_secondary,
+    );
+    if page.entries.is_empty() {
+        widgets::label(ui, "Nenhum plugin encontrado.", t.text_secondary);
+    }
+    egui::ScrollArea::vertical().id_salt("figma_community_results").max_height(300.0).show(ui, |ui| {
+        for entry in &page.entries {
+            ui.add_space(7.0);
+            let name =
+                if entry.name.chars().count() > 43 { format!("{}…", entry.name.chars().take(42).collect::<String>()) } else { entry.name.clone() };
+            if widgets::button(ui, &name, state.community_selected.as_deref() == Some(&entry.plugin_id), true).on_hover_text(&entry.name).clicked() {
+                asked = Some(Manage::SelectCommunity(entry.plugin_id.clone()));
+            }
+            if !entry.tagline.is_empty() {
+                ui.add(egui::Label::new(RichText::new(&entry.tagline).font(regular(11.0)).color(t.text_secondary)).wrap());
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        if page.from > 0 && widgets::button(ui, "Anterior", false, !state.community_loading).clicked() {
+            asked = Some(Manage::SearchCommunity(page.from.saturating_sub(catalog::PAGE_SIZE)));
+        }
+        if page.from.saturating_add(catalog::PAGE_SIZE) < page.total && widgets::button(ui, "Próxima", false, !state.community_loading).clicked() {
+            asked = Some(Manage::SearchCommunity(page.from.saturating_add(catalog::PAGE_SIZE)));
+        }
+    });
+    if let Some(entry) = page.entries.iter().find(|entry| state.community_selected.as_deref() == Some(&entry.plugin_id)) {
+        ui.add_space(12.0);
+        ui.separator();
+        ui.label(RichText::new(&entry.name).font(semibold(13.0)).color(t.text));
+        widgets::label(ui, &format!("Plugin ID: {} · Recurso: {}", entry.plugin_id, entry.resource_id), t.text_secondary);
+        if let Some(version) = &entry.version_id {
+            widgets::label(ui, &format!("Versão publicada: {version}"), t.text_secondary);
+        }
+        widgets::label(
+            ui,
+            match entry.has_ui {
+                Some(true) => "Declara interface HTML · execução indisponível",
+                Some(false) => "Sem interface HTML declarada · execução indisponível",
+                None => "Manifesto indisponível · execução indisponível",
+            },
+            t.text_secondary,
+        );
+        ui.add_space(8.0);
+        if widgets::button(ui, "Ver página original", false, true).clicked() {
+            asked = Some(Manage::OpenCommunity(entry.page_url.clone()));
+        }
+    }
     asked
 }
 

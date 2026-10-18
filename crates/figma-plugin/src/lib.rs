@@ -1,6 +1,7 @@
 //! Parse a local Figma plugin manifest and run a bounded subset of its JavaScript API.
 //! The editor owns file I/O and applies validated document operations after worker completion.
 
+pub mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod worker;
 
