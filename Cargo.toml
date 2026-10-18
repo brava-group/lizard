@@ -74,6 +74,7 @@ crc32fast = "1"
 # debug builds may not do, and then a long-running plugin overflows the native stack.
 wasmi = { version = "2", default-features = false, features = ["std", "stable", "validate", "portable-dispatch"] }
 wat = "1.261"
+boa_engine = { version = "0.22", default-features = false }
 
 # ui
 egui = "0.36"

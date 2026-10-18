@@ -122,8 +122,15 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == figcraft_figma_plugin::worker::WORKER_ARG) {
+        if let Err(e) = figcraft_figma_plugin::worker::run_stdio() {
+            eprintln!("FigCraft plugin worker: {e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!(
             "FigCraft {}{}",

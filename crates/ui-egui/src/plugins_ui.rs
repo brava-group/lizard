@@ -239,6 +239,7 @@ enum Manage {
     ImportFigma(String),
     RemoveFigma(String),
     StatusFigma(String),
+    RunFigma(String, Option<String>),
     Browse(String),
     Confirm(String),
     /// Stop waiting for the directory's listing.
@@ -290,6 +291,16 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
                 app.ui.plugins_manage.figma_report = Some(report);
             }
         }
+        Some(Manage::RunFigma(id, command)) => {
+            if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
+                report["lastRun"] = Value::Null;
+            }
+            if let Some(result) = app.run("plugin.figma.run", json!({"id": id, "command": command})) {
+                if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
+                    report["lastRun"] = result;
+                }
+            }
+        }
         Some(Manage::Browse(server)) => {
             app.ui.plugins_manage.confirm = None;
             app.cancel_background(INSTALL);
@@ -320,7 +331,11 @@ fn inspect_figma_dialog(app: &mut FigApp) {
 }
 
 fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
-    widgets::label(ui, "Inspecione ou registre uma pasta local para desenvolvimento. O código JavaScript ainda não é executado.", t.text_secondary);
+    widgets::label(
+        ui,
+        "Registre um plugin local confiável. A execução inicial aceita seleção, leitura de nome e opacidade, escrita de opacidade e closePlugin.",
+        t.text_secondary,
+    );
     ui.add_space(8.0);
     let mut asked = widgets::button(ui, "Escolher manifest.json…", true, true).clicked().then_some(Manage::InspectFigma);
     for plugin in &app.session.prefs.figma_plugins {
@@ -340,7 +355,7 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     egui::ScrollArea::vertical().id_salt("figma_plugin_report").max_height(360.0).show(ui, |ui| {
         let name = report["name"].as_str().unwrap_or("Plugin");
         ui.label(RichText::new(name).font(semibold(13.0)).color(t.text));
-        widgets::label(ui, "Diagnosticado · execução indisponível", t.text_secondary);
+        widgets::label(ui, "Diagnosticado · execução limitada", t.text_secondary);
         let api = report["api"].as_str().unwrap_or("?");
         let editors =
             report["editorType"].as_array().map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
@@ -371,14 +386,42 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
             asked = Some(Manage::ImportFigma(path.to_string()));
         }
         ui.add_space(8.0);
+        let registered = app
+            .session
+            .prefs
+            .figma_plugins
+            .iter()
+            .any(|plugin| report["id"].as_str() == Some(plugin.id.as_str()) && report["digest"].as_str() == Some(plugin.digest.as_str()));
+        if registered
+            && report["commands"].as_array().is_none_or(Vec::is_empty)
+            && let Some(id) = report["id"].as_str()
+            && widgets::button(ui, "Executar plugin", false, true).clicked()
+        {
+            asked = Some(Manage::RunFigma(id.to_string(), None));
+        }
         if let Some(commands) = report["commands"].as_array()
             && !commands.is_empty()
         {
             widgets::label(ui, "Comandos do menu:", t.text_secondary);
             for command in commands {
                 if let (Some(label), Some(id)) = (command["label"].as_str(), command["command"].as_str()) {
-                    widgets::label(ui, &format!("• {label} ({id})"), t.text_secondary);
+                    if registered {
+                        if widgets::button(ui, label, false, true).clicked() {
+                            if let Some(plugin_id) = report["id"].as_str() {
+                                asked = Some(Manage::RunFigma(plugin_id.to_string(), Some(id.to_string())));
+                            }
+                        }
+                    } else {
+                        widgets::label(ui, &format!("• {label} ({id})"), t.text_secondary);
+                    }
                 }
+            }
+        }
+        if report["lastRun"]["status"] == "executed" {
+            let operations = report["lastRun"]["operations"].as_u64().unwrap_or(0);
+            widgets::label(ui, &format!("Executado · {operations} alteração(ões)"), t.text_secondary);
+            if let Some(message) = report["lastRun"]["message"].as_str() {
+                widgets::label(ui, message, t.text_secondary);
             }
         }
         if let Some(files) = report["files"].as_array() {

@@ -1,5 +1,8 @@
-//! Parse a local Figma plugin manifest without running its JavaScript. The editor owns file I/O
-//! and the eventual runtime; this crate only validates the public manifest shape and paths.
+//! Parse a local Figma plugin manifest and run a bounded subset of its JavaScript API.
+//! The editor owns file I/O and applies validated document operations after worker completion.
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod worker;
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path};

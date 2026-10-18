@@ -50,6 +50,15 @@ See docs/cli.md and docs/mcp.md.";
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().is_some_and(|arg| arg == figcraft_figma_plugin::worker::WORKER_ARG) {
+        return match figcraft_figma_plugin::worker::run_stdio() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("FigCraft plugin worker: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     match run(&argv) {
         Ok(code) => code,
         Err(CliError::Usage(msg)) => {

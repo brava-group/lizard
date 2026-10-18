@@ -81,9 +81,21 @@ files and oversized packages. A manifest `build` command is never run.
 
 `plugin.figma.import {"path":"/path/to/manifest.json","mode":"development"}` records that
 source and digest in preferences. `plugin.figma.status {"id":"…"}` reads it again and reports
-`changedSinceImport`; `plugin.figma.remove {"id":"…"}` forgets it. Installed snapshots and a
-JavaScript runtime are not implemented yet. `plugin.figma.run` explicitly refuses execution.
-These commands are separate from FigCraft's native WebAssembly plugin commands.
+`changedSinceImport`; `plugin.figma.remove {"id":"…"}` forgets it. These commands are separate
+from FigCraft's native WebAssembly plugin commands.
+
+On native builds, `plugin.figma.run {"id":"…","command":"optional menu command"}` executes
+the compiled `main` JavaScript in a one-shot Boa subprocess. The first supported API slice is
+`figma.command`, `figma.currentPage.selection`, selected nodes' `id`, `name` and `opacity`, an
+`opacity` setter (0–1), and `figma.closePlugin()`. A resolved Promise can finish before the worker
+exits. Successful opacity writes form one undo step; a thrown error, invalid value, missing close,
+changed package or expired worker leaves the document unchanged. The worker has a 2-second wall
+clock limit, loop/stack/recursion limits, 1,024 typed writes, and bounded request and response
+sizes. It exposes no file, network or DOM host functions. **It does not yet enforce an OS memory
+limit**, so this is a local development preview for plugins you trust, not a general sandbox for
+untrusted packages. HTML UI, arbitrary node methods, creation, storage, long-lived async sessions,
+browser execution and installed snapshots are still unsupported. The manager shows run controls
+for registered packages and reports unsupported manifests at run time.
 
 **Plugin panels.** A plugin written for API 2 can show a panel while it runs: a floating window,
 first placed beside the properties panel (drag its title bar to move it), with the plugin's notes,
