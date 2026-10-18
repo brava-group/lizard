@@ -294,11 +294,7 @@ fn attach_image(app: &mut FigApp, name: String, bytes: Vec<u8>) -> Result<(), St
     Ok(())
 }
 
-fn attach_clipboard_image(app: &mut FigApp) {
-    let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
-        app.toast("Não há uma imagem na área de transferência.");
-        return;
-    };
+fn attach_rgba_image(app: &mut FigApp, width: u32, height: u32, rgba: Vec<u8>) {
     let Some(expected) = usize::try_from(width).ok().and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)?.checked_mul(4))) else {
         app.toast("A imagem da área de transferência é grande demais.");
         return;
@@ -320,6 +316,46 @@ fn attach_clipboard_image(app: &mut FigApp) {
         }
         Err(error) => app.toast(error.to_string()),
     }
+}
+
+fn attach_clipboard_image(app: &mut FigApp) {
+    let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
+        app.toast("Não há uma imagem na área de transferência.");
+        return;
+    };
+    attach_rgba_image(app, width, height, rgba);
+}
+
+fn paste_image_into_composer(app: &mut FigApp, ui: &Ui) {
+    if !ui.memory(|memory| memory.has_focus(Id::new("agent_prompt"))) {
+        return;
+    }
+    let paste_requested = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(event, egui::Event::Paste(_))
+                || matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, repeat: false, .. } if modifiers.command && !modifiers.shift && !modifiers.alt)
+        })
+    });
+    if !paste_requested {
+        return;
+    }
+    // A copied design may include a PNG preview. Keep that paste on the design path; ordinary
+    // HTML or text alongside a real image does not turn the image into text in the composer.
+    if app.services.clipboard_get_html().is_some_and(|html| figcraft_engine::cmd::edit::design_clipboard_buffer(&html).is_some()) {
+        return;
+    }
+    let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
+        return;
+    };
+    // egui also receives a Paste event for image clipboards on macOS, sometimes containing alt
+    // text. Consume it before TextEdit and the global canvas shortcuts see the same events.
+    ui.ctx().input_mut(|input| {
+        input.events.retain(|event| {
+            !matches!(event, egui::Event::Paste(_))
+                && !matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, repeat: false, .. } if modifiers.command && !modifiers.shift && !modifiers.alt)
+        });
+    });
+    attach_rgba_image(app, width, height, rgba);
 }
 
 fn send_prompt(app: &mut FigApp) {
@@ -786,20 +822,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
         pos2(composer.max.x - 16.0, composer.min.y + 76.0 + context_height + images_height),
     );
-    // Image-only paste becomes an attachment. Text and HTML stay in their existing editor or
-    // design-layer paste path, so a copied design preview is never attached by accident.
-    let image_paste = ui.memory(|memory| memory.has_focus(Id::new("agent_prompt")))
-        && ui.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, repeat: false, .. } if modifiers.command && !modifiers.shift && !modifiers.alt)
-            }) && !input.events.iter().any(|event| matches!(event, egui::Event::Paste(text) if !text.is_empty()))
-        });
-    if image_paste
-        && app.services.clipboard_get_text().is_none_or(|value| value.is_empty())
-        && app.services.clipboard_get_html().is_none_or(|value| value.is_empty())
-    {
-        attach_clipboard_image(app);
-    }
+    paste_image_into_composer(app, ui);
     let input_resp = ui.put(
         input,
         egui::TextEdit::multiline(&mut app.ui.agent.draft)
@@ -940,6 +963,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 mod tests {
     use super::*;
     use crate::{NoServices, Services};
+    use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
     use figcraft_engine::Session;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
@@ -958,6 +982,48 @@ mod tests {
         fn agent_poll(&mut self) -> Vec<AgentEvent> {
             std::mem::take(&mut *self.events.lock().unwrap())
         }
+    }
+
+    struct ImagePasteClipboard;
+
+    impl Services for ImagePasteClipboard {
+        fn clipboard_get_text(&mut self) -> Option<String> {
+            Some("image alt text".into())
+        }
+
+        fn clipboard_get_image(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+            Some((2, 2, vec![255; 16]))
+        }
+    }
+
+    fn paste_into_agent(events: Vec<Event>) {
+        let mut app = FigApp::new(Session::new(), Box::new(ImagePasteClipboard));
+        app.ui.left_tab = crate::LeftTab::Agent;
+        let ctx = egui::Context::default();
+        for (time, events) in [(0.0, Vec::new()), (1.0 / 60.0, Vec::new()), (2.0 / 60.0, events)] {
+            if time > 1.0 / 60.0 {
+                ctx.memory_mut(|memory| memory.request_focus(Id::new("agent_prompt")));
+            }
+            let input =
+                RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(time), events, ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| app.ui(ui));
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.ui.agent.images.len(), 1, "the clipboard image becomes a composer attachment");
+        assert!(app.ui.agent.draft.is_empty(), "the image's alt text must not enter the prompt");
+    }
+
+    #[test]
+    fn paste_event_with_alt_text_attaches_an_image_to_agent_composer() {
+        paste_into_agent(vec![Event::Paste("image alt text".into())]);
+    }
+
+    #[test]
+    fn cmd_v_key_and_paste_event_attach_only_once_to_agent_composer() {
+        paste_into_agent(vec![
+            Event::Key { key: Key::V, physical_key: Some(Key::V), pressed: true, repeat: false, modifiers: Modifiers::MAC_CMD | Modifiers::COMMAND },
+            Event::Paste("image alt text".into()),
+        ]);
     }
 
     #[test]

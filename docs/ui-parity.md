@@ -168,6 +168,7 @@ in the table. `crates/ui-egui/src/shortcut_keys_tests.rs` drives the keys a look
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | Agent composer now handles macOS Paste events for clipboard images, including images accompanied by alt text, without putting that text in the prompt. Focused input tests cover Paste alone and Cmd+V with Paste; an actual macOS image clipboard produced a composer thumbnail after Cmd+V in the running app. Estimates unchanged. |
 | 2026-10-18 | minor | Agent sidebar: selection chips link to canvas nodes without changing the typed prompt, image attachments have previews and removal, and tool activity is grouped above the answer. Broader file and rich-text context remain open; estimates unchanged. |
 | 2026-10-17 | minor | Kept eligible frame composition active for large canvas textures and high zoom. A bounded frame preview follows the pointer while a sharp visible tile is prepared; synthetic bounds tests and a BetterDeck screen capture pass. Ultra-wide display latency remains unmeasured. |
 | 2026-10-17 | minor | Eligible native drags of a single topmost frame now translate a prepared visual layer with the pointer and return to the vector render after release. Synthetic pixel equivalence and interaction tests pass; the 248-node BetterDeck document was visually checked during a rapid drag. Broader drag and display-latency comparisons remain. |

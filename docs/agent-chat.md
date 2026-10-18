@@ -30,8 +30,8 @@ changed that history. Shift+Enter inserts a newline; Enter sends.
 Selected canvas layers appear above the prompt as references. A chip locates its layer on the
 canvas; its × removes that layer from the next message's context without deselecting or deleting
 it. The conversation records the names and IDs that were actually sent. The + button accepts
-PNG/JPEG images from a file or the clipboard, and image-only paste while the prompt has focus
-adds an attachment. Images are shown as removable thumbnails and sent as separate ACP image
+PNG/JPEG images from a file or the clipboard, and pasting an image while the prompt has focus
+adds an attachment even when the clipboard also reports alternate text. Images are shown as removable thumbnails and sent as separate ACP image
 blocks only when the chosen adapter advertises image prompt support. Up to four images, totalling
 4 MB, can be attached to one message; failed sends restore them to the composer. Text, HTML and
 copied design layers continue through their existing paste paths. Agent activity is grouped under

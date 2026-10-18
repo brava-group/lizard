@@ -412,6 +412,7 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | Gap 19: clipboard images paste into the focused Agent composer even when macOS supplies only a Paste event or alt text. Focused UI input tests and an actual macOS clipboard paste in the app pass; estimates unchanged. |
 | 2026-10-18 | minor | Gap 19: selection context chips, image attachments through ACP image content, and expandable tool work receipts improve the Agent tab. Focused UI and ACP tests pass; specialized AI features and estimates remain unchanged. |
 | 2026-10-17 | minor | Gap 7: bounded previews keep eligible frame dragging composited at high zoom and large window sizes. BetterDeck at 800% prepared in about 40 ms instead of about 357 ms; ultra-wide display latency remains unmeasured. Estimates unchanged. |
 | 2026-10-17 | minor | Gap 7: native topmost frame drags can use a separate composited layer, reducing pointer-following work after preparation. The 248-node BetterDeck release run prepared in 33 ms; full presentation latency remains unmeasured. GPU rendering remains open and estimates are unchanged. |
