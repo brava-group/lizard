@@ -100,6 +100,57 @@ fn topmost_frame_uses_composited_drag_and_returns_to_refined_vector_image() {
     assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "the final texture must replace the drag layer");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn zoomed_into_a_frame_corner_drag_stays_composited() {
+    let mut s = Session::new();
+    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let frame = id(s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 2048, "height": 1210, "props": {"fill": "#192736"}})).unwrap());
+    s.execute("shape.rectangle", &json!({"parent": frame, "x": 20, "y": 30, "width": 80, "height": 60, "props": {"fill": "#e03030"}})).unwrap();
+    s.execute("select.set", &json!({"ids": [frame]})).unwrap();
+    let mut ui = Ui::new(s);
+    settle(&mut ui);
+    ui.app.canvas.refine_latency_ms = None;
+    if let Ok(ds) = ui.app.session.ds_mut() {
+        ds.view.zoom = 8.0;
+        ds.view.cx = 130.0;
+        ds.view.cy = 130.0;
+        ds.revision += 1;
+    }
+    ui.frame(vec![]);
+    for _ in 0..300 {
+        ui.frame(vec![]);
+        if ui.app.canvas.refine_latency_ms.is_some() && ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)));
+    let start = ui.app.to_screen(115.0, 115.0);
+    assert!(ui.app.canvas.rect.contains(start));
+    ui.button(start, true);
+    ui.frame(vec![Event::PointerMoved(start + vec2(24.0, 20.0))]);
+    for _ in 0..300 {
+        ui.frame(vec![]);
+        if crate::canvas::drag_mode(&ui.app) == "composited" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(crate::canvas::drag_mode(&ui.app), "composited", "high zoom should not fall back to a full vector redraw");
+    ui.frame(vec![Event::PointerMoved(start + vec2(500.0, 250.0))]);
+    assert_eq!(crate::canvas::drag_mode(&ui.app), "composited", "a long move should keep following the pointer");
+    ui.button(start + vec2(500.0, 250.0), false);
+    for _ in 0..300 {
+        ui.frame(vec![]);
+        if ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "release must refine the vector image");
+}
+
 /// A synthetic dashboard with nested cards, shapes and text. It exercises the same large-frame
 /// redraw and texture conversion as a real design without depending on a proprietary file.
 #[test]

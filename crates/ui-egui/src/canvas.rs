@@ -112,13 +112,17 @@ struct DragVisual {
     root: NodeId,
     source: Arc<Document>,
     base_view: figcraft_render::View,
+    background_view: Option<figcraft_render::View>,
+    visible_view: figcraft_render::View,
     root_view: figcraft_render::View,
+    detail: Option<(figcraft_render::View, egui::TextureHandle)>,
+    detail_pending: Option<Receiver<(figcraft_render::View, egui::ColorImage)>>,
     start_transform: [f64; 6],
     zoom: f64,
     center: (f64, f64),
     canvas_size: egui::Vec2,
-    ready: Option<(egui::TextureHandle, egui::TextureHandle)>,
-    pending: Option<Receiver<(egui::ColorImage, egui::ColorImage, f64)>>,
+    ready: Option<(Option<egui::TextureHandle>, egui::TextureHandle)>,
+    pending: Option<Receiver<(Option<egui::ColorImage>, egui::ColorImage, f64)>>,
     prepare_ms: Option<f64>,
 }
 
@@ -152,9 +156,7 @@ fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View) -> Option<figcraft_render::View> {
-    let bounds = doc.world_render_bounds(root)?;
-    let scale = base.scale;
+fn drag_view_for_bounds(bounds: figcraft_geom::Rect, base: &figcraft_render::View, scale: f64, pixel_limit: f64) -> Option<figcraft_render::View> {
     if !scale.is_finite() || scale <= 0.0 || ![bounds.x0, bounds.y0, bounds.x1, bounds.y1].iter().all(|n| n.is_finite()) {
         return None;
     }
@@ -163,11 +165,95 @@ fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View)
     let x1 = ((bounds.x1 - base.origin.0) * scale).ceil() + 2.0;
     let y1 = ((bounds.y1 - base.origin.1) * scale).ceil() + 2.0;
     let (w, h) = (x1 - x0, y1 - y0);
-    // Bound both CPU allocations and the GPU upload. Very large frames use the normal renderer.
-    if !w.is_finite() || !h.is_finite() || !(1.0..=4096.0).contains(&w) || !(1.0..=4096.0).contains(&h) || w * h > 8_000_000.0 {
+    if !w.is_finite() || !h.is_finite() || !(1.0..=4096.0).contains(&w) || !(1.0..=4096.0).contains(&h) || w * h > pixel_limit {
         return None;
     }
     Some(figcraft_render::View { origin: (base.origin.0 + x0 / scale, base.origin.1 + y0 / scale), scale, width: w as u32, height: h as u32 })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View) -> Option<figcraft_render::View> {
+    let bounds = doc.world_render_bounds(root)?;
+    let width = bounds.width();
+    let height = bounds.height();
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    if let Some(full) = drag_view_for_bounds(bounds, base, base.scale, 8_000_000.0) {
+        return Some(full);
+    }
+    // A small full-frame preview follows the cursor immediately. A full-resolution tile of the
+    // visible area is prepared separately, so zoom never requires rendering the entire frame.
+    let fitted = base.scale.min(2040.0 / width).min(2040.0 / height).min((2_400_000.0 / (width * height)).sqrt());
+    let scale = fitted * 0.999;
+    if scale < 0.05 || !scale.is_finite() {
+        return None;
+    }
+    drag_view_for_bounds(bounds, base, scale, 2_500_000.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drag_background_view(base: &figcraft_render::View) -> Option<figcraft_render::View> {
+    let pixels = f64::from(base.width) * f64::from(base.height);
+    let factor = (7_900_000.0 / pixels).sqrt().min(8190.0 / f64::from(base.width)).min(8190.0 / f64::from(base.height)).min(1.0);
+    if !factor.is_finite() || factor <= 0.0 {
+        return None;
+    }
+    Some(figcraft_render::View {
+        origin: base.origin,
+        scale: base.scale * factor,
+        width: (f64::from(base.width) * factor).ceil() as u32,
+        height: (f64::from(base.height) * factor).ceil() as u32,
+    })
+}
+
+/// The part of the original frame needed at the current pointer position, with a small reserve
+/// around the viewport. The preview supplies pixels until this tile is ready.
+#[cfg(not(target_arch = "wasm32"))]
+fn drag_detail_view(visual: &DragVisual, delta: (f64, f64)) -> Option<figcraft_render::View> {
+    let frame = visual.source.world_render_bounds(visual.root)?;
+    let visible = visual.visible_view.page_rect();
+    let needed = figcraft_geom::Rect::new(
+        (visible.x0 - delta.0).max(frame.x0),
+        (visible.y0 - delta.1).max(frame.y0),
+        (visible.x1 - delta.0).min(frame.x1),
+        (visible.y1 - delta.1).min(frame.y1),
+    );
+    if needed.width() <= 0.0 || needed.height() <= 0.0 {
+        return None;
+    }
+    let scale = visual.base_view.scale;
+    let mut margin = 192.0 / scale;
+    for _ in 0..5 {
+        let bounds = figcraft_geom::Rect::new(
+            (needed.x0 - margin).max(frame.x0),
+            (needed.y0 - margin).max(frame.y0),
+            (needed.x1 + margin).min(frame.x1),
+            (needed.y1 + margin).min(frame.y1),
+        );
+        if let Some(view) = drag_view_for_bounds(bounds, &visual.base_view, scale, 8_000_000.0) {
+            return Some(view);
+        }
+        margin *= 0.5;
+    }
+    drag_view_for_bounds(needed, &visual.base_view, scale, 8_000_000.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn detail_covers_visible(visual: &DragVisual, detail: &figcraft_render::View, delta: (f64, f64)) -> bool {
+    let Some(frame) = visual.source.world_render_bounds(visual.root) else { return false };
+    let visible = visual.visible_view.page_rect();
+    let needed = figcraft_geom::Rect::new(
+        (visible.x0 - delta.0).max(frame.x0),
+        (visible.y0 - delta.1).max(frame.y0),
+        (visible.x1 - delta.0).min(frame.x1),
+        (visible.y1 - delta.1).min(frame.y1),
+    );
+    needed.width() <= 0.0 || needed.height() <= 0.0 || {
+        let covered = detail.page_rect();
+        let eps = 1.0 / detail.scale;
+        covered.x0 <= needed.x0 + eps && covered.y0 <= needed.y0 + eps && covered.x1 >= needed.x1 - eps && covered.y1 >= needed.y1 - eps
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -207,7 +293,13 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
         width: (app.canvas.rect.width() * ctx.pixels_per_point()).ceil().max(1.0) as u32,
         height: (app.canvas.rect.height() * ctx.pixels_per_point()).ceil().max(1.0) as u32,
     };
-    if !covers(base_view, &visible) || u64::from(base_view.width) * u64::from(base_view.height) > 8_000_000 {
+    if !covers(base_view, &visible) {
+        return;
+    }
+    let has_visible_siblings =
+        ds.doc.node(ds.page).is_some_and(|page| page.children.iter().any(|id| *id != root && ds.doc.node(*id).is_some_and(|n| n.visible)));
+    let background_view = if has_visible_siblings { drag_background_view(base_view) } else { None };
+    if has_visible_siblings && background_view.is_none() {
         return;
     }
     let Some(root_view) = cropped_drag_view(&ds.doc, root, base_view) else { return };
@@ -215,21 +307,22 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     let source = ds.doc.clone();
     let job_doc = source.clone();
     let page = ds.page;
-    let base_for_job = base_view.clone();
+    let background_for_job = background_view.clone();
     let root_for_job = root_view.clone();
     let repaint = ctx.clone();
     let viewport = ctx.viewport_id();
     let spawned = std::thread::Builder::new().name("figcraft-drag-layers".into()).spawn(move || {
         let started = web_time::Instant::now();
-        let opts = figcraft_render::Options { skip: vec![root], lod: true, ..Default::default() };
-        let Some(base) = figcraft_render::render_view(&job_doc, page, &base_for_job, &opts) else { return };
+        let base = if let Some(view) = background_for_job.as_ref() {
+            let opts = figcraft_render::Options { skip: vec![root], lod: true, ..Default::default() };
+            let Some(pix) = figcraft_render::render_view(&job_doc, page, view, &opts) else { return };
+            Some(crate::render_worker::screen_image(&pix, job_doc.color_profile))
+        } else {
+            None
+        };
         let Some(mut moving) = figcraft_render::Pixmap::new(root_for_job.width, root_for_job.height) else { return };
         figcraft_render::render_nodes_into_preview(&job_doc, &[root], &root_for_job, &mut moving, true);
-        let images = (
-            crate::render_worker::screen_image(&base, job_doc.color_profile),
-            crate::render_worker::screen_image(&moving, job_doc.color_profile),
-            started.elapsed().as_secs_f64() * 1000.0,
-        );
+        let images = (base, crate::render_worker::screen_image(&moving, job_doc.color_profile), started.elapsed().as_secs_f64() * 1000.0);
         if tx.send(images).is_ok() {
             repaint.request_repaint_of(viewport);
         }
@@ -244,7 +337,11 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
         root,
         source,
         base_view: base_view.clone(),
+        background_view,
+        visible_view: visible,
         root_view,
+        detail: None,
+        detail_pending: None,
         start_transform: ds.doc.world_transform(root).as_coeffs(),
         zoom: ds.view.zoom,
         center: (ds.view.cx, ds.view.cy),
@@ -258,19 +355,67 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
 #[cfg(not(target_arch = "wasm32"))]
 fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
-    let Some(rx) = visual.pending.as_ref() else { return };
-    match rx.try_recv() {
-        Ok((base, moving, ms)) => {
-            visual.ready = Some((
-                ctx.load_texture("figcraft-drag-base", base, egui::TextureOptions::LINEAR),
-                ctx.load_texture("figcraft-drag-frame", moving, egui::TextureOptions::LINEAR),
-            ));
-            visual.pending = None;
-            visual.prepare_ms = Some(ms);
+    if let Some(rx) = visual.pending.as_ref() {
+        match rx.try_recv() {
+            Ok((base, moving, ms)) => {
+                visual.ready = Some((
+                    base.map(|image| ctx.load_texture("figcraft-drag-base", image, egui::TextureOptions::LINEAR)),
+                    ctx.load_texture("figcraft-drag-frame", moving, egui::TextureOptions::LINEAR),
+                ));
+                visual.pending = None;
+                visual.prepare_ms = Some(ms);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                app.canvas.drag_visual = None;
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => app.canvas.drag_visual = None,
-        Err(std::sync::mpsc::TryRecvError::Empty) => {}
     }
+    if let Some(rx) = visual.detail_pending.as_ref() {
+        match rx.try_recv() {
+            Ok((view, image)) => {
+                visual.detail = Some((view, ctx.load_texture("figcraft-drag-detail", image, egui::TextureOptions::LINEAR)));
+                visual.detail_pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => visual.detail_pending = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+    if app.canvas.dragging {
+        request_drag_detail(app, ctx);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
+    let Some(delta) = drag_visual_delta(app) else { return };
+    let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
+    if visual.root_view.scale == visual.base_view.scale
+        || visual.detail_pending.is_some()
+        || visual.detail.as_ref().is_some_and(|(view, _)| detail_covers_visible(visual, view, delta))
+    {
+        return;
+    }
+    let Some(view) = drag_detail_view(visual, delta) else { return };
+    let source = visual.source.clone();
+    let root = visual.root;
+    let repaint = ctx.clone();
+    let viewport = ctx.viewport_id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("figcraft-drag-detail".into()).spawn(move || {
+        let Some(mut pix) = figcraft_render::Pixmap::new(view.width, view.height) else { return };
+        figcraft_render::render_nodes_into_preview(&source, &[root], &view, &mut pix, true);
+        let image = crate::render_worker::screen_image(&pix, source.color_profile);
+        if tx.send((view, image)).is_ok() {
+            repaint.request_repaint_of(viewport);
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("drag detail worker: {e}");
+        return;
+    }
+    visual.detail_pending = Some(rx);
 }
 
 pub(crate) fn drag_mode(app: &FigApp) -> &'static str {
@@ -339,8 +484,13 @@ fn paint_drag_visual(app: &FigApp, painter: &egui::Painter) -> bool {
         let size = vec2((f64::from(view.width) / view.scale * zoom) as f32, (f64::from(view.height) / view.scale * zoom) as f32);
         painter.image(tex.id(), Rect::from_min_size(tl, size), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     };
-    draw(base, &visual.base_view, (0.0, 0.0));
+    if let (Some(base), Some(view)) = (base.as_ref(), visual.background_view.as_ref()) {
+        draw(base, view, (0.0, 0.0));
+    }
     draw(moving, &visual.root_view, (dx, dy));
+    if let Some((view, detail)) = visual.detail.as_ref() {
+        draw(detail, view, (dx, dy));
+    }
     true
 }
 
@@ -374,6 +524,68 @@ mod drag_visual_tests {
         let y = ((crop.origin.1 - view.origin.1) * view.scale).round() as i32;
         base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
         assert_eq!(base.data(), full.data(), "separate background and frame must have the same pixels at rest");
+    }
+
+    #[test]
+    fn zoomed_frame_uses_bounded_preview_and_sharp_visible_tile() {
+        let mut session = figcraft_engine::Session::new();
+        let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+        let frame =
+            id(session.execute("frame.create", &json!({"x": 100, "y": 100, "width": 2048, "height": 1210, "props": {"fill": "#203040"}})).unwrap());
+        session
+            .execute("shape.rectangle", &json!({"parent": frame, "x": 20, "y": 30, "width": 60, "height": 80, "props": {"fill": "#e03030"}}))
+            .unwrap();
+        let ds = session.ds().unwrap();
+        let view = figcraft_render::View { origin: (90.0, 90.0), scale: 8.0, width: 1600, height: 900 };
+        let preview = cropped_drag_view(&ds.doc, frame, &view).unwrap();
+        assert!(preview.scale < view.scale);
+        assert!(preview.width <= 4096 && preview.height <= 4096);
+        assert!(u64::from(preview.width) * u64::from(preview.height) <= 8_000_000);
+        let visual = DragVisual {
+            uid: ds.uid,
+            page: ds.page,
+            root: frame,
+            source: ds.doc.clone(),
+            base_view: view.clone(),
+            background_view: None,
+            visible_view: view.clone(),
+            root_view: preview,
+            detail: None,
+            detail_pending: None,
+            start_transform: ds.doc.world_transform(frame).as_coeffs(),
+            zoom: 8.0,
+            center: (0.0, 0.0),
+            canvas_size: vec2(1600.0, 900.0),
+            ready: None,
+            pending: None,
+            prepare_ms: None,
+        };
+        let detail = drag_detail_view(&visual, (0.0, 0.0)).unwrap();
+        assert_eq!(detail.scale, view.scale);
+        assert!(detail_covers_visible(&visual, &detail, (0.0, 0.0)));
+        assert!(!detail_covers_visible(&visual, &detail, (-90.0, -60.0)));
+        let opts = figcraft_render::Options { lod: true, ..Default::default() };
+        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let opts = figcraft_render::Options { skip: vec![frame], lod: true, ..Default::default() };
+        let mut base = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let mut moving = figcraft_render::Pixmap::new(detail.width, detail.height).unwrap();
+        figcraft_render::render_nodes_into_preview(&ds.doc, &[frame], &detail, &mut moving, true);
+        let x = ((detail.origin.0 - view.origin.0) * view.scale).round() as i32;
+        let y = ((detail.origin.1 - view.origin.1) * view.scale).round() as i32;
+        base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        assert_eq!(base.data(), full.data(), "the sharp tile must reconstruct the visible frame pixels");
+    }
+
+    #[test]
+    fn large_window_background_is_bounded_without_changing_its_page_extent() {
+        let base = figcraft_render::View { origin: (45.0, -20.0), scale: 2.0, width: 9000, height: 3500 };
+        let preview = drag_background_view(&base).unwrap();
+        assert!(preview.scale < base.scale);
+        assert!(preview.width <= 8192 && preview.height <= 8192);
+        assert!(u64::from(preview.width) * u64::from(preview.height) <= 8_000_000);
+        assert_eq!(preview.origin, base.origin);
+        assert!((preview.page_rect().width() - base.page_rect().width()).abs() < 1.0);
+        assert!((preview.page_rect().height() - base.page_rect().height()).abs() < 1.0);
     }
 }
 
