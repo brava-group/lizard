@@ -41,7 +41,7 @@ fn pasted_text(app: &FigApp) -> String {
 fn paste_takes_layers_copied_in_another_design_app() {
     let html = copied_html();
     let mut app = FigApp::new(Session::new(), Box::new(Clip { html, text: Some(String::new()) }));
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(selected_names(&app), ["Copied layer"]);
 }
 
@@ -59,7 +59,7 @@ impl Services for DesignWithPreview {
 #[test]
 fn editable_layers_win_over_clipboard_preview_image() {
     let mut app = FigApp::new(Session::new(), Box::new(DesignWithPreview(copied_html())));
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(selected_names(&app), ["Copied layer"]);
 }
 
@@ -67,7 +67,7 @@ fn editable_layers_win_over_clipboard_preview_image() {
 fn html_from_other_apps_pastes_as_before() {
     let clip = Clip { html: "<b>Hello</b>".into(), text: Some("Hello".into()) };
     let mut app = FigApp::new(Session::new(), Box::new(clip));
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(pasted_text(&app), "Hello");
 }
 
@@ -76,7 +76,7 @@ fn html_that_only_mentions_the_marker_pastes_its_text() {
     let text = format!("Markers {CLIP_OPEN} and {CLIP_CLOSE} explained");
     let clip = Clip { html: format!("<p>{text}</p>"), text: Some(text.clone()) };
     let mut app = FigApp::new(Session::new(), Box::new(clip));
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(pasted_text(&app), text);
     assert!(app.ui.last_error.is_none(), "{:?}", app.ui.last_error);
 }
@@ -97,9 +97,9 @@ impl Services for SharedClip {
 fn text_copied_after_a_design_paste_pastes_as_text() {
     let clip = std::rc::Rc::new(std::cell::RefCell::new(Clip { html: copied_html(), text: None }));
     let mut app = FigApp::new(Session::new(), Box::new(SharedClip(clip.clone())));
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(selected_names(&app), ["Copied layer"]);
     *clip.borrow_mut() = Clip { html: String::new(), text: Some("Fresh text".into()) };
-    crate::menus::paste(&mut app, None);
+    crate::menus::paste(&mut app, None, None);
     assert_eq!(pasted_text(&app), "Fresh text");
 }

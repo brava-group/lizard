@@ -216,7 +216,7 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
     props.dashes.len().hash(&mut h);
     // Points' own caps and joins (vector networks).
     let net = match &n.kind {
-        NodeKind::Vector { network } if network.has_point_styles() => Some(network),
+        NodeKind::Vector { network } if network.has_point_styles(props.join) => Some(network),
         _ => None,
     };
     for v in net.map(|n| n.vertices.as_slice()).unwrap_or_default() {
@@ -698,11 +698,11 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
                 f(pix);
             }
             if n.has_visible_stroke() {
-                let props = figcraft_doc::StrokeProps { align: StrokeAlign::Center, ..n.stroke.clone() };
+                // Glyph outlines are closed: inside and outside strokes clip to them (#615).
                 for style in &prepared.styles {
-                    let s = figcraft_pathops::stroke_center(&style.outline, props.weight, &props);
+                    let s = stroke_area(n, &style.outline, true);
                     if let Some(ts) = ts_path(&s) {
-                        fill_with(pix, &ts, &n.strokes, w, h, gxf, FillRule::Winding, ctx, None);
+                        fill_with(pix, &ts, &n.strokes, w, h, gxf, stroke_rule(n, true), ctx, None);
                     }
                 }
             }

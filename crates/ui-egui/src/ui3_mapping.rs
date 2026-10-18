@@ -140,6 +140,6 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         super::super::Icon::Online => Some(262),
         super::super::Icon::LiveShared => Some(286),
         super::super::Icon::LivePrivate => Some(193),
-        super::super::Icon::Logo => None,
+        super::super::Icon::Angle | super::super::Icon::Logo => None,
     }
 }
