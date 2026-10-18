@@ -11,6 +11,9 @@ use boa_engine::module::IdleModuleLoader;
 use boa_engine::object::JsObject;
 use boa_engine::{Context, Source};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::bridge::{self, Edit};
 
 pub const WORKER_ARG: &str = "--figcraft-figma-plugin-worker";
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -22,6 +25,17 @@ pub struct SelectedNode {
     pub id: String,
     pub name: String,
     pub opacity: f32,
+    #[serde(default)]
+    pub x: f64,
+    #[serde(default)]
+    pub y: f64,
+    #[serde(default)]
+    pub width: f64,
+    #[serde(default)]
+    pub height: f64,
+    #[serde(default)]
+    #[serde(rename = "type")]
+    pub node_type: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,6 +43,8 @@ pub struct Request {
     pub source: String,
     pub command: Option<String>,
     pub selection: Vec<SelectedNode>,
+    #[serde(default)]
+    pub extra: Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,8 +56,13 @@ pub struct SetOpacity {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Response {
     pub operations: Vec<SetOpacity>,
+    #[serde(default)]
+    pub edits: Vec<Edit>,
     pub closed: bool,
     pub message: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "eventResult")]
+    pub event_result: Option<Value>,
 }
 
 #[derive(Default)]
@@ -82,48 +103,21 @@ pub fn execute(request: Request) -> Result<Response, String> {
     if request.source.len() > MAX_REQUEST_BYTES / 2 || request.selection.len() > 4096 {
         return Err("plugin source or selection is too large".into());
     }
-    let selection = serde_json::to_string(&request.selection).map_err(|e| e.to_string())?;
-    let command = serde_json::to_string(&request.command).map_err(|e| e.to_string())?;
+    let selection = serde_json::to_value(&request.selection).map_err(|e| e.to_string())?;
+    let command = serde_json::to_value(&request.command).map_err(|e| e.to_string())?;
     let hooks = Rc::new(RestrictedHooks::default());
     let mut context =
         Context::builder().host_hooks(hooks.clone()).module_loader(Rc::new(IdleModuleLoader)).build().map_err(|e| format!("plugin setup: {e}"))?;
     context.runtime_limits_mut().set_loop_iteration_limit(100_000);
     context.runtime_limits_mut().set_recursion_limit(128);
     context.runtime_limits_mut().set_stack_size_limit(1024);
-    let setup = format!(
-        r#"(() => {{
-            const ops = [];
-            let closed = false;
-            let message = null;
-            const selection = {selection}.map(data => {{
-                const node = {{ id: data.id }};
-                Object.defineProperty(node, 'name', {{ enumerable: true, get() {{ if (closed) throw new Error('plugin is closed'); return data.name; }},
-                    set() {{ throw new Error('name mutation is not supported yet'); }} }});
-                Object.defineProperty(node, 'opacity', {{ enumerable: true, get() {{ if (closed) throw new Error('plugin is closed'); return data.opacity; }},
-                    set(value) {{
-                        if (closed) throw new Error('plugin is closed');
-                        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)
-                            throw new RangeError('opacity must be a finite number from 0 to 1');
-                        if (ops.length >= {max_ops}) throw new Error('plugin operation limit exceeded');
-                        data.opacity = value;
-                        ops.push({{ id: data.id, opacity: value }});
-                    }} }});
-                return node;
-            }});
-            Object.freeze(selection);
-            const figma = Object.freeze({{
-                command: {command} ?? '',
-                currentPage: Object.freeze({{ selection }}),
-                closePlugin(value) {{ closed = true; message = value === undefined ? null : String(value); }}
-            }});
-            Object.defineProperty(globalThis, 'figma', {{ value: figma, configurable: false, writable: false }});
-            Object.defineProperty(globalThis, '__figcraftTake', {{ value: () => JSON.stringify({{operations: ops, closed, message}}), configurable: false }});
-        }})();"#,
-        max_ops = MAX_OPERATIONS
-    );
+    let setup = bridge::setup(&selection, &request.extra, &command, &Value::Null, &Value::Null, MAX_OPERATIONS, 0);
     context.eval(Source::from_bytes(&setup)).map_err(|e| format!("plugin setup: {e}"))?;
     context.eval(Source::from_bytes(&request.source)).map_err(|e| format!("plugin JavaScript: {e}"))?;
     context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
+    context.eval(Source::from_bytes("__figcraftRun()")).map_err(|e| format!("plugin event: {e}"))?;
+    context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
+    bridge::run_timers(&mut context)?;
     if hooks.rejected_promise.get() {
         return Err("plugin Promise was rejected".into());
     }
@@ -133,7 +127,7 @@ pub fn execute(request: Request) -> Result<Response, String> {
         return Err("plugin response is too large".into());
     }
     let response: Response = serde_json::from_str(&output).map_err(|e| format!("invalid plugin result: {e}"))?;
-    if response.operations.len() > MAX_OPERATIONS || response.message.as_ref().is_some_and(|v| v.len() > 4096) {
+    if response.operations.len() + response.edits.len() > MAX_OPERATIONS || response.message.as_ref().is_some_and(|v| v.len() > 4096) {
         return Err("plugin operation or message limit exceeded".into());
     }
     Ok(response)
@@ -144,7 +138,21 @@ mod tests {
     use super::*;
 
     fn request(source: &str) -> Request {
-        Request { source: source.into(), command: None, selection: vec![SelectedNode { id: "42".into(), name: "Card".into(), opacity: 1.0 }] }
+        Request {
+            source: source.into(),
+            command: None,
+            selection: vec![SelectedNode {
+                id: "42".into(),
+                name: "Card".into(),
+                opacity: 1.0,
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+                node_type: "RECTANGLE".into(),
+            }],
+            extra: Value::Null,
+        }
     }
 
     #[test]
@@ -189,5 +197,38 @@ mod tests {
     #[test]
     fn module_import_cannot_read_files() {
         assert!(execute(request("import('./secret.js'); figma.closePlugin()")).is_err());
+    }
+
+    #[test]
+    fn creates_editable_nodes_and_selection() {
+        let result = execute(request("const r = figma.createRectangle(); r.x = 42; r.fills = [{type:'SOLID',color:{r:1,g:0,b:0}}]; figma.currentPage.appendChild(r); figma.currentPage.selection = [r]; figma.viewport.scrollAndZoomIntoView([r]); figma.closePlugin()"))
+            .expect("rectangle plugin");
+        assert!(result.closed);
+        assert_eq!(result.edits.len(), 6);
+        assert!(matches!(&result.edits[0], Edit::CreateNode { node_type, .. } if node_type == "rectangle"));
+        assert!(matches!(&result.edits[4], Edit::Select { ids } if ids.len() == 1));
+    }
+
+    #[test]
+    fn text_review_event_returns_suggestions() {
+        let mut req = request("figma.on('textreview', ({text}) => [{start: text.indexOf('figma'), end: 5, suggestions: ['Figma']}])");
+        req.command = Some("textreview".into());
+        req.extra = serde_json::json!({"text":"figma"});
+        let result = execute(req).expect("text review callback");
+        assert_eq!(result.event_result.unwrap_or(Value::Null)[0]["suggestions"][0], "Figma");
+    }
+
+    #[test]
+    fn parameter_input_returns_suggestions_and_errors() {
+        let mut req = request(
+            "figma.parameters.on('input', ({query, result}) => { if (query === '0') result.setError('positive only'); else result.setSuggestions(['640','800']); })",
+        );
+        req.command = Some("absolute".into());
+        req.extra = serde_json::json!({"parameterInput":{"key":"width","query":"0"}});
+        let error = execute(req.clone()).expect("parameter input");
+        assert_eq!(error.event_result.unwrap_or(Value::Null)["error"], "positive only");
+        req.extra = serde_json::json!({"parameterInput":{"key":"width","query":""}});
+        let choices = execute(req).expect("parameter suggestions");
+        assert_eq!(choices.event_result.unwrap_or(Value::Null)["suggestions"], serde_json::json!(["640", "800"]));
     }
 }

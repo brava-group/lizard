@@ -14,6 +14,7 @@ use boa_engine::{Context, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::bridge::Edit;
 use crate::worker::{MAX_OPERATIONS, SelectedNode, SetOpacity};
 
 pub const WORKER_UI_ARG: &str = "--figcraft-figma-plugin-ui-worker";
@@ -26,8 +27,17 @@ const MAX_CALLBACKS: usize = 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum UiRequest {
-    Start { source: String, command: Option<String>, selection: Vec<SelectedNode>, html: Option<String>, named_html: BTreeMap<String, String> },
-    Message { payload: Value },
+    Start {
+        source: String,
+        command: Option<String>,
+        selection: Vec<SelectedNode>,
+        extra: Value,
+        html: Option<String>,
+        named_html: BTreeMap<String, String>,
+    },
+    Message {
+        payload: Value,
+    },
     Stop,
 }
 
@@ -44,8 +54,13 @@ pub struct UiResponse {
     pub show: Option<UiShow>,
     pub messages: Vec<Value>,
     pub operations: Vec<SetOpacity>,
+    #[serde(default)]
+    pub edits: Vec<Edit>,
     pub closed: bool,
     pub message: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "eventResult")]
+    pub event_result: Option<Value>,
 }
 
 #[derive(Default)]
@@ -75,7 +90,7 @@ pub struct UiRuntime {
 
 impl UiRuntime {
     pub fn start(request: UiRequest) -> Result<(Self, UiResponse), String> {
-        let UiRequest::Start { source, command, selection, html, named_html } = request else {
+        let UiRequest::Start { source, command, selection, extra, html, named_html } = request else {
             return Err("the first UI worker request must start a plugin".into());
         };
         if source.len() > crate::worker::MAX_REQUEST_BYTES / 2
@@ -96,86 +111,19 @@ impl UiRuntime {
         context.runtime_limits_mut().set_loop_iteration_limit(100_000);
         context.runtime_limits_mut().set_recursion_limit(128);
         context.runtime_limits_mut().set_stack_size_limit(1024);
-        let selection = serde_json::to_string(&selection).map_err(|e| e.to_string())?;
-        let command = serde_json::to_string(&command).map_err(|e| e.to_string())?;
-        let html = serde_json::to_string(&html).map_err(|e| e.to_string())?;
-        let named = serde_json::to_string(&named_html).map_err(|e| e.to_string())?;
-        let setup = format!(
-            r#"(() => {{
-                const ops = [];
-                const messages = [];
-                let shown = null;
-                let closed = false;
-                let message = null;
-                const selection = {selection}.map(data => {{
-                    const node = {{ id: data.id }};
-                    Object.defineProperty(node, 'name', {{ enumerable: true,
-                        get() {{ if (closed) throw Error('plugin is closed'); return data.name; }},
-                        set() {{ throw Error('name mutation is not supported yet'); }}
-                    }});
-                    Object.defineProperty(node, 'opacity', {{ enumerable: true,
-                        get() {{ if (closed) throw Error('plugin is closed'); return data.opacity; }},
-                        set(value) {{
-                            if (closed) throw Error('plugin is closed');
-                            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)
-                                throw RangeError('opacity must be a finite number from 0 to 1');
-                            if (ops.length >= {max_ops}) throw Error('plugin operation limit exceeded');
-                            data.opacity = value;
-                            ops.push({{ id: data.id, opacity: value }});
-                        }}
-                    }});
-                    return node;
-                }});
-                Object.freeze(selection);
-                const ui = {{
-                    onmessage: null,
-                    postMessage(value) {{
-                        if (closed) throw Error('plugin is closed');
-                        if (messages.length >= 128) throw Error('plugin message limit exceeded');
-                        messages.push(value);
-                    }},
-                    resize(width, height) {{
-                        if (!shown) throw Error('plugin UI is not open');
-                        figma.showUI(shown.html, {{ width, height, title: shown.title }});
-                    }},
-                    close() {{ closed = true; }}
-                }};
-                const figma = Object.freeze({{
-                    command: {command} ?? '',
-                    currentPage: Object.freeze({{ selection }}),
-                    ui,
-                    showUI(value, options = {{}}) {{
-                        if (closed) throw Error('plugin is closed');
-                        if (typeof value !== 'string' || value.length > {max_html}) throw Error('invalid plugin HTML');
-                        const width = options.width === undefined ? 300 : options.width;
-                        const height = options.height === undefined ? 200 : options.height;
-                        if (!Number.isInteger(width) || width < 100 || width > 1200 ||
-                            !Number.isInteger(height) || height < 100 || height > 1000)
-                            throw RangeError('plugin UI size is out of range');
-                        shown = {{ html: value, width, height, title: options.title == null ? null : String(options.title).slice(0, 128) }};
-                    }},
-                    closePlugin(value) {{ closed = true; message = value === undefined ? null : String(value).slice(0, 4096); }}
-                }});
-                Object.defineProperty(globalThis, 'figma', {{ value: figma, writable: false }});
-                Object.defineProperty(globalThis, '__html__', {{ value: {html}, writable: false }});
-                Object.defineProperty(globalThis, '__uiFiles__', {{ value: Object.freeze({named}), writable: false }});
-                Object.defineProperty(globalThis, '__figcraftReceive', {{ value: payload => {{
-                    if (closed) throw Error('plugin is closed');
-                    if (typeof ui.onmessage === 'function') ui.onmessage(payload);
-                }} }});
-                Object.defineProperty(globalThis, '__figcraftTake', {{ value: () => {{
-                    const result = JSON.stringify({{ show: shown, messages, operations: ops, closed, message }});
-                    shown = null;
-                    messages.length = 0;
-                    ops.length = 0;
-                    return result;
-                }} }});
-            }})();"#,
-            max_ops = MAX_OPERATIONS,
-            max_html = MAX_UI_HTML_BYTES
+        let setup = crate::bridge::setup(
+            &serde_json::to_value(&selection).map_err(|e| e.to_string())?,
+            &extra,
+            &serde_json::to_value(&command).map_err(|e| e.to_string())?,
+            &serde_json::to_value(&html).map_err(|e| e.to_string())?,
+            &serde_json::to_value(&named_html).map_err(|e| e.to_string())?,
+            MAX_OPERATIONS,
+            MAX_UI_HTML_BYTES,
         );
         context.eval(Source::from_bytes(&setup)).map_err(|e| format!("plugin setup: {e}"))?;
         context.eval(Source::from_bytes(&source)).map_err(|e| format!("plugin JavaScript: {e}"))?;
+        context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
+        context.eval(Source::from_bytes("__figcraftRun()")).map_err(|e| format!("plugin event: {e}"))?;
         let mut runtime = Self { context, hooks, callbacks: 0, closed: false };
         let response = runtime.finish_callback()?;
         if response.show.is_none() && !response.closed {
@@ -203,6 +151,7 @@ impl UiRuntime {
 
     fn finish_callback(&mut self) -> Result<UiResponse, String> {
         self.context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
+        crate::bridge::run_timers(&mut self.context)?;
         if self.hooks.rejected_promise.get() {
             return Err("plugin Promise was rejected".into());
         }
@@ -212,7 +161,7 @@ impl UiRuntime {
             return Err("plugin UI response is too large".into());
         }
         let response: UiResponse = serde_json::from_str(&output).map_err(|e| format!("invalid plugin UI result: {e}"))?;
-        if response.operations.len() > MAX_OPERATIONS
+        if response.operations.len() + response.edits.len() > MAX_OPERATIONS
             || response.messages.len() > 128
             || response.messages.iter().any(|v| serde_json::to_vec(v).is_ok_and(|bytes| bytes.len() > MAX_UI_MESSAGE_BYTES))
             || response.show.as_ref().is_some_and(|v| v.html.len() > MAX_UI_HTML_BYTES)
@@ -294,7 +243,17 @@ mod tests {
         UiRequest::Start {
             source: source.into(),
             command: None,
-            selection: vec![SelectedNode { id: "42".into(), name: "Card".into(), opacity: 1.0 }],
+            selection: vec![SelectedNode {
+                id: "42".into(),
+                name: "Card".into(),
+                opacity: 1.0,
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+                node_type: "RECTANGLE".into(),
+            }],
+            extra: Value::Null,
             html: Some("<button>Apply</button>".into()),
             named_html: BTreeMap::new(),
         }
@@ -331,5 +290,18 @@ mod tests {
         assert!(UiRuntime::start(start("figma.showUI(__html__); while(true) {}")).is_err());
         let (mut runtime, _) = UiRuntime::start(start("figma.showUI(__html__); figma.ui.onmessage = () => { while(true) {} };")).unwrap();
         assert!(runtime.receive(&json!({})).is_err());
+    }
+
+    #[test]
+    fn ui_message_can_create_a_frame_and_reply_after_timer() {
+        let (mut runtime, shown) = UiRuntime::start(start("figma.showUI(__html__); figma.ui.onmessage = values => { const frame = figma.createFrame(); frame.resizeWithoutConstraints(800,600); const rect = figma.createRectangle(); frame.appendChild(rect); rect.fills = [{type:'SOLID',color:{r:1,g:0,b:0}}]; setTimeout(() => figma.ui.postMessage({count:values.length}), 10); figma.closePlugin(); }"))
+            .expect("UI plugin");
+        assert!(shown.show.is_some());
+        let started = std::time::Instant::now();
+        let reply = runtime.receive(&json!([1, 2, 3])).expect("UI callback");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(8));
+        assert_eq!(reply.messages, [json!({"count":3})]);
+        assert!(reply.closed);
+        assert_eq!(reply.edits.len(), 5);
     }
 }

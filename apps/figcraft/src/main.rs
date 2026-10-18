@@ -139,6 +139,7 @@ impl eframe::App for App {
                 fig.ui.figma_ui.as_mut().map(|open| figma_webview::Snapshot {
                     id: open.id.clone(),
                     html: open.html.clone(),
+                    allowed_domains: open.allowed_domains.clone(),
                     rect: open.rect,
                     outgoing: std::mem::take(&mut open.outgoing),
                 })

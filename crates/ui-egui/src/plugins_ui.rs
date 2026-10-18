@@ -57,8 +57,11 @@ pub struct PluginsWindow {
     pub server: Option<String>,
     pub query: String,
     pub confirm: Option<String>,
-    /// Last read-only report; never marks a JavaScript plugin as runnable.
+    /// Last inspection report for a local JavaScript plugin.
     pub figma_report: Option<Value>,
+    pub figma_parameters: Map<String, Value>,
+    pub figma_feedback: Map<String, Value>,
+    pub figma_review_target: Option<(figcraft_doc::NodeId, String)>,
     pub community_query: String,
     pub community_page: Option<Page>,
     pub community_error: Option<String>,
@@ -74,10 +77,36 @@ pub struct FigmaUiWindow {
     pub id: String,
     pub title: String,
     pub html: String,
+    pub allowed_domains: Vec<String>,
     pub width: f32,
     pub height: f32,
     pub rect: Option<egui::Rect>,
     pub outgoing: Vec<Value>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FigmaTextReview {
+    #[cfg(not(target_arch = "wasm32"))]
+    registry: Vec<(String, String)>,
+    #[cfg(not(target_arch = "wasm32"))]
+    plugins: Vec<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    document: Option<u64>,
+    pub(crate) node: Option<figcraft_doc::NodeId>,
+    #[cfg(not(target_arch = "wasm32"))]
+    text: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    due: f64,
+    #[cfg(not(target_arch = "wasm32"))]
+    resolved: bool,
+    pub marks: Vec<ReviewMark>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReviewMark {
+    pub start: usize,
+    pub end: usize,
+    pub color: egui::Color32,
 }
 
 /// Width of the plugin windows' fields.
@@ -238,14 +267,12 @@ fn figma_ui_window(app: &mut FigApp, ctx: &Context) {
 /// Called by the desktop WebView bridge after a plugin page posts `pluginMessage`.
 pub fn figma_ui_message(app: &mut FigApp, payload: Value) {
     let Some(id) = app.ui.figma_ui.as_ref().map(|open| open.id.clone()) else { return };
-    if let Some(reply) = app.run("plugin.figma.ui.message", json!({"id": id, "payload": payload})) {
-        accept_ui_reply(app, &id, &reply);
-    } else {
+    if app.run("plugin.figma.ui.message", json!({"id": id, "payload": payload})).is_none() {
         app.ui.figma_ui = None;
     }
 }
 
-fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
+pub(crate) fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
     if reply["closed"] == true {
         if let Some(message) = reply["message"].as_str().filter(|text| !text.is_empty()) {
             app.toast(message.to_string());
@@ -261,6 +288,10 @@ fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
             id: id.to_string(),
             title,
             html: html.to_string(),
+            allowed_domains: show["allowedDomains"]
+                .as_array()
+                .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default(),
             width: show["width"].as_f64().unwrap_or(300.0) as f32,
             height: show["height"].as_f64().unwrap_or(200.0) as f32,
             rect: None,
@@ -272,6 +303,103 @@ fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
     {
         open.outgoing.extend(messages.iter().cloned());
     }
+}
+
+/// Run registered text-review callbacks after typing settles, then paint their returned ranges
+/// over the native canvas text. The worker runs only when the text changes, never every frame.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn text_review_tick(app: &mut FigApp, ctx: &Context) {
+    let registry: Vec<_> = app.session.prefs.figma_plugins.iter().map(|plugin| (plugin.id.clone(), plugin.digest.clone())).collect();
+    if app.ui.figma_text_review.registry != registry {
+        let plugins = registry
+            .iter()
+            .filter_map(|(id, _)| {
+                let report = app.session.execute("plugin.figma.status", &json!({"id": id})).ok()?;
+                report["capabilities"].as_array().is_some_and(|items| items.iter().any(|item| item == "textreview")).then(|| id.clone())
+            })
+            .collect();
+        app.ui.figma_text_review = FigmaTextReview { registry, plugins, ..FigmaTextReview::default() };
+    }
+    let current = app.session.ds().ok().and_then(|ds| {
+        let edit = ds.text_edit.as_ref()?;
+        let node = ds.doc.node(edit.id)?;
+        let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+        Some((ds.uid, edit.id, text.characters.clone()))
+    });
+    let state = &mut app.ui.figma_text_review;
+    let Some((document, node, text)) = current else {
+        state.node = None;
+        state.marks.clear();
+        return;
+    };
+    if state.plugins.is_empty() || text.len() > 16_384 {
+        state.marks.clear();
+        return;
+    }
+    let now = ctx.input(|input| input.time);
+    if state.document != Some(document) || state.node != Some(node) || state.text != text {
+        state.document = Some(document);
+        state.node = Some(node);
+        state.text = text.clone();
+        state.marks.clear();
+        state.due = now + 0.2;
+        state.resolved = false;
+        ctx.request_repaint_after(std::time::Duration::from_millis(210));
+        return;
+    }
+    if state.resolved {
+        return;
+    }
+    if now < state.due {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((state.due - now).max(0.001)));
+        return;
+    }
+    let plugins = state.plugins.clone();
+    let mut marks = Vec::new();
+    for id in plugins {
+        let Ok(reply) = app.session.execute("plugin.figma.run", &json!({"id": id, "command":"textreview", "text":text})) else { continue };
+        let Some(results) = reply["eventResult"].as_array() else { continue };
+        for item in results.iter().take(100) {
+            let (Some(start), Some(end)) = (item["start"].as_u64(), item["end"].as_u64()) else { continue };
+            let (Some(start), Some(end)) = (utf16_char_index(&text, start as usize), utf16_char_index(&text, end as usize)) else { continue };
+            if start >= end {
+                continue;
+            }
+            let color = match item["color"].as_str() {
+                Some("RED") => egui::Color32::from_rgb(238, 98, 98),
+                Some("YELLOW") => egui::Color32::from_rgb(239, 194, 77),
+                _ => egui::Color32::from_rgb(95, 199, 132),
+            };
+            marks.push(ReviewMark { start, end, color });
+        }
+    }
+    app.ui.figma_text_review.marks = marks;
+    app.ui.figma_text_review.resolved = true;
+}
+
+fn utf16_char_index(text: &str, offset: usize) -> Option<usize> {
+    let mut units = 0;
+    for (index, character) in text.chars().enumerate() {
+        if units == offset {
+            return Some(index);
+        }
+        units += character.len_utf16();
+        if units > offset {
+            return None;
+        }
+    }
+    (units == offset).then_some(text.chars().count())
+}
+
+fn replace_review_range(text: &str, start: usize, end: usize, replacement: &str) -> Option<String> {
+    let start = utf16_char_index(text, start)?;
+    let end = utf16_char_index(text, end)?;
+    if start >= end {
+        return None;
+    }
+    let byte_at = |index| text.char_indices().nth(index).map(|(byte, _)| byte).unwrap_or(text.len());
+    let (from, to) = (byte_at(start), byte_at(end));
+    Some(format!("{}{replacement}{}", text.get(..from)?, text.get(to..)?))
 }
 
 /// The panels running plugins show, at first beside the properties panel and each other (they
@@ -318,6 +446,7 @@ enum Manage {
     RemoveFigma(String),
     StatusFigma(String),
     RunFigma(String, Option<String>),
+    AcceptReview(usize, usize, String),
     Browse(String),
     Confirm(String),
     /// Stop waiting for the directory's listing.
@@ -378,18 +507,52 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
             if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
                 report["lastRun"] = Value::Null;
             }
+            app.ui.plugins_manage.figma_review_target = (command.as_deref() == Some("textreview"))
+                .then(|| {
+                    let node_id = *app.session.selection().first()?;
+                    let doc = app.session.doc().ok()?;
+                    let node = doc.node(node_id)?;
+                    let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+                    Some((node_id, text.characters.clone()))
+                })
+                .flatten();
             let has_ui = app.ui.plugins_manage.figma_report.as_ref().is_some_and(|report| report["hasUi"] == true);
             if has_ui && !cfg!(target_os = "macos") {
                 app.toast("A prévia de HTML dos plugins locais está disponível no macOS por enquanto".to_string());
             } else {
                 let command_id = if has_ui { "plugin.figma.ui.start" } else { "plugin.figma.run" };
-                if let Some(result) = app.run(command_id, json!({"id": id, "command": command})) {
+                let parameters = app.ui.plugins_manage.figma_parameters.clone();
+                if let Some(result) = app.run(command_id, json!({"id": id, "command": command, "parameters": parameters})) {
+                    if let Some(notices) = result["notifications"].as_array()
+                        && let Some(last) = notices.last().and_then(Value::as_str)
+                    {
+                        app.toast(last.to_string());
+                    }
                     if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
                         report["lastRun"] = result.clone();
                     }
                     if has_ui {
-                        accept_ui_reply(app, &id, &result);
                         app.ui.plugins_window = false;
+                    }
+                } else {
+                    app.ui.plugins_manage.figma_review_target = None;
+                }
+            }
+        }
+        Some(Manage::AcceptReview(start, end, replacement)) => {
+            if let Some((node_id, original)) = app.ui.plugins_manage.figma_review_target.clone() {
+                let current = app.session.doc().ok().and_then(|doc| doc.node(node_id)).and_then(|node| {
+                    let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+                    Some(text.characters.clone())
+                });
+                if current.as_deref() != Some(original.as_str()) {
+                    app.toast("O texto mudou; revise novamente antes de aplicar a sugestão");
+                } else if let Some(revised) = replace_review_range(&original, start, end, &replacement)
+                    && app.run("text.set", json!({"id": node_id, "characters": revised})).is_some()
+                {
+                    app.ui.plugins_manage.figma_review_target = None;
+                    if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
+                        report["lastRun"] = Value::Null;
                     }
                 }
             }
@@ -428,10 +591,10 @@ fn inspect_figma_dialog(app: &mut FigApp) {
     });
 }
 
-fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+fn figma_local_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     widgets::label(
         ui,
-        "Registre um plugin local confiável. A prévia de UI aceita HTML autocontido, mensagens, seleção e alterações de opacidade.",
+        "Registre um plugin local confiável. A execução aceita um subconjunto de nós, estilos, variáveis e mensagens de UI.",
         t.text_secondary,
     );
     ui.add_space(8.0);
@@ -448,7 +611,7 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
             }
         });
     }
-    let Some(report) = app.ui.plugins_manage.figma_report.as_ref() else { return asked };
+    let Some(report) = app.ui.plugins_manage.figma_report.clone() else { return asked };
     ui.add_space(14.0);
     egui::ScrollArea::vertical().id_salt("figma_plugin_report").max_height(360.0).show(ui, |ui| {
         let name = report["name"].as_str().unwrap_or("Plugin");
@@ -497,6 +660,13 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
         {
             asked = Some(Manage::RunFigma(id.to_string(), None));
         }
+        if registered
+            && report["capabilities"].as_array().is_some_and(|items| items.iter().any(|item| item == "textreview"))
+            && let Some(id) = report["id"].as_str()
+            && widgets::button(ui, "Revisar texto selecionado", false, true).clicked()
+        {
+            asked = Some(Manage::RunFigma(id.to_string(), Some("textreview".into())));
+        }
         if let Some(commands) = report["commands"].as_array()
             && !commands.is_empty()
         {
@@ -504,6 +674,47 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
             for command in commands {
                 if let (Some(label), Some(id)) = (command["label"].as_str(), command["command"].as_str()) {
                     if registered {
+                        if let Some(parameters) = command["parameters"].as_array() {
+                            for parameter in parameters {
+                                let Some(key) = parameter["key"].as_str() else { continue };
+                                let name = parameter["name"].as_str().unwrap_or(key);
+                                let mut input =
+                                    app.ui.plugins_manage.figma_parameters.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+                                let mut changed = false;
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(name).font(regular(11.0)).color(t.text_secondary));
+                                    changed = ui.add(egui::TextEdit::singleline(&mut input).desired_width(110.0)).changed();
+                                });
+                                app.ui.plugins_manage.figma_parameters.insert(key.to_string(), json!(input));
+                                let feedback_key = format!("{id}/{key}");
+                                if changed
+                                    && let Some(plugin_id) = report["id"].as_str()
+                                    && let Some(reply) = app.run(
+                                        "plugin.figma.run",
+                                        json!({
+                                            "id":plugin_id, "command":id,
+                                            "parameterInput":{"key":key,"query":input}
+                                        }),
+                                    )
+                                {
+                                    app.ui.plugins_manage.figma_feedback.insert(feedback_key.clone(), reply["eventResult"].clone());
+                                }
+                                if let Some(feedback) = app.ui.plugins_manage.figma_feedback.get(&feedback_key).cloned() {
+                                    if let Some(error) = feedback["error"].as_str() {
+                                        ui.label(RichText::new(error).font(regular(11.0)).color(t.danger));
+                                    }
+                                    if let Some(suggestions) = feedback["suggestions"].as_array() {
+                                        ui.horizontal_wrapped(|ui| {
+                                            for suggestion in suggestions.iter().filter_map(Value::as_str).take(6) {
+                                                if widgets::button(ui, suggestion, false, true).clicked() {
+                                                    app.ui.plugins_manage.figma_parameters.insert(key.to_string(), json!(suggestion));
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
                         if widgets::button(ui, label, false, true).clicked()
                             && let Some(plugin_id) = report["id"].as_str()
                         {
@@ -518,6 +729,27 @@ fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
         if report["lastRun"]["status"] == "executed" {
             let operations = report["lastRun"]["operations"].as_u64().unwrap_or(0);
             widgets::label(ui, &format!("Executado · {operations} alteração(ões)"), t.text_secondary);
+            if let Some(results) = report["lastRun"]["eventResult"].as_array() {
+                widgets::label(ui, &format!("{} sugestão(ões) de revisão", results.len()), t.text_secondary);
+                for item in results.iter().take(20) {
+                    let (Some(start), Some(end)) = (
+                        item["start"].as_u64().and_then(|value| usize::try_from(value).ok()),
+                        item["end"].as_u64().and_then(|value| usize::try_from(value).ok()),
+                    ) else {
+                        continue;
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        widgets::label(ui, &format!("{start}–{end}:"), t.text_secondary);
+                        for choice in item["suggestions"].as_array().into_iter().flatten().filter_map(Value::as_str).take(6) {
+                            if app.ui.plugins_manage.figma_review_target.is_some() && widgets::button(ui, choice, false, true).clicked() {
+                                asked = Some(Manage::AcceptReview(start, end, choice.to_string()));
+                            } else if app.ui.plugins_manage.figma_review_target.is_none() {
+                                widgets::label(ui, choice, t.text_secondary);
+                            }
+                        }
+                    });
+                }
+            }
             if let Some(message) = report["lastRun"]["message"].as_str() {
                 widgets::label(ui, message, t.text_secondary);
             }
@@ -1055,4 +1287,19 @@ fn field(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Used> {
         ParamKind::Button | ParamKind::Note => None,
     };
     v.map(|v| Used::Set(p.name.clone(), v))
+}
+
+#[cfg(test)]
+mod text_review_tests {
+    use super::utf16_char_index;
+
+    #[test]
+    fn review_offsets_follow_utf16_without_splitting_emoji() {
+        let text = "✨Figma✨ 😀 figma";
+        assert_eq!(utf16_char_index(text, 11), Some(10));
+        assert_eq!(utf16_char_index(text, 12), Some(11));
+        assert_eq!(utf16_char_index(text, 9), None);
+        assert_eq!(utf16_char_index(text, 16), Some(15));
+        assert_eq!(super::replace_review_range("😀 figma", 3, 8, "✨Figma✨").as_deref(), Some("😀 ✨Figma✨"));
+    }
 }

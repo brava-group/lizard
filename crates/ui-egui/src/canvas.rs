@@ -1869,6 +1869,13 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
                 painter.add(Shape::convex_polygon(q.to_vec(), ACCENT.gamma_multiply(0.3), Stroke::NONE));
             }
         }
+        if preedit.is_none() && app.ui.figma_text_review.node == Some(te.id) {
+            for mark in &app.ui.figma_text_review.marks {
+                for quad in text.selection(app, mark.start, mark.end) {
+                    painter.line_segment([quad[3], quad[2]], stroke(mark.color, 1.5));
+                }
+            }
+        }
         if let Some(p) = preedit {
             for r in layout.selection_rects(p.range.0, p.range.1) {
                 // Underline just below the baseline, across the composed chars only.

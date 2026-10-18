@@ -71,7 +71,7 @@ large data instead of logging it in full.
 
 A message the plugin shows (`notify`) appears as a toast; so does a text result.
 
-## Local Figma plugin diagnostics
+## Local Figma plugins
 
 **Figma Community discovery.** Plugins ▸ Manage plugins ▸ Figma Community searches a read-only
 catalogue and shows names, taglines, the resource and plugin IDs, current version ID, whether the
@@ -94,18 +94,17 @@ source and digest in preferences. `plugin.figma.status {"id":"…"}` reads it ag
 `changedSinceImport`; `plugin.figma.remove {"id":"…"}` forgets it. These commands are separate
 from FigCraft's native WebAssembly plugin commands.
 
-On native builds, `plugin.figma.run {"id":"…","command":"optional menu command"}` executes
-the compiled `main` JavaScript in a one-shot Boa subprocess. The first supported API slice is
-`figma.command`, `figma.currentPage.selection`, selected nodes' `id`, `name` and `opacity`, an
-`opacity` setter (0–1), and `figma.closePlugin()`. A resolved Promise can finish before the worker
-exits. Successful opacity writes form one undo step; a thrown error, invalid value, missing close,
-changed package or expired worker leaves the document unchanged. The worker has a 2-second wall
-clock limit, loop/stack/recursion limits, 1,024 typed writes, and bounded request and response
-sizes. It exposes no file, network or DOM host functions. **It does not yet enforce an OS memory
-limit**, so this is a local development preview for plugins you trust, not a general sandbox for
-untrusted packages. Arbitrary node methods, creation, storage, browser execution and installed
-snapshots are still unsupported. The manager shows run controls for registered packages and
-reports unsupported manifests at run time.
+On native builds, `plugin.figma.run {"id":"…","command":"optional menu command",
+"parameters":{"width":"240"}}` executes compiled `main` JavaScript in a one-shot Boa
+subprocess. The supported slice includes selection reads, editable rectangles, frames and text,
+solid fills and strokes, geometry, resizing and scaling, page/frame children, selection, viewport
+zoom, paint-style reads, colour-variable collections and aliases, notifications and the
+`textreview` event. The manager offers fields for menu parameters and displays review results.
+Each successful run is one undo step; exceptions, invalid edits and changed packages leave the
+document unchanged. The worker has a 2-second wall-clock limit, bounded loops and output, and no
+file, network or DOM host functions. **It does not yet enforce an OS memory limit**, so run only
+trusted local packages. This is a selected API subset, not a general Figma plugin runtime;
+browser execution, local storage and installed Community packages remain unsupported.
 
 On macOS, a registered local plugin that declares a `ui` file can run through
 `plugin.figma.ui.start {"id":"…","command":"optional menu command"}`. A persistent Boa
@@ -115,11 +114,22 @@ subprocess evaluates its `main` JavaScript, and a child WebView displays HTML pa
 `parent.postMessage({pluginMessage: value}, '*')` reach
 `plugin.figma.ui.message {"id":"…","payload":value}`; worker replies are delivered as page
 `message` events with `data.pluginMessage`. Closing the window calls `plugin.figma.ui.close`.
-Each successful message's opacity edits are one undo step. HTML and messages have byte limits;
+Each successful message's document edits are one undo step. Short `setTimeout` callbacks run with
+their requested delay, bounded by the worker's timeout. HTML and messages have byte limits;
 each callback has a 2-second wall-clock limit, and the worker ends after an error. The WebView
-blocks navigation, new windows, clipboard access and network loading; it accepts inline scripts,
-styles and data images. This preview is for trusted local development packages: it has no OS
+blocks navigation, new windows, clipboard access and general network requests. It accepts inline scripts,
+styles and data images; declared HTTPS hosts can supply stylesheets and fonts. This preview is for trusted local development packages: it has no OS
 memory limit, is available only in the macOS desktop UI, and does not run Community listings.
+
+The official MIT `figma/plugin-samples` examples `create-rects-shapes`, `resizer` (absolute and
+relative), `text-review`, `styles-to-variables`, `post-message` and `barchart` were tested from
+local source on macOS on 2026-10-18. Creation, editable chart layers, resize and scale, text
+suggestions, colour variables and aliases, delayed UI reply and undo all executed in FigCraft.
+The sample source is not bundled with FigCraft. The manager shows the resizer's parameter
+suggestions and validation errors. Registered text-review plugins underline their returned ranges
+on the canvas after typing settles; the manager lists and applies their suggestions to unchanged
+selected text. The chart sample's declared remote stylesheet loads in the macOS WebView when the
+network is available.
 
 **Plugin panels.** A plugin written for API 2 can show a panel while it runs: a floating window,
 first placed beside the properties panel (drag its title bar to move it), with the plugin's notes,

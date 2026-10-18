@@ -1,6 +1,8 @@
 //! Parse a local Figma plugin manifest and run a bounded subset of its JavaScript API.
 //! The editor owns file I/O and applies validated document operations after worker completion.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bridge;
 pub mod catalog;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod worker;
@@ -46,6 +48,8 @@ pub struct Manifest {
     #[serde(default)]
     pub parameters: Vec<Value>,
     #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
     pub build: Option<String>,
 }
 
@@ -61,6 +65,8 @@ pub struct NetworkAccess {
 pub struct MenuCommand {
     pub label: String,
     pub command: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -133,13 +139,14 @@ impl ParsedManifest {
             diagnostics.push("HTML UI preview supports local, self-contained files on macOS; browser and other desktop platforms are pending".into());
         }
         if manifest.network_access.as_ref().is_some_and(|v| !v.allowed_domains.is_empty() && v.allowed_domains != ["none"]) {
-            diagnostics.push("Network access is not supported yet".into());
+            diagnostics
+                .push("HTML UI preview loads stylesheets and fonts from declared HTTPS hosts; other network requests are not supported yet".into());
         }
         if manifest.build.is_some() {
             diagnostics.push("The manifest's build command was not run; provide compiled main JavaScript".into());
         }
         if !manifest.parameters.is_empty() {
-            diagnostics.push("Quick action parameters are not supported yet".into());
+            diagnostics.push("Quick action parameters are supported for local plugins; unsupported parameter types may be ignored".into());
         }
         if manifest.document_access.is_none() {
             diagnostics.push("Legacy full-document loading is not supported yet".into());
@@ -194,7 +201,11 @@ fn parse_menu(items: &[Value], prefix: &str, depth: usize, out: &mut Vec<MenuCom
         let label = if prefix.is_empty() { name.to_string() } else { format!("{prefix} / {name}") };
         match (obj.get("command").and_then(Value::as_str), obj.get("menu")) {
             (Some(command), None) if !command.is_empty() && command.len() <= 128 && !command.chars().any(char::is_control) => {
-                out.push(MenuCommand { label, command: command.to_string() });
+                let parameters = obj.get("parameters").and_then(Value::as_array).cloned().unwrap_or_default();
+                if parameters.len() > 32 || parameters.iter().any(|v| v["key"].as_str().is_none_or(|key| key.is_empty() || key.len() > 64)) {
+                    return Err("plugin menu has invalid parameters".into());
+                }
+                out.push(MenuCommand { label, command: command.to_string(), parameters });
             }
             (None, Some(Value::Array(children))) => parse_menu(children, &label, depth + 1, out)?,
             _ => return Err("menu item must be a command, submenu or separator".into()),

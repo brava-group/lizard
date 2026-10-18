@@ -272,9 +272,21 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
                     entry.agent = true;
                 }
             }
-            // Programmatic calls never open dialogs.
+            // Programmatic calls never open dialog requests. An explicit plugin.figma.ui.start
+            // command can still open that plugin's HTML UI after the command succeeds.
             app.session.ui_requests.retain(|u| !u.kind.starts_with("dialog."));
             app.handle_ui_requests();
+            if let Ok(reply) = &r {
+                match cmd {
+                    "plugin.figma.ui.start" | "plugin.figma.ui.message" => {
+                        if let Some(id) = params.get("id").and_then(Value::as_str) {
+                            crate::plugins_ui::accept_ui_reply(app, id, reply);
+                        }
+                    }
+                    "plugin.figma.ui.close" => app.ui.figma_ui = None,
+                    _ => {}
+                }
+            }
             r
         }
         "engine.commands" => Ok(Value::Array(

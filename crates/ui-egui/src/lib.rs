@@ -591,6 +591,8 @@ pub struct UiState {
     pub plugins_manage: plugins_ui::PluginsWindow,
     /// The local Figma plugin whose HTML is shown by the desktop shell.
     pub figma_ui: Option<plugins_ui::FigmaUiWindow>,
+    /// Text review ranges returned by registered local Figma plugins for the active text layer.
+    pub figma_text_review: plugins_ui::FigmaTextReview,
     /// A plugin command's parameters form, when open.
     pub plugin_form: Option<plugins_ui::PluginForm>,
     /// Live sessions: remote cursors as drawn, the Join dialog.
@@ -693,6 +695,7 @@ impl Default for UiState {
             plugins_window: false,
             plugins_manage: plugins_ui::PluginsWindow::default(),
             figma_ui: None,
+            figma_text_review: plugins_ui::FigmaTextReview::default(),
             plugin_form: None,
             live: live::LiveUi::default(),
             online: online::OnlineUi::default(),
@@ -782,7 +785,21 @@ impl FigApp {
     pub fn run(&mut self, id: &str, params: Value) -> Option<Value> {
         let r = self.session.execute(id, &params);
         self.handle_ui_requests();
-        r.map_err(|e| self.failed(id, &e)).ok()
+        let result = r.map_err(|e| self.failed(id, &e)).ok();
+        match id {
+            "plugin.figma.ui.start" | "plugin.figma.ui.message" => {
+                if let Some(reply) = &result
+                    && let Some(plugin_id) = params.get("id").and_then(Value::as_str)
+                {
+                    plugins_ui::accept_ui_reply(self, plugin_id, reply);
+                } else if result.is_none() {
+                    self.ui.figma_ui = None;
+                }
+            }
+            "plugin.figma.ui.close" => self.ui.figma_ui = None,
+            _ => {}
+        }
+        result
     }
 
     /// [`run`](Self::run) for something the user did (a dialog, a drop, a paste, a recent file):
@@ -1410,6 +1427,8 @@ impl FigApp {
         self.frame_stats.record(&ctx);
         let first = !self.fonts_installed;
         self.logic(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        plugins_ui::text_review_tick(self, &ctx);
         agent_panel::sync(self, &ctx);
         self.autosave_tick(&ctx);
         self.auto_save_tick(&ctx);
@@ -1700,6 +1719,10 @@ impl FigApp {
             "status": self.session.status(),
             "lastError": self.ui.last_error,
             "importReport": self.ui.import_report.as_ref().map(import_report::Report::inspect),
+        });
+        state["figmaTextReview"] = json!({
+            "node": self.ui.figma_text_review.node.map(|id| id.0),
+            "ranges": self.ui.figma_text_review.marks.iter().map(|mark| json!({"start":mark.start,"end":mark.end})).collect::<Vec<_>>(),
         });
         state["canvas"]["uncoveredPixels"] = json!(self.session.ds().ok().and_then(|ds| self.canvas.uncovered_pixels(ds)));
         state["pendingOpens"] = json!(self.ui.pending_opens.len());

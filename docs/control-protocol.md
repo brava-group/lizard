@@ -89,6 +89,7 @@ calls never open dialogs: dialog requests are dropped. Returns the command's res
 commands return `{"id": N}`). Paints (`fills`, `strokes`, `paint`) take a colour, the full paint
 JSON or the gradient shorthand `{"type":"linearGradient","stops":["#hex","#hex"],"from"?,"to"?}`
 (as in `docs/mcp.md`).
+The explicit `plugin.figma.ui.start` command opens a local plugin's HTML UI; it is not a dialog request.
 
 ```json
 {"id":1,"method":"engine.execute","params":{"command":"shape.rectangle","params":{"x":10,"y":10,"width":100,"height":50}}}
