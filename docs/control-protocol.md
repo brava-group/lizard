@@ -117,7 +117,9 @@ zoom preview or the refined image (`canvas.quality`: `preview` or `refined`) and
 asking for a render to its preview and its refined image being handed to egui as the canvas
 texture (`canvas.previewLatencyMs`, `canvas.refineLatencyMs`, on a monotonic clock, rendering
 included in the browser too; the GPU upload and presenting the frame come after; `null` until
-there was one). `canvas.uploadPixels` is the number of pixels converted and sent to the canvas
+there was one). `canvas.uncoveredPixels` estimates device pixels in the visible canvas that are
+outside both the current image and its retained wide-view fallback; zero means the zoomed view
+has complete image coverage before refinement. `canvas.uploadPixels` is the number of pixels converted and sent to the canvas
 texture in the last update; `canvas.textureCurrent` says whether that texture represents the
 current document revision. While a prototype plays, `presenter`
 (full window) and `preview` (the preview pane) hold the player's state: the `current` frame and its

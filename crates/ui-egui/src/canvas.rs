@@ -26,11 +26,15 @@ pub struct CanvasState {
     /// The document version behind the texture, so stale previews cannot replace newer pixels.
     tex_doc: Option<Arc<Document>>,
     tex_style: Option<RenderStyle>,
+    /// A wider, still-current view kept while a zoomed-in texture is shown. It fills newly
+    /// exposed areas on zoom-out without doing a whole-view raster pass in the input frame.
+    zoom_fallback: Option<ZoomFallback>,
     /// The texture is a coarse preview (see [`crate::render_worker`]).
     pub tex_coarse: bool,
     submitted: Option<JobKey>,
     /// The view of the last render asked for.
     want_view: Option<figcraft_render::View>,
+    visible_view: Option<figcraft_render::View>,
     /// What the last canvas render had to do (shown by `ui.inspect`).
     pub render_work: Option<figcraft_render::Work>,
     /// Device pixels uploaded for the last completed render (zero when its texture was reused).
@@ -72,9 +76,11 @@ impl Default for CanvasState {
             tex_of: None,
             tex_doc: None,
             tex_style: None,
+            zoom_fallback: None,
             tex_coarse: false,
             submitted: None,
             want_view: None,
+            visible_view: None,
             render_work: None,
             upload_pixels: 0,
             preview_latency_ms: None,
@@ -97,9 +103,57 @@ impl Default for CanvasState {
     }
 }
 
+struct ZoomFallback {
+    texture: egui::TextureHandle,
+    view: figcraft_render::View,
+    of: (u64, NodeId),
+    doc: Arc<Document>,
+    style: RenderStyle,
+}
+
+impl ZoomFallback {
+    fn matches(&self, job: &Job) -> bool {
+        self.of == (job.uid, job.page) && Arc::ptr_eq(&self.doc, &job.doc) && self.style == job.style()
+    }
+}
+
+fn view_area(view: &figcraft_render::View) -> f64 {
+    f64::from(view.width) * f64::from(view.height) / view.scale / view.scale
+}
+
 impl CanvasState {
     pub(crate) fn texture_current(&self, ds: &figcraft_engine::DocState) -> bool {
         self.tex_of == Some((ds.uid, ds.page)) && !self.tex_coarse && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
+    }
+
+    /// Device pixels without any current image source. This measures texture coverage, including
+    /// the retained wide view, before the page background is painted underneath it.
+    pub(crate) fn uncovered_pixels(&self, ds: &figcraft_engine::DocState) -> Option<u64> {
+        let visible = self.visible_view.as_ref()?;
+        let current = self
+            .tex_view
+            .as_ref()
+            .filter(|_| self.tex_of == Some((ds.uid, ds.page)) && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc)));
+        let fallback = self
+            .zoom_fallback
+            .as_ref()
+            .filter(|cached| cached.of == (ds.uid, ds.page) && Arc::ptr_eq(&cached.doc, &ds.doc) && self.tex_style.as_ref() == Some(&cached.style));
+        let area = |view: &figcraft_render::View| {
+            let (a, b) = (visible.page_rect(), view.page_rect());
+            (a.x1.min(b.x1) - a.x0.max(b.x0)).max(0.0) * (a.y1.min(b.y1) - a.y0.max(b.y0)).max(0.0)
+        };
+        let overlap = current.zip(fallback).map_or(0.0, |(a, b)| {
+            let (v, a, b) = (visible.page_rect(), a.page_rect(), b.view.page_rect());
+            (v.x1.min(a.x1).min(b.x1) - v.x0.max(a.x0).max(b.x0)).max(0.0) * (v.y1.min(a.y1).min(b.y1) - v.y0.max(a.y0).max(b.y0)).max(0.0)
+        });
+        let uncovered = (visible.page_rect().width() * visible.page_rect().height()
+            - current.map_or(0.0, &area)
+            - fallback.map_or(0.0, |cached| area(&cached.view))
+            + overlap)
+            .max(0.0)
+            * visible.scale
+            * visible.scale;
+        Some(uncovered.round().min(u64::MAX as f64) as u64)
     }
 }
 
@@ -805,6 +859,24 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let painted_drag = paint_drag_visual(app, &painter);
     #[cfg(target_arch = "wasm32")]
     let painted_drag = false;
+    if !painted_drag
+        && let Some(fallback) = &app.canvas.zoom_fallback
+        && let Ok(ds) = app.session.ds()
+        && fallback.of == (ds.uid, ds.page)
+        && Arc::ptr_eq(&fallback.doc, &ds.doc)
+        && app.canvas.tex_style.as_ref() == Some(&fallback.style)
+        && !app.canvas.tex_view.as_ref().zip(app.canvas.visible_view.as_ref()).is_some_and(|(current, visible)| {
+            app.canvas.tex_of == Some((ds.uid, ds.page))
+                && app.canvas.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
+                && covers(current, visible)
+        })
+    {
+        let tl = app.to_screen(fallback.view.origin.0, fallback.view.origin.1);
+        let zoom = ds.view.zoom;
+        let w = (f64::from(fallback.view.width) / fallback.view.scale * zoom) as f32;
+        let h = (f64::from(fallback.view.height) / fallback.view.scale * zoom) as f32;
+        painter.image(fallback.texture.id(), Rect::from_min_size(tl, vec2(w, h)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
     if let (Some(tex), Some(v), true) = (&app.canvas.texture, &app.canvas.tex_view, !painted_drag && shown.is_some() && app.canvas.tex_of == shown) {
         // Re-project the last render onto the current view.
         let tl = app.to_screen(v.origin.0, v.origin.1);
@@ -866,6 +938,26 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
         && app.canvas.tex_style.as_ref() == Some(&done.style)
         && app.canvas.tex_of == Some((done.uid, done.page))
         && app.canvas.tex_doc.as_ref().is_some_and(|shown| done.base_docs.iter().any(|base| Arc::ptr_eq(base, shown)));
+    // Keep the broadest refined view across a zoom-in. Once zooming back out, its pixels fill
+    // the margins immediately while the worker renders the new view. A texture handle must be
+    // moved, not cloned: `set` would otherwise mutate the cached image as well.
+    if matches!(done.update, TextureUpdate::Full(_)) && !app.canvas.tex_coarse && !same_view {
+        let previous = app.canvas.tex_view.as_ref().zip(app.canvas.tex_doc.as_ref()).zip(app.canvas.tex_style.as_ref());
+        if let Some(((view, doc), style)) = previous
+            && app.canvas.tex_of == Some((done.uid, done.page))
+            && Arc::ptr_eq(doc, &done.doc)
+            && style == &done.style
+            && view_area(view) > view_area(&done.view) * 1.25
+            && app.canvas.zoom_fallback.as_ref().is_none_or(|old| view_area(view) > view_area(&old.view) * 1.1)
+            && let Some(texture) = app.canvas.texture.take()
+        {
+            app.canvas.zoom_fallback =
+                Some(ZoomFallback { texture, view: view.clone(), of: (done.uid, done.page), doc: doc.clone(), style: style.clone() });
+        }
+    }
+    if app.canvas.zoom_fallback.as_ref().is_some_and(|old| old.of != (done.uid, done.page) || !Arc::ptr_eq(&old.doc, &done.doc)) {
+        app.canvas.zoom_fallback = None;
+    }
     let applied = match (&mut app.canvas.texture, done.update) {
         (Some(t), TextureUpdate::Partial(patches)) if can_patch => {
             app.canvas.upload_pixels = patches.iter().map(|(_, image)| image.size.iter().map(|n| *n as u64).product::<u64>()).sum();
@@ -999,6 +1091,8 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     let margin = overscan_margin(visible_w, visible_h, max_texture_side);
     let origin = (ox, oy);
     let visible = (visible_w, visible_h);
+    let visible_view = figcraft_render::View { origin, scale, width: visible.0, height: visible.1 };
+    app.canvas.visible_view = Some(visible_view.clone());
     let requested = (ox - f64::from(margin) / scale, oy - f64::from(margin) / scale);
     let size = (visible_w.saturating_add(margin * 2).min(max_texture_side), visible_h.saturating_add(margin * 2).min(max_texture_side));
     let key = JobKey {
@@ -1048,11 +1142,12 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     // A fast zoom-out can expose page area outside the previous texture. Draw a whole-view
     // vector preview before painting this UI frame, then let the worker refine it. Otherwise the
     // newly exposed areas show only the page background for one or more frames.
-    let visible_view = figcraft_render::View { origin, scale, width: visible.0, height: visible.1 };
     let exposed_zoom_out = app.canvas.tex_of == Some((job.uid, job.page))
         && app.canvas.tex_view.as_ref().is_some_and(|old| scale < old.scale * 0.98 && !covers(old, &visible_view));
+    let fallback_covers = app.canvas.zoom_fallback.as_ref().is_some_and(|cached| cached.matches(&job) && covers(&cached.view, &visible_view));
     if exposed_zoom_out
         && job.zoom_preview
+        && !fallback_covers
         && let Some(preview) = preview_now(&job)
     {
         apply_render(app, ctx, preview, Some((job.uid, job.page)));

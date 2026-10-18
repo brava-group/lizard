@@ -62,7 +62,7 @@ pub struct Job {
 }
 
 impl Job {
-    fn style(&self) -> RenderStyle {
+    pub(crate) fn style(&self) -> RenderStyle {
         RenderStyle {
             outline: self.outline,
             outline_extras: self.outline_extras,

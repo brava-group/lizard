@@ -1572,6 +1572,7 @@ impl FigApp {
             "status": self.session.status(),
             "lastError": self.ui.last_error,
         });
+        state["canvas"]["uncoveredPixels"] = json!(self.session.ds().ok().and_then(|ds| self.canvas.uncovered_pixels(ds)));
         state["pendingOpens"] = json!(self.ui.pending_opens.len());
         state
     }

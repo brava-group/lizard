@@ -190,6 +190,33 @@ fn immediate_preview_matches_the_worker_preview() {
 }
 
 #[test]
+fn a_retained_wide_view_covers_zoom_out_without_synchronous_rasterization() {
+    let (s, _) = document();
+    let mut ui = crate::layers_drag_tests::Ui::new(s);
+    let settle = |ui: &mut crate::layers_drag_tests::Ui| {
+        for _ in 0..150 {
+            ui.frame(vec![]);
+            if ui.app.worker.as_ref().is_some_and(|w| !w.in_flight()) && !ui.app.canvas.tex_coarse {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("vector render did not finish");
+    };
+    ui.app.run("view.zoom50", json!({}));
+    settle(&mut ui);
+    ui.app.run("view.zoom200", json!({}));
+    settle(&mut ui);
+    assert!(ui.app.canvas.zoom_fallback.is_some(), "the wide vector image remains available");
+
+    ui.app.run("view.zoom100", json!({}));
+    ui.frame(vec![]);
+    assert!(!ui.app.canvas.tex_coarse, "the input frame reuses existing pixels instead of rendering a preview");
+    let ds = ui.app.session.ds().unwrap();
+    assert_eq!(ui.app.canvas.uncovered_pixels(ds), Some(0), "the retained view covers the exposed margins");
+}
+
+#[test]
 fn a_drag_converts_only_damage_when_the_visible_texture_is_its_base() {
     let (mut s, rect) = document();
     let ds = s.ds().unwrap();
