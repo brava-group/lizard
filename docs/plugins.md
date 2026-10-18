@@ -60,14 +60,30 @@ large data instead of logging it in full.
   with a field per parameter, drawn with FigCraft's own widgets; **Run** runs it.
 - **Plugins ▸ Run last plugin** (⌥⌘P on macOS, Ctrl+Alt+Shift+P on Windows and Linux, where
   Ctrl+Alt+P is Pixel preview) runs the last plugin command again with the same parameters.
-- **Plugins ▸ Manage plugins…** has two tabs. **Installed** lists the installed plugins (version,
+- **Plugins ▸ Manage plugins…** has three tabs. **Installed** lists the installed plugins (version,
   access, where each comes from: its manifest path or the server it was installed from) with a
   Remove button for each, and an Import button. **Browse** shows a server's plugin directory, with
-  Install, Update and Remove (see [Plugin directories](#plugin-directories)).
+  Install, Update and Remove (see [Plugin directories](#plugin-directories)). **Figma local**
+  inspects a local `manifest.json` and can register its folder as a development source; this
+  records the path and SHA-256 digest for later change detection, but does not execute JavaScript.
 - **Plugins ▸ Widgets** lists the installed widget plugins; picking one puts its widget in the
   middle of the view.
 
 A message the plugin shows (`notify`) appears as a toast; so does a text result.
+
+## Local Figma plugin diagnostics
+
+`plugin.figma.inspect {"path":"/path/to/manifest.json"}` checks a local Figma plugin manifest,
+its `main` JavaScript and declared `ui` files, without running them. It reports the editor types,
+menu commands (including nested submenus), declared network domains, file sizes, a SHA-256 digest
+and currently unsupported capabilities. It refuses absolute or escaping paths, symlinks, missing
+files and oversized packages. A manifest `build` command is never run.
+
+`plugin.figma.import {"path":"/path/to/manifest.json","mode":"development"}` records that
+source and digest in preferences. `plugin.figma.status {"id":"…"}` reads it again and reports
+`changedSinceImport`; `plugin.figma.remove {"id":"…"}` forgets it. Installed snapshots and a
+JavaScript runtime are not implemented yet. `plugin.figma.run` explicitly refuses execution.
+These commands are separate from FigCraft's native WebAssembly plugin commands.
 
 **Plugin panels.** A plugin written for API 2 can show a panel while it runs: a floating window,
 first placed beside the properties panel (drag its title bar to move it), with the plugin's notes,

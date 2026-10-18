@@ -248,6 +248,14 @@ pub fn metadata(path: impl AsRef<Path>) -> Result<std::fs::Metadata> {
     std::fs::metadata(allow(path, Access::Read)?).map_err(io(path))
 }
 
+/// Metadata of the named path itself, so importers can refuse symbolic links rather than follow
+/// them. Automation roots are checked first, including the link's resolved destination.
+pub fn symlink_metadata(path: impl AsRef<Path>) -> Result<std::fs::Metadata> {
+    let path = path.as_ref();
+    let _ = allow(path, Access::Read)?;
+    std::fs::symlink_metadata(path).map_err(io(path))
+}
+
 /// Whether `path` is a folder (false when it may not be read).
 pub fn is_dir(path: impl AsRef<Path>) -> bool {
     metadata(path).is_ok_and(|m| m.is_dir())

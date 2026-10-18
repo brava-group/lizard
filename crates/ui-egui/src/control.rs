@@ -492,11 +492,14 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
             if let Some(h) = p.get("pluginsWindow").and_then(Value::as_bool) {
                 app.ui.plugins_window = h;
             }
-            // The Plugins window's tab ("installed", "browse"), and the plugin of the listed
+            // The Plugins window's tab ("installed", "browse", "figmaLocal"), and the plugin of the listed
             // directory whose install asks for confirmation (null: none).
             if let Some(tab) = p.get("pluginsTab").and_then(Value::as_str) {
-                app.ui.plugins_manage.tab =
-                    if tab == "browse" { crate::plugins_ui::PluginsTab::Browse } else { crate::plugins_ui::PluginsTab::Installed };
+                app.ui.plugins_manage.tab = match tab {
+                    "browse" => crate::plugins_ui::PluginsTab::Browse,
+                    "figmaLocal" => crate::plugins_ui::PluginsTab::FigmaLocal,
+                    _ => crate::plugins_ui::PluginsTab::Installed,
+                };
             }
             match p.get("pluginConfirm") {
                 Some(Value::String(id)) => app.ui.plugins_manage.confirm = Some(id.clone()),

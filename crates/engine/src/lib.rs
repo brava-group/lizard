@@ -28,6 +28,7 @@ pub mod devinspect;
 pub mod distance;
 pub mod doc_urls;
 pub mod drop;
+pub mod figma_plugins;
 pub mod file_access;
 pub mod guard;
 pub mod guides;
@@ -640,6 +641,9 @@ pub struct Prefs {
     /// Installed plugins (Plugins menu), in menu order.
     #[serde(serialize_with = "plugins::persisted")]
     pub plugins: Vec<plugins::InstalledPlugin>,
+    /// Local Figma JavaScript packages registered for development diagnostics (never run yet).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub figma_plugins: Vec<figma_plugins::LocalPlugin>,
     /// Plugins' own settings (`setting_set`), by plugin id, then key: JSON values, capped per
     /// plugin.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -698,6 +702,7 @@ impl Default for Prefs {
             auto_save: false,
             invite_links: None,
             plugins: Vec::new(),
+            figma_plugins: Vec::new(),
             plugin_settings: BTreeMap::new(),
             plugin_directory: None,
             publish_server: live::DEFAULT_SERVER.into(),

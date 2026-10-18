@@ -30,15 +30,17 @@ pub enum PluginsTab {
     #[default]
     Installed,
     Browse,
+    FigmaLocal,
 }
 
 impl PluginsTab {
-    pub const ALL: [PluginsTab; 2] = [PluginsTab::Installed, PluginsTab::Browse];
+    pub const ALL: [PluginsTab; 3] = [PluginsTab::Installed, PluginsTab::Browse, PluginsTab::FigmaLocal];
 
     fn label(self) -> &'static str {
         match self {
             PluginsTab::Installed => tr("Installed"),
             PluginsTab::Browse => tr("Browse"),
+            PluginsTab::FigmaLocal => "Figma local",
         }
     }
 }
@@ -52,6 +54,8 @@ pub struct PluginsWindow {
     pub server: Option<String>,
     pub query: String,
     pub confirm: Option<String>,
+    /// Last read-only report; never marks a JavaScript plugin as runnable.
+    pub figma_report: Option<Value>,
 }
 
 /// Width of the plugin windows' fields.
@@ -231,6 +235,10 @@ fn panel_windows(app: &mut FigApp, ctx: &Context) {
 enum Manage {
     Remove(String),
     Import,
+    InspectFigma,
+    ImportFigma(String),
+    RemoveFigma(String),
+    StatusFigma(String),
     Browse(String),
     Confirm(String),
     /// Stop waiting for the directory's listing.
@@ -257,6 +265,7 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
         asked = match tab {
             PluginsTab::Installed => installed_tab(app, ui, &t),
             PluginsTab::Browse => browse_tab(app, ui, &t),
+            PluginsTab::FigmaLocal => figma_local_tab(app, ui, &t),
         };
     });
     app.ui.plugins_manage.tab = tab;
@@ -266,6 +275,21 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
             app.run("plugin.remove", json!({"id": id}));
         }
         Some(Manage::Import) => import_dialog(app),
+        Some(Manage::InspectFigma) => inspect_figma_dialog(app),
+        Some(Manage::ImportFigma(path)) => {
+            if let Some(result) = app.run("plugin.figma.import", json!({"path": path, "mode": "development"})) {
+                app.ui.plugins_manage.figma_report = Some(result["report"].clone());
+            }
+        }
+        Some(Manage::RemoveFigma(id)) if app.run("plugin.figma.remove", json!({"id": id})).is_some() => {
+            app.ui.plugins_manage.figma_report = None;
+        }
+        Some(Manage::RemoveFigma(_)) => {}
+        Some(Manage::StatusFigma(id)) => {
+            if let Some(report) = app.run("plugin.figma.status", json!({"id": id})) {
+                app.ui.plugins_manage.figma_report = Some(report);
+            }
+        }
         Some(Manage::Browse(server)) => {
             app.ui.plugins_manage.confirm = None;
             app.cancel_background(INSTALL);
@@ -284,6 +308,95 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
     if app.ui.plugins_manage.confirm.is_some() {
         confirm_window(app, ctx, &t);
     }
+}
+
+fn inspect_figma_dialog(app: &mut FigApp) {
+    app.pick_open("Escolher manifest.json do plugin Figma", &["json"], |app, path| {
+        if let Some(report) = app.run("plugin.figma.inspect", json!({"path": path.to_string_lossy()})) {
+            app.ui.plugins_manage.figma_report = Some(report);
+            app.ui.plugins_manage.tab = PluginsTab::FigmaLocal;
+        }
+    });
+}
+
+fn figma_local_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+    widgets::label(ui, "Inspecione ou registre uma pasta local para desenvolvimento. O código JavaScript ainda não é executado.", t.text_secondary);
+    ui.add_space(8.0);
+    let mut asked = widgets::button(ui, "Escolher manifest.json…", true, true).clicked().then_some(Manage::InspectFigma);
+    for plugin in &app.session.prefs.figma_plugins {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&plugin.name).font(semibold(12.0)).color(t.text));
+            if widgets::button(ui, "Verificar", false, true).clicked() {
+                asked = Some(Manage::StatusFigma(plugin.id.clone()));
+            }
+            if widgets::button(ui, tr("Remove"), false, true).clicked() {
+                asked = Some(Manage::RemoveFigma(plugin.id.clone()));
+            }
+        });
+    }
+    let Some(report) = app.ui.plugins_manage.figma_report.as_ref() else { return asked };
+    ui.add_space(14.0);
+    egui::ScrollArea::vertical().id_salt("figma_plugin_report").max_height(360.0).show(ui, |ui| {
+        let name = report["name"].as_str().unwrap_or("Plugin");
+        ui.label(RichText::new(name).font(semibold(13.0)).color(t.text));
+        widgets::label(ui, "Diagnosticado · execução indisponível", t.text_secondary);
+        let api = report["api"].as_str().unwrap_or("?");
+        let editors =
+            report["editorType"].as_array().map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+        widgets::label(ui, &format!("API {api} · {editors}"), t.text_secondary);
+        if let Some(source) = report["source"].as_str() {
+            ui.add(egui::Label::new(RichText::new(source).font(regular(11.0)).color(t.text_secondary)).wrap());
+        }
+        if let Some(digest) = report["digest"].as_str() {
+            ui.label(RichText::new(format!("SHA-256: {}…", digest.get(..24).unwrap_or(digest))).font(regular(11.0)).color(t.text_secondary))
+                .on_hover_text(digest);
+        }
+        if let Some(domains) = report["networkAccess"]["allowedDomains"].as_array() {
+            let list = domains.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+            widgets::label(ui, &format!("Domínios declarados: {list}"), t.text_secondary);
+        }
+        if report["changedSinceImport"] == true {
+            widgets::label(ui, "Os arquivos mudaram desde o registro. Verifique e registre novamente.", t.text_secondary);
+        }
+        if let Some(path) = report["source"].as_str()
+            && !app
+                .session
+                .prefs
+                .figma_plugins
+                .iter()
+                .any(|plugin| report["id"].as_str() == Some(plugin.id.as_str()) && report["digest"].as_str() == Some(plugin.digest.as_str()))
+            && widgets::button(ui, "Registrar para desenvolvimento", false, true).clicked()
+        {
+            asked = Some(Manage::ImportFigma(path.to_string()));
+        }
+        ui.add_space(8.0);
+        if let Some(commands) = report["commands"].as_array()
+            && !commands.is_empty()
+        {
+            widgets::label(ui, "Comandos do menu:", t.text_secondary);
+            for command in commands {
+                if let (Some(label), Some(id)) = (command["label"].as_str(), command["command"].as_str()) {
+                    widgets::label(ui, &format!("• {label} ({id})"), t.text_secondary);
+                }
+            }
+        }
+        if let Some(files) = report["files"].as_array() {
+            widgets::label(ui, "Arquivos:", t.text_secondary);
+            for file in files {
+                if let Some(path) = file["path"].as_str() {
+                    widgets::label(ui, &format!("• {path} ({} bytes)", file["bytes"]), t.text_secondary);
+                }
+            }
+        }
+        ui.add_space(8.0);
+        if let Some(diagnostics) = report["diagnostics"].as_array() {
+            for reason in diagnostics.iter().filter_map(Value::as_str) {
+                ui.add(egui::Label::new(RichText::new(format!("• {reason}")).font(regular(11.0)).color(t.text_secondary)).wrap());
+            }
+        }
+    });
+    asked
 }
 
 fn installed_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {

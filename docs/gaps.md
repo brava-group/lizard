@@ -2,6 +2,8 @@
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (merged upstream 0.7.0 updates; Agent tab selection context, image attachments and work receipts; retained wide-view zoom-out coverage; bounded frame drag previews at high zoom and large window sizes; native composited drags for eligible topmost frames; measured zoom-wheel and selection-fit subset of the interaction pass; ACP Agent chat with document-scoped MCP; Agent chat sidebar shell; faster vector canvas drags and localized texture uploads; bounded canvas pan overscan; reviewed Russian catalog and integer plurals; `.fig` export: instance sizes, variables with modes, shared styles, variable-width strokes; sharing with a join code; text box sizes measured against documents re-saved by other software; live sessions per document; .fig export checked by opening written files in other software; experimental .fig export; keyboard shortcut parity suite and bindings; Simplified Chinese draft catalog; Latin American Spanish overlay; prototyping tail: gamepad triggers, widgets in prototypes, mode lookups; plugin directory on figcraft-server; Japanese and Korean draft catalogs and CJK UI fonts; plugin widgets and the plugin panel tail; French, German and Brazilian Portuguese draft catalogs; cursor chat and spotlight in live sessions; layers and assets panels behaviour suite and fixes; vector multi-edit and edit tail; dev resources links; extended collections tail; branch version history and finer list merges; comments and version history behaviour suite and fixes; canvas navigation, guides and grids behaviour suite and fixes; `.fig` import: editable vector networks, more layer kinds, variable prototype actions; `.fig` import, best effort: gap 1 down to its tail; Windows QA pass: everyday workflows on Windows 11, eight fixes incl. unsaved work kept after a crash or a forced quit; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; localization layer with a draft Spanish catalog; hosting figcraft-server: wss in the desktop app, server releases, deployment guide; plugin panels and settings; canvas fixes: boolean hit testing on the result, group drags, frame outlines and slices; code connect; stretch and scatter brushes, pen pressure; text on a path and pattern fills; team libraries on the server and swap library; branches: create, update from main, review and merge; animated GIF fills and TIFF images; Open recent, outlines for the selection and mask outlines: menu breadth 100%; extended collections, variables import/export, gradient stop and variant bindings: gap 14 down to its tail) · **Target:** Figma Design (desktop app 126.10.7)
 
+> **Local plugin work:** a diagnostic importer for `manifest.json` is in progress on this branch; Figma JavaScript plugins still cannot run.
+
 Every known shortfall against Figma, one entry each, ranked by how much it stops a Figma user from
 doing real work in FigCraft. Agents: pick work from the top unless the owner says otherwise. The
 numbers behind the ranking are in [`target-app-parity.md`](target-app-parity.md). Hours are one
@@ -227,11 +229,15 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   text input, property menus, hover or timers) and draw only frames, text, shapes and images;
   no images or sliders in panels. Figma's own plugins are JavaScript against Figma's plugin API and
   don't run.
+- **Local branch (2026-10-18):** a separate Figma `manifest.json` inspector validates declared
+  files, menu subcommands, paths, symlinks, size limits and a package digest. The Manage plugins
+  window can register and recheck a development folder. This is diagnostic only; no JavaScript
+  runtime, Figma API adapter or HTML plugin UI has landed. Compatibility percentages stay unchanged.
 - **Impact:** teams that depend on specific Figma plugins (icons, content, accessibility checks)
   can't bring them. FigCraft's CLI, control channel and MCP server cover agent automation better
   than Figma does.
 - **Estimate:** 8–26 h for the missing pieces of FigCraft's own API. Running Figma's plugins
-  needs a JS engine and an API shim: **owner decision needed**.
+  needs a JS engine and an API shim; the owner asked to begin this work on the local branch.
 
 ### 7. CPU canvas where Figma uses the GPU
 - **Missing:** GPU rendering of the canvas. FigCraft renders with tiny-skia on the CPU (banded,
