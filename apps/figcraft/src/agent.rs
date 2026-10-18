@@ -5,14 +5,14 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use figcraft_ui_egui::agent_panel::{AgentEvent, AgentKind};
+use figcraft_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
 use serde_json::{Value, json};
 
 const MAX_LINE: usize = 8 * 1024 * 1024;
 
 enum Input {
     Message(Value),
-    Prompt(String),
+    Prompt(AgentPrompt),
     Cancel,
     Permission(Value, Option<String>),
     Shutdown,
@@ -71,7 +71,7 @@ impl Agent {
         Ok(Self { input, events, document, kind })
     }
 
-    pub fn send(&self, prompt: String) -> Result<(), String> {
+    pub fn send(&self, prompt: AgentPrompt) -> Result<(), String> {
         self.input.send(Input::Prompt(prompt)).map_err(|_| "O agente terminou a sessão".into())
     }
 
@@ -138,6 +138,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
     let mut queued = std::collections::VecDeque::new();
     let mut prompt_id = 10_u64;
     let mut active: Option<u64> = None;
+    let mut image_supported = false;
     while let Ok(event) = requests.recv() {
         let action = match event {
             Input::Prompt(text) => {
@@ -181,6 +182,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                             if message["result"]["protocolVersion"].as_u64() != Some(1) {
                                 Err("O agente não suporta ACP v1".into())
                             } else {
+                                image_supported = message["result"]["agentCapabilities"]["promptCapabilities"]["image"].as_bool() == Some(true);
                                 send(&mut stdin, Some(2), "session/new", json!({"cwd":cwd, "mcpServers":[mcp]}))
                             }
                         }
@@ -219,10 +221,14 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
             && let Some(sid) = session.as_deref()
             && let Some(prompt) = queued.pop_front()
         {
+            if !prompt.images.is_empty() && !image_supported {
+                let _ = output.send(AgentEvent::Error("Este agente ACP não aceita imagens no prompt.".into()));
+                continue;
+            }
+            let mut blocks = vec![json!({"type":"text", "text":prompt.text})];
+            blocks.extend(prompt.images.into_iter().map(|image| json!({"type":"image", "mimeType":image.mime, "data":image.data})));
             prompt_id = prompt_id.saturating_add(1);
-            if let Err(error) =
-                send(&mut stdin, Some(prompt_id), "session/prompt", json!({"sessionId":sid, "prompt":[{"type":"text", "text":prompt}]}))
-            {
+            if let Err(error) = send(&mut stdin, Some(prompt_id), "session/prompt", json!({"sessionId":sid, "prompt":blocks})) {
                 let _ = output.send(AgentEvent::Error(error));
                 break;
             }
@@ -252,13 +258,14 @@ for line in sys.stdin:
  msg=json.loads(line)
  method=msg.get('method')
  if method=='initialize':
-  send({'jsonrpc':'2.0','id':msg['id'],'result':{'protocolVersion':1}})
+  send({'jsonrpc':'2.0','id':msg['id'],'result':{'protocolVersion':1,'agentCapabilities':{'promptCapabilities':{'image':True}}}})
  elif method=='session/new':
   assert msg['params']['mcpServers'][0]['name']=='figcraft'
   assert msg['params']['mcpServers'][0]['args']==['mcp','--attach','7777']
   send({'jsonrpc':'2.0','id':msg['id'],'result':{'sessionId':'session-1'}})
  elif method=='session/prompt':
   assert 'create a frame' in msg['params']['prompt'][0]['text']
+  assert msg['params']['prompt'][1]=={'type':'image','mimeType':'image/png','data':'aGVsbG8='}
   send({'jsonrpc':'2.0','method':'session/update','params':{'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'Working'}}}})
   send({'jsonrpc':'2.0','method':'session/update','params':{'update':{'sessionUpdate':'tool_call','toolCallId':'tool-1','title':'Create frame','status':'in_progress'}}})
   send({'jsonrpc':'2.0','id':99,'method':'session/request_permission','params':{'toolCall':{'title':'Create frame'},'options':[{'optionId':'allow','name':'Allow'}]}})
@@ -273,7 +280,12 @@ for line in sys.stdin:
         std::fs::set_permissions(&script, perms).unwrap();
         let agent =
             Agent::start_with_command(AgentKind::Codex, 42, 7777, &folder.to_string_lossy(), "figcraft-cli", Some(script.as_os_str())).unwrap();
-        agent.send("create a frame".into()).unwrap();
+        agent
+            .send(AgentPrompt {
+                text: "create a frame".into(),
+                images: vec![figcraft_ui_egui::agent_panel::AgentImage { mime: "image/png".into(), data: "aGVsbG8=".into() }],
+            })
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
         let mut got_text = false;
         let mut got_tool = false;

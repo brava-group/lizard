@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use figcraft_engine::{Prefs, Session};
-use figcraft_ui_egui::agent_panel::{AgentEvent, AgentKind};
+use figcraft_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
 use figcraft_ui_egui::{ControlRequest, DialogFuture, FigApp, Services};
 use serde_json::{Value, json};
 
@@ -253,7 +253,7 @@ fn picked(pick: impl Future<Output = Option<rfd::FileHandle>> + 'static) -> Dial
 }
 
 impl Services for Desktop {
-    fn agent_send(&mut self, kind: AgentKind, prompt: String, document: u64) -> Result<(), String> {
+    fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
         if self.agent.as_ref().is_some_and(|a| a.document != document || a.kind != kind) {
             self.agent_reset();
         }

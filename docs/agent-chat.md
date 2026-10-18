@@ -27,5 +27,16 @@ session and supplies its recent transcript as context. A completed answer offers
 answer's changes** only when every Undo step it added came from the agent and no later edit has
 changed that history. Shift+Enter inserts a newline; Enter sends.
 
-The browser build retains the chat layout but cannot start local ACP executables. Specialized
-image generation, background removal and visual search are separate AI features and remain open.
+Selected canvas layers appear above the prompt as references. A chip locates its layer on the
+canvas; its × removes that layer from the next message's context without deselecting or deleting
+it. The conversation records the names and IDs that were actually sent. The + button accepts
+PNG/JPEG images from a file or the clipboard, and image-only paste while the prompt has focus
+adds an attachment. Images are shown as removable thumbnails and sent as separate ACP image
+blocks only when the chosen adapter advertises image prompt support. Up to four images, totalling
+4 MB, can be attached to one message; failed sends restore them to the composer. Text, HTML and
+copied design layers continue through their existing paste paths. Agent activity is grouped under
+an expandable work receipt, while the answer and guarded Undo remain visible.
+
+The browser build retains the chat layout but cannot start local ACP executables. File attachment
+dialogs use the desktop file picker. Specialized image generation, background removal and visual
+search are separate AI features and remain open.

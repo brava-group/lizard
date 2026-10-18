@@ -209,7 +209,7 @@ pub use control::{ControlReply, ControlRequest};
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).
 pub trait Services {
     /// Start or continue a local ACP design agent. Desktop implementations run it off the UI thread.
-    fn agent_send(&mut self, _agent: agent_panel::AgentKind, _prompt: String, _document: u64) -> Result<(), String> {
+    fn agent_send(&mut self, _agent: agent_panel::AgentKind, _prompt: agent_panel::AgentPrompt, _document: u64) -> Result<(), String> {
         Err("Agentes locais estão disponíveis apenas no aplicativo desktop".into())
     }
     fn agent_poll(&mut self) -> Vec<agent_panel::AgentEvent> {

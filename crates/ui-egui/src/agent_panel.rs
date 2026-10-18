@@ -1,6 +1,8 @@
 //! The Agent sidebar and its conversation state.
 
+use base64::Engine as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
+use figcraft_doc::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::FigApp;
@@ -54,7 +56,13 @@ pub struct ChatMessage {
     pub role: String,
     pub text: String,
     #[serde(default)]
+    pub selected_nodes: Vec<ChatNodeRef>,
+    #[serde(default)]
+    pub attached_images: Vec<String>,
+    #[serde(default)]
     pub tools: Vec<ChatTool>,
+    #[serde(default)]
+    pub work_seconds: Option<u64>,
     #[serde(default)]
     pub stopped: bool,
     #[serde(default)]
@@ -65,6 +73,30 @@ pub struct ChatMessage {
     pub revision_after: u64,
     #[serde(default)]
     pub reverted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ChatNodeRef {
+    pub id: NodeId,
+    pub name: String,
+}
+
+/// The ACP prompt keeps binary images separate from the visible text and node references.
+pub struct AgentPrompt {
+    pub text: String,
+    pub images: Vec<AgentImage>,
+}
+
+pub struct AgentImage {
+    pub mime: String,
+    pub data: String,
+}
+
+pub struct DraftImage {
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+    pub preview: Option<egui::TextureHandle>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -86,6 +118,14 @@ pub struct Conversation {
 #[derive(Default)]
 pub struct AgentUi {
     pub draft: String,
+    pub images: Vec<DraftImage>,
+    pub pending_images: Vec<DraftImage>,
+    pub context_menu_open: bool,
+    /// IDs hidden from this draft's context, without changing the canvas selection.
+    pub excluded_selection: Vec<NodeId>,
+    pub observed_selection: Vec<NodeId>,
+    pub observed_document: Option<u64>,
+    pub turn_started: Option<std::time::Instant>,
     pub history_open: bool,
     pub menu_open: bool,
     pub selected_suggestion: Option<usize>,
@@ -124,6 +164,17 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
         }
     }
     let document = app.session.ds().ok().map(|ds| ds.uid);
+    if app.ui.agent.observed_document != document {
+        app.ui.agent.observed_document = document;
+        app.ui.agent.observed_selection.clear();
+        app.ui.agent.excluded_selection.clear();
+        app.ui.agent.images.clear();
+    }
+    let selection = app.session.ds().ok().map_or_else(Vec::new, |ds| ds.selection.clone());
+    if app.ui.agent.observed_selection != selection {
+        app.ui.agent.observed_selection = selection;
+        app.ui.agent.excluded_selection.clear();
+    }
     let key = document_key(app);
     if app.ui.agent.runtime_document == document
         && let Some(chat) = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id))
@@ -163,7 +214,9 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
             }
             AgentEvent::Permission { id, title, options } => app.ui.agent.permission = Some(AgentPermission { id, title, options }),
             AgentEvent::Done(reason) => {
+                app.ui.agent.pending_images.clear();
                 if let Some(message) = active.and_then(|chat| chat.messages.last_mut()) {
+                    message.work_seconds = app.ui.agent.turn_started.take().map(|started| started.elapsed().as_secs());
                     if let Ok(ds) = app.session.ds() {
                         message.undo_after = ds.history.undo.len();
                         message.revision_after = ds.revision;
@@ -174,6 +227,12 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                 completed = true;
             }
             AgentEvent::Error(error) => {
+                app.ui.agent.turn_started = None;
+                if app.session.ds().ok().is_some_and(|ds| Some(ds.uid) == app.ui.agent.runtime_document) {
+                    app.ui.agent.images.append(&mut app.ui.agent.pending_images);
+                } else {
+                    app.ui.agent.pending_images.clear();
+                }
                 if let Some(message) = active.and_then(|chat| chat.messages.last_mut()) {
                     if !message.text.is_empty() {
                         message.text.push_str("\n\n");
@@ -198,9 +257,75 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
     }
 }
 
+fn selected_context(app: &FigApp) -> Vec<ChatNodeRef> {
+    let Ok(ds) = app.session.ds() else { return Vec::new() };
+    ds.selection
+        .iter()
+        .filter(|id| !app.ui.agent.excluded_selection.contains(id))
+        .filter_map(|id| ds.doc.node(*id).map(|node| ChatNodeRef { id: *id, name: node.name.clone() }))
+        .take(32)
+        .collect()
+}
+
+const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+
+fn attach_image(app: &mut FigApp, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    if app.ui.agent.images.len() >= 4
+        || bytes.is_empty()
+        || bytes.len().saturating_add(app.ui.agent.images.iter().map(|image| image.bytes.len()).sum::<usize>()) > MAX_IMAGE_BYTES
+    {
+        return Err("Anexe até 4 imagens, somando no máximo 4 MB.".into());
+    }
+    let mime = match image::guess_format(&bytes) {
+        Ok(image::ImageFormat::Png) => "image/png",
+        Ok(image::ImageFormat::Jpeg) => "image/jpeg",
+        _ => return Err("Use uma imagem PNG ou JPEG.".into()),
+    };
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|error| error.to_string())?
+        .into_dimensions()
+        .map_err(|error| error.to_string())?;
+    if width == 0 || height == 0 || width > 4096 || height > 4096 || u64::from(width) * u64::from(height) > 12_000_000 {
+        return Err("A imagem deve ter até 4.096 px por lado e 12 milhões de pixels.".into());
+    }
+    image::load_from_memory(&bytes).map_err(|error| format!("A imagem está danificada: {error}"))?;
+    app.ui.agent.images.push(DraftImage { name, mime: mime.into(), bytes, preview: None });
+    Ok(())
+}
+
+fn attach_clipboard_image(app: &mut FigApp) {
+    let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
+        app.toast("Não há uma imagem na área de transferência.");
+        return;
+    };
+    let Some(expected) = usize::try_from(width).ok().and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)?.checked_mul(4))) else {
+        app.toast("A imagem da área de transferência é grande demais.");
+        return;
+    };
+    if rgba.len() != expected || width > 4096 || height > 4096 || u64::from(width) * u64::from(height) > 12_000_000 {
+        app.toast("A imagem da área de transferência é grande demais.");
+        return;
+    }
+    let Some(image) = image::RgbaImage::from_raw(width, height, rgba) else {
+        app.toast("Não foi possível ler a imagem copiada.");
+        return;
+    };
+    let mut out = std::io::Cursor::new(Vec::new());
+    match image::DynamicImage::ImageRgba8(image).write_to(&mut out, image::ImageFormat::Png) {
+        Ok(()) => {
+            if let Err(error) = attach_image(app, "Imagem colada.png".into(), out.into_inner()) {
+                app.toast(error);
+            }
+        }
+        Err(error) => app.toast(error.to_string()),
+    }
+}
+
 fn send_prompt(app: &mut FigApp) {
     let prompt = app.ui.agent.draft.trim().to_string();
-    if prompt.is_empty() || app.ui.agent.busy {
+    let selected_nodes = selected_context(app);
+    if (prompt.is_empty() && selected_nodes.is_empty() && app.ui.agent.images.is_empty()) || app.ui.agent.busy {
         return;
     }
     let Ok(ds) = app.session.ds() else {
@@ -209,7 +334,7 @@ fn send_prompt(app: &mut FigApp) {
     };
     let document = ds.uid;
     let undo_before = ds.history.undo.len();
-    let selection: Vec<_> = ds.selection.iter().map(ToString::to_string).collect();
+    let selection: Vec<_> = selected_nodes.iter().map(|node| node.id.to_string()).collect();
     let page = ds.page.to_string();
     let key = document_key(app);
     let active = app.ui.agent.active.filter(|id| app.ui.agent.conversations.iter().any(|chat| chat.id == *id && chat.document == key));
@@ -232,25 +357,42 @@ fn send_prompt(app: &mut FigApp) {
         "Você está editando um documento FigCraft. Use o servidor MCP figcraft para ler e alterar o documento por comandos. Página selecionada: {page}. IDs selecionados: {}. Confirme apenas ações realmente executadas.\n\nHistórico desta conversa:\n{prior}\n\nPedido: {prompt}",
         selection.join(", ")
     );
-    match app.services.agent_send(app.ui.agent.agent, context, document) {
+    let images = app
+        .ui
+        .agent
+        .images
+        .iter()
+        .map(|image| AgentImage { mime: image.mime.clone(), data: base64::engine::general_purpose::STANDARD.encode(&image.bytes) })
+        .collect();
+    let attached_images = app.ui.agent.images.iter().map(|image| image.name.clone()).collect();
+    match app.services.agent_send(app.ui.agent.agent, AgentPrompt { text: context, images }, document) {
         Ok(()) => {
             if active.is_none() {
                 app.ui.agent.conversations.push(Conversation {
                     id,
                     document: key,
-                    title: prompt.chars().take(42).collect(),
+                    title: if prompt.is_empty() {
+                        selected_nodes.first().map_or_else(
+                            || app.ui.agent.images.first().map_or_else(|| "Novo chat".to_string(), |image| image.name.clone()),
+                            |node| node.name.clone(),
+                        )
+                    } else {
+                        prompt.chars().take(42).collect()
+                    },
                     agent: app.ui.agent.agent,
                     messages: Vec::new(),
                 });
             }
             if let Some(chat) = app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id) {
-                chat.messages.push(ChatMessage { role: "user".into(), text: prompt, ..Default::default() });
+                chat.messages.push(ChatMessage { role: "user".into(), text: prompt, selected_nodes, attached_images, ..Default::default() });
                 chat.messages.push(ChatMessage { role: "assistant".into(), undo_before, ..Default::default() });
             }
             app.ui.agent.active = Some(id);
             app.ui.agent.runtime_conversation = Some(id);
             app.ui.agent.runtime_document = Some(document);
             app.ui.agent.draft.clear();
+            app.ui.agent.pending_images = std::mem::take(&mut app.ui.agent.images);
+            app.ui.agent.turn_started = Some(std::time::Instant::now());
             app.ui.agent.busy = true;
             save_history(app);
         }
@@ -264,6 +406,11 @@ fn send_prompt(app: &mut FigApp) {
 impl AgentUi {
     fn new_chat(&mut self) {
         self.draft.clear();
+        self.images.clear();
+        self.pending_images.clear();
+        self.context_menu_open = false;
+        self.excluded_selection.clear();
+        self.turn_started = None;
         self.history_open = false;
         self.menu_open = false;
         self.selected_suggestion = None;
@@ -294,6 +441,12 @@ fn stop_chat(app: &mut FigApp) {
         save_history(app);
     }
     app.ui.agent.busy = false;
+    if app.session.ds().ok().is_some_and(|ds| Some(ds.uid) == app.ui.agent.runtime_document) {
+        app.ui.agent.images.append(&mut app.ui.agent.pending_images);
+    } else {
+        app.ui.agent.pending_images.clear();
+    }
+    app.ui.agent.turn_started = None;
     app.ui.agent.permission = None;
     app.ui.agent.runtime_document = None;
     app.ui.agent.runtime_conversation = None;
@@ -318,6 +471,25 @@ fn glyph(ui: &Ui, rect: Rect, icon: AgentIcon, size: egui::Vec2, color: Color32)
     icons::paint_agent(ui.painter(), Rect::from_center_size(rect.center(), size), icon, color);
 }
 
+fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -> (bool, bool) {
+    let body = Rect::from_min_max(rect.min, pos2(rect.max.x - 24.0, rect.max.y));
+    let remove = Rect::from_min_max(pos2(body.max.x, rect.min.y), rect.max);
+    let locate = ui.interact(body, ui.id().with(("agent_node", &salt)), Sense::click()).on_hover_text("Localizar no canvas");
+    let exclude = ui.interact(remove, ui.id().with(("agent_remove_node", &salt)), Sense::click()).on_hover_text("Retirar do contexto do chat");
+    a11y::button(&locate, "Localizar no canvas");
+    a11y::button(&exclude, "Retirar do contexto do chat");
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(5),
+        if locate.hovered() || exclude.hovered() { t.hover } else { t.menu },
+        Stroke::new(1.0, t.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(pos2(rect.min.x + 9.0, rect.center().y), Align2::LEFT_CENTER, name, regular(11.0), t.text);
+    ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), t.text_secondary);
+    (locate.clicked(), exclude.clicked())
+}
+
 pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let full = ui.max_rect();
@@ -327,6 +499,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let dim = if t.dark { DIM } else { t.text_tertiary };
     let panel = t.panel;
     let border = t.border;
+    let selected_nodes = selected_context(app);
+    let context_height = if selected_nodes.is_empty() { 0.0 } else { 34.0 };
+    let images_height = if app.ui.agent.images.is_empty() { 0.0 } else { 34.0 };
+    let composer_height = 130.0 + context_height + images_height;
     ui.painter().rect_filled(full, 0.0, panel);
 
     // Header: back, two-line title, IA badge, options.
@@ -366,7 +542,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
     ui.painter().text(badge.center(), Align2::CENTER_CENTER, "IA", semibold(11.0), secondary);
 
-    let middle_bottom = (full.max.y - 156.0).max(header_bottom);
+    let middle_bottom = (full.max.y - 26.0 - composer_height).max(header_bottom);
     let middle = Rect::from_min_max(pos2(full.min.x, header_bottom), pos2(full.max.x, middle_bottom));
     let painter = ui.painter().with_clip_rect(middle);
     if app.ui.agent.history_open {
@@ -406,6 +582,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         let transcript = middle.shrink2(vec2(16.0, 12.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(transcript));
         let mut revert = None;
+        let mut locate_node = None;
         egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(&mut child, |ui| {
             ui.set_width(transcript.width());
             for (index, message) in chat.messages.iter().enumerate() {
@@ -413,20 +590,44 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                     ui.add_space(12.0);
                     egui::Frame::new().fill(t.hover).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
                         ui.set_max_width(transcript.width() - 12.0);
-                        ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
+                        if !message.text.is_empty() {
+                            ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
+                        }
+                        for node in &message.selected_nodes {
+                            if ui.small_button(format!("▣ {}", node.name)).on_hover_text("Localizar no canvas").clicked() {
+                                locate_node = Some(node.id);
+                            }
+                        }
+                        for image in &message.attached_images {
+                            ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(secondary));
+                        }
                     });
                 } else {
                     ui.add_space(16.0);
                     ui.label(egui::RichText::new(chat.agent.label()).size(11.0).strong().color(BLUE));
                     ui.add_space(4.0);
-                    if message.text.is_empty() && app.ui.agent.busy {
-                        ui.spinner();
-                    } else {
-                        ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
+                    if !message.tools.is_empty() {
+                        let label = message.work_seconds.map_or_else(|| "Trabalhando…".to_string(), |s| format!("Trabalhou por {s} s"));
+                        egui::CollapsingHeader::new(egui::RichText::new(label).size(11.0).color(secondary))
+                            .id_salt(("agent_work", chat.id, index))
+                            .show(ui, |ui| {
+                                for tool in &message.tools {
+                                    let mark = if tool.status == "completed" {
+                                        "✓"
+                                    } else if tool.status == "failed" {
+                                        "!"
+                                    } else {
+                                        "◌"
+                                    };
+                                    ui.label(egui::RichText::new(format!("{mark} {} · {}", tool.title, tool.status)).size(11.0).color(secondary));
+                                }
+                            });
+                        ui.add_space(6.0);
                     }
-                    for tool in &message.tools {
-                        ui.add_space(5.0);
-                        ui.label(egui::RichText::new(format!("{} · {}", tool.title, tool.status)).size(11.0).color(secondary));
+                    if message.text.is_empty() && app.ui.agent.busy && index + 1 == chat.messages.len() {
+                        ui.spinner();
+                    } else if !message.text.is_empty() {
+                        ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
                     }
                     if message.stopped {
                         ui.label(egui::RichText::new("Interrompido").size(11.0).color(secondary));
@@ -450,6 +651,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                 }
             }
         });
+        if let Some(node) = locate_node {
+            app.run("select.set", serde_json::json!({"ids":[node]}));
+            app.run("view.zoomSelection", serde_json::json!({}));
+        }
         if let Some((index, count)) = revert {
             for _ in 0..count.min(100) {
                 let _ = app.run("edit.undo", serde_json::json!({}));
@@ -505,9 +710,96 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
 
     // Composer is anchored to the bottom, independently of the welcome area height.
-    let composer = Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 146.0), vec2((width - 32.0).max(0.0), 130.0));
+    let composer = Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 16.0 - composer_height), vec2((width - 32.0).max(0.0), composer_height));
     ui.painter().rect(composer, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-    let input = Rect::from_min_max(pos2(composer.min.x + 16.0, composer.min.y + 16.0), pos2(composer.max.x - 16.0, composer.min.y + 76.0));
+    if !selected_nodes.is_empty() {
+        let mut x = composer.min.x + 12.0;
+        let mut shown = 0;
+        for node in &selected_nodes {
+            let label: String = node.name.chars().take(22).collect();
+            let chip_width = (label.chars().count() as f32 * 6.2 + 42.0).clamp(72.0, 190.0);
+            if x + chip_width > composer.max.x - 12.0 {
+                break;
+            }
+            let chip = Rect::from_min_size(pos2(x, composer.min.y + 8.0), vec2(chip_width, 24.0));
+            let (locate, exclude) = context_chip(ui, chip, &label, node.id, &t);
+            if locate {
+                app.run("select.set", serde_json::json!({"ids":[node.id]}));
+                app.run("view.zoomSelection", serde_json::json!({}));
+            }
+            if exclude && !app.ui.agent.excluded_selection.contains(&node.id) {
+                app.ui.agent.excluded_selection.push(node.id);
+            }
+            x += chip_width + 6.0;
+            shown += 1;
+        }
+        if shown < selected_nodes.len() {
+            ui.painter().text(
+                pos2(x + 3.0, composer.min.y + 20.0),
+                Align2::LEFT_CENTER,
+                format!("+{}", selected_nodes.len() - shown),
+                regular(11.0),
+                secondary,
+            );
+        }
+    }
+    if !app.ui.agent.images.is_empty() {
+        let mut x = composer.min.x + 12.0;
+        let mut remove_image = None;
+        for (index, image) in app.ui.agent.images.iter_mut().enumerate() {
+            if x + 146.0 > composer.max.x - 12.0 {
+                break;
+            }
+            if image.preview.is_none()
+                && let Ok(decoded) = image::load_from_memory(&image.bytes)
+            {
+                let thumb = decoded.thumbnail(48, 48).to_rgba8();
+                let color = egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize, thumb.height() as usize], thumb.as_raw());
+                image.preview = Some(ui.ctx().load_texture(format!("agent-image-{}-{index}", image.name), color, egui::TextureOptions::LINEAR));
+            }
+            let tile = Rect::from_min_size(pos2(x, composer.min.y + 8.0 + context_height), vec2(140.0, 24.0));
+            let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y), vec2(24.0, 24.0));
+            ui.painter().rect(tile, CornerRadius::same(5), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+            if let Some(preview) = &image.preview {
+                ui.painter().image(
+                    preview.id(),
+                    Rect::from_min_size(pos2(tile.min.x + 4.0, tile.min.y + 3.0), vec2(18.0, 18.0)),
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+            let label: String = image.name.chars().take(13).collect();
+            ui.painter().text(pos2(tile.min.x + 27.0, tile.center().y), Align2::LEFT_CENTER, label, regular(11.0), text);
+            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).on_hover_text("Remover imagem");
+            a11y::button(&remove_resp, "Remover imagem");
+            ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), secondary);
+            if remove_resp.clicked() {
+                remove_image = Some(index);
+            }
+            x += 146.0;
+        }
+        if let Some(index) = remove_image {
+            app.ui.agent.images.remove(index);
+        }
+    }
+    let input = Rect::from_min_max(
+        pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
+        pos2(composer.max.x - 16.0, composer.min.y + 76.0 + context_height + images_height),
+    );
+    // Image-only paste becomes an attachment. Text and HTML stay in their existing editor or
+    // design-layer paste path, so a copied design preview is never attached by accident.
+    let image_paste = ui.memory(|memory| memory.has_focus(Id::new("agent_prompt")))
+        && ui.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, repeat: false, .. } if modifiers.command && !modifiers.shift && !modifiers.alt)
+            }) && !input.events.iter().any(|event| matches!(event, egui::Event::Paste(text) if !text.is_empty()))
+        });
+    if image_paste
+        && app.services.clipboard_get_text().is_none_or(|value| value.is_empty())
+        && app.services.clipboard_get_html().is_none_or(|value| value.is_empty())
+    {
+        attach_clipboard_image(app);
+    }
     let input_resp = ui.put(
         input,
         egui::TextEdit::multiline(&mut app.ui.agent.draft)
@@ -523,7 +815,9 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let libraries = Rect::from_min_size(pos2(add.max.x + 8.0, actions_y), vec2(24.0, 24.0));
     let voice = Rect::from_min_size(pos2(composer.max.x - 68.0, actions_y), vec2(24.0, 24.0));
     let send = Rect::from_min_size(pos2(composer.max.x - 36.0, actions_y), vec2(24.0, 24.0));
-    hit(ui, "agent_context", add, "A seleção atual é enviada como contexto");
+    if hit(ui, "agent_context", add, "Adicionar contexto").clicked() {
+        app.ui.agent.context_menu_open = !app.ui.agent.context_menu_open;
+    }
     hit(ui, "agent_libraries", libraries, "Bibliotecas (em breve)");
     hit(ui, "agent_voice", voice, "Ditar (em breve)");
     let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { "Parar agente" } else { "Enviar mensagem" });
@@ -534,7 +828,11 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().circle_filled(
         send.center(),
         12.0,
-        if app.ui.agent.busy || !app.ui.agent.draft.trim().is_empty() { BLUE_BG } else { Color32::from_rgb(0x75, 0x75, 0x75) },
+        if app.ui.agent.busy || !app.ui.agent.draft.trim().is_empty() || !selected_nodes.is_empty() || !app.ui.agent.images.is_empty() {
+            BLUE_BG
+        } else {
+            Color32::from_rgb(0x75, 0x75, 0x75)
+        },
     );
     if app.ui.agent.busy {
         ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(8.0, 8.0)), 1.0, Color32::WHITE);
@@ -543,11 +841,44 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
     let enter = input_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     if send_resp.clicked() || enter {
-        if app.ui.agent.busy {
+        if app.ui.agent.busy && send_resp.clicked() {
             stop_chat(app);
-        } else {
+        } else if !app.ui.agent.busy {
             send_prompt(app);
         }
+    }
+
+    if app.ui.agent.context_menu_open {
+        let menu = Rect::from_min_size(pos2(composer.min.x + 12.0, composer.min.y - 72.0), vec2(176.0, 64.0));
+        ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+        let choose = Rect::from_min_size(menu.min, vec2(menu.width(), 32.0));
+        let paste = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 32.0), vec2(menu.width(), 32.0));
+        if hit(ui, "agent_attach_file", choose, "Anexar PNG ou JPEG").clicked() {
+            app.ui.agent.context_menu_open = false;
+            app.pick_open("Anexar imagem ao agente", &["png", "jpg", "jpeg"], |app, path| {
+                let result = std::fs::metadata(&path)
+                    .map_err(|error| error.to_string())
+                    .and_then(|meta| {
+                        if meta.len() <= MAX_IMAGE_BYTES as u64 {
+                            std::fs::read(&path).map_err(|error| error.to_string())
+                        } else {
+                            Err("A imagem excede 4 MB.".into())
+                        }
+                    })
+                    .and_then(|bytes| {
+                        attach_image(app, path.file_name().map_or_else(|| "Imagem".into(), |name| name.to_string_lossy().into_owned()), bytes)
+                    });
+                if let Err(error) = result {
+                    app.toast(error);
+                }
+            });
+        }
+        if hit(ui, "agent_attach_clipboard", paste, "Colar imagem copiada").clicked() {
+            app.ui.agent.context_menu_open = false;
+            attach_clipboard_image(app);
+        }
+        ui.painter().text(pos2(choose.min.x + 12.0, choose.center().y), Align2::LEFT_CENTER, "Anexar PNG ou JPEG", regular(12.0), text);
+        ui.painter().text(pos2(paste.min.x + 12.0, paste.center().y), Align2::LEFT_CENTER, "Colar imagem", regular(12.0), text);
     }
 
     if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
@@ -614,12 +945,12 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     struct FakeAgent {
-        sent: Arc<Mutex<Vec<String>>>,
+        sent: Arc<Mutex<Vec<AgentPrompt>>>,
         events: Arc<Mutex<Vec<AgentEvent>>>,
     }
 
     impl Services for FakeAgent {
-        fn agent_send(&mut self, _agent: AgentKind, prompt: String, _document: u64) -> Result<(), String> {
+        fn agent_send(&mut self, _agent: AgentKind, prompt: AgentPrompt, _document: u64) -> Result<(), String> {
             self.sent.lock().unwrap().push(prompt);
             Ok(())
         }
@@ -639,11 +970,49 @@ mod tests {
         send_prompt(&mut app);
         assert!(app.ui.agent.busy);
         assert!(app.ui.agent.draft.is_empty());
-        assert!(sent.lock().unwrap()[0].contains("Crie um frame"));
+        assert!(sent.lock().unwrap()[0].text.contains("Crie um frame"));
         events.lock().unwrap().extend([AgentEvent::Text("Frame criado.".into()), AgentEvent::Done("end_turn".into())]);
         sync(&mut app, &egui::Context::default());
         assert!(!app.ui.agent.busy);
         assert_eq!(app.ui.agent.conversations[0].messages[1].text, "Frame criado.");
+    }
+
+    #[test]
+    fn selected_nodes_are_context_refs_and_excluding_one_keeps_canvas_selection() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events }));
+        app.ui.agent.history_loaded = true;
+        let first = app.session.execute("node.create", &json!({"type":"rectangle", "name":"First"})).unwrap()["id"].as_u64().unwrap();
+        let second = app.session.execute("node.create", &json!({"type":"rectangle", "name":"Second"})).unwrap()["id"].as_u64().unwrap();
+        app.session.execute("select.set", &json!({"ids":[first,second]})).unwrap();
+        sync(&mut app, &egui::Context::default());
+        app.ui.agent.excluded_selection.push(NodeId(first));
+        app.ui.agent.draft = "Ajuste o item".into();
+        send_prompt(&mut app);
+        assert_eq!(app.session.ds().unwrap().selection, vec![NodeId(first), NodeId(second)]);
+        assert_eq!(app.ui.agent.conversations[0].messages[0].selected_nodes.len(), 1);
+        assert_eq!(app.ui.agent.conversations[0].messages[0].selected_nodes[0].id, NodeId(second));
+        assert!(sent.lock().unwrap()[0].text.contains(&NodeId(second).to_string()));
+        assert!(!sent.lock().unwrap()[0].text.contains(&format!("IDs selecionados: {}", NodeId(first))));
+    }
+
+    #[test]
+    fn png_attachment_is_sent_as_a_separate_acp_image_and_can_be_retried() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        app.ui.agent.history_loaded = true;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        attach_image(&mut app, "test.png".into(), png.into_inner()).unwrap();
+        send_prompt(&mut app);
+        assert_eq!(sent.lock().unwrap()[0].images.len(), 1);
+        assert_eq!(sent.lock().unwrap()[0].images[0].mime, "image/png");
+        assert_eq!(app.ui.agent.conversations[0].messages[0].attached_images, ["test.png"]);
+        events.lock().unwrap().push(AgentEvent::Error("unsupported".into()));
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(app.ui.agent.images.len(), 1, "failed sends keep the image in the composer");
     }
 
     #[test]
