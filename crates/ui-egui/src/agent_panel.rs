@@ -517,7 +517,7 @@ fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -
     ui.painter().rect(
         rect,
         CornerRadius::same(5),
-        if locate.hovered() || exclude.hovered() { t.hover } else { t.menu },
+        if locate.hovered() || exclude.hovered() { t.pressed } else { t.field },
         Stroke::new(1.0, t.border),
         egui::StrokeKind::Inside,
     );
@@ -537,7 +537,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let border = t.border;
     let selected_nodes = selected_context(app);
     let context_height = if selected_nodes.is_empty() { 0.0 } else { 34.0 };
-    let images_height = if app.ui.agent.images.is_empty() { 0.0 } else { 34.0 };
+    let image_size = 72.0_f32.min((width - 56.0).max(24.0));
+    let image_columns = (((width - 56.0 + 8.0) / (image_size + 8.0)).floor() as usize).max(1);
+    let image_rows = app.ui.agent.images.len().div_ceil(image_columns);
+    let images_height = image_rows as f32 * (image_size + 8.0);
     let composer_height = 130.0 + context_height + images_height;
     ui.painter().rect_filled(full, 0.0, panel);
 
@@ -630,12 +633,23 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                             ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
                         }
                         for node in &message.selected_nodes {
-                            if ui.small_button(format!("▣ {}", node.name)).on_hover_text("Localizar no canvas").clicked() {
+                            let badge = egui::Button::new(egui::RichText::new(format!("▣ {}", node.name)).size(11.0).color(text))
+                                .fill(t.panel)
+                                .stroke(Stroke::new(1.0, border))
+                                .corner_radius(5);
+                            if ui.add(badge).on_hover_text("Localizar no canvas").clicked() {
                                 locate_node = Some(node.id);
                             }
                         }
                         for image in &message.attached_images {
-                            ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(secondary));
+                            egui::Frame::new()
+                                .fill(t.panel)
+                                .stroke(Stroke::new(1.0, border))
+                                .corner_radius(5)
+                                .inner_margin(egui::Margin::symmetric(8, 4))
+                                .show(ui, |ui| {
+                                    ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(text));
+                                });
                         }
                     });
                 } else {
@@ -748,6 +762,41 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     // Composer is anchored to the bottom, independently of the welcome area height.
     let composer = Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 16.0 - composer_height), vec2((width - 32.0).max(0.0), composer_height));
     ui.painter().rect(composer, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    if !app.ui.agent.images.is_empty() {
+        let mut remove_image = None;
+        for (index, image) in app.ui.agent.images.iter_mut().enumerate() {
+            if image.preview.is_none()
+                && let Ok(decoded) = image::load_from_memory(&image.bytes)
+            {
+                let thumb = decoded.resize_to_fill(144, 144, image::imageops::FilterType::Triangle).to_rgba8();
+                let color = egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize, thumb.height() as usize], thumb.as_raw());
+                image.preview = Some(ui.ctx().load_texture(format!("agent-image-{}-{index}", image.name), color, egui::TextureOptions::LINEAR));
+            }
+            let row = index / image_columns;
+            let column = index % image_columns;
+            let tile = Rect::from_min_size(
+                pos2(composer.min.x + 12.0 + column as f32 * (image_size + 8.0), composer.min.y + 8.0 + row as f32 * (image_size + 8.0)),
+                vec2(image_size, image_size),
+            );
+            let _ = ui.interact(tile, ui.id().with(("agent_image", index)), Sense::hover()).on_hover_text(&image.name);
+            ui.painter().rect(tile, CornerRadius::same(8), t.field, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+            if let Some(preview) = &image.preview {
+                egui::Image::from_texture(preview).corner_radius(8).paint_at(ui, tile.shrink(1.0));
+            }
+            let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y + 4.0), vec2(20.0, 20.0));
+            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).on_hover_text("Remover imagem");
+            a11y::button(&remove_resp, "Remover imagem");
+            ui.painter().circle_filled(remove.center(), 10.0, if remove_resp.hovered() { t.pressed } else { panel });
+            ui.painter().circle_stroke(remove.center(), 9.5, Stroke::new(1.0, border));
+            ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), text);
+            if remove_resp.clicked() {
+                remove_image = Some(index);
+            }
+        }
+        if let Some(index) = remove_image {
+            app.ui.agent.images.remove(index);
+        }
+    }
     if !selected_nodes.is_empty() {
         let mut x = composer.min.x + 12.0;
         let mut shown = 0;
@@ -757,7 +806,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             if x + chip_width > composer.max.x - 12.0 {
                 break;
             }
-            let chip = Rect::from_min_size(pos2(x, composer.min.y + 8.0), vec2(chip_width, 24.0));
+            let chip = Rect::from_min_size(pos2(x, composer.min.y + 8.0 + images_height), vec2(chip_width, 24.0));
             let (locate, exclude) = context_chip(ui, chip, &label, node.id, &t);
             if locate {
                 app.run("select.set", serde_json::json!({"ids":[node.id]}));
@@ -771,51 +820,12 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         }
         if shown < selected_nodes.len() {
             ui.painter().text(
-                pos2(x + 3.0, composer.min.y + 20.0),
+                pos2(x + 3.0, composer.min.y + 20.0 + images_height),
                 Align2::LEFT_CENTER,
                 format!("+{}", selected_nodes.len() - shown),
                 regular(11.0),
                 secondary,
             );
-        }
-    }
-    if !app.ui.agent.images.is_empty() {
-        let mut x = composer.min.x + 12.0;
-        let mut remove_image = None;
-        for (index, image) in app.ui.agent.images.iter_mut().enumerate() {
-            if x + 146.0 > composer.max.x - 12.0 {
-                break;
-            }
-            if image.preview.is_none()
-                && let Ok(decoded) = image::load_from_memory(&image.bytes)
-            {
-                let thumb = decoded.thumbnail(48, 48).to_rgba8();
-                let color = egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize, thumb.height() as usize], thumb.as_raw());
-                image.preview = Some(ui.ctx().load_texture(format!("agent-image-{}-{index}", image.name), color, egui::TextureOptions::LINEAR));
-            }
-            let tile = Rect::from_min_size(pos2(x, composer.min.y + 8.0 + context_height), vec2(140.0, 24.0));
-            let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y), vec2(24.0, 24.0));
-            ui.painter().rect(tile, CornerRadius::same(5), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-            if let Some(preview) = &image.preview {
-                ui.painter().image(
-                    preview.id(),
-                    Rect::from_min_size(pos2(tile.min.x + 4.0, tile.min.y + 3.0), vec2(18.0, 18.0)),
-                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
-            let label: String = image.name.chars().take(13).collect();
-            ui.painter().text(pos2(tile.min.x + 27.0, tile.center().y), Align2::LEFT_CENTER, label, regular(11.0), text);
-            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).on_hover_text("Remover imagem");
-            a11y::button(&remove_resp, "Remover imagem");
-            ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), secondary);
-            if remove_resp.clicked() {
-                remove_image = Some(index);
-            }
-            x += 146.0;
-        }
-        if let Some(index) = remove_image {
-            app.ui.agent.images.remove(index);
         }
     }
     let input = Rect::from_min_max(
