@@ -10,6 +10,9 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
+use base64::Engine as _;
+
+#[cfg(not(target_arch = "wasm32"))]
 use figcraft_color::PaintKind;
 #[cfg(not(target_arch = "wasm32"))]
 use figcraft_doc::{NodeId, NodeKind, StyleKind};
@@ -33,29 +36,116 @@ use crate::{Result, Session, bad, file_access, spec};
 const COMMAND: &str = "plugin.figma.inspect";
 
 #[cfg(not(target_arch = "wasm32"))]
+fn snapshot_node(doc: &figcraft_doc::Document, id: NodeId, count: &mut usize, depth: usize) -> Option<SelectedNode> {
+    if *count >= 4096 || depth >= 32 {
+        return None;
+    }
+    let node = doc.node(id)?;
+    *count += 1;
+    let at = node.transform.translation();
+    let fills = node
+        .fills
+        .iter()
+        .filter_map(|paint| match &paint.kind {
+            PaintKind::Solid { color } => Some(json!({"type":"SOLID","visible":paint.visible,"blendMode":"NORMAL","opacity":paint.opacity * color.a,
+                "color":{"r":color.r,"g":color.g,"b":color.b}})),
+            PaintKind::Image(image) => {
+                let mode = match image.scale_mode {
+                    figcraft_color::ImageScaleMode::Fill => "FILL",
+                    figcraft_color::ImageScaleMode::Fit => "FIT",
+                    figcraft_color::ImageScaleMode::Crop => "CROP",
+                    figcraft_color::ImageScaleMode::Tile => "TILE",
+                };
+                Some(json!({"type":"IMAGE","visible":paint.visible,"blendMode":"NORMAL","opacity":paint.opacity,
+                    "imageHash":image.image,"scaleMode":mode}))
+            }
+            _ => None,
+        })
+        .collect();
+    Some(SelectedNode {
+        id: id.to_string(),
+        name: node.name.clone(),
+        opacity: node.opacity,
+        x: at.x,
+        y: at.y,
+        width: node.width,
+        height: node.height,
+        node_type: node.kind.type_name().into(),
+        children: node.children.iter().filter_map(|child| snapshot_node(doc, *child, count, depth + 1)).collect(),
+        characters: if let NodeKind::Text(text) = &node.kind { Some(text.characters.clone()) } else { None },
+        fills,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn selected_ids(selected: &[SelectedNode]) -> std::collections::BTreeMap<String, NodeId> {
+    fn visit(node: &SelectedNode, ids: &mut std::collections::BTreeMap<String, NodeId>) {
+        if let Ok(id) = node.id.parse::<NodeId>() {
+            ids.insert(node.id.clone(), id);
+        }
+        for child in &node.children {
+            visit(child, ids);
+        }
+    }
+    let mut ids = std::collections::BTreeMap::new();
+    for node in selected {
+        visit(node, &mut ids);
+    }
+    ids
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn selected_image_hashes(selected: &[SelectedNode]) -> std::collections::BTreeSet<String> {
+    fn visit(node: &SelectedNode, hashes: &mut std::collections::BTreeSet<String>) {
+        for fill in &node.fills {
+            if fill["type"] == "IMAGE"
+                && let Some(hash) = fill["imageHash"].as_str()
+            {
+                hashes.insert(hash.to_owned());
+            }
+        }
+        for child in &node.children {
+            visit(child, hashes);
+        }
+    }
+    let mut hashes = std::collections::BTreeSet::new();
+    for node in selected {
+        visit(node, &mut hashes);
+    }
+    hashes
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn snapshot(s: &Session, params: &Value) -> Result<(Vec<SelectedNode>, Value)> {
     let doc = s.doc()?;
-    let selected = s
-        .selection()
+    let mut count = 0;
+    let selected: Vec<_> = s.selection().into_iter().filter_map(|id| snapshot_node(doc, id, &mut count, 0)).collect();
+    let mut remaining_image_bytes = 2 * 1024 * 1024;
+    let images: std::collections::BTreeMap<_, _> = selected_image_hashes(&selected)
         .into_iter()
+        .filter_map(|hash| {
+            let image = doc.images.get(&hash)?;
+            if image.bytes.len() > remaining_image_bytes {
+                return None;
+            }
+            remaining_image_bytes -= image.bytes.len();
+            Some((
+                hash,
+                json!({"data":base64::engine::general_purpose::STANDARD.encode(&*image.bytes),
+                "width":image.width,"height":image.height}),
+            ))
+        })
+        .collect();
+    let node_plugin_data: std::collections::BTreeMap<_, _> = selected_ids(&selected)
+        .into_values()
         .filter_map(|id| {
             let node = doc.node(id)?;
-            let at = node.transform.translation();
-            let node_type = match &node.kind {
-                NodeKind::Text(_) => "TEXT",
-                NodeKind::Frame => "FRAME",
-                _ => "RECTANGLE",
-            };
-            Some(SelectedNode {
-                id: id.to_string(),
-                name: node.name.clone(),
-                opacity: node.opacity,
-                x: at.x,
-                y: at.y,
-                width: node.width,
-                height: node.height,
-                node_type: node_type.into(),
-            })
+            let shared: std::collections::BTreeMap<_, _> = node
+                .plugin_data
+                .iter()
+                .filter_map(|(key, value)| key.strip_prefix("figma.shared.").map(|key| (key.to_owned(), value.clone())))
+                .collect();
+            (!shared.is_empty()).then(|| (id.to_string(), shared))
         })
         .collect();
     let styles: Vec<Value> = doc
@@ -81,21 +171,36 @@ fn snapshot(s: &Session, params: &Value) -> Result<(Vec<SelectedNode>, Value)> {
             .and_then(|id| doc.node(*id))
             .and_then(|node| if let NodeKind::Text(text) = &node.kind { Some(json!(text.characters)) } else { None })
     });
-    let extra = json!({"center":{"x":view.cx,"y":view.cy},"styles":styles,
+    let extra = json!({"center":{"x":view.cx,"y":view.cy},"styles":styles,"images":images,"nodePluginData":node_plugin_data,
         "parameters":params.get("parameters"), "parameterInput":params.get("parameterInput"), "text":text});
     Ok((selected, extra))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn paint_value(value: &Value) -> Result<Value> {
+fn paint_value(value: &Value, image_hashes: &std::collections::BTreeMap<String, String>) -> Result<Value> {
     let items = value.as_array().ok_or_else(|| bad("plugin.figma.run", "paint list must be an array"))?;
     if items.len() > 128 {
         return Err(bad("plugin.figma.run", "paint list is too large"));
     }
     let mut out = Vec::with_capacity(items.len());
     for paint in items {
+        if paint["type"] == "IMAGE" {
+            let temp_hash = paint["imageHash"].as_str().ok_or_else(|| bad("plugin.figma.run", "image paint has no hash"))?;
+            let hash = image_hashes.get(temp_hash).ok_or_else(|| bad("plugin.figma.run", "image hash is unavailable"))?;
+            let mode = match paint["scaleMode"].as_str().unwrap_or("FILL") {
+                "FIT" => figcraft_color::ImageScaleMode::Fit,
+                "CROP" => figcraft_color::ImageScaleMode::Crop,
+                "TILE" => figcraft_color::ImageScaleMode::Tile,
+                _ => figcraft_color::ImageScaleMode::Fill,
+            };
+            let mut converted = serde_json::to_value(figcraft_color::Paint::image(hash, mode)).map_err(|e| bad("plugin.figma.run", e.to_string()))?;
+            converted["opacity"] = json!(paint.get("opacity").and_then(Value::as_f64).unwrap_or(1.0));
+            converted["visible"] = json!(paint.get("visible").and_then(Value::as_bool).unwrap_or(true));
+            out.push(converted);
+            continue;
+        }
         if paint["type"] != "SOLID" {
-            return Err(bad("plugin.figma.run", "only solid Figma paints are supported"));
+            return Err(bad("plugin.figma.run", "unsupported Figma paint type"));
         }
         let color = paint.get("color").ok_or_else(|| bad("plugin.figma.run", "solid paint has no color"))?;
         out.push(json!({"type":"solid", "color":color,
@@ -106,9 +211,9 @@ fn paint_value(value: &Value) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn node_prop(key: &str, value: &Value) -> Result<Value> {
+fn node_prop(key: &str, value: &Value, image_hashes: &std::collections::BTreeMap<String, String>) -> Result<Value> {
     match key {
-        "fills" | "strokes" => paint_value(value),
+        "fills" | "strokes" => paint_value(value, image_hashes),
         "strokeAlign" | "textAlignHorizontal" | "textAlignVertical" => Ok(json!(value.as_str().unwrap_or_default().to_ascii_lowercase())),
         "constraints" => {
             let axis = |v: &Value, horizontal: bool| -> Value {
@@ -133,7 +238,13 @@ fn node_prop(key: &str, value: &Value) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn apply_edits(s: &mut Session, edits: &[Edit], allowed: &std::collections::BTreeMap<String, NodeId>, command: &str) -> Result<Vec<String>> {
+fn apply_edits(
+    s: &mut Session,
+    edits: &[Edit],
+    allowed: &std::collections::BTreeMap<String, NodeId>,
+    image_hashes: &mut std::collections::BTreeMap<String, String>,
+    command: &str,
+) -> Result<Vec<String>> {
     if edits.len() > worker::MAX_OPERATIONS {
         return Err(bad(command, "plugin operation limit exceeded"));
     }
@@ -158,6 +269,24 @@ fn apply_edits(s: &mut Session, edits: &[Edit], allowed: &std::collections::BTre
                 let nid = created["id"].as_u64().map(NodeId).ok_or_else(|| bad(command, "node creation returned no ID"))?;
                 nodes.insert(id.clone(), nid);
             }
+            Edit::CreateSvgNode { id, svg } => {
+                if !id.starts_with("plugin:") || nodes.contains_key(id) || svg.len() > 2 * 1024 * 1024 || !svg.trim_start().starts_with("<svg") {
+                    return Err(bad(command, "invalid plugin SVG node"));
+                }
+                let encoded = base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
+                let created = s.execute("file.import", &json!({"data":encoded,"name":"Plugin.svg","x":0,"y":0}))?;
+                let nid = created["id"].as_u64().map(NodeId).ok_or_else(|| bad(command, "SVG import returned no ID"))?;
+                nodes.insert(id.clone(), nid);
+            }
+            Edit::CreateImage { id, data } => {
+                if !id.starts_with("plugin:image:") || image_hashes.contains_key(id) || data.len() > 6 * 1024 * 1024 {
+                    return Err(bad(command, "invalid plugin image"));
+                }
+                let bytes =
+                    base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| bad(command, format!("invalid plugin image data: {e}")))?;
+                let (hash, _, _) = figcraft_format::add_image(s.doc_mut()?, bytes).map_err(|e| bad(command, e.to_string()))?;
+                image_hashes.insert(id.clone(), hash);
+            }
             Edit::SetNode { id, key, value } => {
                 let nid = get_node(&nodes, id)?;
                 let allowed_key = matches!(
@@ -177,11 +306,22 @@ fn apply_edits(s: &mut Session, edits: &[Edit], allowed: &std::collections::BTre
                         | "fontSize"
                         | "textAlignHorizontal"
                         | "textAlignVertical"
+                        | "pluginData"
                 );
                 if !allowed_key {
                     return Err(bad(command, format!("unsupported plugin node property `{key}`")));
                 }
-                let value = node_prop(key, value)?;
+                if key == "pluginData" {
+                    let data = value.as_object().ok_or_else(|| bad(command, "plugin data must be an object"))?;
+                    if data.len() != 1
+                        || data.iter().any(|(key, value)| {
+                            !key.starts_with("figma.shared.") || key.len() > 256 || value.as_str().is_none_or(|text| text.len() > 64 * 1024)
+                        })
+                    {
+                        return Err(bad(command, "invalid or oversized shared plugin data"));
+                    }
+                }
+                let value = node_prop(key, value, image_hashes)?;
                 s.execute("node.set", &json!({"id":nid,"props":{key:value}}))?;
             }
             Edit::AppendChild { parent, id, x, y } => {
@@ -283,10 +423,14 @@ fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
     let mut hasher = Sha256::new();
     hasher.update(&manifest_bytes);
     let mut total = manifest_bytes.len() as u64;
+    let mut dynamic_ui = false;
     let mut files = Vec::with_capacity(parsed.files.len());
     for relative in &parsed.files {
         let file = checked_file(root, relative)?;
         let bytes = file_access::read_capped(&file, MAX_FILE_BYTES)?;
+        if relative == &parsed.manifest.main && bytes.windows(b"figma.showUI".len()).any(|part| part == b"figma.showUI") {
+            dynamic_ui = true;
+        }
         total = total.saturating_add(bytes.len() as u64);
         if total > MAX_PACKAGE_BYTES {
             return Err(bad(COMMAND, "referenced files exceed 32 MB"));
@@ -302,7 +446,6 @@ fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
         .push("Local execution supports a bounded subset of Figma nodes, styles, variables and UI messages. Inspect never runs JavaScript".into());
     let executable = cfg!(not(target_arch = "wasm32"))
         && parsed.manifest.editor_type.iter().any(|v| v == "figma")
-        && parsed.manifest.document_access.as_deref() == Some("dynamic-page")
         && parsed.manifest.api.split('.').next() == Some("1");
     Ok(json!({
         "status": "diagnosticado",
@@ -315,7 +458,7 @@ fn inspect(_s: &mut Session, params: &Value) -> Result<Value> {
         "networkAccess": parsed.manifest.network_access,
         "commands": parsed.commands,
         "capabilities": parsed.manifest.capabilities,
-        "hasUi": parsed.manifest.ui.is_some(),
+        "hasUi": parsed.manifest.ui.is_some() || dynamic_ui,
         "files": files,
         "digest": digest,
         "source": manifest_path,
@@ -372,6 +515,9 @@ fn remove(s: &mut Session, params: &Value) -> Result<Value> {
     let before = s.prefs.figma_plugins.len();
     s.prefs.figma_plugins.retain(|p| p.id != id);
     let removed = before != s.prefs.figma_plugins.len();
+    if removed && s.prefs.plugin_settings.remove(&format!("figma:{id}")).is_some() {
+        s.plugins.unsaved = true;
+    }
     s.plugins.unsaved |= removed;
     Ok(json!({"removed": removed, "id": id}))
 }
@@ -382,6 +528,7 @@ pub(crate) struct UiProcess {
     doc_uid: u64,
     allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>,
     allowed_domains: Vec<String>,
+    image_hashes: std::collections::BTreeMap<String, String>,
     child: Child,
     stdin: ChildStdin,
     replies: std::sync::mpsc::Receiver<std::result::Result<Vec<u8>, String>>,
@@ -402,6 +549,7 @@ impl UiProcess {
         doc_uid: u64,
         allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>,
         allowed_domains: Vec<String>,
+        image_hashes: std::collections::BTreeMap<String, String>,
     ) -> std::result::Result<Self, String> {
         let executable = std::env::current_exe().map_err(|e| format!("cannot locate plugin UI worker: {e}"))?;
         let mut child = Command::new(executable)
@@ -437,7 +585,7 @@ impl UiProcess {
                 }
             }
         });
-        Ok(Self { id, doc_uid, allowed, allowed_domains, child, stdin, replies })
+        Ok(Self { id, doc_uid, allowed, allowed_domains, image_hashes, child, stdin, replies })
     }
 
     fn exchange(&mut self, request: &UiRequest) -> std::result::Result<UiResponse, String> {
@@ -448,7 +596,7 @@ impl UiProcess {
         bytes.push(b'\n');
         self.stdin.write_all(&bytes).and_then(|_| self.stdin.flush()).map_err(|e| format!("cannot send plugin UI request: {e}"))?;
         let line =
-            self.replies.recv_timeout(Duration::from_secs(2)).map_err(|_| "plugin UI callback exceeded the 2-second time limit".to_string())??;
+            self.replies.recv_timeout(Duration::from_secs(15)).map_err(|_| "plugin UI callback exceeded the 15-second time limit".to_string())??;
         serde_json::from_slice::<std::result::Result<UiResponse, String>>(&line).map_err(|e| format!("invalid plugin UI worker reply: {e}"))?
     }
 }
@@ -483,12 +631,8 @@ fn ui_start(s: &mut Session, params: &Value) -> Result<Value> {
     let manifest_path = PathBuf::from(&entry.path);
     let manifest_bytes = file_access::read_capped(&manifest_path, MAX_MANIFEST_BYTES)?;
     let parsed = ParsedManifest::parse(&manifest_bytes).map_err(|e| bad(command_id, e))?;
-    if parsed.manifest.ui.is_none()
-        || !parsed.manifest.editor_type.iter().any(|v| v == "figma")
-        || parsed.manifest.document_access.as_deref() != Some("dynamic-page")
-        || parsed.manifest.api.split('.').next() != Some("1")
-    {
-        return Err(bad(command_id, "this UI preview requires a Figma Design plugin with dynamic-page access and API 1"));
+    if !parsed.manifest.editor_type.iter().any(|v| v == "figma") || parsed.manifest.api.split('.').next() != Some("1") {
+        return Err(bad(command_id, "this UI preview requires a Figma Design plugin with API 1"));
     }
     let menu_command = string(params, "command");
     if let Some(command) = menu_command.as_deref()
@@ -498,11 +642,12 @@ fn ui_start(s: &mut Session, params: &Value) -> Result<Value> {
     }
     let root = manifest_path.parent().ok_or_else(|| bad(command_id, "manifest has no parent folder"))?;
     let main_path = checked_file(root, &parsed.manifest.main)?;
-    let source = String::from_utf8(file_access::read_capped(&main_path, (worker::MAX_REQUEST_BYTES / 2) as u64)?)
+    let source = String::from_utf8(file_access::read_capped(&main_path, worker_ui::MAX_UI_SOURCE_BYTES as u64)?)
         .map_err(|_| bad(command_id, "main JavaScript must be UTF-8"))?;
     let mut html = None;
     let mut named_html = std::collections::BTreeMap::new();
-    match parsed.manifest.ui.as_ref() {
+    let embedded_ui = source.starts_with("const __html__ =") || source.starts_with("const __uiFiles__ =");
+    match parsed.manifest.ui.as_ref().filter(|_| !embedded_ui) {
         Some(UiFiles::One(relative)) => {
             html = Some(
                 String::from_utf8(file_access::read_capped(&checked_file(root, relative)?, worker_ui::MAX_UI_HTML_BYTES as u64)?)
@@ -516,20 +661,23 @@ fn ui_start(s: &mut Session, params: &Value) -> Result<Value> {
                 named_html.insert(key.clone(), content);
             }
         }
-        None => return Err(bad(command_id, "plugin has no HTML UI")),
+        None => {}
     }
     if inspect(s, &json!({"path": entry.path}))?["digest"].as_str() != Some(entry.digest.as_str()) {
         return Err(bad(command_id, "plugin files changed while preparing execution"));
     }
     let doc_uid = s.ds()?.uid;
-    let (selected, extra) = snapshot(s, params)?;
-    let allowed = selected.iter().filter_map(|node| node.id.parse::<figcraft_doc::NodeId>().ok().map(|id| (node.id.clone(), id))).collect();
-    let request = UiRequest::Start { source, command: menu_command, selection: selected, extra, html, named_html };
-    s.figma_ui = None;
+    let (selected, mut extra) = snapshot(s, params)?;
+    extra["clientStorage"] = json!(s.prefs.plugin_settings.get(&format!("figma:{id}")).cloned().unwrap_or_default());
+    let allowed = selected_ids(&selected);
+    let image_hashes = selected_image_hashes(&selected).into_iter().map(|hash| (hash.clone(), hash)).collect();
     let allowed_domains = parsed.manifest.network_access.as_ref().map(|access| access.allowed_domains.clone()).unwrap_or_default();
-    let mut process = UiProcess::spawn(id.clone(), doc_uid, allowed, allowed_domains).map_err(|e| bad(command_id, e))?;
+    let request =
+        UiRequest::Start { source, command: menu_command, selection: selected, extra, html, named_html, allowed_domains: allowed_domains.clone() };
+    s.figma_ui = None;
+    let mut process = UiProcess::spawn(id.clone(), doc_uid, allowed, allowed_domains, image_hashes).map_err(|e| bad(command_id, e))?;
     let reply = process.exchange(&request).map_err(|e| bad(command_id, e))?;
-    let result = apply_ui_response(s, &process, reply, command_id)?;
+    let result = apply_ui_response(s, &mut process, reply, command_id)?;
     if result["closed"] != true {
         s.figma_ui = Some(process);
     }
@@ -550,7 +698,7 @@ fn ui_message(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad(command_id, "the plugin's document is no longer active"));
     }
     let reply = process.exchange(&UiRequest::Message { payload: payload.clone() }).map_err(|e| bad(command_id, e))?;
-    let result = apply_ui_response(s, &process, reply, command_id)?;
+    let result = apply_ui_response(s, &mut process, reply, command_id)?;
     if result["closed"] != true {
         s.figma_ui = Some(process);
     }
@@ -564,8 +712,40 @@ fn ui_close(s: &mut Session, _params: &Value) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn apply_ui_response(s: &mut Session, process: &UiProcess, reply: UiResponse, command_id: &str) -> Result<Value> {
-    let mut result = apply_ui_operations(s, &process.id, &process.allowed, reply, command_id)?;
+fn apply_ui_response(s: &mut Session, process: &mut UiProcess, reply: UiResponse, command_id: &str) -> Result<Value> {
+    let storage_key = format!("figma:{}", process.id);
+    let mut next_storage = s.prefs.plugin_settings.get(&storage_key).cloned().unwrap_or_default();
+    for (key, value) in &reply.storage {
+        if key.is_empty() || key.len() > 128 || key.chars().any(char::is_control) {
+            return Err(bad(command_id, "invalid plugin storage key"));
+        }
+        if let Some(value) = value {
+            next_storage.insert(key.clone(), value.clone());
+        } else {
+            next_storage.remove(key);
+        }
+    }
+    let storage_size: usize = next_storage.iter().map(|(key, value)| key.len() + value.to_string().len()).sum();
+    if storage_size > 64 * 1024 {
+        return Err(bad(command_id, "plugin storage exceeds 64 KB"));
+    }
+    let previous_images = process.image_hashes.clone();
+    let storage_changed = !reply.storage.is_empty();
+    let mut result = match apply_ui_operations(s, &process.id, &process.allowed, &mut process.image_hashes, reply, command_id) {
+        Ok(result) => result,
+        Err(error) => {
+            process.image_hashes = previous_images;
+            return Err(error);
+        }
+    };
+    if storage_changed {
+        if next_storage.is_empty() {
+            s.prefs.plugin_settings.remove(&storage_key);
+        } else {
+            s.prefs.plugin_settings.insert(storage_key, next_storage);
+        }
+        s.plugins.unsaved = true;
+    }
     if result["show"].is_object() {
         result["show"]["allowedDomains"] = json!(process.allowed_domains);
     }
@@ -577,6 +757,7 @@ fn apply_ui_operations(
     s: &mut Session,
     id: &str,
     allowed: &std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+    image_hashes: &mut std::collections::BTreeMap<String, String>,
     reply: UiResponse,
     command_id: &str,
 ) -> Result<Value> {
@@ -597,7 +778,7 @@ fn apply_ui_operations(
             let node_id = allowed.get(&op.id).ok_or_else(|| bad(command_id, "plugin node ID is invalid"))?;
             s.execute("node.set", &json!({"id": node_id, "props": {"opacity": op.opacity}}))?;
         }
-        apply_edits(s, &reply.edits, allowed, command_id)
+        apply_edits(s, &reply.edits, allowed, image_hashes, command_id)
     })?;
     Ok(json!({
         "status": if reply.closed { "closed" } else { "open" },
@@ -608,6 +789,7 @@ fn apply_ui_operations(
         "notifications": notices,
         "closed": reply.closed,
         "message": reply.message,
+        "warnings": reply.warnings,
     }))
 }
 
@@ -633,11 +815,8 @@ fn run_with(s: &mut Session, params: &Value, execute: impl FnOnce(Request) -> st
     let manifest_path = PathBuf::from(&entry.path);
     let bytes = file_access::read_capped(&manifest_path, MAX_MANIFEST_BYTES)?;
     let parsed = ParsedManifest::parse(&bytes).map_err(|e| bad(command_id, e))?;
-    if parsed.manifest.ui.is_some()
-        || !parsed.manifest.editor_type.iter().any(|v| v == "figma")
-        || parsed.manifest.document_access.as_deref() != Some("dynamic-page")
-    {
-        return Err(bad(command_id, "this runtime requires a Figma Design plugin without HTML UI and with dynamic-page access"));
+    if parsed.manifest.ui.is_some() || !parsed.manifest.editor_type.iter().any(|v| v == "figma") {
+        return Err(bad(command_id, "this runtime requires a Figma Design plugin without HTML UI"));
     }
     if parsed.manifest.api.split('.').next() != Some("1") {
         return Err(bad(command_id, "this plugin requires an unsupported API version"));
@@ -651,7 +830,7 @@ fn run_with(s: &mut Session, params: &Value, execute: impl FnOnce(Request) -> st
     }
     let root = manifest_path.parent().ok_or_else(|| bad(command_id, "manifest has no parent folder"))?;
     let main_path = checked_file(root, &parsed.manifest.main)?;
-    let source = String::from_utf8(file_access::read_capped(&main_path, (worker::MAX_REQUEST_BYTES / 2) as u64)?)
+    let source = String::from_utf8(file_access::read_capped(&main_path, worker::MAX_SOURCE_BYTES as u64)?)
         .map_err(|_| bad(command_id, "main JavaScript must be UTF-8"))?;
     // Recheck the package after reading main: a development source must not silently switch code.
     if inspect(s, &json!({"path": entry.path}))?["digest"].as_str() != Some(entry.digest.as_str()) {
@@ -669,7 +848,7 @@ fn run_with(s: &mut Session, params: &Value, execute: impl FnOnce(Request) -> st
     if response.operations.len() + response.edits.len() > worker::MAX_OPERATIONS {
         return Err(bad(command_id, "plugin operation limit exceeded"));
     }
-    let allowed: std::collections::BTreeMap<_, _> = selected.iter().map(|node| (node.id.as_str(), node.id.parse::<figcraft_doc::NodeId>())).collect();
+    let allowed = selected_ids(&selected);
     for op in &response.operations {
         if !op.opacity.is_finite() || !(0.0..=1.0).contains(&op.opacity) || !allowed.contains_key(op.id.as_str()) {
             return Err(bad(command_id, "plugin returned an invalid or unauthorized opacity change"));
@@ -678,16 +857,10 @@ fn run_with(s: &mut Session, params: &Value, execute: impl FnOnce(Request) -> st
     let count = response.operations.len() + response.edits.len();
     let notices = s.grouped(&format!("Figma plugin: {}", entry.name), |s| {
         for op in &response.operations {
-            let node_id =
-                allowed.get(op.id.as_str()).and_then(|result| result.as_ref().ok()).ok_or_else(|| bad(command_id, "plugin node ID is invalid"))?;
+            let node_id = allowed.get(op.id.as_str()).ok_or_else(|| bad(command_id, "plugin node ID is invalid"))?;
             s.execute("node.set", &json!({"id": node_id, "props": {"opacity": op.opacity}}))?;
         }
-        apply_edits(
-            s,
-            &response.edits,
-            &allowed.iter().filter_map(|(key, id)| id.as_ref().ok().map(|id| ((*key).to_string(), *id))).collect(),
-            command_id,
-        )
+        apply_edits(s, &response.edits, &allowed, &mut std::collections::BTreeMap::new(), command_id)
     })?;
     Ok(json!({"status": "executed", "id": id, "operations": count, "closed": response.closed,
         "message": response.message, "notifications": notices, "eventResult":response.event_result}))
@@ -809,6 +982,41 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn selected_frame_snapshot_includes_nested_layers() {
+        let mut session = Session::default();
+        let frame = session.execute("frame.create", &json!({"x":0,"y":0,"width":200,"height":100})).unwrap()["id"].as_u64().unwrap();
+        let child = session.execute("shape.rectangle", &json!({"parent":frame,"x":8,"y":10,"width":40,"height":24})).unwrap()["id"].as_u64().unwrap();
+        session.set_selection(vec![NodeId(frame)]);
+        let (selected, _) = snapshot(&session, &json!({})).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].node_type, "FRAME");
+        assert_eq!(selected[0].children[0].id, child.to_string());
+        assert_eq!(selected[0].children[0].node_type, "RECTANGLE");
+        assert!(selected_ids(&selected).contains_key(&child.to_string()));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn selected_image_snapshot_exposes_its_paint_and_bytes() {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1).write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let original = bytes.into_inner();
+        let mut session = Session::default();
+        let placed = session
+            .execute("image.place", &json!({"data":base64::engine::general_purpose::STANDARD.encode(&original),"width":32,"height":32}))
+            .unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        session.set_selection(vec![NodeId(placed)]);
+        let (selected, extra) = snapshot(&session, &json!({})).unwrap();
+        let hash = selected[0].fills[0]["imageHash"].as_str().unwrap();
+        assert_eq!(selected[0].fills[0]["type"], "IMAGE");
+        assert_eq!(extra["images"][hash]["width"], 1);
+        assert_eq!(extra["images"][hash]["data"], base64::engine::general_purpose::STANDARD.encode(original));
+    }
+
     #[test]
     fn synthetic_package_inspects_without_running_build() {
         let dir = std::env::temp_dir().join(format!("figcraft-figma-plugin-{}", std::process::id()));
@@ -864,7 +1072,7 @@ mod tests {
             Edit::Select { ids: vec!["plugin:2".into()] },
         ];
         let before = session.undo_depth().0;
-        session.grouped("Plugin layers", |s| apply_edits(s, &edits, &Default::default(), "test")).unwrap();
+        session.grouped("Plugin layers", |s| apply_edits(s, &edits, &Default::default(), &mut Default::default(), "test")).unwrap();
         let rect = session.selection()[0];
         let frame = session.doc().unwrap().node(rect).unwrap().parent.unwrap();
         assert_eq!(session.doc().unwrap().node(frame).unwrap().parent, Some(session.page().unwrap()));
@@ -921,9 +1129,11 @@ mod tests {
             edits: Vec::new(),
             closed: false,
             message: None,
+            warnings: Vec::new(),
+            storage: Default::default(),
             event_result: None,
         };
-        let result = apply_ui_operations(&mut session, "test.ui", &allowed, reply, "plugin.figma.ui.message").unwrap();
+        let result = apply_ui_operations(&mut session, "test.ui", &allowed, &mut Default::default(), reply, "plugin.figma.ui.message").unwrap();
         assert_eq!(result["operations"], 1);
         assert_eq!(session.undo_depth().0, before + 1);
         assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 0.25);
@@ -937,9 +1147,46 @@ mod tests {
             edits: Vec::new(),
             closed: false,
             message: None,
+            warnings: Vec::new(),
+            storage: Default::default(),
             event_result: None,
         };
-        assert!(apply_ui_operations(&mut session, "test.ui", &allowed, bad_reply, "plugin.figma.ui.message").is_err());
+        assert!(apply_ui_operations(&mut session, "test.ui", &allowed, &mut Default::default(), bad_reply, "plugin.figma.ui.message").is_err());
         assert_eq!(session.doc().unwrap().node(node_id).unwrap().opacity, 1.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn svg_from_plugin_remains_editable_vector_content() {
+        let mut session = Session::default();
+        let edits = [Edit::CreateSvgNode {
+            id: "plugin:1".into(),
+            svg: "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><rect width='24' height='24' fill='#f00'/></svg>".into(),
+        }];
+        apply_edits(&mut session, &edits, &std::collections::BTreeMap::new(), &mut Default::default(), "plugin.figma.run").unwrap();
+        let page = session.page().unwrap();
+        assert!(!session.doc().unwrap().node(page).unwrap().children.is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn plugin_image_fill_keeps_encoded_pixels_in_document() {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1).write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.into_inner());
+        let edits = [
+            Edit::CreateImage { id: "plugin:image:1".into(), data: encoded },
+            Edit::CreateNode { id: "plugin:2".into(), node_type: "rectangle".into() },
+            Edit::SetNode {
+                id: "plugin:2".into(),
+                key: "fills".into(),
+                value: json!([{"type":"IMAGE","imageHash":"plugin:image:1","scaleMode":"FILL"}]),
+            },
+        ];
+        let mut session = Session::default();
+        let mut image_hashes = std::collections::BTreeMap::new();
+        apply_edits(&mut session, &edits, &Default::default(), &mut image_hashes, "plugin.figma.run").unwrap();
+        let hash = image_hashes.get("plugin:image:1").unwrap();
+        assert!(session.doc().unwrap().images.contains_key(hash));
     }
 }

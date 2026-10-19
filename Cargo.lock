@@ -1915,9 +1915,11 @@ dependencies = [
 name = "figcraft-figma-plugin"
 version = "0.7.0"
 dependencies = [
+ "base64 0.22.1",
  "boa_engine",
  "serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

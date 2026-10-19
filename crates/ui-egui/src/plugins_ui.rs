@@ -283,7 +283,8 @@ pub(crate) fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
     if let Some(show) = reply.get("show").filter(|v| !v.is_null())
         && let Some(html) = show["html"].as_str()
     {
-        let title = show["title"].as_str().filter(|text| !text.is_empty()).unwrap_or(id).to_string();
+        let plugin_name = app.session.prefs.figma_plugins.iter().find(|plugin| plugin.id == id).map(|plugin| plugin.name.as_str());
+        let title = show["title"].as_str().filter(|text| !text.is_empty()).or(plugin_name).unwrap_or(id).to_string();
         app.ui.figma_ui = Some(FigmaUiWindow {
             id: id.to_string(),
             title,
@@ -527,6 +528,9 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
                         && let Some(last) = notices.last().and_then(Value::as_str)
                     {
                         app.toast(last.to_string());
+                    }
+                    if let Some(warning) = result["warnings"].as_array().and_then(|items| items.first()).and_then(Value::as_str) {
+                        app.toast(warning.lines().next().unwrap_or(warning).to_string());
                     }
                     if let Some(report) = app.ui.plugins_manage.figma_report.as_mut() {
                         report["lastRun"] = result.clone();

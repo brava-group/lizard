@@ -80,8 +80,8 @@ manifest declares HTML UI, and a link to the original page. Searches use Figma's
 stop working. Requests have a timeout and size cap; responses are validated and never executed.
 The listing does not include a verified downloadable package. Community results therefore cannot
 be installed or opened as working plugin UI in FigCraft. The separate **Figma local** tab accepts
-packages supplied by the plugin author or user. On macOS, a supported local plugin can open a
-self-contained HTML UI preview.
+packages supplied by the plugin author or user. On macOS, a supported local plugin opens its HTML
+UI in a child WebView.
 
 `plugin.figma.inspect {"path":"/path/to/manifest.json"}` checks a local Figma plugin manifest,
 its `main` JavaScript and declared `ui` files, without running them. It reports the editor types,
@@ -102,24 +102,30 @@ zoom, paint-style reads, colour-variable collections and aliases, notifications 
 `textreview` event. The manager offers fields for menu parameters and displays review results.
 Each successful run is one undo step; exceptions, invalid edits and changed packages leave the
 document unchanged. The worker has a 2-second wall-clock limit, bounded loops and output, and no
-file, network or DOM host functions. **It does not yet enforce an OS memory limit**, so run only
-trusted local packages. This is a selected API subset, not a general Figma plugin runtime;
-browser execution, local storage and installed Community packages remain unsupported.
+file or DOM host functions. **It does not yet enforce an OS memory limit**, so run only trusted
+local packages. This is a selected API subset, not a general Figma plugin runtime; browser
+execution and installed Community packages remain unsupported.
 
 On macOS, a registered local plugin that declares a `ui` file can run through
 `plugin.figma.ui.start {"id":"…","command":"optional menu command"}`. A persistent Boa
 subprocess evaluates its `main` JavaScript, and a child WebView displays HTML passed to
 `figma.showUI`. The worker exposes `__html__` and named `__uiFiles__`, `figma.ui.onmessage`,
-`figma.ui.postMessage`, `figma.ui.resize` and `figma.closePlugin`. Messages from the page's
+`figma.ui.postMessage`, `figma.ui.resize`, `figma.clientStorage`, image and SVG creation, selected
+image bytes within the worker request budget, and
+`figma.closePlugin`. Messages from the page's
 `parent.postMessage({pluginMessage: value}, '*')` reach
 `plugin.figma.ui.message {"id":"…","payload":value}`; worker replies are delivered as page
-`message` events with `data.pluginMessage`. Closing the window calls `plugin.figma.ui.close`.
+`message` events with `data.pluginMessage`. `Uint8Array` image bytes retain their type across
+this bridge within its size limits. Closing the window calls `plugin.figma.ui.close`.
 Each successful message's document edits are one undo step. Short `setTimeout` callbacks run with
 their requested delay, bounded by the worker's timeout. HTML and messages have byte limits;
-each callback has a 2-second wall-clock limit, and the worker ends after an error. The WebView
-blocks navigation, new windows, clipboard access and general network requests. It accepts inline scripts,
-styles and data images; declared HTTPS hosts can supply stylesheets and fonts. This preview is for trusted local development packages: it has no OS
-memory limit, is available only in the macOS desktop UI, and does not run Community listings.
+each callback has a 15-second host timeout, and the worker ends after an error. The WebView
+blocks navigation, new windows and clipboard access. It accepts inline scripts, styles and data
+images; HTTPS requests from UI or plugin JavaScript are limited to the manifest's declared hosts.
+Client storage is kept in the user's preferences with a 64 KB limit per plugin. This runtime is
+for trusted local development packages: it has no OS memory limit, is available only in the macOS
+desktop UI, and does not run Community listings. [The ten-package compatibility check](local-figma-plugin-compatibility.md)
+records which published bundles opened and what still needs validation.
 
 The official MIT `figma/plugin-samples` examples `create-rects-shapes`, `resizer` (absolute and
 relative), `text-review`, `styles-to-variables`, `post-message` and `barchart` were tested from
@@ -516,7 +522,9 @@ import what you need from `figcraft`.
   no publisher accounts or signatures (the server's key is the publisher), no ratings, reviews or
   install counts, and updates are found when you browse, not in the background. The browser build
   can't use a directory yet.
-- Plugins written for other apps (JavaScript plugins) don't run.
+- General JavaScript plugin compatibility is not available. The local Figma plugin runtime above
+  supports a selected API subset on macOS; other apps' plugins and browser-side JavaScript
+  execution remain unsupported.
 - Widgets: clicks are their only events (no text input, hover, property menu or timers), they
   can't open a panel, and their layers are frames, text, rectangles, ellipses and images only (no
   vectors, components or variables).

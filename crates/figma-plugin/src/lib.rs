@@ -136,11 +136,10 @@ impl ParsedManifest {
             diagnostics.push("This plugin does not target the Figma design editor".into());
         }
         if manifest.ui.is_some() {
-            diagnostics.push("HTML UI preview supports local, self-contained files on macOS; browser and other desktop platforms are pending".into());
+            diagnostics.push("HTML UI runs in a macOS child WebView; browser and other desktop platforms are pending".into());
         }
         if manifest.network_access.as_ref().is_some_and(|v| !v.allowed_domains.is_empty() && v.allowed_domains != ["none"]) {
-            diagnostics
-                .push("HTML UI preview loads stylesheets and fonts from declared HTTPS hosts; other network requests are not supported yet".into());
+            diagnostics.push("HTML UI and worker HTTPS requests are limited to declared network domains".into());
         }
         if manifest.build.is_some() {
             diagnostics.push("The manifest's build command was not run; provide compiled main JavaScript".into());
@@ -149,7 +148,7 @@ impl ParsedManifest {
             diagnostics.push("Quick action parameters are supported for local plugins; unsupported parameter types may be ignored".into());
         }
         if manifest.document_access.is_none() {
-            diagnostics.push("Legacy full-document loading is not supported yet".into());
+            diagnostics.push("Legacy plugins can start, but the worker currently sees a limited document snapshot".into());
         }
         if manifest.api.split('.').next() != Some("1") {
             diagnostics.push("This Figma API version has not been validated".into());
@@ -245,6 +244,6 @@ mod tests {
         let parsed = ParsedManifest::parse(input.as_bytes()).unwrap();
         assert_eq!(parsed.files.len(), 2);
         assert!(parsed.diagnostics.iter().any(|v| v.contains("build command")));
-        assert!(parsed.diagnostics.iter().any(|v| v.contains("HTML UI preview")));
+        assert!(parsed.diagnostics.iter().any(|v| v.contains("HTML UI runs")));
     }
 }

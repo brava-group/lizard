@@ -1,14 +1,14 @@
 //! A one-shot JavaScript worker. It receives a bounded document snapshot and returns typed edits;
 //! it has no host functions, document handle, filesystem or network API.
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::rc::Rc;
 
-use boa_engine::builtins::promise::{OperationType, Promise};
+use boa_engine::builtins::promise::{OperationType, Promise, PromiseState};
 use boa_engine::context::HostHooks;
 use boa_engine::module::IdleModuleLoader;
-use boa_engine::object::JsObject;
+use boa_engine::object::{JsObject, builtins::JsPromise};
 use boa_engine::{Context, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,7 +16,8 @@ use serde_json::Value;
 use crate::bridge::{self, Edit};
 
 pub const WORKER_ARG: &str = "--figcraft-figma-plugin-worker";
-pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+pub const MAX_SOURCE_BYTES: usize = 12 * 1024 * 1024;
+pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub const MAX_OPERATIONS: usize = 1024;
 
@@ -36,6 +37,12 @@ pub struct SelectedNode {
     #[serde(default)]
     #[serde(rename = "type")]
     pub node_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<SelectedNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub characters: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fills: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,13 +74,23 @@ pub struct Response {
 
 #[derive(Default)]
 struct RestrictedHooks {
-    rejected_promise: Cell<bool>,
+    rejected_promise: RefCell<Option<String>>,
 }
 
 impl HostHooks for RestrictedHooks {
-    fn promise_rejection_tracker(&self, _promise: &JsObject<Promise>, operation: OperationType, _context: &mut Context) {
+    fn promise_rejection_tracker(&self, promise: &JsObject<Promise>, operation: OperationType, context: &mut Context) {
         if operation == OperationType::Reject {
-            self.rejected_promise.set(true);
+            if let PromiseState::Rejected(reason) = JsPromise::from(promise.clone()).state() {
+                let summary = reason.to_string(context).map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
+                let stack = reason
+                    .as_object()
+                    .and_then(|object| object.get(boa_engine::js_string!("stack"), context).ok())
+                    .filter(|stack| !stack.is_undefined())
+                    .unwrap_or(reason)
+                    .to_string(context)
+                    .map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
+                *self.rejected_promise.borrow_mut() = Some(format!("{summary}\n{stack}").chars().take(1024).collect());
+            }
         }
     }
 
@@ -100,7 +117,7 @@ pub fn run_stdio() -> Result<(), String> {
 
 /// Also used by focused semantic tests. Production calls this inside a child process.
 pub fn execute(request: Request) -> Result<Response, String> {
-    if request.source.len() > MAX_REQUEST_BYTES / 2 || request.selection.len() > 4096 {
+    if request.source.len() > MAX_SOURCE_BYTES || request.selection.len() > 4096 {
         return Err("plugin source or selection is too large".into());
     }
     let selection = serde_json::to_value(&request.selection).map_err(|e| e.to_string())?;
@@ -111,15 +128,24 @@ pub fn execute(request: Request) -> Result<Response, String> {
     context.runtime_limits_mut().set_loop_iteration_limit(100_000);
     context.runtime_limits_mut().set_recursion_limit(128);
     context.runtime_limits_mut().set_stack_size_limit(1024);
-    let setup = bridge::setup(&selection, &request.extra, &command, &Value::Null, &Value::Null, MAX_OPERATIONS, 0);
+    let setup = bridge::setup(
+        &selection,
+        &request.extra,
+        &command,
+        &Value::Null,
+        &Value::Null,
+        MAX_OPERATIONS,
+        0,
+        request.source.starts_with("const __html__ =") || request.source.starts_with("const __uiFiles__ ="),
+    );
     context.eval(Source::from_bytes(&setup)).map_err(|e| format!("plugin setup: {e}"))?;
     context.eval(Source::from_bytes(&request.source)).map_err(|e| format!("plugin JavaScript: {e}"))?;
     context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
     context.eval(Source::from_bytes("__figcraftRun()")).map_err(|e| format!("plugin event: {e}"))?;
     context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
     bridge::run_timers(&mut context)?;
-    if hooks.rejected_promise.get() {
-        return Err("plugin Promise was rejected".into());
+    if let Some(reason) = hooks.rejected_promise.borrow().as_ref() {
+        return Err(format!("plugin Promise was rejected: {reason}"));
     }
     let value = context.eval(Source::from_bytes("__figcraftTake()")).map_err(|e| format!("plugin result: {e}"))?;
     let output = value.to_string(&mut context).map_err(|e| format!("plugin result: {e}"))?.to_std_string_escaped();
@@ -150,6 +176,9 @@ mod tests {
                 width: 100.0,
                 height: 100.0,
                 node_type: "RECTANGLE".into(),
+                children: Vec::new(),
+                characters: None,
+                fills: Vec::new(),
             }],
             extra: Value::Null,
         }
