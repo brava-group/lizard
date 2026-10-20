@@ -1390,8 +1390,14 @@ fn grid(ui: &mut Ui, salt: Id, p: &Param, values: &Map<String, Value>, t: &Token
                         Some(texture) => {
                             let inner = rect.shrink(7.0);
                             let s = texture.size_vec2();
-                            let shown = egui::Rect::from_center_size(inner.center(), s * (inner.width() / s.x.max(1.0)).min(inner.height() / s.y.max(1.0)));
-                            ui.painter().image(texture.id(), shown, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                            let shown =
+                                egui::Rect::from_center_size(inner.center(), s * (inner.width() / s.x.max(1.0)).min(inner.height() / s.y.max(1.0)));
+                            ui.painter().image(
+                                texture.id(),
+                                shown,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
                         }
                         None => {
                             ui.painter().rect_filled(rect.shrink(7.0), egui::CornerRadius::same(4), t.field);

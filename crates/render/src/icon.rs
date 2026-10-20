@@ -44,11 +44,7 @@ pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, 
             if !width.is_finite() || width <= 0.0 || width > 24.0 {
                 return None;
             }
-            let paint = Paint {
-                shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)),
-                anti_alias: true,
-                ..Paint::default()
-            };
+            let paint = Paint { shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)), anti_alias: true, ..Paint::default() };
             let stroke = Stroke {
                 // In user space: the transform scales it to device pixels.
                 width: width as f32,
@@ -59,11 +55,7 @@ pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, 
             pix.stroke_path(&path, &paint, &stroke, xf, None);
         }
         (None, Some([r, g, b, a])) => {
-            let paint = Paint {
-                shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)),
-                anti_alias: true,
-                ..Paint::default()
-            };
+            let paint = Paint { shader: Shader::SolidColor(tiny_skia::Color::from_rgba8(r, g, b, a)), anti_alias: true, ..Paint::default() };
             pix.fill_path(&path, &paint, FillRule::Winding, xf, None);
         }
         _ => return None,

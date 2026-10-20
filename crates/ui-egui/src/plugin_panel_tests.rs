@@ -146,8 +146,7 @@ fn grid_module() -> Vec<u8> {
 fn a_panel_grid_names_its_cells_and_a_click_picks_one() {
     let manifest = json!({"id": "org.test.grid", "name": "Grid test", "main": "p.wasm", "api": 4, "permissions": {}});
     let mut s = Session::new();
-    s.execute("plugin.import", &json!({"manifest": manifest, "wasm": base64::engine::general_purpose::STANDARD.encode(grid_module())}))
-        .unwrap();
+    s.execute("plugin.import", &json!({"manifest": manifest, "wasm": base64::engine::general_purpose::STANDARD.encode(grid_module())})).unwrap();
     s.execute("plugin.run", &json!({"id": "org.test.grid"})).unwrap();
     let mut u = Ui::new(s);
     u.ctx.enable_accesskit();

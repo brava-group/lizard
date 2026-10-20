@@ -215,15 +215,7 @@ pub enum ParamKind {
 impl ParamKind {
     /// Added by plugin API 4.
     fn api_4(self) -> bool {
-        matches!(
-            self,
-            ParamKind::Slider
-                | ParamKind::Image
-                | ParamKind::Progress
-                | ParamKind::Divider
-                | ParamKind::Section
-                | ParamKind::Grid
-        )
+        matches!(self, ParamKind::Slider | ParamKind::Image | ParamKind::Progress | ParamKind::Divider | ParamKind::Section | ParamKind::Grid)
     }
 
     /// Needs no `name`: it has no value and isn't used.
