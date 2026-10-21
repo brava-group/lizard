@@ -1416,30 +1416,38 @@ fn grid(ui: &mut Ui, salt: Id, p: &Param, values: &Map<String, Value>, t: &Token
     hit
 }
 
-/// A grid cell's texture, rasterised once per path, picture, colour and stroke.
+/// A grid cell's texture, rasterised once per path, picture, colour and stroke. The key is
+/// hashed every frame, but bounded: picture `data` can be hundreds of KB, so only its
+/// length and edge bytes feed the hash (paths, colours and strokes hash in full).
 fn cell_texture(ui: &mut Ui, id: Id, item: &figcraft_engine::plugins::GridItem) -> Option<egui::TextureHandle> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     item.path.hash(&mut hasher);
-    item.data.hash(&mut hasher);
+    item.data.len().hash(&mut hasher);
+    let data = item.data.as_bytes();
+    data.get(..data.len().min(64)).hash(&mut hasher);
+    data.get(data.len().saturating_sub(64)..).hash(&mut hasher);
     item.color.hash(&mut hasher);
     item.stroke.map(f64::to_bits).hash(&mut hasher);
+    ui.visuals().dark_mode.hash(&mut hasher);
     let key = hasher.finish();
     let kept = ui.data(|d| d.get_temp::<(u64, Option<egui::TextureHandle>)>(id)).filter(|(k, _)| *k == key);
     let (_, texture) = kept.unwrap_or_else(|| {
-        let fresh = (key, cell_pixels(item).map(|img| ui.ctx().load_texture("plugin-cell", img, egui::TextureOptions::LINEAR)));
+        let fresh =
+            (key, cell_pixels(item, ui.visuals().dark_mode).map(|img| ui.ctx().load_texture("plugin-cell", img, egui::TextureOptions::LINEAR)));
         ui.data_mut(|d| d.insert_temp(id, fresh.clone()));
         fresh
     });
     texture
 }
 
-/// A grid cell's pixels: a picture decoded, or SVG path data rasterised in its colour.
-fn cell_pixels(item: &figcraft_engine::plugins::GridItem) -> Option<egui::ColorImage> {
+/// A grid cell's pixels: a picture decoded, or SVG path data rasterised in its colour (dark
+/// icons on a light theme, light icons on a dark one, unless the cell names one).
+fn cell_pixels(item: &figcraft_engine::plugins::GridItem, dark: bool) -> Option<egui::ColorImage> {
     if !item.data.trim().is_empty() {
         return decode(&item.data);
     }
-    let color = if item.color.is_empty() { "#1E1E1E" } else { item.color.as_str() };
+    let color = if item.color.is_empty() { if dark { "#EDEDED" } else { "#1E1E1E" } } else { item.color.as_str() };
     let rgba = match item.stroke {
         Some(w) => figcraft_render::rasterize_icon(&item.path, None, Some((color, w)), GRID_ICON_PX),
         None => figcraft_render::rasterize_icon(&item.path, Some(color), None, GRID_ICON_PX),
