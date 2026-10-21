@@ -257,6 +257,66 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
         return Err("Termine o gesto no canvas antes de executar uma ação do agente".into());
     }
     match method {
+        "agent.activity" => {
+            let document = p.get("__agent_document").and_then(Value::as_u64).ok_or("A atividade do agente exige uma sessão anexada")?;
+            if !app.ui.agent.busy || app.ui.agent.runtime_document != Some(document) {
+                return Ok(json!({"accepted": false}));
+            }
+            let phase = p.get("phase").and_then(Value::as_str).unwrap_or("");
+            let tool = p.get("tool").and_then(Value::as_str).unwrap_or("");
+            let inspection = matches!(tool, "get_node" | "inspect_document" | "screenshot");
+            let mut ids: Vec<_> = p.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).take(8).collect();
+            if ids.is_empty()
+                && matches!(tool, "inspect_document" | "screenshot")
+                && let Ok(ds) = app.session.ds()
+                && let Some(page) = ds.doc.node(ds.page)
+            {
+                ids = page
+                    .children
+                    .iter()
+                    .filter(|id| {
+                        ds.doc.node(**id).is_some_and(|node| node.kind.is_frame_like())
+                            && ds.doc.world_bounds(**id).is_some_and(|bounds| {
+                                egui::Rect::from_two_pos(app.to_screen(bounds.x0, bounds.y0), app.to_screen(bounds.x1, bounds.y1))
+                                    .intersects(app.canvas.rect)
+                            })
+                    })
+                    .take(3)
+                    .map(|id| id.0)
+                    .collect();
+            }
+            let now = std::time::Instant::now();
+            let presence = &mut app.ui.agent.presence;
+            presence.document = Some(document);
+            presence.conversation = app.ui.agent.runtime_conversation;
+            presence.updated = Some(now);
+            presence.active = true;
+            presence.generating = phase == "start" && tool == "create_node";
+            if let Some(id) = ids.first().copied() {
+                presence.target = Some(figcraft_doc::NodeId(id));
+            } else if presence.generating {
+                presence.target = None;
+            }
+            if phase == "done" {
+                for id in ids {
+                    if presence.pulses.len() >= 8 {
+                        presence.pulses.remove(0);
+                    }
+                    presence.pulses.push(crate::agent_panel::AgentPulse { id: figcraft_doc::NodeId(id), started: now, inspection });
+                }
+            }
+            if phase == "done"
+                && tool == "screenshot"
+                && let Some(data) = p.get("preview").and_then(Value::as_str).filter(|data| data.len() <= 2_000_000)
+                && let Some(chat) = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id))
+                && let Some(message) = chat.messages.last_mut()
+                && message.previews.len() < 6
+            {
+                message.previews.push(crate::agent_panel::AgentPreview { data: data.to_string(), texture: None });
+            }
+            ctx.request_repaint();
+            Ok(json!({"accepted": true}))
+        }
         "engine.execute" => {
             let cmd = p.get("command").and_then(Value::as_str).ok_or("`command` required")?;
             let params = p.get("params").cloned().unwrap_or(json!({}));

@@ -52,6 +52,7 @@ pub enum AgentEvent {
     LoginError(String),
     Models(Vec<(String, String)>),
     Text(String),
+    Thinking(String),
     Tool { id: String, title: String, status: String },
     Done(String),
     Error(String),
@@ -70,6 +71,10 @@ pub struct ChatMessage {
     pub role: String,
     pub text: String,
     #[serde(default)]
+    pub thinking: String,
+    #[serde(skip)]
+    pub previews: Vec<AgentPreview>,
+    #[serde(default)]
     pub selected_nodes: Vec<ChatNodeRef>,
     #[serde(default)]
     pub attached_images: Vec<String>,
@@ -87,6 +92,37 @@ pub struct ChatMessage {
     pub revision_after: u64,
     #[serde(default)]
     pub reverted: bool,
+}
+
+#[derive(Clone)]
+pub struct AgentPreview {
+    pub data: String,
+    pub texture: Option<egui::TextureHandle>,
+}
+
+impl std::fmt::Debug for AgentPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentPreview").field("bytes", &self.data.len()).finish()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentPulse {
+    pub id: NodeId,
+    pub started: std::time::Instant,
+    pub inspection: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentPresence {
+    pub document: Option<u64>,
+    pub conversation: Option<u64>,
+    pub target: Option<NodeId>,
+    pub shown: Option<(f32, f32)>,
+    pub updated: Option<std::time::Instant>,
+    pub pulses: Vec<AgentPulse>,
+    pub active: bool,
+    pub generating: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -136,6 +172,7 @@ pub struct Conversation {
 
 #[derive(Default)]
 pub struct AgentUi {
+    pub presence: AgentPresence,
     pub draft: String,
     pub images: Vec<DraftImage>,
     pub pending_images: Vec<DraftImage>,
@@ -184,6 +221,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                 chat.messages.truncate(200);
                 for message in &mut chat.messages {
                     message.text.truncate(message.text.floor_char_boundary(64_000));
+                    message.thinking.truncate(message.thinking.floor_char_boundary(32_000));
                 }
             }
             app.ui.agent.conversations = chats;
@@ -191,6 +229,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
     }
     let document = app.session.ds().ok().map(|ds| ds.uid);
     if app.ui.agent.observed_document != document {
+        app.ui.agent.presence = AgentPresence::default();
         app.ui.agent.observed_document = document;
         app.ui.agent.observed_selection.clear();
         app.ui.agent.excluded_selection.clear();
@@ -249,6 +288,13 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                     message.text.push_str(&chunk);
                 }
             }
+            AgentEvent::Thinking(chunk) => {
+                if let Some(message) = active.and_then(|chat| chat.messages.last_mut())
+                    && message.thinking.len() < 32_000
+                {
+                    message.thinking.push_str(&chunk);
+                }
+            }
             AgentEvent::Tool { id, title, status } => {
                 if let Some(message) = active.and_then(|chat| chat.messages.last_mut()) {
                     if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == id) {
@@ -261,6 +307,8 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
             }
             AgentEvent::Permission { id, title, options } => app.ui.agent.permission = Some(AgentPermission { id, title, options }),
             AgentEvent::Done(reason) => {
+                app.ui.agent.presence.active = false;
+                app.ui.agent.presence.updated = Some(std::time::Instant::now());
                 app.ui.agent.pending_images.clear();
                 if let Some(message) = active.and_then(|chat| chat.messages.last_mut()) {
                     message.work_seconds = app.ui.agent.turn_started.take().map(|started| started.elapsed().as_secs());
@@ -274,6 +322,8 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                 completed = true;
             }
             AgentEvent::Error(error) => {
+                app.ui.agent.presence.active = false;
+                app.ui.agent.presence.updated = Some(std::time::Instant::now());
                 app.ui.agent.turn_started = None;
                 if app.session.ds().ok().is_some_and(|ds| Some(ds.uid) == app.ui.agent.runtime_document) {
                     app.ui.agent.images.append(&mut app.ui.agent.pending_images);
@@ -293,6 +343,21 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                 app.ui.agent.runtime_document = None;
                 app.ui.agent.runtime_conversation = None;
                 completed = true;
+            }
+        }
+    }
+    for chat in &mut app.ui.agent.conversations {
+        for message in &mut chat.messages {
+            for (index, preview) in message.previews.iter_mut().enumerate() {
+                if preview.texture.is_none()
+                    && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&preview.data)
+                    && let Ok(image) = image::load_from_memory(&bytes)
+                {
+                    let rgba = image.thumbnail(320, 240).to_rgba8();
+                    let color = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+                    preview.texture = Some(ctx.load_texture(format!("agent-preview-{}-{index}", chat.id), color, egui::TextureOptions::LINEAR));
+                    preview.data.clear();
+                }
             }
         }
     }
@@ -483,6 +548,10 @@ fn send_prompt(app: &mut FigApp) {
             app.ui.agent.pending_images = std::mem::take(&mut app.ui.agent.images);
             app.ui.agent.turn_started = Some(std::time::Instant::now());
             app.ui.agent.busy = true;
+            app.ui.agent.presence.document = Some(document);
+            app.ui.agent.presence.conversation = Some(id);
+            app.ui.agent.presence.active = true;
+            app.ui.agent.presence.updated = Some(std::time::Instant::now());
             save_history(app);
         }
         Err(error) => {
@@ -510,6 +579,7 @@ impl AgentUi {
 }
 
 fn stop_chat(app: &mut FigApp) {
+    app.ui.agent.presence = AgentPresence::default();
     app.services.agent_stop();
     app.services.agent_reset();
     if app.ui.agent.busy {
@@ -730,28 +800,52 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                     ui.add_space(16.0);
                     ui.label(egui::RichText::new(chat.agent.label()).size(11.0).strong().color(BLUE));
                     ui.add_space(4.0);
-                    if !message.tools.is_empty() {
+                    let working = app.ui.agent.busy && app.ui.agent.runtime_conversation == Some(chat.id) && index + 1 == chat.messages.len();
+                    if working || !message.tools.is_empty() || !message.thinking.is_empty() {
                         let label = message.work_seconds.map_or_else(|| "Trabalhando…".to_string(), |s| format!("Trabalhou por {s} s"));
-                        egui::CollapsingHeader::new(egui::RichText::new(label).size(11.0).color(secondary))
-                            .id_salt(("agent_work", chat.id, index))
-                            .show(ui, |ui| {
-                                for tool in &message.tools {
-                                    let mark = if tool.status == "completed" {
-                                        "✓"
-                                    } else if tool.status == "failed" {
-                                        "!"
-                                    } else {
-                                        "◌"
-                                    };
-                                    ui.label(egui::RichText::new(format!("{mark} {} · {}", tool.title, tool.status)).size(11.0).color(secondary));
-                                }
-                            });
+                        ui.horizontal(|ui| {
+                            if working {
+                                ui.add(egui::Spinner::new().size(12.0));
+                            }
+                            egui::CollapsingHeader::new(egui::RichText::new(label).size(11.0).color(secondary))
+                                .id_salt(("agent_work", chat.id, index))
+                                .default_open(working)
+                                .show(ui, |ui| {
+                                    if !message.thinking.is_empty() {
+                                        ui.label(egui::RichText::new(&message.thinking).size(11.0).color(secondary));
+                                        ui.add_space(4.0);
+                                    }
+                                    for tool in &message.tools {
+                                        let mark = if tool.status == "completed" {
+                                            "✓"
+                                        } else if tool.status == "failed" {
+                                            "!"
+                                        } else {
+                                            "◌"
+                                        };
+                                        let state = match tool.status.as_str() {
+                                            "completed" => "Concluído",
+                                            "failed" => "Falhou",
+                                            _ => "Executando",
+                                        };
+                                        ui.label(egui::RichText::new(format!("{mark} {} · {state}", tool.title)).size(11.0).color(secondary));
+                                    }
+                                });
+                        });
                         ui.add_space(6.0);
                     }
-                    if message.text.is_empty() && app.ui.agent.busy && index + 1 == chat.messages.len() {
-                        ui.spinner();
-                    } else if !message.text.is_empty() {
-                        ui.label(egui::RichText::new(&message.text).size(13.0).color(text));
+                    if !message.text.is_empty() {
+                        crate::agent_markdown::show(ui, &message.text, text, BLUE);
+                    }
+                    if !message.previews.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Prévias verificadas").size(11.0).color(secondary));
+                    }
+                    for preview in &message.previews {
+                        if let Some(texture) = &preview.texture {
+                            ui.add_space(8.0);
+                            ui.add(egui::Image::from_texture(texture).max_width(transcript.width() - 8.0).corner_radius(8));
+                        }
                     }
                     if message.stopped {
                         ui.label(egui::RichText::new("Interrompido").size(11.0).color(secondary));
@@ -1215,6 +1309,51 @@ mod tests {
         sync(&mut app, &egui::Context::default());
         assert!(!app.ui.agent.busy);
         assert_eq!(app.ui.agent.conversations[0].messages[1].text, "Frame criado.");
+    }
+
+    #[test]
+    fn attached_agent_activity_targets_the_current_document_and_adds_preview() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Confira o frame".into();
+        send_prompt(&mut app);
+        let uid = app.session.ds().unwrap().uid;
+        let ctx = egui::Context::default();
+        let page = app.session.ds().unwrap().page;
+        assert!(
+            crate::control::handle(
+                &mut app,
+                &ctx,
+                "agent.activity",
+                &json!({
+                    "__agent_document": uid + 1, "phase":"done", "tool":"get_node", "ids":[page.0]
+                })
+            )
+            .is_err()
+        );
+        crate::control::handle(
+            &mut app,
+            &ctx,
+            "agent.activity",
+            &json!({
+                "__agent_document": uid, "phase":"done", "tool":"get_node", "ids":[page.0]
+            }),
+        )
+        .unwrap();
+        assert_eq!(app.ui.agent.presence.target, Some(page));
+        assert_eq!(app.ui.agent.presence.pulses.len(), 1);
+        crate::control::handle(
+            &mut app,
+            &ctx,
+            "agent.activity",
+            &json!({
+                "__agent_document": uid, "phase":"done", "tool":"screenshot", "preview":"aGVsbG8="
+            }),
+        )
+        .unwrap();
+        assert_eq!(app.ui.agent.conversations[0].messages[1].previews.len(), 1);
     }
 
     #[test]

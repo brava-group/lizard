@@ -46,6 +46,17 @@ message; failed sends restore them to the composer. Text, HTML and
 copied design layers continue through their existing paste paths. Agent activity is grouped under
 an expandable work receipt, while the answer and guarded Undo remain visible.
 
+While a turn runs, the receipt shows a loading spinner, agent reasoning summaries when the
+adapter supplies them, and each tool's progress. MCP screenshots used for design review appear
+as bounded image previews in the reply. These previews are temporary and are not added to the
+design file or chat history. Agent replies render CommonMark headings, emphasis, lists, links and
+code in the chat; raw HTML is displayed as text, and the prompt field stays plain text.
+Attached MCP calls pass the IDs of inspected or changed layers to a
+document-scoped UI overlay: the agent cursor moves toward the current target, inspection briefly
+highlights visible frames, and edits pulse on the affected layer. An active creation inside a
+frame gives that frame a subtle animated outline. The overlay never enters Undo, export or the
+document; reduced-motion settings remove the moving scan and cursor glide.
+
 The browser build retains the chat layout but cannot start local agent executables. File attachment
 dialogs use the desktop file picker. Specialized image generation, background removal and visual
 search are separate AI features and remain open.

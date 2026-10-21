@@ -373,6 +373,11 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                                 let _ = output.send(AgentEvent::Text(chunk.chars().take(16_384).collect()));
                             }
                         }
+                        "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
+                            if let Some(chunk) = message["params"]["delta"].as_str() {
+                                let _ = output.send(AgentEvent::Thinking(chunk.chars().take(16_384).collect()));
+                            }
+                        }
                         "item/started" | "item/completed" => {
                             let item = &message["params"]["item"];
                             let item_type = item["type"].as_str().unwrap_or_default();
@@ -838,6 +843,7 @@ fn update(message: &Value) -> Option<AgentEvent> {
     let value = &message["params"]["update"];
     match value["sessionUpdate"].as_str()? {
         "agent_message_chunk" => value["content"]["text"].as_str().map(|text| AgentEvent::Text(text.chars().take(16_384).collect())),
+        "agent_thought_chunk" => value["content"]["text"].as_str().map(|text| AgentEvent::Thinking(text.chars().take(16_384).collect())),
         "tool_call" | "tool_call_update" => Some(AgentEvent::Tool {
             id: value["toolCallId"].as_str()?.to_string(),
             title: value["title"].as_str().unwrap_or("Ação do agente").to_string(),

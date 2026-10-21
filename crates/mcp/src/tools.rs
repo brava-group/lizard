@@ -403,6 +403,12 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         Ok(a) => a,
         Err(e) => return ToolResult::error(e),
     };
+    let relevant =
+        matches!(name, "create_node" | "set_properties" | "get_node" | "inspect_document" | "screenshot" | "select" | "run_command" | "batch");
+    if relevant {
+        let ids = activity_ids(name, args);
+        b.agent_activity(json!({"phase":"start", "tool":name, "ids":ids}));
+    }
     let r = match name {
         "list_commands" => list_commands(b, &a),
         "run_command" => run_command(b, &a),
@@ -424,7 +430,45 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         "inspect_ui" => b.call("ui.inspect", json!({})).map(|v| ToolResult::json(&v)),
         other => Err(format!("unknown tool `{other}` (tools/list has: {})", TOOL_NAMES.join(", "))),
     };
-    r.unwrap_or_else(ToolResult::error)
+    let result = r.unwrap_or_else(ToolResult::error);
+    if relevant {
+        let mut ids = activity_ids(name, args);
+        if name == "create_node"
+            && !result.is_error
+            && let Ok(created) = serde_json::from_str::<Value>(result.first_text())
+            && let Some(id) = created.get("id").and_then(Value::as_u64)
+        {
+            ids = vec![id];
+        }
+        let preview = if name == "screenshot" && !result.is_error {
+            result
+                .content
+                .iter()
+                .find(|block| block.get("type").and_then(Value::as_str) == Some("image"))
+                .and_then(|block| block.get("data").and_then(Value::as_str))
+                .filter(|data| data.len() <= 2_000_000)
+        } else {
+            None
+        };
+        b.agent_activity(json!({"phase": if result.is_error {"failed"} else {"done"}, "tool":name, "ids":ids, "preview":preview}));
+    }
+    result
+}
+
+fn activity_ids(name: &str, args: &Value) -> Vec<u64> {
+    if name == "create_node" {
+        return args.get("parent").and_then(Value::as_u64).into_iter().collect();
+    }
+    if !matches!(name, "set_properties" | "get_node" | "screenshot" | "select" | "run_command" | "batch") {
+        return Vec::new();
+    }
+    let source = if name == "run_command" { &args["params"] } else { args };
+    let mut ids: Vec<u64> = source.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).take(8).collect();
+    if let Some(id) = source.get("id").and_then(Value::as_u64) {
+        ids.push(id);
+    }
+    ids.truncate(8);
+    ids
 }
 
 fn list_commands(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
@@ -774,5 +818,19 @@ fn type_text(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, 
             Ok(ToolResult::json(&json!({"ok": true, "node": node})))
         }
         None => b.call("ui.type", json!({"text": text})).map(|v| ToolResult::json(&v)),
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+
+    #[test]
+    fn activity_targets_only_explicit_design_nodes() {
+        assert_eq!(activity_ids("get_node", &json!({"id":42})), vec![42]);
+        assert_eq!(activity_ids("set_properties", &json!({"ids":[2,3]})), vec![2, 3]);
+        assert_eq!(activity_ids("create_node", &json!({"parent":7,"name":"Demo"})), vec![7]);
+        assert_eq!(activity_ids("run_command", &json!({"command":"node.set","params":{"ids":[9]}})), vec![9]);
+        assert!(activity_ids("list_commands", &json!({"ids":[5]})).is_empty());
     }
 }

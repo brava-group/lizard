@@ -6,7 +6,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod a11y;
+mod agent_markdown;
 pub mod agent_panel;
+pub mod agent_presence;
 pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;

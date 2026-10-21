@@ -21,6 +21,9 @@ pub trait Backend {
     /// Short human description ("headless", "attached to 127.0.0.1:7979").
     fn describe(&self) -> String;
 
+    /// Ephemeral UI telemetry for a locally attached agent. Headless callers ignore it.
+    fn agent_activity(&mut self, _activity: Value) {}
+
     /// PNG bytes of the document: `ids` (in page coordinates, their union) or, when empty, the
     /// current page's content. The default goes through `ui.render`, the PNG coming back as data.
     fn render_png(&mut self, ids: &[u64], scale: f64) -> Result<Vec<u8>, String> {
@@ -148,6 +151,9 @@ impl Attached {
 }
 
 impl Backend for Attached {
+    fn agent_activity(&mut self, activity: Value) {
+        let _ = self.call("agent.activity", activity);
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
