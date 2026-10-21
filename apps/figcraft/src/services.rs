@@ -27,6 +27,8 @@ pub struct Desktop {
     agent: Option<crate::agent::Agent>,
     agent_control: Option<(ControlQueue, ContextSlot)>,
     agent_bridge: Option<(u16, Arc<AtomicBool>)>,
+    agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
+    agent_model_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
 }
 
 pub fn config_dir() -> Option<PathBuf> {
@@ -71,6 +73,8 @@ impl Desktop {
             agent: None,
             agent_control: None,
             agent_bridge: None,
+            agent_login_events: None,
+            agent_model_events: None,
         }
     }
 
@@ -285,7 +289,7 @@ fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
 
 impl Services for Desktop {
     fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
-        if self.agent.as_ref().is_some_and(|a| a.document != document || a.kind != kind) {
+        if self.agent.as_ref().is_some_and(|a| a.document != document || a.kind != kind || a.conversation != prompt.conversation) {
             self.agent_reset();
         }
         if self.agent.is_none() {
@@ -298,13 +302,63 @@ impl Services for Desktop {
                 .unwrap_or_else(|| "figcraft-cli".into());
             let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("FigCraft Agent"));
             std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
-            self.agent = Some(crate::agent::Agent::start(kind, document, port, &cwd.to_string_lossy(), &cli)?);
+            self.agent = Some(crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli)?);
         }
         self.agent.as_ref().ok_or("O agente não está disponível".into()).and_then(|a| a.send(prompt))
     }
 
     fn agent_poll(&mut self) -> Vec<AgentEvent> {
-        self.agent.as_ref().map_or_else(Vec::new, crate::agent::Agent::poll)
+        let mut events = self.agent.as_ref().map_or_else(Vec::new, crate::agent::Agent::poll);
+        if let Some(login) = &self.agent_login_events {
+            events.extend(login.try_iter().take(20));
+        }
+        if let Some(models) = &self.agent_model_events {
+            events.extend(models.try_iter().take(20));
+        }
+        events
+    }
+
+    fn agent_connection(&mut self, kind: AgentKind) -> figcraft_ui_egui::agent_panel::AgentConnection {
+        let Some(program) = crate::agent::program(kind) else {
+            return figcraft_ui_egui::agent_panel::AgentConnection {
+                installed: false,
+                authenticated: false,
+                detail: format!("{} não está instalado neste computador", kind.label()),
+            };
+        };
+        if kind == AgentKind::Codex {
+            let status = std::process::Command::new(program).args(["login", "status"]).output();
+            let authenticated = status.as_ref().is_ok_and(|output| output.status.success());
+            figcraft_ui_egui::agent_panel::AgentConnection {
+                installed: true,
+                authenticated,
+                detail: if authenticated { "ChatGPT conectado".into() } else { "Entre com sua conta ChatGPT".into() },
+            }
+        } else {
+            figcraft_ui_egui::agent_panel::AgentConnection {
+                installed: true,
+                authenticated: true,
+                detail: format!("{} disponível via ACP", kind.label()),
+            }
+        }
+    }
+
+    fn agent_login(&mut self) -> Result<(), String> {
+        let (send, receive) = std::sync::mpsc::channel();
+        crate::agent::login_codex(send)?;
+        self.agent_login_events = Some(receive);
+        Ok(())
+    }
+
+    fn agent_request_models(&mut self, kind: AgentKind) {
+        if kind == AgentKind::Codex {
+            let (send, receive) = std::sync::mpsc::channel();
+            if let Err(error) = crate::agent::request_codex_models(send) {
+                log::warn!("codex models: {error}");
+            } else {
+                self.agent_model_events = Some(receive);
+            }
+        }
     }
 
     fn agent_stop(&mut self) {

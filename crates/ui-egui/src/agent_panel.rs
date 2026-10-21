@@ -22,6 +22,7 @@ pub enum AgentKind {
     Codex,
     Claude,
     Gemini,
+    Kimi,
 }
 
 impl AgentKind {
@@ -30,13 +31,26 @@ impl AgentKind {
             Self::Codex => "Codex",
             Self::Claude => "Claude Code",
             Self::Gemini => "Gemini CLI",
+            Self::Kimi => "Kimi Code",
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentConnection {
+    pub installed: bool,
+    pub authenticated: bool,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug)]
 pub enum AgentEvent {
     Ready,
+    Session(String),
+    LoginUrl(String),
+    LoginComplete,
+    LoginError(String),
+    Models(Vec<(String, String)>),
     Text(String),
     Tool { id: String, title: String, status: String },
     Done(String),
@@ -85,6 +99,9 @@ pub struct ChatNodeRef {
 pub struct AgentPrompt {
     pub text: String,
     pub images: Vec<AgentImage>,
+    pub conversation: u64,
+    pub resume: Option<String>,
+    pub model: Option<String>,
 }
 
 pub struct AgentImage {
@@ -113,6 +130,8 @@ pub struct Conversation {
     pub title: String,
     pub agent: AgentKind,
     pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub remote_session: Option<String>,
 }
 
 #[derive(Default)]
@@ -137,6 +156,13 @@ pub struct AgentUi {
     pub runtime_document: Option<u64>,
     pub runtime_conversation: Option<u64>,
     pub permission: Option<AgentPermission>,
+    pub connection: Option<(AgentKind, AgentConnection)>,
+    pub login_pending: bool,
+    pub model: Option<String>,
+    pub models: Vec<(String, String)>,
+    pub model_menu_open: bool,
+    pub models_requested: Option<AgentKind>,
+    pub models_loading_until: Option<std::time::Instant>,
 }
 
 fn document_key(app: &FigApp) -> String {
@@ -195,6 +221,27 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
         let active = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id));
         match event {
             AgentEvent::Ready => {}
+            AgentEvent::Session(session) => {
+                if let Some(chat) = active {
+                    chat.remote_session = Some(session);
+                    completed = true;
+                }
+            }
+            AgentEvent::LoginUrl(url) => {
+                app.services.open_url(&url);
+            }
+            AgentEvent::LoginComplete => {
+                app.ui.agent.login_pending = false;
+                app.ui.agent.connection = None;
+            }
+            AgentEvent::LoginError(error) => {
+                app.ui.agent.login_pending = false;
+                app.toast(error);
+            }
+            AgentEvent::Models(models) => {
+                app.ui.agent.models = models;
+                app.ui.agent.models_loading_until = None;
+            }
             AgentEvent::Text(chunk) => {
                 if let Some(message) = active.and_then(|chat| chat.messages.last_mut())
                     && message.text.len() < 100_000
@@ -252,8 +299,8 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
     if completed {
         save_history(app);
     }
-    if app.ui.agent.busy {
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    if app.ui.agent.busy || app.ui.agent.login_pending || app.ui.agent.models_loading_until.is_some_and(|until| until > std::time::Instant::now()) {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 
@@ -375,7 +422,8 @@ fn send_prompt(app: &mut FigApp) {
     let key = document_key(app);
     let active = app.ui.agent.active.filter(|id| app.ui.agent.conversations.iter().any(|chat| chat.id == *id && chat.document == key));
     let id = active.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |time| time.as_nanos() as u64));
-    let prior = if app.ui.agent.runtime_conversation == Some(id) {
+    let resume = app.ui.agent.conversations.iter().find(|chat| chat.id == id).and_then(|chat| chat.remote_session.clone());
+    let prior = if app.ui.agent.runtime_conversation == Some(id) || (app.ui.agent.agent == AgentKind::Codex && resume.is_some()) {
         String::new()
     } else {
         app.ui.agent.conversations.iter().find(|chat| chat.id == id).map_or_else(String::new, |chat| {
@@ -401,7 +449,11 @@ fn send_prompt(app: &mut FigApp) {
         .map(|image| AgentImage { mime: image.mime.clone(), data: base64::engine::general_purpose::STANDARD.encode(&image.bytes) })
         .collect();
     let attached_images = app.ui.agent.images.iter().map(|image| image.name.clone()).collect();
-    match app.services.agent_send(app.ui.agent.agent, AgentPrompt { text: context, images }, document) {
+    match app.services.agent_send(
+        app.ui.agent.agent,
+        AgentPrompt { text: context, images, conversation: id, resume, model: app.ui.agent.model.clone() },
+        document,
+    ) {
         Ok(()) => {
             if active.is_none() {
                 app.ui.agent.conversations.push(Conversation {
@@ -417,6 +469,7 @@ fn send_prompt(app: &mut FigApp) {
                     },
                     agent: app.ui.agent.agent,
                     messages: Vec::new(),
+                    remote_session: None,
                 });
             }
             if let Some(chat) = app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id) {
@@ -527,6 +580,18 @@ fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -
 }
 
 pub fn show(app: &mut FigApp, ui: &mut Ui) {
+    if app.ui.agent.connection.as_ref().is_none_or(|(kind, _)| *kind != app.ui.agent.agent) {
+        let kind = app.ui.agent.agent;
+        app.ui.agent.connection = Some((kind, app.services.agent_connection(kind)));
+    }
+    if app.ui.agent.models_requested != Some(app.ui.agent.agent) {
+        app.ui.agent.models_requested = Some(app.ui.agent.agent);
+        if app.ui.agent.agent == AgentKind::Codex {
+            app.ui.agent.models_loading_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+            app.services.agent_request_models(app.ui.agent.agent);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
     let t = Tokens::get(ui.ctx());
     let full = ui.max_rect();
     let width = full.width();
@@ -567,7 +632,12 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             .map_or("Novo chat", |chat| chat.title.as_str())
     };
     ui.painter().text(pos2(title_x, full.min.y + 12.0), Align2::LEFT_TOP, title, semibold(13.0), text);
-    ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, "Local", regular(11.0), secondary);
+    let subtitle = if app.ui.agent.agent == AgentKind::Codex {
+        if app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated) { "Codex · ChatGPT" } else { "Codex · desconectado" }
+    } else {
+        app.ui.agent.agent.label()
+    };
+    ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, subtitle, regular(11.0), secondary);
     let more = Rect::from_min_size(pos2(full.max.x - 38.0, full.min.y + 12.0), vec2(24.0, 24.0));
     let more_resp = hit(ui, "agent_options", more, "Mais opções");
     if more_resp.hovered() || app.ui.agent.menu_open {
@@ -580,6 +650,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let badge = Rect::from_center_size(pos2(full.max.x - 55.5, full.min.y + 24.0), vec2(19.0, 18.0));
     ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
     ui.painter().text(badge.center(), Align2::CENTER_CENTER, "IA", semibold(11.0), secondary);
+    if hit(ui, "agent_model_badge", badge, "Selecionar modelo").clicked() {
+        app.ui.agent.model_menu_open = !app.ui.agent.model_menu_open;
+        app.ui.agent.menu_open = false;
+    }
 
     let middle_bottom = (full.max.y - 26.0 - composer_height).max(header_bottom);
     let middle = Rect::from_min_max(pos2(full.min.x, header_bottom), pos2(full.max.x, middle_bottom));
@@ -755,6 +829,36 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                 app.ui.agent.selected_suggestion = Some(index);
                 app.ui.agent.draft = prompts[index].to_string();
                 ui.memory_mut(|m| m.request_focus(Id::new("agent_prompt")));
+            }
+        }
+        let connection = app.ui.agent.connection.as_ref().map(|(_, state)| state.clone()).unwrap_or_default();
+        let setup = Rect::from_min_size(pos2(full.min.x + 16.0, cards_top + 160.0), vec2((width - 32.0).max(0.0), 54.0));
+        painter.rect(setup, CornerRadius::same(8), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+        let setup_title = if app.ui.agent.login_pending {
+            "Aguardando login no navegador…"
+        } else if !connection.installed {
+            "Instalar agente"
+        } else if !connection.authenticated {
+            "Conectar com ChatGPT"
+        } else {
+            if app.ui.agent.agent == AgentKind::Codex { "Agente conectado" } else { "Agente disponível" }
+        };
+        painter.text(pos2(setup.min.x + 12.0, setup.min.y + 9.0), Align2::LEFT_TOP, setup_title, semibold(12.0), text);
+        painter.text(pos2(setup.min.x + 12.0, setup.min.y + 29.0), Align2::LEFT_TOP, &connection.detail, regular(11.0), secondary);
+        if hit(ui, "agent_setup", setup, setup_title).clicked() && !app.ui.agent.login_pending {
+            if !connection.installed {
+                let url = match app.ui.agent.agent {
+                    AgentKind::Codex => "https://developers.openai.com/codex/cli",
+                    AgentKind::Claude => "https://github.com/zed-industries/claude-agent-acp",
+                    AgentKind::Gemini => "https://github.com/google-gemini/gemini-cli",
+                    AgentKind::Kimi => "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/ides",
+                };
+                app.services.open_url(url);
+            } else if !connection.authenticated && app.ui.agent.agent == AgentKind::Codex {
+                match app.services.agent_login() {
+                    Ok(()) => app.ui.agent.login_pending = true,
+                    Err(error) => app.toast(error),
+                }
             }
         }
     }
@@ -933,14 +1037,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
 
     if app.ui.agent.menu_open {
-        let menu = Rect::from_min_size(pos2(full.max.x - 180.0, full.min.y + 42.0), vec2(166.0, 120.0));
+        let menu = Rect::from_min_size(pos2(full.max.x - 180.0, full.min.y + 42.0), vec2(166.0, 180.0));
         ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
         let new = Rect::from_min_size(menu.min, vec2(menu.width(), 30.0));
         if hit(ui, "agent_menu_new_chat", new, "Novo chat").clicked() {
             reset_chat(app);
         }
         ui.painter().text(pos2(new.min.x + 12.0, new.center().y), Align2::LEFT_CENTER, "Novo chat", regular(12.0), text);
-        for (index, kind) in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini].into_iter().enumerate() {
+        for (index, kind) in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi].into_iter().enumerate() {
             let row = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 30.0 + index as f32 * 30.0), vec2(menu.width(), 30.0));
             if hit(
                 ui,
@@ -948,6 +1052,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                     AgentKind::Codex => "agent_codex",
                     AgentKind::Claude => "agent_claude",
                     AgentKind::Gemini => "agent_gemini",
+                    AgentKind::Kimi => "agent_kimi",
                 },
                 row,
                 kind.label(),
@@ -956,6 +1061,11 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             {
                 reset_chat(app);
                 app.ui.agent.agent = kind;
+                app.ui.agent.connection = None;
+                app.ui.agent.model = None;
+                app.ui.agent.models.clear();
+                app.ui.agent.models_requested = None;
+                app.ui.agent.models_loading_until = None;
                 app.ui.agent.menu_open = false;
             }
             ui.painter().text(
@@ -964,6 +1074,60 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                 kind.label(),
                 regular(12.0),
                 if app.ui.agent.agent == kind { BLUE } else { text },
+            );
+        }
+        let setup = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 150.0), vec2(menu.width(), 30.0));
+        let setup_label = if app.ui.agent.agent == AgentKind::Codex { "Conexão ChatGPT" } else { "Configurar agente" };
+        if hit(ui, "agent_menu_setup", setup, setup_label).clicked() {
+            app.ui.agent.menu_open = false;
+            let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
+            app.ui.agent.connection = None;
+            if app.ui.agent.agent == AgentKind::Codex && !connected && !app.ui.agent.login_pending {
+                match app.services.agent_login() {
+                    Ok(()) => app.ui.agent.login_pending = true,
+                    Err(error) => app.toast(error),
+                }
+            } else if app.ui.agent.agent != AgentKind::Codex {
+                let url = match app.ui.agent.agent {
+                    AgentKind::Codex => "https://developers.openai.com/codex/cli",
+                    AgentKind::Claude => "https://github.com/zed-industries/claude-agent-acp",
+                    AgentKind::Gemini => "https://github.com/google-gemini/gemini-cli",
+                    AgentKind::Kimi => "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/ides",
+                };
+                app.services.open_url(url);
+            }
+        }
+        ui.painter().text(pos2(setup.min.x + 12.0, setup.center().y), Align2::LEFT_CENTER, setup_label, regular(12.0), text);
+    }
+    if app.ui.agent.model_menu_open {
+        let items = app.ui.agent.models.clone();
+        let rows = (items.len() + 1).min(9);
+        let menu = Rect::from_min_size(pos2(full.max.x - 194.0, full.min.y + 42.0), vec2(180.0, rows as f32 * 30.0));
+        ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+        let default_row = Rect::from_min_size(menu.min, vec2(menu.width(), 30.0));
+        if hit(ui, "agent_model_default", default_row, "Modelo padrão").clicked() {
+            app.ui.agent.model = None;
+            app.ui.agent.model_menu_open = false;
+        }
+        ui.painter().text(
+            pos2(default_row.min.x + 12.0, default_row.center().y),
+            Align2::LEFT_CENTER,
+            "Modelo padrão",
+            regular(12.0),
+            if app.ui.agent.model.is_none() { BLUE } else { text },
+        );
+        for (index, (id, label)) in items.iter().take(8).enumerate() {
+            let row = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 30.0 * (index + 1) as f32), vec2(menu.width(), 30.0));
+            if ui.interact(row, ui.id().with(("agent_model", index)), Sense::click()).on_hover_text(label).clicked() {
+                app.ui.agent.model = Some(id.clone());
+                app.ui.agent.model_menu_open = false;
+            }
+            ui.painter().text(
+                pos2(row.min.x + 12.0, row.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                regular(12.0),
+                if app.ui.agent.model.as_deref() == Some(id) { BLUE } else { text },
             );
         }
     }
