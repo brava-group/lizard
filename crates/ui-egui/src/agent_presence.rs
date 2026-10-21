@@ -21,14 +21,17 @@ pub fn draw(app: &mut FigApp, painter: &Painter, ctx: &egui::Context) {
     let target = presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
         let x = bounds.x0 + bounds.width() * 0.35;
         let y = bounds.y0 + bounds.height() * 0.35;
-        app.to_screen(x, y)
+        (x, y)
     });
-    let target = target.unwrap_or_else(|| app.canvas.rect.center());
     let reduce_motion = app.reduce_motion();
-    let old = presence.shown.map(|(x, y)| pos2(x, y)).unwrap_or(target);
-    let tip = if reduce_motion { target } else { old + (target - old) * 0.22 };
-    let moving = tip.distance(target) > 0.5;
-    app.ui.agent.presence.shown = Some((tip.x, tip.y));
+    // Smooth only in page space. A pan or zoom then reprojects the agent with its frame in
+    // the same UI frame, without the cursor trailing behind the camera.
+    let shown = target.map(|target| {
+        let old = presence.shown.unwrap_or(target);
+        if reduce_motion { target } else { (old.0 + (target.0 - old.0) * 0.22, old.1 + (target.1 - old.1) * 0.22) }
+    });
+    let moving = shown.zip(target).is_some_and(|(shown, target)| (shown.0 - target.0).abs() + (shown.1 - target.1).abs() > 0.5);
+    app.ui.agent.presence.shown = shown;
     app.ui
         .agent
         .presence
@@ -53,29 +56,83 @@ pub fn draw(app: &mut FigApp, painter: &Painter, ctx: &egui::Context) {
             }
         }
     }
-    if app.ui.agent.presence.generating
-        && active
-        && let Some(id) = app.ui.agent.presence.target
-        && let Some(bounds) = app.session.ds().ok().and_then(|ds| ds.doc.world_bounds(id))
-    {
+    app.ui.agent.presence.shimmers.retain(|shimmer| {
+        now.saturating_duration_since(shimmer.started) < if shimmer.ongoing { Duration::from_secs(20) } else { Duration::from_secs(2) }
+    });
+    for shimmer in &app.ui.agent.presence.shimmers {
+        let Some(bounds) = app.session.ds().ok().and_then(|ds| ds.doc.world_bounds(shimmer.id)) else { continue };
         let rect = Rect::from_two_pos(app.to_screen(bounds.x0, bounds.y0), app.to_screen(bounds.x1, bounds.y1));
         if rect.is_positive() && rect.intersects(app.canvas.rect) {
-            let glow = if reduce_motion { 0.5 } else { 0.35 + 0.25 * (ctx.input(|i| i.time) as f32 * 5.0).sin().abs() };
-            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, BLUE.gamma_multiply(glow)), StrokeKind::Outside);
+            let elapsed = now.saturating_duration_since(shimmer.started).as_secs_f32();
+            let fade = if shimmer.ongoing { 1.0 } else { (1.0 - elapsed / 2.0).clamp(0.0, 1.0) };
+            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, BLUE.gamma_multiply(0.65 * fade)), StrokeKind::Outside);
+            if !reduce_motion {
+                let visible = rect.intersect(app.canvas.rect);
+                let clipped = painter.with_clip_rect(visible);
+                let band = visible.width().clamp(36.0, 180.0) * 0.4;
+                let progress = (elapsed / 1.1).fract();
+                let center = visible.left() - band + (visible.width() + 2.0 * band) * progress;
+                for strip in 0..9 {
+                    let distance = (strip as f32 - 4.0).abs() / 4.0;
+                    let x = center + (strip as f32 - 4.5) * band / 9.0;
+                    let stripe = Rect::from_min_size(pos2(x, visible.top()), vec2(band / 9.0 + 1.0, visible.height()));
+                    clipped.rect_filled(stripe, CornerRadius::ZERO, BLUE.gamma_multiply((1.0 - distance) * 0.18 * fade));
+                }
+            }
         }
     }
-    if fade > 0.0 && app.canvas.rect.contains(tip) {
-        crate::live::pointer(painter, tip, BLUE.gamma_multiply(fade));
-        let name = app
-            .ui
-            .agent
-            .runtime_conversation
-            .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
-            .map_or("Agente", |chat| chat.agent.label());
-        crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, BLUE.gamma_multiply(fade));
+    if let Some((x, y)) = shown.filter(|_| fade > 0.0) {
+        let tip = app.to_screen(x, y);
+        if app.canvas.rect.contains(tip) {
+            crate::live::pointer(painter, tip, BLUE.gamma_multiply(fade));
+            let name = app
+                .ui
+                .agent
+                .runtime_conversation
+                .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
+                .map_or("Agente", |chat| chat.agent.label());
+            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, BLUE.gamma_multiply(fade));
+        }
     }
-    if moving || (active && app.ui.agent.presence.generating && !reduce_motion) || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && !active)
-    {
+    if moving || !app.ui.agent.presence.shimmers.is_empty() || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && !active) {
         ctx.request_repaint_after(Duration::from_millis(if reduce_motion { 100 } else { 33 }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use figcraft_doc::NodeId;
+    use figcraft_engine::Session;
+    use serde_json::json;
+
+    use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn agent_cursor_uses_page_coordinates_through_pan_and_has_no_center_fallback() {
+        let mut session = Session::new();
+        let frame =
+            NodeId(session.execute("node.create", &json!({"type":"frame","x":140,"y":90,"width":320,"height":240})).unwrap()["id"].as_u64().unwrap());
+        let mut ui = Ui::new(session);
+        let uid = ui.app.session.ds().unwrap().uid;
+        ui.app.ui.agent.busy = true;
+        ui.app.ui.agent.runtime_conversation = Some(7);
+        ui.app.ui.agent.presence.document = Some(uid);
+        ui.app.ui.agent.presence.conversation = Some(7);
+        ui.app.ui.agent.presence.active = true;
+        ui.app.ui.agent.presence.target = Some(frame);
+        ui.frame(vec![]);
+        let page = ui.app.ui.agent.presence.shown.unwrap();
+        assert_eq!(page, (252.0, 174.0));
+        let before = ui.app.to_screen(page.0, page.1);
+
+        ui.app.session.ds_mut().unwrap().view.cx += 100.0;
+        ui.frame(vec![]);
+        assert_eq!(ui.app.ui.agent.presence.shown, Some(page));
+        let after = ui.app.to_screen(page.0, page.1);
+        assert!(after.x < before.x - 90.0, "the marker follows the frame immediately when the camera pans");
+
+        ui.app.ui.agent.presence.target = None;
+        ui.frame(vec![]);
+        assert!(ui.app.ui.agent.presence.shown.is_none(), "without a target there is no marker at canvas center");
     }
 }

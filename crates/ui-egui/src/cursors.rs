@@ -3,9 +3,9 @@
 //! Its SVG files contain embedded PNG images, so the corresponding PNG payloads are shown
 //! directly. This preserves the supplied artwork without tracing or redrawing it.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use egui::{Color32, CursorIcon, Pos2, Rect, TextureHandle, TextureOptions, pos2, vec2};
+use egui::{CursorIcon, CustomCursorImage, vec2};
 use figcraft_engine::tools::{Cursor, PenCursor};
 
 /// The engine cursor's visual state.
@@ -34,10 +34,10 @@ pub enum Shown {
     Drawn(Glyph),
 }
 
-/// Cursor textures belong to the canvas's egui context and are decoded only on first use.
+/// Decoded cursor bitmaps are shared across frames so winit can cache each OS cursor.
 #[derive(Default)]
 pub struct CursorTextures {
-    loaded: HashMap<(Asset, u32, u8), TextureHandle>,
+    loaded: HashMap<(Asset, u32, u8), CustomCursorImage>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -65,6 +65,7 @@ enum Asset {
 }
 
 impl Asset {
+    #[cfg(test)]
     fn name(self) -> &'static str {
         match self {
             Self::Move => "move",
@@ -128,8 +129,10 @@ impl Asset {
 }
 
 impl CursorTextures {
-    fn get(&mut self, ctx: &egui::Context, asset: Asset, quarter_turns: u8) -> Option<&TextureHandle> {
-        let pixels = (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32;
+    fn get(&mut self, ctx: &egui::Context, asset: Asset, quarter_turns: u8) -> Option<&CustomCursorImage> {
+        // winit's macOS cursor creates an NSImage whose logical size equals this pixel size.
+        // Scaling by Retina density there would make the pointer physically twice as large.
+        let pixels = if cfg!(target_os = "macos") { 32 } else { (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32 };
         let quarter_turns = if asset == Asset::Rotate { quarter_turns % 4 } else { 0 };
         let key = (asset, pixels, quarter_turns);
         if let std::collections::hash_map::Entry::Vacant(entry) = self.loaded.entry(key) {
@@ -143,10 +146,14 @@ impl CursorTextures {
                 3 => image::imageops::rotate270(&rgba),
                 _ => rgba,
             };
-            let side = usize::try_from(pixels).ok()?;
-            let image = egui::ColorImage::from_rgba_unmultiplied([side, side], rgba.as_raw());
-            let texture = ctx.load_texture(format!("canvas-cursor-{}-{pixels}-{quarter_turns}", asset.name()), image, TextureOptions::LINEAR);
-            entry.insert(texture);
+            let scale = pixels as f32 / 32.0;
+            let hotspot = asset.hotspot() * scale;
+            let side = u16::try_from(pixels).ok()?;
+            entry.insert(CustomCursorImage {
+                rgba: Arc::from(rgba.into_raw()),
+                size: [side, side],
+                hotspot: [hotspot.x.round() as u16, hotspot.y.round() as u16],
+            });
         }
         self.loaded.get(&key)
     }
@@ -240,7 +247,17 @@ impl Shown {
     pub fn icon(self) -> CursorIcon {
         match self {
             Self::System(i) => i,
-            Self::Drawn(_) => CursorIcon::None,
+            Self::Drawn(glyph) => match glyph {
+                Glyph::Arrow | Glyph::Move => CursorIcon::Default,
+                Glyph::Crosshair | Glyph::Pen(_) | Glyph::Pencil | Glyph::PaintBucket | Glyph::Rotate(_) | Glyph::Eyedropper => CursorIcon::Crosshair,
+                Glyph::Resize(degrees) => resize_icon(f64::from(degrees)),
+                Glyph::Hand(false) => CursorIcon::Grab,
+                Glyph::Hand(true) => CursorIcon::Grabbing,
+                Glyph::Copy => CursorIcon::Copy,
+                Glyph::Zoom(false) => CursorIcon::ZoomIn,
+                Glyph::Zoom(true) => CursorIcon::ZoomOut,
+                Glyph::Comment | Glyph::Pointer => CursorIcon::PointingHand,
+            },
         }
     }
 
@@ -284,18 +301,20 @@ impl Shown {
         }
     }
 
-    /// Paint the supplied 32 × 32 cursor image over the canvas at the pointer.
-    pub fn show(self, ctx: &egui::Context, at: Pos2, textures: &mut CursorTextures) {
+    /// Use the same supplied artwork as a native OS cursor, independent of canvas repaint speed.
+    pub fn show(self, ctx: &egui::Context, textures: &mut CursorTextures) {
         ctx.set_cursor_icon(self.icon());
-        let Self::Drawn(glyph) = self else { return };
+        let Self::Drawn(glyph) = self else {
+            return;
+        };
         let asset = glyph.asset();
-        let Some(texture) = textures.get(ctx, asset, glyph.quarter_turns()) else {
+        let Some(image) = textures.get(ctx, asset, glyph.quarter_turns()) else {
             ctx.set_cursor_icon(CursorIcon::Default);
             return;
         };
-        let rect = Rect::from_min_size(at - asset.hotspot(), vec2(32.0, 32.0));
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas_cursor")));
-        painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        // Native winit uses cursor_image; web and integrations without bitmap support
+        // retain a usable system cursor instead of hiding the pointer.
+        ctx.set_cursor_image(Some(image.clone()));
     }
 }
 

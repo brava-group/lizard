@@ -145,14 +145,23 @@ pub struct AgentPulse {
     pub inspection: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct AgentShimmer {
+    pub id: NodeId,
+    pub started: std::time::Instant,
+    pub ongoing: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AgentPresence {
     pub document: Option<u64>,
     pub conversation: Option<u64>,
     pub target: Option<NodeId>,
-    pub shown: Option<(f32, f32)>,
+    /// Smoothed cursor position in page coordinates; camera changes must not move it off target.
+    pub shown: Option<(f64, f64)>,
     pub updated: Option<std::time::Instant>,
     pub pulses: Vec<AgentPulse>,
+    pub shimmers: Vec<AgentShimmer>,
     pub active: bool,
     pub generating: bool,
 }
@@ -628,6 +637,7 @@ fn send_prompt(app: &mut FigApp) {
         .map(|image| AgentImage { mime: image.mime.clone(), data: base64::engine::general_purpose::STANDARD.encode(&image.bytes) })
         .collect();
     let attached_images = app.ui.agent.images.iter().map(|image| image.name.clone()).collect();
+    let first_selected_node = selected_nodes.first().map(|node| node.id);
     let model_label = app
         .ui
         .agent
@@ -715,6 +725,11 @@ fn send_prompt(app: &mut FigApp) {
             app.ui.agent.busy = true;
             app.ui.agent.presence.document = Some(document);
             app.ui.agent.presence.conversation = Some(id);
+            app.ui.agent.presence.target = first_selected_node;
+            app.ui.agent.presence.shown = None;
+            app.ui.agent.presence.pulses.clear();
+            app.ui.agent.presence.shimmers.clear();
+            app.ui.agent.presence.generating = false;
             app.ui.agent.presence.active = true;
             app.ui.agent.presence.updated = Some(std::time::Instant::now());
             save_history(app);
@@ -814,6 +829,10 @@ fn begin_next_variant(app: &mut FigApp) {
     app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
     app.ui.agent.turn_started = Some(std::time::Instant::now());
     app.ui.agent.presence.active = true;
+    app.ui.agent.presence.target = selected_nodes.first().map(|node| node.id);
+    app.ui.agent.presence.shown = None;
+    app.ui.agent.presence.shimmers.clear();
+    app.ui.agent.presence.generating = false;
 }
 
 impl AgentUi {
@@ -1909,6 +1928,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(app.ui.agent.conversations[0].messages[1].previews.len(), 1);
+    }
+
+    #[test]
+    fn agent_frame_edit_starts_a_transient_shimmer() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        let frame =
+            app.session.execute("node.create", &json!({"type":"frame", "x":140, "y":90, "width":320, "height":240})).unwrap()["id"].as_u64().unwrap();
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Ajuste o frame".into();
+        send_prompt(&mut app);
+        let uid = app.session.ds().unwrap().uid;
+        let ctx = egui::Context::default();
+        crate::control::handle(&mut app, &ctx, "agent.activity", &json!({"__agent_document":uid,"phase":"start","tool":"get_node","ids":[frame]}))
+            .unwrap();
+        assert!(app.ui.agent.presence.shimmers[0].ongoing);
+        crate::control::handle(&mut app, &ctx, "agent.activity", &json!({"__agent_document":uid,"phase":"done","tool":"create_node","ids":[frame]}))
+            .unwrap();
+        assert_eq!(app.ui.agent.presence.target, Some(NodeId(frame)));
+        assert_eq!(app.ui.agent.presence.shimmers.len(), 1);
+        assert_eq!(app.ui.agent.presence.shimmers[0].id, NodeId(frame));
+        assert!(!app.ui.agent.presence.shimmers[0].ongoing, "the shimmer finishes after the tool completes");
     }
 
     #[test]

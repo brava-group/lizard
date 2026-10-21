@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (merged upstream 0.7.0 updates; retained wide-view zoom-out coverage; bounded frame drag previews at high zoom and large window sizes; native composited drags for eligible topmost frames; measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (measured ultrawide Retina canvas and idle frame drag preparation; native canvas cursors and page-attached agent presence; merged upstream 0.7.0 updates; retained wide-view zoom-out coverage; bounded frame drag previews at high zoom and large window sizes; native composited drags for eligible topmost frames; measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -55,9 +55,19 @@ and a direct comparison with Figma were not measured. At 800% zoom the original 
 preparation cost about 357 ms for a 248-node BetterDeck wrapper. A bounded preview plus a sharp
 visible tile, skipping the background render when the frame is the only page child, prepared in
 about 40 ms in the same release setup. The former 8-million-pixel canvas cutoff is removed;
-with other page siblings a bounded background preview is rendered. An ultra-wide physical window
-was not available for direct cursor-to-display latency measurement. The vector render returns
+with other page siblings a bounded background preview is rendered. The vector render returns
 after release.
+
+On the owner's 5120×2160, 75 Hz ultrawide (2× Retina), expanding a 1440×900 window to
+2560×1050 points increased the visible canvas from about 2.49 million to 7.45 million device
+pixels. The BetterDeck full canvas texture grew from about 3.79 million to 8.99 million pixels;
+one settled wide full render reached the UI in 77–114 ms. A selected top-level BetterDeck frame
+prepared its composited drag layer in 35–48 ms in the `dev` build. The layer now prepares while
+the selection is idle: an inspected drag entered composited mode on its first movement instead of
+waiting for preparation during the gesture. Native canvas cursors now move independently of
+egui's frame rate. These are control-channel and render measurements, not physical
+cursor-to-display latency. The brief stretched window during macOS titlebar expansion precedes
+FigCraft's re-layout; the wide full render and GPU presentation remain measurable limits.
 
 A second synthetic dashboard benchmark (142 nested frame, shape and text nodes) at 2880×1800
 rendered 10 alternating large moves with a median of 16.9–18.6 ms for vector rendering plus
@@ -96,6 +106,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Tested a real 5120×2160 ultrawide at 2× Retina with BetterDeck. The wide canvas requests about 3× the visible pixels of the initial window and a full texture of 8.99 million pixels. Eligible frame drag layers now prepare while selected and idle; the first inspected move used composition. Canvas tool cursors use native OS images rather than a painted overlay, and agent presence follows page coordinates with frame shimmer during tool work. GPU canvas work and estimates remain open. |
 | 2026-10-17 | minor | Zoom-out retains the broadest refined canvas texture as a one-view fallback and paints it under the current view only when new area is exposed. With a 2,880×1,740 desktop window, the 248-node BetterDeck scene's old synchronous preview took 4.7–6.4 ms at 800%→100%→25%, with refinement 17–38 ms. On a synthetic dark page with 1,005 nodes at four corners, the old 25% preview took 1.2–19.2 ms over 12 alternating runs; after warming the retained view, 12 runs each at 100% and 25% reported zero uncovered pixels in the first inspected frame and no synchronous preview. The inspected UI frames took 0.17–0.45 ms. Control inspection does not capture every presented frame or display latency; GPU rendering remains open. |
 | 2026-10-17 | minor | High zoom frame dragging now uses a bounded moving preview plus a sharp visible tile and remains eligible when the canvas texture exceeds 8 million pixels. Pages with only the moving frame skip a background render; pages with siblings use a bounded background preview. On the 248-node BetterDeck wrapper at 800%, measured preparation fell from about 357 ms to about 40 ms. Ultra-wide screen presentation was not measured; estimates remain. |
 | 2026-10-17 | minor | Native drags of eligible topmost frames composite a prepared frame layer over a background without that frame, following the pointer while the vector document changes. The 248-node BetterDeck release run prepared in 33 ms and 10 rapid control moves took about 12 ms median per request; pixel equivalence and drag/refinement tests pass. Unsupported frames and browser builds keep the existing render path; GPU canvas work and estimates remain. |

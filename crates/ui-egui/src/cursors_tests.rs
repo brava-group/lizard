@@ -48,8 +48,8 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
     for (cursor, shown, name) in rows {
         assert_eq!(of(cursor), shown, "{cursor:?}");
         assert_eq!(shown.name(), name, "{cursor:?}");
-        // A drawn cursor hides the system's; a system cursor is never "other".
-        assert_eq!(shown.icon() == CursorIcon::None, matches!(shown, Drawn(_)), "{cursor:?}");
+        // Native desktop uses the supplied bitmap; other integrations retain a usable icon.
+        assert_ne!(shown.icon(), CursorIcon::None, "{cursor:?}");
         assert_ne!(name, "other");
     }
     // Every tool's own cursor is in the table (none falls through to a cursor without a name).
@@ -104,7 +104,7 @@ fn panning_and_the_zoom_tool_come_before_the_tools_cursor() {
 
 /// A frame with the pointer at `p` and `keys` held; the cursor the window asked for and the
 /// canvas's own.
-fn at(u: &mut Ui, p: Pos2, keys: &[Key], modifiers: Modifiers) -> (CursorIcon, Option<String>) {
+fn at(u: &mut Ui, p: Pos2, keys: &[Key], modifiers: Modifiers) -> (CursorIcon, Option<String>, bool) {
     let mut events = vec![Event::PointerMoved(p)];
     events.extend(keys.iter().map(|key| Event::Key { key: *key, physical_key: None, pressed: true, repeat: false, modifiers }));
     u.frame_with(events, modifiers);
@@ -114,7 +114,7 @@ fn at(u: &mut Ui, p: Pos2, keys: &[Key], modifiers: Modifiers) -> (CursorIcon, O
     let released: Vec<Event> =
         keys.iter().map(|key| Event::Key { key: *key, physical_key: None, pressed: false, repeat: false, modifiers }).collect();
     u.frame_with(released, modifiers);
-    (out.platform_output.cursor_icon, shown)
+    (out.platform_output.cursor_icon, shown, out.platform_output.cursor_image.is_some())
 }
 
 #[test]
@@ -132,27 +132,28 @@ fn the_window_asks_for_the_cursor_of_the_tool_under_the_pointer() {
     // (tool, where, keys held, modifiers) → (system cursor, the canvas's cursor by name)
     type Row<'a> = (&'a str, Pos2, &'a [Key], Modifiers, CursorIcon, &'a str);
     let rows: Vec<Row> = vec![
-        ("move", empty, &[], no, CursorIcon::None, "default"),
-        ("move", edge, &[], no, CursorIcon::None, "ew-resize"),
-        ("move", on, &[], alt, CursorIcon::None, "copy"),
-        ("hand", empty, &[], no, CursorIcon::None, "grab"),
-        ("rectangle", empty, &[], no, CursorIcon::None, "crosshair"),
-        ("frame", on, &[], no, CursorIcon::None, "crosshair"),
-        ("slice", empty, &[], no, CursorIcon::None, "crosshair"),
-        ("text", empty, &[], no, CursorIcon::None, "crosshair"),
-        ("pen", empty, &[], no, CursorIcon::None, "pen"),
-        ("pencil", empty, &[], no, CursorIcon::None, "pencil"),
-        ("shapeBuilder", empty, &[], no, CursorIcon::None, "paint-bucket"),
-        ("comment", empty, &[], no, CursorIcon::None, "comment"),
-        ("move", empty, &[Key::Space], no, CursorIcon::None, "grab"),
-        ("rectangle", empty, &[Key::Space], no, CursorIcon::None, "grab"),
-        ("move", empty, &[Key::Z], no, CursorIcon::None, "zoom-in"),
-        ("move", empty, &[Key::Z], alt, CursorIcon::None, "zoom-out"),
+        ("move", empty, &[], no, CursorIcon::Default, "default"),
+        ("move", edge, &[], no, CursorIcon::ResizeHorizontal, "ew-resize"),
+        ("move", on, &[], alt, CursorIcon::Copy, "copy"),
+        ("hand", empty, &[], no, CursorIcon::Grab, "grab"),
+        ("rectangle", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
+        ("frame", on, &[], no, CursorIcon::Crosshair, "crosshair"),
+        ("slice", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
+        ("text", empty, &[], no, CursorIcon::Crosshair, "crosshair"),
+        ("pen", empty, &[], no, CursorIcon::Crosshair, "pen"),
+        ("pencil", empty, &[], no, CursorIcon::Crosshair, "pencil"),
+        ("shapeBuilder", empty, &[], no, CursorIcon::Crosshair, "paint-bucket"),
+        ("comment", empty, &[], no, CursorIcon::PointingHand, "comment"),
+        ("move", empty, &[Key::Space], no, CursorIcon::Grab, "grab"),
+        ("rectangle", empty, &[Key::Space], no, CursorIcon::Grab, "grab"),
+        ("move", empty, &[Key::Z], no, CursorIcon::ZoomIn, "zoom-in"),
+        ("move", empty, &[Key::Z], alt, CursorIcon::ZoomOut, "zoom-out"),
     ];
     for (tool, p, keys, mods, icon, name) in rows {
         u.app.run("tool.set", json!({"tool": tool}));
-        let (got, shown) = at(&mut u, p, keys, mods);
+        let (got, shown, native_image) = at(&mut u, p, keys, mods);
         assert_eq!((got, shown.as_deref()), (icon, Some(name)), "{tool} with {keys:?} {mods:?}");
+        assert!(native_image, "{tool} should send its supplied cursor bitmap to the native window");
     }
     // `ui.inspect` reports it while the pointer is over the canvas, and nothing over a panel.
     u.app.run("edit.pickColor", json!({}));
@@ -178,7 +179,8 @@ fn a_ruler_guide_keeps_its_own_cursor_under_the_tools() {
     assert!(u.app.canvas.cursor.is_none(), "the tool's cursor stays out of it");
     u.frame(vec![Event::PointerMoved(away)]);
     let out = u.frame_output(vec![Event::PointerMoved(away)]);
-    assert_eq!(out.platform_output.cursor_icon, CursorIcon::None);
+    assert_eq!(out.platform_output.cursor_icon, CursorIcon::Default);
+    assert!(out.platform_output.cursor_image.is_some());
     assert_eq!(u.app.canvas.cursor.map(Shown::name).as_deref(), Some("default"));
 }
 

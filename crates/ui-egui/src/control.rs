@@ -285,17 +285,38 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
                     .map(|id| id.0)
                     .collect();
             }
+            let shimmer_ids: Vec<_> = if matches!(tool, "create_node" | "set_properties" | "get_node" | "inspect_document" | "screenshot")
+                && matches!(phase, "start" | "done")
+            {
+                ids.iter()
+                    .copied()
+                    .filter(|id| {
+                        app.session.ds().ok().and_then(|ds| ds.doc.node(figcraft_doc::NodeId(*id))).is_some_and(|node| node.kind.is_frame_like())
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let now = std::time::Instant::now();
             let presence = &mut app.ui.agent.presence;
             presence.document = Some(document);
             presence.conversation = app.ui.agent.runtime_conversation;
             presence.updated = Some(now);
             presence.active = true;
-            presence.generating = phase == "start" && tool == "create_node";
+            presence.generating = phase == "start" && matches!(tool, "create_node" | "set_properties");
             if let Some(id) = ids.first().copied() {
                 presence.target = Some(figcraft_doc::NodeId(id));
-            } else if presence.generating {
+            } else if phase == "start" {
                 presence.target = None;
+                presence.shown = None;
+            }
+            for id in shimmer_ids {
+                let id = figcraft_doc::NodeId(id);
+                presence.shimmers.retain(|shimmer| shimmer.id != id);
+                if presence.shimmers.len() >= 8 {
+                    presence.shimmers.remove(0);
+                }
+                presence.shimmers.push(crate::agent_panel::AgentShimmer { id, started: now, ongoing: phase == "start" });
             }
             if phase == "done" {
                 for id in ids {

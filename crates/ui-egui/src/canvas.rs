@@ -407,6 +407,19 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn drag_visual_matches_idle_document(app: &FigApp) -> bool {
+    let Some(visual) = app.canvas.drag_visual.as_ref() else { return false };
+    let Ok(ds) = app.session.ds() else { return false };
+    visual.uid == ds.uid
+        && visual.page == ds.page
+        && ds.selection.as_slice() == [visual.root]
+        && Arc::ptr_eq(&visual.source, &ds.doc)
+        && ds.view.zoom.to_bits() == visual.zoom.to_bits()
+        && (ds.view.cx, ds.view.cy) == visual.center
+        && app.canvas.rect.size() == visual.canvas_size
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
     if let Some(rx) = visual.pending.as_ref() {
@@ -474,7 +487,7 @@ fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
 
 pub(crate) fn drag_mode(app: &FigApp) -> &'static str {
     #[cfg(not(target_arch = "wasm32"))]
-    if drag_visual_delta(app).is_some() {
+    if app.canvas.dragging && drag_visual_delta(app).is_some() {
         return "composited";
     }
     #[cfg(target_arch = "wasm32")]
@@ -529,6 +542,11 @@ fn drag_visual_delta(app: &FigApp) -> Option<(f64, f64)> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn paint_drag_visual(app: &FigApp, painter: &egui::Painter) -> bool {
+    // An idle prepared layer must not replace the normal canvas image. After mouse-up, keep the
+    // moved layer visible until the renderer catches up with the committed document.
+    if !app.canvas.dragging && drag_visual_matches_idle_document(app) {
+        return false;
+    }
     let Some((dx, dy)) = drag_visual_delta(app) else { return false };
     let Some(visual) = app.canvas.drag_visual.as_ref() else { return false };
     let Some((base, moving)) = visual.ready.as_ref() else { return false };
@@ -823,7 +841,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     {
         poll_drag_visual(app, &ctx);
         if !app.canvas.dragging && app.session.ds().ok().is_some_and(|ds| app.canvas.texture_current(ds)) {
-            app.canvas.drag_visual = None;
+            if !drag_visual_matches_idle_document(app) {
+                app.canvas.drag_visual = None;
+            }
+            // Render the selected top-level frame before its first pointer move. On large Retina
+            // viewports this avoids a noticeable blank interval while the drag layer is built.
+            if app.canvas.drag_visual.is_none() {
+                start_drag_visual(app, &ctx);
+            }
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -909,10 +934,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     crate::dev_mode::focus_bar(app, &ctx, rect);
     // The cursor: the tool's, unless something on the canvas with its own has the pointer.
     app.canvas.cursor = None;
-    if let (true, Some(at)) = (own_cursor && resp.hovered(), ctx.input(|i| i.pointer.hover_pos())) {
+    if own_cursor && resp.hovered() && ctx.input(|i| i.pointer.hover_pos()).is_some() {
         let panning = app.canvas.space_pan || app.canvas.middle_pan.is_some();
         let shown = crate::cursors::on_canvas(panning, ctx.input(|i| i.pointer.any_down()), app.canvas.zoom_tool, app.session.tool.overlay.cursor);
-        shown.show(&ctx, at, &mut app.canvas.cursor_textures);
+        shown.show(&ctx, &mut app.canvas.cursor_textures);
         app.canvas.cursor = Some(shown);
     }
 }
@@ -1418,7 +1443,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         if k != PointerKind::Move || app.canvas.last_drag_input != Some(input) {
             send(app, k, pos, &mods);
             #[cfg(not(target_arch = "wasm32"))]
-            if k == PointerKind::Down {
+            if k == PointerKind::Down && !drag_visual_matches_idle_document(app) {
                 start_drag_visual(app, &ctx);
             }
         }
