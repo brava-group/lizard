@@ -21,7 +21,11 @@ Codex uses the installed Codex CLI's [app-server](https://developers.openai.com/
 and its ChatGPT subscription login. The Agent welcome screen shows the connection state;
 **Conectar com ChatGPT** starts browser sign-in when needed. The model selector in the composer
 footer lists models returned by Codex, plus its default model. The adjacent lightning control
-selects one to six agents, and the grid control selects one to six variants. Multiple agents use
+selects one to six agents, and the grid control selects one to six variants. The composer uses
+24 px footer controls with brief hover fades; the model field uses the property-panel field
+colours and the model list uses its popup component. It opens above the field and closes on an
+outside click or Escape.
+Reduced-motion preferences make those hover changes immediate. Multiple agents use
 separate local sessions and document-scoped MCP bridges; their streamed messages and screenshot
 previews appear under separate agent labels. Side-by-side mode asks each agent to create an
 independent root frame, while split mode assigns each a distinct part of the same request. Variants

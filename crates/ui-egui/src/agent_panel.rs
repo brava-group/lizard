@@ -248,8 +248,6 @@ pub struct AgentUi {
     pub login_pending: bool,
     pub model: Option<String>,
     pub models: Vec<(String, String)>,
-    pub model_menu_open: bool,
-    pub model_menu_offset: usize,
     pub parallel_menu_open: bool,
     pub variant_menu_open: bool,
     pub agent_count: u8,
@@ -892,6 +890,17 @@ fn glyph(ui: &Ui, rect: Rect, icon: AgentIcon, size: egui::Vec2, color: Color32)
     icons::paint_agent(ui.painter(), Rect::from_center_size(rect.center(), size), icon, color);
 }
 
+fn composer_hover(ui: &Ui, id: &'static str, rect: Rect, response: &egui::Response, dark: bool, reduce_motion: bool) -> f32 {
+    let duration = if reduce_motion { 0.0 } else { 0.14 };
+    let hover = ui.ctx().animate_bool_with_time(ui.id().with((id, "hover")), response.hovered() || response.has_focus(), duration);
+    if hover > 0.0 {
+        let alpha = (12.0 * hover).round() as u8;
+        let color = if dark { Color32::from_rgba_unmultiplied(255, 255, 255, alpha) } else { Color32::from_rgba_unmultiplied(0, 0, 0, alpha) };
+        ui.painter().rect_filled(rect, CornerRadius::same(6), color);
+    }
+    hover
+}
+
 fn message_age(created_at: u64) -> String {
     if created_at == 0 {
         return String::new();
@@ -1042,7 +1051,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
     ui.painter().text(badge.center(), Align2::CENTER_CENTER, "IA", semibold(11.0), secondary);
     if hit(ui, "agent_model_badge", badge, "Selecionar modelo").clicked() {
-        app.ui.agent.model_menu_open = !app.ui.agent.model_menu_open;
+        egui::Popup::open_id(ui.ctx(), Id::new("agent_footer_model_popup"));
         app.ui.agent.menu_open = false;
     }
 
@@ -1376,7 +1385,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
     let input = Rect::from_min_max(
         pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
-        pos2(composer.max.x - 16.0, composer.min.y + 76.0 + context_height + images_height),
+        pos2(composer.max.x - 16.0, composer.min.y + 86.0 + context_height + images_height),
     );
     paste_image_into_composer(app, ui);
     let input_resp = ui.put(
@@ -1389,49 +1398,17 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             .desired_width(input.width())
             .desired_rows(3),
     );
-    let actions_y = composer.max.y - 44.0;
-    let attach = Rect::from_min_size(pos2(composer.min.x + 12.0, actions_y), vec2(28.0, 28.0));
-    let parallel = Rect::from_min_size(pos2(attach.max.x + 9.0, actions_y), vec2(55.0, 28.0));
-    let variants = Rect::from_min_size(pos2(parallel.max.x + 9.0, actions_y), vec2(55.0, 28.0));
-    let send = Rect::from_min_size(pos2(composer.max.x - 40.0, actions_y), vec2(28.0, 28.0));
-    let model = Rect::from_min_max(pos2(variants.max.x + 9.0, actions_y), pos2(send.min.x - 9.0, actions_y + 28.0));
-    if hit(ui, "agent_context", attach, "Inserir anexo").clicked() {
-        app.ui.agent.context_menu_open = !app.ui.agent.context_menu_open;
-    }
-    if hit(ui, "agent_parallel", parallel, "Quantidade de agentes").clicked() {
-        app.ui.agent.parallel_menu_open = !app.ui.agent.parallel_menu_open;
-        app.ui.agent.variant_menu_open = false;
-        app.ui.agent.model_menu_open = false;
-    }
-    if hit(ui, "agent_variants", variants, "Quantidade de variantes").clicked() {
-        app.ui.agent.variant_menu_open = !app.ui.agent.variant_menu_open;
-        app.ui.agent.parallel_menu_open = false;
-        app.ui.agent.model_menu_open = false;
-    }
-    if ui.interact(model, ui.id().with("agent_footer_model"), Sense::click()).on_hover_text("Selecionar modelo").clicked() {
-        app.ui.agent.model_menu_open = !app.ui.agent.model_menu_open;
-        app.ui.agent.parallel_menu_open = false;
-        app.ui.agent.variant_menu_open = false;
-    }
-    let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { "Parar agente" } else { "Enviar mensagem" });
-    glyph(ui, attach, AgentIcon::Paperclip, vec2(17.0, 17.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
-    let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
-    glyph(ui, Rect::from_min_size(parallel.min, vec2(20.0, 28.0)), AgentIcon::Lightning, vec2(15.0, 15.0), parallel_color);
-    ui.painter().text(
-        pos2(parallel.min.x + 21.0, parallel.center().y),
-        Align2::LEFT_CENTER,
-        format!("{}x", app.ui.agent.agent_count.max(1)),
-        regular(14.0),
-        parallel_color,
-    );
-    glyph(ui, Rect::from_min_size(variants.min, vec2(20.0, 28.0)), AgentIcon::Grid, vec2(15.0, 15.0), Color32::from_rgb(0x99, 0x99, 0x99));
-    ui.painter().text(
-        pos2(variants.min.x + 21.0, variants.center().y),
-        Align2::LEFT_CENTER,
-        format!("{}x", app.ui.agent.variant_count.max(1)),
-        regular(14.0),
-        Color32::from_rgb(0x99, 0x99, 0x99),
-    );
+    let actions_y = composer.max.y - 32.0;
+    let attach = Rect::from_min_size(pos2(composer.min.x + 8.0, actions_y), vec2(24.0, 24.0));
+    let parallel = Rect::from_min_size(pos2(attach.max.x + 8.0, actions_y), vec2(34.0, 24.0));
+    let variants = Rect::from_min_size(pos2(parallel.max.x + 11.0, actions_y), vec2(34.0, 24.0));
+    let send = Rect::from_min_size(pos2(composer.max.x - 32.0, actions_y), vec2(24.0, 24.0));
+    let model = Rect::from_min_max(pos2(variants.max.x + 11.0, actions_y), pos2(send.min.x - 8.0, actions_y + 24.0));
+    let attach_resp = hit(ui, "agent_context", attach, "Inserir anexo");
+    let parallel_resp = hit(ui, "agent_parallel", parallel, "Quantidade de agentes");
+    let variants_resp = hit(ui, "agent_variants", variants, "Quantidade de variantes");
+    let model_resp = hit(ui, "agent_footer_model", model, "Selecionar modelo");
+    ui.painter().rect_filled(model, CornerRadius::same(5), t.field);
     let model_label = app
         .ui
         .agent
@@ -1439,25 +1416,86 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         .as_deref()
         .and_then(|id| app.ui.agent.models.iter().find(|(model_id, _)| model_id == id).map(|(_, label)| label.as_str()))
         .unwrap_or_else(|| app.ui.agent.agent.label());
+    a11y::combo(&model_resp, "Selecionar modelo", model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
+    let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { "Parar agente" } else { "Enviar mensagem" });
+    let reduce_motion = app.reduce_motion();
+    for (id, rect, response) in
+        [("agent_context", attach, &attach_resp), ("agent_parallel", parallel, &parallel_resp), ("agent_variants", variants, &variants_resp)]
+    {
+        composer_hover(ui, id, rect, response, t.dark, reduce_motion);
+    }
+    let model_hover = ui.ctx().animate_bool_with_time(
+        ui.id().with("agent_footer_model_hover"),
+        model_resp.hovered() || model_resp.has_focus(),
+        if reduce_motion { 0.0 } else { 0.14 },
+    );
+    if model_hover > 0.0 {
+        ui.painter().rect_stroke(
+            model,
+            CornerRadius::same(5),
+            Stroke::new(1.0, t.field_hover_border.linear_multiply(model_hover)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if attach_resp.clicked() {
+        app.ui.agent.context_menu_open = !app.ui.agent.context_menu_open;
+    }
+    if parallel_resp.clicked() {
+        app.ui.agent.parallel_menu_open = !app.ui.agent.parallel_menu_open;
+        app.ui.agent.variant_menu_open = false;
+        egui::Popup::close_all(ui.ctx());
+    }
+    if variants_resp.clicked() {
+        app.ui.agent.variant_menu_open = !app.ui.agent.variant_menu_open;
+        app.ui.agent.parallel_menu_open = false;
+        egui::Popup::close_all(ui.ctx());
+    }
+    if model_resp.clicked() {
+        app.ui.agent.parallel_menu_open = false;
+        app.ui.agent.variant_menu_open = false;
+    }
+    glyph(ui, attach, AgentIcon::Paperclip, vec2(14.0, 14.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
+    let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
+    glyph(ui, Rect::from_min_size(parallel.min, vec2(13.0, 24.0)), AgentIcon::Lightning, vec2(13.0, 13.0), parallel_color);
+    ui.painter().text(
+        pos2(parallel.min.x + 16.0, parallel.center().y),
+        Align2::LEFT_CENTER,
+        format!("{}x", app.ui.agent.agent_count.max(1)),
+        regular(12.0),
+        parallel_color,
+    );
+    glyph(ui, Rect::from_min_size(variants.min, vec2(13.0, 24.0)), AgentIcon::Grid, vec2(13.0, 13.0), Color32::from_rgb(0x99, 0x99, 0x99));
+    ui.painter().text(
+        pos2(variants.min.x + 16.0, variants.center().y),
+        Align2::LEFT_CENTER,
+        format!("{}x", app.ui.agent.variant_count.max(1)),
+        regular(12.0),
+        Color32::from_rgb(0x99, 0x99, 0x99),
+    );
     let model_name: String = model_label.chars().take(if width < 340.0 { 9 } else { 16 }).collect();
-    ui.painter().text(pos2(model.min.x, model.center().y), Align2::LEFT_CENTER, model_name, regular(14.0), Color32::from_rgb(0xAA, 0xAA, 0xAA));
+    ui.painter().text(pos2(model.min.x + 8.0, model.center().y), Align2::LEFT_CENTER, model_name, regular(12.0), Color32::from_rgb(0xAA, 0xAA, 0xAA));
     glyph(
         ui,
-        Rect::from_center_size(pos2(model.max.x - 7.0, model.center().y), vec2(13.0, 13.0)),
+        Rect::from_center_size(pos2(model.max.x - 12.0, model.center().y), vec2(11.0, 11.0)),
         AgentIcon::Down,
-        vec2(13.0, 13.0),
+        vec2(11.0, 11.0),
         Color32::from_rgb(0x77, 0x77, 0x77),
     );
-    let can_send = !app.ui.agent.draft.trim().is_empty() || !selected_nodes.is_empty() || !app.ui.agent.images.is_empty();
-    ui.painter().circle_filled(
-        send.center(),
-        14.0,
-        if app.ui.agent.busy || can_send { Color32::from_rgb(0xD4, 0xD4, 0xD8) } else { Color32::from_rgb(0x75, 0x75, 0x75) },
+    let send_hover = ui.ctx().animate_bool_with_time(
+        ui.id().with("agent_send_hover"),
+        send_resp.hovered() || send_resp.has_focus(),
+        if reduce_motion { 0.0 } else { 0.14 },
     );
+    let send_blue = Color32::from_rgb(
+        (12.0 + 18.0 * send_hover).round() as u8,
+        (140.0 + 13.0 * send_hover).round() as u8,
+        (232.0 + 7.0 * send_hover).round() as u8,
+    );
+    ui.painter().circle_filled(send.center(), 12.0, send_blue);
     if app.ui.agent.busy {
-        ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(8.0, 8.0)), 1.0, Color32::WHITE);
+        ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(7.0, 7.0)), 1.0, Color32::from_rgb(0xDD, 0xE1, 0xED));
     } else {
-        glyph(ui, send, AgentIcon::SendUp, vec2(18.0, 18.0), if can_send { Color32::from_rgb(0x20, 0x21, 0x24) } else { Color32::WHITE });
+        glyph(ui, send, AgentIcon::SendUp, vec2(15.0, 15.0), Color32::from_rgb(0xDD, 0xE1, 0xED));
     }
     let enter = input_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     if send_resp.clicked() || enter {
@@ -1582,47 +1620,21 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         }
         ui.painter().text(pos2(setup.min.x + 12.0, setup.center().y), Align2::LEFT_CENTER, setup_label, regular(12.0), text);
     }
-    if app.ui.agent.model_menu_open {
-        let items = app.ui.agent.models.clone();
-        let rows = (items.len() + 1).min(9);
-        let menu = Rect::from_min_size(pos2(composer.max.x - 180.0, composer.min.y - rows as f32 * 30.0 - 8.0), vec2(180.0, rows as f32 * 30.0));
-        if ui.input(|input| input.pointer.hover_pos().is_some_and(|pointer| menu.contains(pointer))) {
-            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-            if scroll < -1.0 {
-                app.ui.agent.model_menu_offset = (app.ui.agent.model_menu_offset + 1).min(items.len().saturating_sub(8));
-            } else if scroll > 1.0 {
-                app.ui.agent.model_menu_offset = app.ui.agent.model_menu_offset.saturating_sub(1);
-            }
-        }
-        app.ui.agent.model_menu_offset = app.ui.agent.model_menu_offset.min(items.len().saturating_sub(8));
-        ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        let default_row = Rect::from_min_size(menu.min, vec2(menu.width(), 30.0));
-        if hit(ui, "agent_model_default", default_row, "Modelo padrão").clicked() {
+    let models = app.ui.agent.models.clone();
+    crate::right::menu_popup(&model_resp).id(Id::new("agent_footer_model_popup")).width(model.width().max(180.0)).show(|ui| {
+        if crate::right::menu_item(ui, "Modelo padrão", "") {
             app.ui.agent.model = None;
-            app.ui.agent.model_menu_open = false;
+            ui.close();
         }
-        ui.painter().text(
-            pos2(default_row.min.x + 12.0, default_row.center().y),
-            Align2::LEFT_CENTER,
-            "Modelo padrão",
-            regular(12.0),
-            if app.ui.agent.model.is_none() { BLUE } else { text },
-        );
-        for (slot, (index, (id, label))) in items.iter().enumerate().skip(app.ui.agent.model_menu_offset).take(8).enumerate() {
-            let row = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 30.0 * (slot + 1) as f32), vec2(menu.width(), 30.0));
-            if ui.interact(row, ui.id().with(("agent_model", index)), Sense::click()).on_hover_text(label).clicked() {
-                app.ui.agent.model = Some(id.clone());
-                app.ui.agent.model_menu_open = false;
+        egui::ScrollArea::vertical().max_height(8.0 * 26.0).show(ui, |ui| {
+            for (id, label) in &models {
+                if crate::right::menu_item(ui, label, "") {
+                    app.ui.agent.model = Some(id.clone());
+                    ui.close();
+                }
             }
-            ui.painter().text(
-                pos2(row.min.x + 12.0, row.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                regular(12.0),
-                if app.ui.agent.model.as_deref() == Some(id) { BLUE } else { text },
-            );
-        }
-    }
+        });
+    });
     if app.ui.agent.parallel_menu_open {
         let menu = Rect::from_min_size(pos2(parallel.min.x, composer.min.y - 226.0), vec2(196.0, 218.0));
         ui.painter().rect(menu, CornerRadius::same(9), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
