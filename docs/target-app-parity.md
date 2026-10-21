@@ -635,6 +635,7 @@ Carried over from the ROADMAP's "Shipped so far" (2026-10-10). The test count th
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | The Agent model field now uses content-sized width, capped by available footer space. AI score and estimates remain unchanged. |
 | 2026-10-21 | minor | Agent composer spacing, type sizes and send colour follow the revised reference; hover fades and the shared model popup, including outside-click dismissal, were checked in the desktop app. AI score and estimate remain unchanged. |
 | 2026-10-21 | minor | Agent chat gained the reference conversation layout and composer footer controls for model, parallel sessions and successive variants. Scoped control bridges route screenshots to the correct agent response. AI score and specialized-feature estimate remain unchanged. |
 | 2026-10-21 | minor | In-app agent harness now supplies original editing instructions at local session start and a bounded live document snapshot on every turn. Existing MCP, provider sessions and permission paths are reused. AI score and specialized-feature estimate remain unchanged. |

@@ -1403,12 +1403,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let parallel = Rect::from_min_size(pos2(attach.max.x + 8.0, actions_y), vec2(34.0, 24.0));
     let variants = Rect::from_min_size(pos2(parallel.max.x + 11.0, actions_y), vec2(34.0, 24.0));
     let send = Rect::from_min_size(pos2(composer.max.x - 32.0, actions_y), vec2(24.0, 24.0));
-    let model = Rect::from_min_max(pos2(variants.max.x + 11.0, actions_y), pos2(send.min.x - 8.0, actions_y + 24.0));
-    let attach_resp = hit(ui, "agent_context", attach, "Inserir anexo");
-    let parallel_resp = hit(ui, "agent_parallel", parallel, "Quantidade de agentes");
-    let variants_resp = hit(ui, "agent_variants", variants, "Quantidade de variantes");
-    let model_resp = hit(ui, "agent_footer_model", model, "Selecionar modelo");
-    ui.painter().rect_filled(model, CornerRadius::same(5), t.field);
     let model_label = app
         .ui
         .agent
@@ -1416,6 +1410,16 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         .as_deref()
         .and_then(|id| app.ui.agent.models.iter().find(|(model_id, _)| model_id == id).map(|(_, label)| label.as_str()))
         .unwrap_or_else(|| app.ui.agent.agent.label());
+    let model_x = variants.max.x + 11.0;
+    let model_available = (send.min.x - 8.0 - model_x).max(0.0);
+    let model_label_width = ui.painter().layout_no_wrap(model_label.to_owned(), regular(12.0), Color32::PLACEHOLDER).size().x;
+    let model_width = (model_label_width + 36.0).ceil().max(72.0).min(model_available);
+    let model = Rect::from_min_size(pos2(model_x, actions_y), vec2(model_width, 24.0));
+    let attach_resp = hit(ui, "agent_context", attach, "Inserir anexo");
+    let parallel_resp = hit(ui, "agent_parallel", parallel, "Quantidade de agentes");
+    let variants_resp = hit(ui, "agent_variants", variants, "Quantidade de variantes");
+    let model_resp = hit(ui, "agent_footer_model", model, "Selecionar modelo");
+    ui.painter().rect_filled(model, CornerRadius::same(5), t.field);
     a11y::combo(&model_resp, "Selecionar modelo", model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
     let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { "Parar agente" } else { "Enviar mensagem" });
     let reduce_motion = app.reduce_motion();
@@ -1472,15 +1476,25 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         regular(12.0),
         Color32::from_rgb(0x99, 0x99, 0x99),
     );
-    let model_name: String = model_label.chars().take(if width < 340.0 { 9 } else { 16 }).collect();
-    ui.painter().text(pos2(model.min.x + 8.0, model.center().y), Align2::LEFT_CENTER, model_name, regular(12.0), Color32::from_rgb(0xAA, 0xAA, 0xAA));
-    glyph(
-        ui,
-        Rect::from_center_size(pos2(model.max.x - 12.0, model.center().y), vec2(11.0, 11.0)),
-        AgentIcon::Down,
-        vec2(11.0, 11.0),
-        Color32::from_rgb(0x77, 0x77, 0x77),
-    );
+    let model_name = crate::widgets::elide_font(ui, model_label, (model.width() - 36.0).max(0.0), regular(12.0));
+    if model.width() >= 36.0 {
+        ui.painter().text(
+            pos2(model.min.x + 8.0, model.center().y),
+            Align2::LEFT_CENTER,
+            model_name,
+            regular(12.0),
+            Color32::from_rgb(0xAA, 0xAA, 0xAA),
+        );
+    }
+    if model.width() >= 24.0 {
+        glyph(
+            ui,
+            Rect::from_center_size(pos2(model.max.x - 12.0, model.center().y), vec2(11.0, 11.0)),
+            AgentIcon::Down,
+            vec2(11.0, 11.0),
+            Color32::from_rgb(0x77, 0x77, 0x77),
+        );
+    }
     let send_hover = ui.ctx().animate_bool_with_time(
         ui.id().with("agent_send_hover"),
         send_resp.hovered() || send_resp.has_focus(),

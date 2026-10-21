@@ -318,6 +318,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | The Agent model selector now hugs its label and chevron instead of filling the composer footer. Agent estimates remain unchanged. |
 | 2026-10-21 | minor | Agent composer now matches the compact footer reference, with 24 px controls, a blue send button and short hover transitions. The model field matches property-panel selects and uses their dismissible popup. Target and estimates remain unchanged. |
 | 2026-10-21 | minor | Agent chat now follows the reference conversation layout and composer. Model, parallel agent count and variant count are functional; each agent receives a scoped MCP bridge and its own tool and preview receipts. AI estimates remain unchanged. |
 | 2026-10-21 | minor | Agent chat now starts local sessions with original FigCraft editing instructions and sends current page, revision, selection and top-level layer context on each turn. Session, tool and permission handling reuse the document-scoped MCP bridge. Focused harness and chat tests pass; AI estimates remain unchanged. |

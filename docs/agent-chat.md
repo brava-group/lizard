@@ -23,7 +23,8 @@ and its ChatGPT subscription login. The Agent welcome screen shows the connectio
 footer lists models returned by Codex, plus its default model. The adjacent lightning control
 selects one to six agents, and the grid control selects one to six variants. The composer uses
 24 px footer controls with brief hover fades; the model field uses the property-panel field
-colours and the model list uses its popup component. It opens above the field and closes on an
+colours and hugs the model name while leaving free space before Send. The model list uses the
+property-panel popup component. It opens above the field and closes on an
 outside click or Escape.
 Reduced-motion preferences make those hover changes immediate. Multiple agents use
 separate local sessions and document-scoped MCP bridges; their streamed messages and screenshot
