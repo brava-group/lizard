@@ -24,9 +24,9 @@ pub struct Desktop {
     language: Option<String>,
     /// Recovery copies of unsaved files (written at once after a panic).
     recovery: crate::recovery::Shared,
-    agent: Option<crate::agent::Agent>,
+    agents: Vec<crate::agent::Agent>,
     agent_control: Option<(ControlQueue, ContextSlot)>,
-    agent_bridge: Option<(u16, Arc<AtomicBool>)>,
+    agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
     agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
     agent_model_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
 }
@@ -70,9 +70,9 @@ impl Desktop {
             reduce_motion,
             language: system_language(),
             recovery,
-            agent: None,
+            agents: Vec::new(),
             agent_control: None,
-            agent_bridge: None,
+            agent_bridges: Vec::new(),
             agent_login_events: None,
             agent_model_events: None,
         }
@@ -82,11 +82,15 @@ impl Desktop {
         self.agent_control = Some((queue, context));
     }
 
-    fn agent_port(&mut self, document: u64) -> Result<u16, String> {
+    fn agent_port(&mut self, document: u64, index: usize) -> Result<u16, String> {
         let Some((queue, context)) = &self.agent_control else { return Err("O canal de controle não está disponível".into()) };
-        let (port, enabled) = crate::control_server::start_agent(document, queue.clone(), context.clone())
-            .ok_or("Não foi possível abrir o canal de controle do FigCraft")?;
-        self.agent_bridge = Some((port, enabled));
+        let bridge = if index == 0 {
+            crate::control_server::start_agent(document, queue.clone(), context.clone())
+        } else {
+            crate::control_server::start_agent_scoped(document, index, queue.clone(), context.clone())
+        };
+        let (port, enabled) = bridge.ok_or("Não foi possível abrir o canal de controle do FigCraft")?;
+        self.agent_bridges.push((port, enabled));
         Ok(port)
     }
 }
@@ -289,11 +293,14 @@ fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
 
 impl Services for Desktop {
     fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
-        if self.agent.as_ref().is_some_and(|a| a.document != document || a.kind != kind || a.conversation != prompt.conversation) {
+        let count = usize::from(prompt.agent_count.clamp(1, 6));
+        if !self.agents.is_empty()
+            && (self.agents.len() != count
+                || self.agents.iter().any(|agent| agent.document != document || agent.kind != kind || agent.conversation != prompt.conversation))
+        {
             self.agent_reset();
         }
-        if self.agent.is_none() {
-            let port = self.agent_port(document)?;
+        if self.agents.is_empty() {
             let cli = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|parent| parent.join(if cfg!(windows) { "figcraft-cli.exe" } else { "figcraft-cli" })))
@@ -302,13 +309,62 @@ impl Services for Desktop {
                 .unwrap_or_else(|| "figcraft-cli".into());
             let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("FigCraft Agent"));
             std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
-            self.agent = Some(crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli)?);
+            for index in 0..count {
+                let port = match self.agent_port(document, index) {
+                    Ok(port) => port,
+                    Err(error) => {
+                        self.agent_reset();
+                        return Err(error);
+                    }
+                };
+                match crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli) {
+                    Ok(agent) => self.agents.push(agent),
+                    Err(error) => {
+                        self.agent_reset();
+                        return Err(error);
+                    }
+                }
+            }
         }
-        self.agent.as_ref().ok_or("O agente não está disponível".into()).and_then(|a| a.send(prompt))
+        for index in 0..self.agents.len() {
+            let mut assigned = prompt.clone();
+            if count > 1 {
+                let role = match prompt.parallel_mode {
+                    figcraft_ui_egui::agent_panel::ParallelMode::SideBySide => format!(
+                        "Você é o agente {} de {}. Crie uma versão completa e independente do pedido. Trabalhe em um novo frame raiz identificado como 'Alternativa {}'. Preserve os frames dos outros agentes e não altere o trabalho deles.",
+                        index + 1,
+                        count,
+                        index + 1
+                    ),
+                    figcraft_ui_egui::agent_panel::ParallelMode::Split => format!(
+                        "Você é o agente {} de {}. Faça uma parte distinta e proporcional do trabalho pedido. Identifique claramente sua parte antes de editar. Não altere as partes dos outros agentes. Ao terminar, informe qual parte fez.",
+                        index + 1,
+                        count
+                    ),
+                };
+                assigned.text.push_str("\n\nCoordenação da rodada: ");
+                assigned.text.push_str(&role);
+                assigned.resume = prompt.resumes.get(index).cloned().flatten().or_else(|| if index == 0 { prompt.resume.clone() } else { None });
+            }
+            if let Err(error) = self.agents[index].send(assigned) {
+                self.agent_reset();
+                return Err(error);
+            }
+        }
+        Ok(())
     }
 
     fn agent_poll(&mut self) -> Vec<AgentEvent> {
-        let mut events = self.agent.as_ref().map_or_else(Vec::new, crate::agent::Agent::poll);
+        let mut events = Vec::new();
+        for (index, agent) in self.agents.iter().enumerate() {
+            for event in agent.poll() {
+                if self.agents.len() > 1 {
+                    events.push(AgentEvent::Scoped { index, event: Box::new(event) });
+                } else {
+                    events.push(event);
+                }
+            }
+        }
         if let Some(login) = &self.agent_login_events {
             events.extend(login.try_iter().take(20));
         }
@@ -362,21 +418,23 @@ impl Services for Desktop {
     }
 
     fn agent_stop(&mut self) {
-        if let Some(agent) = &self.agent {
+        for agent in &self.agents {
             agent.stop();
         }
     }
 
     fn agent_reset(&mut self) {
-        self.agent = None;
-        if let Some((_, enabled)) = self.agent_bridge.take() {
+        self.agents.clear();
+        for (_, enabled) in self.agent_bridges.drain(..) {
             enabled.store(false, Ordering::Release);
         }
     }
 
     fn agent_permission(&mut self, id: Value, option: Option<String>) {
-        if let Some(agent) = &self.agent {
-            agent.permission(id, option);
+        let index = id.get("agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0);
+        let request = id.get("request").cloned().unwrap_or(id);
+        if let Some(agent) = self.agents.get(index) {
+            agent.permission(request, option);
         }
     }
 

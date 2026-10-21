@@ -128,6 +128,12 @@ pub enum AgentIcon {
     Library,
     Microphone,
     Send,
+    Paperclip,
+    Lightning,
+    Grid,
+    Down,
+    Up,
+    SendUp,
 }
 
 macro_rules! icons {

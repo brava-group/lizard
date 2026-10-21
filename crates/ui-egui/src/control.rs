@@ -309,7 +309,11 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
                 && tool == "screenshot"
                 && let Some(data) = p.get("preview").and_then(Value::as_str).filter(|data| data.len() <= 2_000_000)
                 && let Some(chat) = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id))
-                && let Some(message) = chat.messages.last_mut()
+                && let Some(message) = chat.messages.iter_mut().rev().find(|message| {
+                    message.role == "assistant"
+                        && message.agent_index
+                            == p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0)
+                })
                 && message.previews.len() < 6
             {
                 message.previews.push(crate::agent_panel::AgentPreview { data: data.to_string(), texture: None });

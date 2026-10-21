@@ -5,11 +5,30 @@ starts the selected local agent and gives it FigCraft's existing MCP server, att
 document. Design changes still go through
 the normal engine commands, appear on the canvas and enter Undo history.
 
+The in-app harness prepares each turn before it reaches the selected provider. A new local
+agent process receives FigCraft's own editing instructions: use the attached MCP tools, make
+changes through commands, verify structure and screenshots, and report only confirmed work. Every turn
+also gets a bounded JSON snapshot of the current document, page, revision, selected layers and
+top-level layers. The agent can request more detail through `inspect_document` and `get_node`;
+the snapshot is not assumed to stay current after later edits. A running local session keeps its
+original instructions, so FigCraft sends only fresh context and the user's next request. The
+first turn after reopening a chat repeats the instructions in case its ACP adapter cannot restore
+the prior remote session. Recent transcript text is supplied to ACP after a local restart;
+Codex relies on its saved thread instead.
+
 The menu in the chat header chooses **Codex**, **Claude Code**, **Gemini CLI** or **Kimi Code**.
 Codex uses the installed Codex CLI's [app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)
 and its ChatGPT subscription login. The Agent welcome screen shows the connection state;
-**Conectar com ChatGPT** starts browser sign-in when needed. The IA badge lists models returned
-by Codex, plus its default model. FigCraft stores neither tokens nor API keys. Install the
+**Conectar com ChatGPT** starts browser sign-in when needed. The model selector in the composer
+footer lists models returned by Codex, plus its default model. The adjacent lightning control
+selects one to six agents, and the grid control selects one to six variants. Multiple agents use
+separate local sessions and document-scoped MCP bridges; their streamed messages and screenshot
+previews appear under separate agent labels. Side-by-side mode asks each agent to create an
+independent root frame, while split mode assigns each a distinct part of the same request. Variants
+run in successive rounds after all agents in the previous round finish. The variants control can
+request changes in layout or visual style. Parallel edits still share one canvas, so the agents'
+instructions coordinate their work without hard layer ownership. FigCraft stores neither tokens
+nor API keys. Install the
 corresponding executable:
 
 | Choice | Executable started by FigCraft |
@@ -28,15 +47,15 @@ session changes. ACP tool approvals appear in the chat before the adapter contin
 
 Replies stream into the panel with their tool calls. **Stop** cancels the current session. The
 history is kept locally in `agent-chats.json` in FigCraft's user configuration directory (owner
-read/write permissions on Unix), grouped by document. Codex threads resume by saved ID; ACP
-agents resume a saved session when their `loadSession` capability is available. Recent transcript
+read/write permissions on Unix), grouped by document. Each Codex worker resumes by its saved thread ID;
+ACP workers resume a saved session when their `loadSession` capability is available. Recent transcript
 text remains available as context for ACP agents. A completed answer offers **Undo this
 answer's changes** only when every Undo step it added came from the agent and no later edit has
 changed that history. Shift+Enter inserts a newline; Enter sends.
 
 Selected canvas layers appear above the prompt as references. A chip locates its layer on the
 canvas; its × removes that layer from the next message's context without deselecting or deleting
-it. The conversation records the names and IDs that were actually sent. The + button accepts
+it. The conversation records the names and IDs that were actually sent. The paperclip button accepts
 PNG/JPEG images from a file or the clipboard, and pasting an image while the prompt has focus
 adds an attachment even when the clipboard also reports alternate text. Images appear as removable,
 rounded 72 px square thumbnails above the prompt; selected layer chips and sent attachment badges
@@ -46,7 +65,9 @@ message; failed sends restore them to the composer. Text, HTML and
 copied design layers continue through their existing paste paths. Agent activity is grouped under
 an expandable work receipt, while the answer and guarded Undo remain visible.
 
-While a turn runs, the receipt shows a loading spinner, agent reasoning summaries when the
+The conversation follows the current dark panel reference: user messages are right aligned in
+rounded bubbles; each answer shows the agent, model and variant, thought time, tool receipts,
+preview images and final Markdown response. While a turn runs, the receipt shows a loading spinner, agent reasoning summaries when the
 adapter supplies them, and each tool's progress. MCP screenshots used for design review appear
 as bounded image previews in the reply. These previews are temporary and are not added to the
 design file or chat history. Agent replies render CommonMark headings, emphasis, lists, links and

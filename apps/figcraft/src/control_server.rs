@@ -54,6 +54,10 @@ pub fn start(port: u16, queue: Queue, ctx: CtxSlot) -> Option<u16> {
 /// A private MCP bridge tied to the document that started the agent. Dropping its flag revokes
 /// queued and future calls, including calls from an old agent process still shutting down.
 pub fn start_agent(document: u64, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
+    start_agent_scoped(document, 0, queue, ctx)
+}
+
+pub fn start_agent_scoped(document: u64, agent_index: usize, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let port = listener.local_addr().ok()?.port();
     listener.set_nonblocking(true).ok()?;
@@ -74,7 +78,7 @@ pub fn start_agent(document: u64, queue: Queue, ctx: CtxSlot) -> Option<(u16, Ar
                         let ctx = ctx.clone();
                         let guard = flag.clone();
                         if let Ok(worker) = std::thread::Builder::new().name("figcraft-agent-control-conn".into()).spawn(move || {
-                            let _ = serve_guarded(stream, queue, ctx, TIMEOUT, Some((document, guard)));
+                            let _ = serve_guarded(stream, queue, ctx, TIMEOUT, Some((document, agent_index, guard)));
                         }) {
                             workers.push(worker);
                         }
@@ -105,7 +109,13 @@ fn serve(out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> std::
     serve_guarded(out, queue, ctx, timeout, None)
 }
 
-fn serve_guarded(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration, guard: Option<(u64, Arc<AtomicBool>)>) -> std::io::Result<()> {
+fn serve_guarded(
+    mut out: TcpStream,
+    queue: Queue,
+    ctx: CtxSlot,
+    timeout: Duration,
+    guard: Option<(u64, usize, Arc<AtomicBool>)>,
+) -> std::io::Result<()> {
     out.set_read_timeout(Some(timeout))?;
     out.set_write_timeout(Some(timeout))?;
     let mut reader = BufReader::new(out.try_clone()?);
@@ -131,13 +141,14 @@ fn serve_guarded(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Durati
                 let id = v.get("id").cloned().unwrap_or(Value::Null);
                 let method = v.get("method").and_then(Value::as_str).unwrap_or("").to_string();
                 let mut params = v.get("params").cloned().unwrap_or(json!({}));
-                if let Some((document, enabled)) = &guard {
+                if let Some((document, agent_index, enabled)) = &guard {
                     if !enabled.load(Ordering::Acquire) {
                         writeln!(out, "{}", json!({"id": id, "ok": false, "error": "A sessão do agente foi encerrada"}))?;
                         continue;
                     }
                     if let Some(object) = params.as_object_mut() {
                         object.insert("__agent_document".into(), json!(document));
+                        object.insert("__agent_index".into(), json!(agent_index));
                     }
                 }
                 let (tx, rx) = std::sync::mpsc::channel();
@@ -155,7 +166,7 @@ fn serve_guarded(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Durati
                     params,
                     reply: tx,
                     cancelled: cancelled.clone(),
-                    agent_guard: guard.as_ref().map(|(_, flag)| flag.clone()),
+                    agent_guard: guard.as_ref().map(|(_, _, flag)| flag.clone()),
                 });
                 drop(pending);
                 if let Some(c) = ctx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {

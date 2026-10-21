@@ -21,7 +21,7 @@ fn format(style: &Style, color: Color32, accent: Color32, inline_code: bool) -> 
         Some(HeadingLevel::H1) => 18.0,
         Some(HeadingLevel::H2) => 16.0,
         Some(_) => 14.0,
-        None => 13.0,
+        None => 14.0,
     };
     let code = inline_code || style.code_block > 0;
     TextFormat {
@@ -177,7 +177,7 @@ mod tests {
         assert!(!job.text.contains("**"));
         assert!(!job.text.contains('`'));
         assert!(!job.text.ends_with('\n'));
-        assert!(job.sections.iter().any(|section| section.format.font_id == semibold(13.0)));
+        assert!(job.sections.iter().any(|section| section.format.font_id == semibold(14.0)));
         assert!(job.sections.iter().any(|section| section.format.font_id == FontId::monospace(12.0)));
     }
 

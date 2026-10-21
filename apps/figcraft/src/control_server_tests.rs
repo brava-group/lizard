@@ -80,6 +80,31 @@ fn valid_frames_keep_their_order_ids_and_parameters() {
 }
 
 #[test]
+fn agent_bridge_tags_the_document_and_worker_index() {
+    let (mut client, server) = pair();
+    let pending = queue();
+    let q = pending.clone();
+    let enabled = Arc::new(AtomicBool::new(true));
+    let guard = enabled.clone();
+    let worker = std::thread::spawn(move || serve_guarded(server, q, context(), Duration::from_secs(5), Some((42, 2, guard))));
+    client.write_all(b"{\"id\":1,\"method\":\"agent.activity\",\"params\":{\"phase\":\"done\"}}\n").unwrap();
+    let start = Instant::now();
+    let request = loop {
+        if let Some(request) = pending.lock().unwrap().pop() {
+            break request;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert_eq!(request.params["__agent_document"], 42);
+    assert_eq!(request.params["__agent_index"], 2);
+    request.reply.send(figcraft_ui_egui::ControlReply { id: request.id, result: Ok(json!({"accepted":true})) }).unwrap();
+    assert_eq!(reply(&mut BufReader::new(client.try_clone().unwrap()))["ok"], true);
+    client.shutdown(Shutdown::Write).unwrap();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
 fn a_line_that_is_not_json_ends_the_connection_before_anything_after_it_runs() {
     // What a browser sends when a web page posts to the port: the JSON line in its body never runs.
     let (mut client, server) = pair();

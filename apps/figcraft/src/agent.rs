@@ -709,7 +709,12 @@ for line in sys.stdin:
                     images: vec![figcraft_ui_egui::agent_panel::AgentImage { mime: "image/png".into(), data: "aGVsbG8=".into() }],
                     conversation: 1,
                     resume,
+                    resumes: Vec::new(),
                     model: Some("test-model".into()),
+                    agent_count: 1,
+                    parallel_mode: figcraft_ui_egui::agent_panel::ParallelMode::Split,
+                    variant_count: 1,
+                    variant_mode: figcraft_ui_egui::agent_panel::VariantMode::Style,
                 })
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(4);
@@ -781,7 +786,12 @@ for line in sys.stdin:
                 images: vec![figcraft_ui_egui::agent_panel::AgentImage { mime: "image/png".into(), data: "aGVsbG8=".into() }],
                 conversation: 1,
                 resume: None,
+                resumes: Vec::new(),
                 model: None,
+                agent_count: 1,
+                parallel_mode: figcraft_ui_egui::agent_panel::ParallelMode::Split,
+                variant_count: 1,
+                variant_mode: figcraft_ui_egui::agent_panel::VariantMode::Style,
             })
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
@@ -804,7 +814,9 @@ for line in sys.stdin:
                     | AgentEvent::LoginUrl(_)
                     | AgentEvent::LoginComplete
                     | AgentEvent::LoginError(_)
-                    | AgentEvent::Models(_) => {}
+                    | AgentEvent::Models(_)
+                    | AgentEvent::Thinking(_)
+                    | AgentEvent::Scoped { .. } => {}
                 }
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -819,7 +831,12 @@ for line in sys.stdin:
                 images: vec![figcraft_ui_egui::agent_panel::AgentImage { mime: "image/png".into(), data: "aGVsbG8=".into() }],
                 conversation: 1,
                 resume: Some("session-1".into()),
+                resumes: Vec::new(),
                 model: None,
+                agent_count: 1,
+                parallel_mode: figcraft_ui_egui::agent_panel::ParallelMode::Split,
+                variant_count: 1,
+                variant_mode: figcraft_ui_egui::agent_panel::VariantMode::Style,
             })
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
