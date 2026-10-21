@@ -331,14 +331,16 @@ impl Param {
             if self.items.is_empty() || self.items.len() > MAX_GRID_ITEMS {
                 return Err(format!("a grid has 1–{MAX_GRID_ITEMS} cells (control `{}`)", self.name));
             }
-            if let Some(dup) = first_duplicate(self.items.iter().map(|i| i.value.as_str())) {
-                return Err(format!("a grid picks two cells with `{dup}` (control `{}`)", self.name));
-            }
             for item in &mut self.items {
                 item.value = clean("cell value", &item.value, MAX_LABEL)?;
                 if item.value.is_empty() {
                     return Err(format!("a grid cell has no value (control `{}`)", self.name));
                 }
+            }
+            if let Some(dup) = first_duplicate(self.items.iter().map(|i| i.value.as_str())) {
+                return Err(format!("a grid picks two cells with `{dup}` (control `{}`)", self.name));
+            }
+            for item in &mut self.items {
                 item.label = clean("cell label", &item.label, MAX_LABEL)?;
                 if !item.color.is_empty() {
                     item.color = figcraft_color::Color::from_hex(&item.color)

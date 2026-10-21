@@ -371,6 +371,7 @@ fn a_panel_grid_is_checked_and_coerced() {
     for bad in [
         json!({"title": "t", "controls": [{"type": "grid", "name": "g", "items": []}]}),
         json!({"title": "t", "controls": [{"type": "grid", "name": "g", "items": [{"value": "a", "path": "M0 0"}, {"value": "a", "path": "M1 1"}]}]}),
+        json!({"title": "t", "controls": [{"type": "grid", "name": "g", "items": [{"value": "a", "path": "M0 0"}, {"value": "a ", "path": "M1 1"}]}]}),
         json!({"title": "t", "controls": [{"type": "grid", "name": "g", "items": [{"value": "a"}]}]}),
         json!({"title": "t", "controls": [{"type": "grid", "name": "g", "items": [{"value": "a", "path": "M0 0", "data": "AAAA"}]}]}),
         json!({"title": "t", "controls": [{"type": "grid", "name": "g", "columns": 13, "items": [{"value": "a", "path": "M0 0"}]}]}),
