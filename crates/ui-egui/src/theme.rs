@@ -97,7 +97,7 @@ impl Tokens {
         Self {
             dark: true,
             bg: Color32::from_rgb(0x2C, 0x2C, 0x2C),
-            panel: Color32::from_rgb(0x2C, 0x2C, 0x2C),
+            panel: Color32::from_rgb(0x2B, 0x2B, 0x2B),
             canvas: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             border: Color32::from_rgb(0x44, 0x44, 0x44),
             border_strong: Color32::from_rgb(0x55, 0x55, 0x55),

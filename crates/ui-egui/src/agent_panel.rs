@@ -14,7 +14,6 @@ const BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF8);
 const BLUE_BG: Color32 = Color32::from_rgb(0x39, 0x43, 0x60);
 const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
 const DIM: Color32 = Color32::from_rgba_premultiplied(102, 102, 102, 102);
-const CHAT_BG: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2B);
 const CHAT_BUBBLE: Color32 = Color32::from_rgb(0x40, 0x40, 0x40);
 const RECEIPT_BG: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
 const RECEIPT_BORDER: Color32 = Color32::from_rgb(0x3D, 0x3D, 0x42);
@@ -1031,7 +1030,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let image_rows = app.ui.agent.images.len().div_ceil(image_columns);
     let images_height = image_rows as f32 * (image_size + 8.0);
     let composer_height = 142.0 + context_height + images_height;
-    ui.painter().rect_filled(full, 0.0, CHAT_BG);
+    ui.painter().rect_filled(full, 0.0, panel);
 
     // Header: back, two-line title, IA badge, options.
     let header_bottom = full.min.y + 63.0;
