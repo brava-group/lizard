@@ -448,6 +448,17 @@ its proportion). A path or point set that draws nothing is refused instead of ma
 0×0 layer, as is a size on an axis the geometry has none of (except 0, such as a horizontal line's
 height) and a size of 0 or less on an axis it has, which would flatten it.
 
+`node.set {path}` (or `set_properties`) replaces a vector's geometry with new SVG path data and
+keeps the layer: its id, name, place in the layer list, paints, effects, styles, variable bindings
+and constraints. The path is read as `vector.create` reads it, and `width`/`height` in the same call
+scale it the same way. The path's own box goes at the layer's current x/y (rotation and flips
+stay); with `x`/`y` in the same call it goes at `x` + its left edge and `y` + its top, as
+`vector.create` places it. Points' own settings (per-point corner radius, caps, joins) go with the
+old geometry. On several layers, layers that aren't vectors are skipped with a warning; on a
+single one, or when none is a vector, the call is refused (convert shapes with
+`vector.edit.begin` or Flatten first). A layer inside an instance is refused too: its geometry
+comes from its main component, so edit that or detach the instance. Undo brings the old path back.
+
 Vector edit mode is driven with `run_command` (or `pointer`/`key` for gestures):
 `vector.edit.begin {id? | ids?}` (default the selection; converts shapes to vectors; several layers
 are edited at once, the first active; `key` Enter with shapes selected does the same),

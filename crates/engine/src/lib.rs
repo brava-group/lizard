@@ -1869,6 +1869,8 @@ mod vector_multi_behaviour_tests;
 #[cfg(test)]
 mod vector_offset_tests;
 #[cfg(test)]
+mod vector_path_set_tests;
+#[cfg(test)]
 mod version_preview_tests;
 #[cfg(test)]
 mod version_tests;

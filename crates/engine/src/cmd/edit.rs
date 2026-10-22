@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use figcraft_doc::*;
 use figcraft_geom::Affine;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::{CommandSpec, ok};
 use crate::params::*;
@@ -1321,6 +1321,9 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"matches": hits}))
 }
 
+/// Keys only some layer types take, the test for those layers, and why the others skip them.
+type TypedKeys<'a> = (&'a [&'a str], &'a dyn Fn(&Node) -> bool, &'a str);
+
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets("node.set", s, p)?;
     let props = match get(p, "props") {
@@ -1351,34 +1354,44 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         None => Vec::new(),
     };
     let mut warnings = font_style_warnings(&s.ds()?.doc, &ids, &props);
-    // Auto layout keys go to the layers that can have auto layout; with none among the targets,
-    // the first refuses them (`props::layout_mut`).
+    // Type-specific keys go to the layers that take them and are skipped, with a warning, on the
+    // others: auto layout keys to frame-like layers, `path` to vectors. With none among the targets
+    // that take them, the first refuses them (`props::layout_mut`, `props::apply`).
+    let doc = &s.ds()?.doc;
     let layout_keys: Vec<&str> = props.keys().map(String::as_str).filter(|k| super::props::LAYOUT_KEYS.contains(k)).collect();
-    let mut without_layout = props.clone();
-    let mut skipped = BTreeSet::new();
-    if !layout_keys.is_empty() {
-        let doc = &s.ds()?.doc;
-        let frame_like = |i: &NodeId| doc.node(*i).is_some_and(|n| n.kind.is_frame_like());
-        if ids.iter().any(frame_like) {
-            skipped = ids.iter().copied().filter(|i| !frame_like(i)).collect();
-            without_layout.retain(|k, _| !layout_keys.contains(&k.as_str()));
+    let path_keys: Vec<&str> = props.keys().map(String::as_str).filter(|k| *k == "path").collect();
+    let frame_like = |n: &Node| n.kind.is_frame_like();
+    let vector = |n: &Node| matches!(n.kind, NodeKind::Vector { .. });
+    let typed: [TypedKeys; 2] = [
+        (&layout_keys, &frame_like, "only frames, components and instances have auto layout"),
+        (&path_keys, &vector, "only vector layers have a path"),
+    ];
+    let mut skipped: BTreeMap<NodeId, Map<String, Value>> = BTreeMap::new();
+    for (keys, takes, why) in typed {
+        let takes = |i: &NodeId| doc.node(*i).is_some_and(takes);
+        if keys.is_empty() || !ids.iter().any(takes) {
+            continue;
         }
-        if !skipped.is_empty() {
-            let names: Vec<String> =
-                skipped.iter().take(10).filter_map(|i| doc.node(*i)).map(|n| format!("{} “{}” ({})", n.id, n.name, n.kind.type_name())).collect();
-            let more = if skipped.len() > names.len() { format!(" and {} more", skipped.len() - names.len()) } else { String::new() };
-            warnings.push(format!(
-                "{} skipped on {}{more}: only frames, components and instances have auto layout",
-                layout_keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", "),
-                names.join(", ")
-            ));
+        let others: Vec<NodeId> = ids.iter().copied().filter(|i| !takes(i)).collect();
+        if others.is_empty() {
+            continue;
         }
+        for i in &others {
+            skipped.entry(*i).or_insert_with(|| props.clone()).retain(|k, _| !keys.contains(&k.as_str()));
+        }
+        let names: Vec<String> =
+            others.iter().take(10).filter_map(|i| doc.node(*i)).map(|n| format!("{} “{}” ({})", n.id, n.name, n.kind.type_name())).collect();
+        let more = if others.len() > names.len() { format!(" and {} more", others.len() - names.len()) } else { String::new() };
+        warnings.push(format!(
+            "{} skipped on {}{more}: {why}",
+            keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", "),
+            names.join(", ")
+        ));
     }
     let doc = s.doc_mut()?;
     let before = super::styles::bound_before(doc, &ids);
     for i in ids {
-        let props = if skipped.contains(&i) { &without_layout } else { &props };
-        super::props::apply("node.set", doc, i, props)?;
+        super::props::apply("node.set", doc, i, skipped.get(&i).unwrap_or(&props))?;
     }
     super::styles::detach_edited(doc, &before);
     if let Some(o) = pivot {

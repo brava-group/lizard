@@ -26,7 +26,9 @@ fontSize, lineHeight (auto|px|\"150%\"), letterSpacing (px|\"2%\"), textAlign (l
 textDecorationColor (colour, or auto/null: the text's), textCase (original|upper|lower|title|smallCaps), paragraphSpacing, paragraphIndent, \
 listStyle (none|bulleted|numbered; with start/end: the paragraphs those chars touch), indentation (list nesting level 0-8, same range rule), \
 listSpacing (px between list items, in place of paragraphSpacing), hangingPunctuation, hangingList (markers outside the box), leadingTrim (vertical trim: none|capHeight), maxLines, features ({tag: bool}, e.g. {\"liga\": false, \"tnum\": true}), \
-fontVariations / variationSettings ({axis: number}, e.g. {\"wght\": 550, \"wdth\": 85}; null = none), pointCount, innerRadius, arcStart, arcSweep, \
+fontVariations / variationSettings ({axis: number}, e.g. {\"wght\": 550, \"wdth\": 85}; null = none), \
+path (a vector's SVG path data: replaces its geometry, keeping the layer, its paints, styles and bindings; width/height in the same call scale it as \
+node.create does; its own box goes at the layer's x/y, or with x/y given, at x + its left edge and y + its top as node.create places it), pointCount, innerRadius, arcStart, arcSweep, \
 arcInner, booleanOperation (a boolean group's operation, or an operand's own; null: the group's), operandOperation (a layer in a boolean \
 group: how it combines with the operands below it; null: the group's), constrainProportions, description, interactions, overflow, pluginData {k: v}";
 
@@ -376,7 +378,7 @@ fn set_paints(n: &mut Node, fills: bool, paints: Vec<Paint>) {
 /// bindings last so paints set in the same call don't detach them.
 fn apply_order(k: &str) -> u8 {
     match k {
-        "width" | "height" | "w" | "h" => 0,
+        "path" | "width" | "height" | "w" | "h" => 0,
         "rotation" => 2,
         "x" | "y" => 3,
         "boundVariables" => 4,
@@ -389,11 +391,17 @@ pub fn apply(cmd: &str, doc: &mut Document, id: NodeId, props: &Map<String, Valu
     let mut unknown = Vec::new();
     let mut keys: Vec<(&String, &Value)> = props.iter().collect();
     keys.sort_by_key(|(k, _)| apply_order(k));
+    // Where a new `path` had its own box, for `x`/`y` in the same call (as `node.create` places it).
+    let mut path_offset = (0.0, 0.0);
     for (k, v) in keys {
         let k = k.as_str();
         match k {
+            "path" => path_offset = set_path(cmd, doc, id, v, props)?,
+            // A new path takes the size asked for as its scale (`set_path`).
+            "width" | "height" | "w" | "h" if props.contains_key("path") => {}
             "x" | "y" => {
                 let val = f64_of(v).ok_or_else(|| bad(cmd, format!("`{k}` must be a number")))?;
+                let val = val + if k == "x" { path_offset.0 } else { path_offset.1 };
                 // X/Y are the node's own origin (its rotated top-left for rotated nodes), in the
                 // frame it is in (groups have no space of their own).
                 let n = doc.get(id)?;
@@ -918,6 +926,33 @@ pub fn apply(cmd: &str, doc: &mut Document, id: NodeId, props: &Map<String, Valu
         }
     }
     Ok(())
+}
+
+/// Replace vector `id`'s geometry with SVG path data `v`, as `node.create` reads it: `width`/`height`
+/// in the same call scale it, and the path's own box goes at the layer's origin, which keeps its
+/// place, rotation and everything else. Returns where the path's own box was, which `x`/`y` in the
+/// same call add (so `{path, x: 0, y: 0}` places it as `node.create` does). Layers inside an
+/// instance are refused: their geometry comes from the main component, and a sync would undo it.
+fn set_path(cmd: &str, doc: &mut Document, id: NodeId, v: &Value, props: &Map<String, Value>) -> Result<(f64, f64)> {
+    let d = v.as_str().ok_or_else(|| bad(cmd, "`path` must be SVG path data (a string)"))?;
+    let n = doc.get(id)?;
+    if !matches!(n.kind, NodeKind::Vector { .. }) {
+        return Err(bad(cmd, format!("`path` applies to vector layers, and layer {} “{}” is a {}", n.id, n.name, n.kind.type_name())));
+    }
+    if crate::components::inside_instance(doc, id) {
+        return Err(bad(cmd, format!("`path`: layer {} “{}” is inside an instance: edit its main component, or detach the instance", n.id, n.name)));
+    }
+    let size = |long: &str, short: &str| -> Result<Option<f64>> {
+        props.get(long).or_else(|| props.get(short)).map(|v| f64_of(v).ok_or_else(|| bad(cmd, format!("`{long}` must be a number")))).transpose()
+    };
+    let shape = super::create::path_network(cmd, d, size("width", "w")?, size("height", "h")?)?;
+    let n = doc.get_mut(id)?;
+    if let NodeKind::Vector { network } = &mut n.kind {
+        *network = shape.network;
+    }
+    n.width = shape.width;
+    n.height = shape.height;
+    Ok(shape.offset)
 }
 
 /// The override group a property key belongs to.
