@@ -15,7 +15,7 @@
 //!   for the frames that follow (all false: released); `gamepad` presses a controller button in the
 //!   prototype playing (presenter or preview pane)
 //! - `ui.menu.invoke {id}` — a menu item exactly like clicking it (may open a dialog)
-//! - `ui.set {rightTab?, leftTab?, theme?, home?, homeSection?, homeRecentsView?, homeRecentsSort?, homeRecentsOrder?, palette?, focusRegion?, preview?, presentScroll?, …}`
+//! - `ui.set {rightTab?, leftTab?, theme?, home?, homeSection?, homeSearch?, homeRecentsView?, homeRecentsSort?, homeRecentsOrder?, palette?, focusRegion?, preview?, presentScroll?, …}`
 //! - `ui.screenshot {path?}` — PNG of the window (needs a visible window), written to `path` or
 //!   returned as base64 `data`
 //! - `ui.render {path?, scale?, ids?}` — PNG of the document (no UI chrome; works without a
@@ -347,6 +347,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
             let params = p.get("params").cloned().unwrap_or(json!({}));
             let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
+            app.clear_comment_draft_after_tool_set(cmd, r.is_ok());
             if r.is_ok()
                 && p.get("__agent_document")
                     .and_then(Value::as_u64)
@@ -563,6 +564,9 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
             }
             if let Some(section) = p.get("homeSection").and_then(Value::as_str).and_then(crate::home::Section::parse) {
                 app.ui.home_view.section = section;
+            }
+            if let Some(query) = p.get("homeSearch").and_then(Value::as_str) {
+                app.ui.home_view.file_query = query.chars().take(256).collect();
             }
             if let Some(view) = p.get("homeRecentsView").and_then(Value::as_str).and_then(crate::home_recents::View::parse) {
                 view.store(&mut app.session.prefs);

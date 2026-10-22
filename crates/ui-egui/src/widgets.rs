@@ -46,6 +46,25 @@ impl Lead<'_> {
     }
 }
 
+/// What a number field shows when it has no single value, and whether that word types 0.
+#[derive(Clone, Copy)]
+pub enum Empty<'a> {
+    /// Dim text that is only a label ("Mixed", or "Auto" where 0 means something else).
+    Text(&'a str),
+    /// Auto, in the UI's language: 0 is the field's automatic value, so the word types 0.
+    Auto,
+}
+
+impl<'a> Empty<'a> {
+    /// The text shown when the field has no value.
+    fn text(self) -> &'a str {
+        match self {
+            Empty::Text(s) => s,
+            Empty::Auto => tr("Auto"),
+        }
+    }
+}
+
 /// Result of a field edit.
 pub enum FieldEdit {
     /// Committed a new value (Enter, Tab or focus loss; an arrow key's step).
@@ -166,18 +185,19 @@ pub fn number_field(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, suffix:
 /// [`number_field`] over several layers: without a single value (`value` None, "Mixed") a relative
 /// edit comes back as one for each layer ([`Edit::Each`]).
 pub fn number_field_mixed(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, suffix: &str, width: f32, step: f64) -> Option<Edit> {
-    number_field_bindable(ui, id, lead, value, suffix, width, step, None, tr("Mixed")).0
+    number_field_bindable(ui, id, lead, value, suffix, width, step, None, Empty::Text(tr("Mixed"))).0
 }
 
 /// [`number_field`] that shows `empty` (dim) for no value instead of "Mixed" (e.g. "Auto"): there
 /// is no value to edit relative to, so `+4` is 4.
 pub fn number_field_or(ui: &mut Ui, id: Id, value: Option<f64>, empty: &str, width: f32, step: f64) -> Option<FieldEdit> {
-    number_field_impl(ui, id, Lead::None, value, "", width, step, None, empty, None).0?.settled()
+    number_field_impl(ui, id, Lead::None, value, "", width, step, None, Empty::Text(empty), None).0?.settled()
 }
 
 /// [`number_field`] that can bind a variable: `binding` None = not bindable, `Some(None)` = shows
 /// a variable button on hover, `Some(Some(name))` = bound (shows the name; click to change, the
-/// detach button unbinds). No value shows `empty` ("Mixed", "Auto").
+/// detach button unbinds). No value shows `empty` ("Mixed", "Auto"); [`Empty::Auto`] also takes
+/// the word for Auto as 0.
 pub fn number_field_bindable(
     ui: &mut Ui,
     id: Id,
@@ -187,7 +207,7 @@ pub fn number_field_bindable(
     width: f32,
     step: f64,
     binding: Option<Option<&str>>,
-    empty: &str,
+    empty: Empty<'_>,
 ) -> (Option<Edit>, Option<BindEvent>) {
     let (edit, bind, _) = number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty, None);
     (edit, bind)
@@ -204,7 +224,7 @@ pub fn number_field_with_sizing(
     binding: Option<Option<&str>>,
     label: &str,
 ) -> (Option<Edit>, Option<BindEvent>, egui::Response) {
-    let (edit, bind, selector) = number_field_impl(ui, id, lead, value, "", width, 1.0, binding, tr("Mixed"), Some(label));
+    let (edit, bind, selector) = number_field_impl(ui, id, lead, value, "", width, 1.0, binding, Empty::Text(tr("Mixed")), Some(label));
     let selector = selector.unwrap_or_else(|| ui.interact(Rect::NOTHING, id.with("sizing_fallback"), Sense::hover()));
     (edit, bind, selector)
 }
@@ -218,7 +238,7 @@ fn number_field_impl(
     width: f32,
     step: f64,
     binding: Option<Option<&str>>,
-    empty: &str,
+    empty: Empty<'_>,
     sizing: Option<&str>,
 ) -> (Option<Edit>, Option<BindEvent>, Option<egui::Response>) {
     let t = Tokens::get(ui.ctx());
@@ -240,20 +260,25 @@ fn number_field_impl(
     let editing_id = id.with("editing");
     let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
     let field_resp = ui.interact(edit_rect, id.with("field"), if sizing.is_some() { Sense::CLICK | Sense::DRAG } else { Sense::click() });
-    a11y::number(&field_resp, lead.name(), value, suffix, empty);
+    a11y::number(&field_resp, lead.name(), value, suffix, empty.text());
     a11y::ring_around(ui, rect, &field_resp);
     // The label scrubs with the pointer; the keyboard stops at the value only.
     let lead_resp = ui.interact(lead_rect, id.with("lead"), Sense::CLICK | Sense::DRAG);
     let hovered = field_resp.hovered() || lead_resp.hovered() || editing.is_some();
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     if editing.is_some() {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
     } else if hovered {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
     }
     match lead {
         Lead::Text(s) => {
-            ui.painter().text(pos2(lead_rect.min.x + 8.0, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), t.text_secondary);
+            let galley = crate::bidi::name_galley(ui.painter(), s, regular(11.0), t.text_secondary, lead_w - 12.0);
+            // A label cut short shows whole on hover.
+            if galley.elided {
+                lead_resp.clone().on_hover_text(s);
+            }
+            ui.painter().galley(pos2(lead_rect.min.x + 8.0, rect.center().y - galley.size().y / 2.0), galley, t.text_secondary);
         }
         Lead::Icon(i, _) => {
             icons::paint(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(14.0, 14.0)), i, t.icon_secondary)
@@ -308,10 +333,21 @@ fn number_field_impl(
     };
     // A relative edit of no single value goes to each layer's own.
     let set = |v: f64| Edit::All(FieldEdit::Set(v));
-    let typed = |text: &str| match (parse(text, suffix == "%")?, value) {
-        (Typed::Value(v), _) => Some(set(v)),
-        (Typed::Rel(r), Some(cur)) => r.apply(cur).map(set),
-        (Typed::Rel(r), None) => Some(Edit::Each(r)),
+    let typed = |text: &str| {
+        // A field where 0 is its automatic value takes the word for Auto as input too: the
+        // placeholder's own text (so it is what the field shows, in the UI's language) or the
+        // English word.
+        if let Empty::Auto = empty {
+            let t = text.trim();
+            if t == empty.text() || t.eq_ignore_ascii_case("auto") {
+                return Some(set(0.0));
+            }
+        }
+        match (parse(text, suffix == "%")?, value) {
+            (Typed::Value(v), _) => Some(set(v)),
+            (Typed::Rel(r), Some(cur)) => r.apply(cur).map(set),
+            (Typed::Rel(r), None) => Some(Edit::Each(r)),
+        }
     };
     // With the keyboard on the field (Tab) and nothing typed yet, the arrows step it as it is.
     if editing.is_none()
@@ -398,7 +434,7 @@ fn number_field_impl(
         None => {
             let s = match value {
                 Some(v) => format!("{}{}", fmt_num(v), suffix),
-                None => empty.to_string(),
+                None => empty.text().to_string(),
             };
             let col = if value.is_some() { t.text } else { t.text_secondary };
             ui.painter().with_clip_rect(edit_rect).text(pos2(edit_rect.min.x, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), col);
@@ -438,6 +474,13 @@ fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, 
     response
 }
 
+/// The width a text label takes at the start of a field `field_w` wide: the label as drawn plus
+/// its padding, leaving the value room for a few characters (a longer label ends in an ellipsis).
+pub(crate) fn text_lead_width(ui: &Ui, label: &str, field_w: f32) -> f32 {
+    let text = ui.painter().layout_no_wrap(label.to_string(), regular(11.0), Color32::PLACEHOLDER).size().x;
+    (12.0 + text).min(field_w - 32.0).max(24.0)
+}
+
 /// A field bound to a variable: the lead, then the variable's name in a chip; the chip opens the
 /// picker and the detach button unbinds.
 /// A field showing the variable `name` bound to it in `rect`: click to change, detach to unbind.
@@ -452,8 +495,9 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
     let lead_w = match lead {
         Lead::None | Lead::Named(_) => 4.0,
         Lead::Text(s) => {
-            ui.painter().text(pos2(rect.min.x + 8.0, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), t.text_secondary);
-            (12.0 + s.chars().count() as f32 * 7.0).max(24.0)
+            let w = text_lead_width(ui, s, rect.width());
+            crate::bidi::paint_name(ui.painter(), pos2(rect.min.x + 8.0, rect.center().y), s, regular(11.0), t.text_secondary, w - 12.0);
+            w
         }
         Lead::Icon(i, _) => {
             icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(14.0, 14.0)), i, t.icon_secondary);
@@ -599,7 +643,7 @@ fn text_field_in(ui: &mut Ui, id: Id, value: &str, rect: Rect, placeholder: &str
     a11y::text(&resp, name, value);
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     if editing.is_some() {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
     } else if resp.hovered() {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
     }
@@ -607,7 +651,7 @@ fn text_field_in(ui: &mut Ui, id: Id, value: &str, rect: Rect, placeholder: &str
     if started {
         editing = Some(value.to_string());
         ui.memory_mut(|m| m.request_focus(id.with("te")));
-        select_all_next(ui, id.with("te"));
+        select_all_next(ui, id.with("te"), value);
     }
     let mut out = None;
     match editing {
@@ -662,7 +706,7 @@ pub fn text_input(ui: &mut Ui, id: Id, text: &mut String, width: f32, hint: &str
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     let r = field_editor(ui, rect, id, text, hint);
     if r.has_focus() {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
     } else if ui.rect_contains_pointer(rect) {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
     }
@@ -699,21 +743,33 @@ pub fn select_all_on_focus(ui: &Ui, r: &Response, text: &str) {
         ui.data_mut(|d| d.remove::<bool>(pending));
         return;
     }
-    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
-        let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
-        state.cursor.set_char_range(Some(all));
-        state.store(ui.ctx(), r.id);
-        ui.ctx().request_repaint();
+    // A key typed in the frame the edit started already replaced the selection laid beforehand.
+    if r.changed() {
+        ui.data_mut(|d| d.remove::<bool>(pending));
+        return;
     }
+    select_all(ui, r.id, text);
+    ui.ctx().request_repaint();
     if !down {
         ui.data_mut(|d| d.remove::<bool>(pending));
     }
 }
 
 /// Has [`select_all_on_focus`] select all of editor `te_id` from now on (an edit that starts
-/// with the editor already focused, which then gains no focus).
-fn select_all_next(ui: &Ui, te_id: Id) {
+/// with the editor already focused, which then gains no focus). Call it before adding the editor:
+/// the text is selected at once, so a key typed in the frame the edit starts (the frame after a
+/// double-click or F2 is often the one with the first key) replaces it.
+fn select_all_next(ui: &Ui, te_id: Id, text: &str) {
     ui.data_mut(|d| d.insert_temp(select_all_id(te_id), true));
+    select_all(ui, te_id, text);
+}
+
+/// Selects all of `text` in editor `te_id`.
+fn select_all(ui: &Ui, te_id: Id, text: &str) {
+    let mut state = egui::TextEdit::load_state(ui.ctx(), te_id).unwrap_or_default();
+    let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
+    state.cursor.set_char_range(Some(all));
+    state.store(ui.ctx(), te_id);
 }
 
 fn select_all_id(te_id: Id) -> Id {
@@ -1135,7 +1191,7 @@ pub fn checkbox(ui: &mut Ui, on: bool, label: &str) -> bool {
     let b = Rect::from_min_size(pos2(rect.min.x, rect.center().y - 7.0), vec2(14.0, 14.0));
     if on {
         ui.painter().rect_filled(b, CornerRadius::same(3), t.accent);
-        icons::paint(ui.painter(), b.shrink(1.5), Icon::Check, Color32::WHITE);
+        icons::paint(ui.painter(), b.shrink(1.5), Icon::Check, t.accent_on);
     } else {
         ui.painter().rect_stroke(b, CornerRadius::same(3), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
     }
@@ -1151,35 +1207,35 @@ pub fn radio(ui: &mut Ui, on: bool, label: &str) -> bool {
     let c = pos2(rect.min.x + 7.0, rect.center().y);
     if on {
         ui.painter().circle_filled(c, 7.0, t.accent);
-        ui.painter().circle_filled(c, 2.5, Color32::WHITE);
+        ui.painter().circle_filled(c, 2.5, t.accent_on);
     } else {
-        ui.painter().circle_stroke(c, 6.5, Stroke::new(1.0, if resp.hovered() { t.accent } else { t.border_strong }));
+        ui.painter().circle_stroke(c, 6.5, Stroke::new(1.0, if resp.hovered() { crate::theme::ACCENT } else { t.border_strong }));
     }
     ui.painter().text(pos2(rect.min.x + 22.0, rect.center().y), Align2::LEFT_CENTER, label, regular(11.0), t.text);
     resp.clicked()
 }
 
 /// A text button: `primary` is filled with the accent colour, otherwise outlined. A disabled
-/// button is dimmed and never reports clicks.
+/// button is grey with dim text (still readable) and never reports clicks.
 pub fn button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(label.to_string(), regular(11.0), t.text);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 24.0, FIELD_H), sense);
     a11y::button(&resp, label);
-    let hot = enabled && resp.hovered();
-    let (fill, text) = match (primary, hot) {
-        (true, false) => (t.accent, Color32::WHITE),
-        (true, true) => (t.accent_hover, Color32::WHITE),
-        (false, false) => (Color32::TRANSPARENT, t.text),
-        (false, true) => (t.hover, t.text),
+    let (fill, text) = match (enabled, primary, resp.hovered()) {
+        (false, true, _) => (t.field, t.text_tertiary),
+        (false, false, _) => (Color32::TRANSPARENT, t.text_tertiary),
+        (true, true, false) => (t.accent, t.accent_on),
+        (true, true, true) => (t.accent_hover, t.accent_on),
+        (true, false, false) => (Color32::TRANSPARENT, t.text),
+        (true, false, true) => (t.hover, t.text),
     };
-    let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
-    ui.painter().rect_filled(rect, CornerRadius::same(5), dim(fill));
+    ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
     if !primary {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
     }
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, regular(11.0), dim(text));
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, regular(11.0), text);
     resp
 }
 
@@ -1202,12 +1258,12 @@ pub fn text_field_inline(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egu
     if started {
         buf = Some(value.to_string());
         ui.memory_mut(|m| m.request_focus(te_id));
-        select_all_next(ui, te_id);
+        select_all_next(ui, te_id, value);
     }
     match buf {
         Some(mut text) => {
             ui.painter().rect_filled(rect.expand(2.0), CornerRadius::same(4), t.panel);
-            ui.painter().rect_stroke(rect.expand(2.0), CornerRadius::same(4), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            ui.painter().rect_stroke(rect.expand(2.0), CornerRadius::same(4), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             let r = crate::bidi::single_line(&mut child, te_id, &mut text, font, rect.width());
             a11y::own_focus(&r);

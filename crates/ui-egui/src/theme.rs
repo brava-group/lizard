@@ -14,6 +14,7 @@ pub struct Tokens {
     pub border_strong: Color32,
     pub text: Color32,
     pub text_secondary: Color32,
+    /// Dim text for disabled controls, placeholders and hints.
     pub text_tertiary: Color32,
     pub icon: Color32,
     pub icon_secondary: Color32,
@@ -23,6 +24,7 @@ pub struct Tokens {
     pub field_hover_border: Color32,
     pub accent: Color32,
     pub accent_hover: Color32,
+    pub accent_on: Color32,
     pub accent_text: Color32,
     pub selected_row: Color32,
     pub selected_row_child: Color32,
@@ -44,7 +46,19 @@ pub struct Tokens {
     pub focus: Color32,
 }
 
+/// Keep the branch's blue accent across controls and canvas overlays.
 pub const ACCENT: Color32 = Color32::from_rgb(0x0D, 0x99, 0xFF);
+pub const ACCENT_ON: Color32 = Color32::WHITE;
+/// The blue overlay color used by the branch's canvas.
+pub fn canvas_accent(_ctx: &Context) -> Color32 {
+    ACCENT
+}
+
+/// Preserve the branch's blue fill under white text.
+pub fn under_white(c: Color32) -> Color32 {
+    c
+}
+
 pub const COMPONENT: Color32 = Color32::from_rgb(0x97, 0x47, 0xFF);
 /// Handoff status badges (white text on these, in both themes).
 pub const DEV_READY: Color32 = Color32::from_rgb(0x14, 0xAE, 0x5C);
@@ -72,14 +86,14 @@ impl Tokens {
             field_hover_border: Color32::from_rgb(0xE6, 0xE6, 0xE6),
             accent: ACCENT,
             accent_hover: Color32::from_rgb(0x00, 0x7B, 0xE5),
-            // 5.2:1 on white, 4.6:1 on selected rows: WCAG AA for text.
+            accent_on: ACCENT_ON,
             accent_text: Color32::from_rgb(0x00, 0x6B, 0xD1),
             selected_row: Color32::from_rgb(0xE5, 0xF4, 0xFF),
             selected_row_child: Color32::from_rgb(0xF2, 0xF9, 0xFF),
             component: COMPONENT,
             component_row: Color32::from_rgb(0xF1, 0xE9, 0xFF),
             danger: Color32::from_rgb(0xF2, 0x48, 0x22),
-            success: Color32::from_rgb(0x14, 0xAE, 0x5C),
+            success: DEV_READY,
             warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
             guide: Color32::from_rgb(0xF2, 0x48, 0x22),
             tab_bar: Color32::from_rgb(0xE8, 0xE8, 0xE8),
@@ -112,13 +126,14 @@ impl Tokens {
             field_hover_border: Color32::from_rgb(0x4D, 0x4D, 0x4D),
             accent: ACCENT,
             accent_hover: Color32::from_rgb(0x3D, 0xAD, 0xFF),
+            accent_on: ACCENT_ON,
             accent_text: Color32::from_rgb(0x7C, 0xC4, 0xF8),
             selected_row: Color32::from_rgb(0x2A, 0x45, 0x5C),
             selected_row_child: Color32::from_rgb(0x2D, 0x37, 0x41),
             component: Color32::from_rgb(0xD2, 0x7C, 0xFF),
             component_row: Color32::from_rgb(0x3E, 0x30, 0x52),
             danger: Color32::from_rgb(0xF2, 0x48, 0x22),
-            success: Color32::from_rgb(0x14, 0xAE, 0x5C),
+            success: DEV_READY,
             warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
             guide: Color32::from_rgb(0xF2, 0x48, 0x22),
             tab_bar: Color32::from_rgb(0x3A, 0x3B, 0x40),
@@ -254,7 +269,7 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     semi.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
     fonts.families.insert(FontFamily::Name("semibold".into()), semi);
     // CJK and other scripts from craft-fonts as fallbacks (Noto Sans CJK only with FIGCRAFT_EMBED_CJK).
-    const BUILT_IN: [&str; 4] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic"];
+    const BUILT_IN: [&str; 5] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Georgian"];
     let lang = crate::i18n::current().map_or("en", |l| l.code);
     // A Chinese UI draws Han in a Chinese face: the built-in Japanese one goes after the system faces.
     let late = |family: &str| family == "BIZ UDPGothic" && crate::cjk::language(lang) == crate::cjk::HAN;
@@ -274,7 +289,9 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
                 .filter_map(|f| figcraft_text::find_face(f, "Regular"))
                 .any(|x| x.has_char(c))
         };
-        extra.extend(crate::bidi::script_fallbacks(&embedded));
+        let mut taken = Vec::new();
+        extra.extend(crate::bidi::script_fallbacks(&embedded, &mut taken));
+        extra.extend(key_symbol_fallbacks(&embedded, &mut taken));
         extra.extend(crate::cjk::faces(cjk, lang, &embedded).iter().map(|f| (format!("system-{}-{}", f.family, f.style), font_data(f))));
     }
     extra.extend(craft(true));
@@ -287,6 +304,38 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
         }
     }
     ctx.set_fonts(fonts);
+}
+
+/// The glyphs macOS shortcuts are written with ([`figcraft_engine::keymap::display`]).
+const KEY_SYMBOLS: &str = "⌃⌥⇧⌘⌫↵⇥⇞⇟←→↑↓";
+/// System families that have them, in order of preference.
+const KEY_FAMILIES: [&str; 6] = ["Lucida Grande", "Apple Symbols", "Segoe UI Symbol", "DejaVu Sans", "Noto Sans Symbols 2", "FreeSans"];
+
+/// System faces for the shortcut glyphs the UI's own fonts lack (egui's default face has ⌘ but
+/// not ⌥ or ↵); `taken` as for [`system_fallbacks`].
+fn key_symbol_fallbacks(have: &dyn Fn(char) -> bool, taken: &mut Vec<Arc<figcraft_text::Face>>) -> Vec<(String, FontData)> {
+    system_fallbacks(KEY_SYMBOLS.chars(), &KEY_FAMILIES, have, taken)
+}
+
+/// System faces, the first of `families` that has each, for the `samples` neither the UI's own
+/// fonts (`have`) nor the faces already `taken` draw. Each face found joins `taken`, so a face that
+/// several lists name is added once.
+pub(crate) fn system_fallbacks(
+    samples: impl IntoIterator<Item = char>,
+    families: &[&str],
+    have: &dyn Fn(char) -> bool,
+    taken: &mut Vec<Arc<figcraft_text::Face>>,
+) -> Vec<(String, FontData)> {
+    let mut out = Vec::new();
+    for c in samples {
+        if have(c) || taken.iter().any(|f| f.has_char(c)) {
+            continue;
+        }
+        let Some(face) = figcraft_text::face_with_char(c, families) else { continue };
+        out.push((format!("system-{}-{}", face.family, face.style), font_data(&face)));
+        taken.push(face);
+    }
+    out
 }
 
 /// egui font data over a face's bytes, without copying them (CJK faces are 10–20 MB). Font

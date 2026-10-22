@@ -9,7 +9,7 @@ use crate::FigApp;
 use crate::a11y::{self, Nav, Region, Tip};
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
-use crate::theme::{ACCENT, Tokens, regular};
+use crate::theme::{Tokens, regular};
 
 struct Group {
     key: &'static str,
@@ -85,6 +85,8 @@ pub(crate) fn main_width() -> f32 {
     8.0 + GROUPS.len() as f32 * (cell + gap) + 4.0 * 10.0 + 2.0 * (cell + 4.0) + 8.0 + MODE_SEGMENT_WIDTH + 8.0
 }
 
+/// The main toolbar pill: the tool groups with their flyouts, Resources and Actions, then the
+/// Draw · Design · Prototype · Inspect mode switcher.
 fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let (cell, gap) = (32.0, 4.0);
     let width = main_width();
@@ -148,7 +150,7 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
         // The Actions button reads on while its panel is open; clicking it again closes it.
         let actions_open = id == "actions" && app.ui.palette.is_some();
         if actions_open {
-            ui.painter().rect_filled(r, CornerRadius::same(5), ACCENT);
+            ui.painter().rect_filled(r, CornerRadius::same(5), t.accent);
         } else if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
         }
@@ -390,7 +392,7 @@ fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Ic
     });
     a11y::toggle(&resp, tip, active);
     let bg = if active {
-        ACCENT
+        t.accent
     } else if resp.hovered() {
         t.hover
     } else {
@@ -413,8 +415,8 @@ fn done_button(ui: &mut Ui, t: &Tokens, x: f32, cy: f32, tip: &str) -> bool {
     divider(ui, t, x, cy);
     let done = Rect::from_min_size(pos2(x + 12.0, cy - 14.0), vec2(DONE_W, 28.0));
     let resp = ui.interact(done, ui.id().with("tool_done"), Sense::click()).tip(tip);
-    ui.painter().rect_filled(done, CornerRadius::same(6), if resp.hovered() { t.accent_hover } else { ACCENT });
-    ui.painter().text(done.center(), Align2::CENTER_CENTER, tr("Done"), crate::theme::semibold(11.5), Color32::WHITE);
+    ui.painter().rect_filled(done, CornerRadius::same(6), if resp.hovered() { t.accent_hover } else { t.accent });
+    ui.painter().text(done.center(), Align2::CENTER_CENTER, tr("Done"), crate::theme::semibold(11.5), t.accent_on);
     resp.clicked()
 }
 

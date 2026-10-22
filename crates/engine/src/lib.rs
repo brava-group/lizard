@@ -30,6 +30,7 @@ pub mod doc_urls;
 pub mod drop;
 pub mod figma_plugins;
 pub mod file_access;
+pub mod fonts;
 pub mod guard;
 pub mod guides;
 pub mod inspect;
@@ -49,6 +50,7 @@ pub mod proto_run;
 pub mod rename;
 pub mod rotation_origin;
 pub mod selection_colors;
+pub mod selection_reorder;
 pub mod selection_spacing;
 pub mod shape_handles;
 pub mod shapebuilder;
@@ -381,6 +383,8 @@ pub struct DocState {
     pub guide: Option<(NodeId, usize)>,
     /// The selection's rotation origin, when moved or shown (see [`rotation_origin`]; not saved).
     pub(crate) rotation_origin: Option<rotation_origin::RotationOrigin>,
+    /// The View toggles the preferences keep were applied ([`Session::apply_view_prefs`]).
+    view_from_prefs: bool,
     /// The last duplicate while its copies are the selection: Duplicate repeats its offset (see
     /// [`cmd::edit::Duplicated`]; not saved).
     pub(crate) last_duplicate: Option<cmd::edit::Duplicated>,
@@ -442,6 +446,7 @@ impl DocState {
             focus: None,
             guide: None,
             rotation_origin: None,
+            view_from_prefs: false,
             last_duplicate: None,
         };
         st.zoom_to_fit();
@@ -605,6 +610,23 @@ impl DocState {
     }
 }
 
+/// The smallest and largest interface size, relative to the system's display scale (1.0 is the
+/// system's own size).
+pub const UI_SCALE_MIN: f64 = 0.75;
+pub const UI_SCALE_MAX: f64 = 3.0;
+
+/// `scale` kept between [`UI_SCALE_MIN`] and [`UI_SCALE_MAX`]; not a finite number: `None`.
+pub fn clamp_ui_scale(scale: f64) -> Option<f64> {
+    scale.is_finite().then(|| scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX))
+}
+
+/// Reads the saved interface size. Anything but a number reads as 1 (the system's size) and a
+/// number out of range is clamped, so a settings file edited by hand never costs the other
+/// preferences.
+fn read_ui_scale<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f64, D::Error> {
+    Ok(Value::deserialize(d)?.as_f64().and_then(clamp_ui_scale).unwrap_or(1.0))
+}
+
 /// App-wide preferences that commands read (nudge amounts, behaviours).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -632,9 +654,16 @@ pub struct Prefs {
     /// Reduce motion: the interface's own animations are off (the system's setting turns them off
     /// too). Prototype transitions still play.
     pub reduce_motion: bool,
+    /// How large the whole interface is drawn, relative to the system's display scale: 1.0 is the
+    /// system's own size, 1.25 a quarter larger (kept between [`UI_SCALE_MIN`] and
+    /// [`UI_SCALE_MAX`]). The canvas zoom is separate.
+    #[serde(deserialize_with = "read_ui_scale")]
+    pub ui_scale: f64,
     /// Files that have a path are saved by themselves a few seconds after they change (the app's
     /// timer; off: only File ▸ Save writes them).
     pub auto_save: bool,
+    /// The desktop app starts on the Home screen instead of in a new file.
+    pub start_on_home: bool,
     /// `figcraft://` invite links open this app (`collab.registerLinks`); `None`: on for installed
     /// builds, off for development builds.
     pub invite_links: Option<bool>,
@@ -673,6 +702,10 @@ pub struct Prefs {
     pub home_sort: String,
     /// Which way: `"desc"` (newest first, Z to A) or `"asc"`.
     pub home_order: String,
+    /// The View menu's toggles turned on or off (rulers, pixel grid, snapping…), by command id:
+    /// files opened or made later start with them. Missing: the toggle's default.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub view: BTreeMap<String, bool>,
     /// Recently run actions (the Actions palette's Recents), newest first, at most
     /// [`MAX_RECENT_ACTIONS`]. Entries are `command:<id>`, `plugin:<plugin>/<command>` or
     /// `widget:<plugin>`.
@@ -699,7 +732,9 @@ impl Default for Prefs {
             language: "system".into(),
             user_name: cmd::comment::DEFAULT_AUTHOR.into(),
             reduce_motion: false,
+            ui_scale: 1.0,
             auto_save: false,
+            start_on_home: false,
             invite_links: None,
             plugins: Vec::new(),
             figma_plugins: Vec::new(),
@@ -712,6 +747,7 @@ impl Default for Prefs {
             home_views: BTreeMap::new(),
             home_sort: "modified".into(),
             home_order: "desc".into(),
+            view: BTreeMap::new(),
             recent_actions: Vec::new(),
         }
     }
@@ -736,6 +772,8 @@ pub struct Clipboard {
     /// The page-space bounds of the copied selection.
     pub bounds: Option<figcraft_geom::Rect>,
     pub source_doc: u64,
+    /// Copied component/set roots, excluding cuts and originals discarded by undo (ids are reused).
+    pub copied_components: std::collections::BTreeSet<NodeId>,
     /// The document copied from (pastes into other files follow its mains) and its file path.
     pub source: Option<Arc<Document>>,
     pub source_path: Option<String>,
@@ -869,6 +907,14 @@ impl Session {
         s
     }
 
+    /// Files new to the session start with the View toggles the preferences keep.
+    pub fn apply_view_prefs(&mut self) {
+        for ds in self.docs.iter_mut().filter(|d| !d.view_from_prefs) {
+            cmd::view::apply_kept(&self.prefs, &mut ds.view);
+            ds.view_from_prefs = true;
+        }
+    }
+
     pub fn ds(&self) -> Result<&DocState> {
         self.docs.get(self.active).ok_or(EngineError::NoDocument)
     }
@@ -910,6 +956,7 @@ impl Session {
             return Err(EngineError::Disabled(id.into(), "leave the live session before reverting to the saved file".into()));
         }
         branches::sync(self);
+        self.apply_view_prefs();
         if textpreview::COMMANDS.contains(&id) {
             // A live preview is no edit: no undo step, normalisation or rollback here.
             let r = guard::run(id, || (spec.run)(self, params));
@@ -935,6 +982,7 @@ impl Session {
         match &result {
             Ok(_) => {
                 self.after_command(spec, before);
+                self.apply_view_prefs();
                 if spec.history && id != "edit.repeat" {
                     self.last_command = Some((id.to_string(), params.clone()));
                 }
@@ -1029,7 +1077,9 @@ impl Session {
         };
         let Some(ds) = self.docs.iter_mut().find(|d| d.uid == uid) else { return };
         let changed = !Arc::ptr_eq(&ds.doc, &bdoc);
-        if changed {
+        // Saving may adopt the chosen filename as the document title. The encoded snapshot is
+        // already final; normalising it again would detach it from the saved baseline.
+        if changed && !matches!(spec.id, "file.save" | "file.saveAs") {
             normalize(ds.doc_mut(), &bdoc);
         }
         let edit = changed && ds.interaction.is_none();
@@ -1094,8 +1144,11 @@ impl Session {
         let Some(it) = ds.interaction.clone() else { return Err(EngineError::Other("no gesture in progress".into())) };
         let mut doc = (*it.doc).clone();
         let mut sel = it.selection.clone();
+        // What the gesture changes on the selected layers is an explicit edit.
+        let before = cmd::styles::bound_before(&doc, &it.selection);
         let res = f(&mut doc, &mut sel);
         if res.is_ok() {
+            cmd::styles::detach_edited(&mut doc, &before);
             normalize(&mut doc, &it.doc);
             // The same preview again (a handle held still) keeps the document: a new one would
             // re-render the canvas for nothing.
@@ -1162,6 +1215,13 @@ impl Session {
         }
         ds.clean_selection();
         ds.revision += 1;
+        let (uid, doc) = (ds.uid, ds.doc.clone());
+        if self.clipboard.source_doc == uid {
+            self.clipboard.copied_components.retain(|id| {
+                doc.node(*id)
+                    .is_some_and(|n| matches!(n.kind, figcraft_doc::NodeKind::Component { .. } | figcraft_doc::NodeKind::ComponentSet { .. }))
+            });
+        }
         Ok(true)
     }
 
@@ -1456,20 +1516,34 @@ fn affects_layout(before: &Document, doc: &Document, id: NodeId) -> bool {
 }
 
 /// The layers whose variable bindings an edit may have changed: every bound layer when a variable
-/// changed, else the touched layers and everything below those that moved, are new or chose
-/// another variable mode (modes are inherited).
+/// changed, else the touched layers and everything below those that moved, are new, chose
+/// another variable mode or became an instance of another main (modes are inherited, an
+/// instance's from its main too), and the instances of a main that chose another mode.
 fn binding_scope(doc: &Document, before: &Document, touched: &BTreeSet<NodeId>) -> Option<BTreeSet<NodeId>> {
     if doc.variables != before.variables {
         return None;
     }
+    let main = |n: &Node| match n.kind {
+        figcraft_doc::NodeKind::Instance { component, .. } => Some(component),
+        _ => None,
+    };
     let mut out = BTreeSet::new();
     for &id in touched {
         let Some(n) = doc.node(id) else { continue };
-        let inherited = before.node(id).is_none_or(|b| b.var_modes != n.var_modes || b.parent != n.parent);
-        if inherited {
+        let Some(b) = before.node(id) else {
+            out.extend(doc.subtree(id));
+            continue;
+        };
+        let modes = b.var_modes != n.var_modes;
+        if modes || b.parent != n.parent || main(b) != main(n) {
             out.extend(doc.subtree(id));
         } else {
             out.insert(id);
+        }
+        if modes && matches!(n.kind, figcraft_doc::NodeKind::Component { .. }) {
+            for i in components::instances_of(doc, id) {
+                out.extend(doc.subtree(i));
+            }
         }
     }
     Some(out)
@@ -1549,6 +1623,8 @@ mod batch_step_ref_tests;
 mod binding_lists_tests;
 #[cfg(test)]
 mod booleans_tests;
+#[cfg(test)]
+mod bound_alpha_tests;
 #[cfg(test)]
 mod branch_tests;
 #[cfg(test)]
@@ -1646,6 +1722,8 @@ mod import_journal_tests;
 #[cfg(test)]
 mod inspect_behaviour_tests;
 #[cfg(test)]
+mod instance_modes_tests;
+#[cfg(test)]
 mod instance_resizing_tests;
 #[cfg(test)]
 mod interaction_rollback_tests;
@@ -1714,6 +1792,8 @@ mod pixel_preview_tests;
 #[cfg(test)]
 mod playground_tests;
 #[cfg(test)]
+mod plugin_data_tests;
+#[cfg(test)]
 mod plugin_directory_tests;
 #[cfg(test)]
 mod plugin_panels_tests;
@@ -1739,6 +1819,8 @@ mod proto_responsive_tests;
 mod proto_run_tests;
 #[cfg(test)]
 mod proto_tail_tests;
+#[cfg(test)]
+mod rest_slot_tests;
 #[cfg(test)]
 mod retained_walk_tests;
 #[cfg(test)]
@@ -1812,7 +1894,11 @@ mod variables_behaviour_tests;
 #[cfg(test)]
 mod variables_editor_tests;
 #[cfg(test)]
+mod variables_import_shapes_tests;
+#[cfg(test)]
 mod variables_io_tests;
+#[cfg(test)]
+mod variants_discovery_tests;
 #[cfg(test)]
 mod vector_behaviour_tests;
 #[cfg(test)]
@@ -1828,5 +1914,7 @@ mod view_behaviour_tests;
 #[cfg(test)]
 mod widgets_tests;
 
+#[cfg(test)]
+mod selection_reorder_tests;
 #[cfg(test)]
 mod selection_spacing_tests;
