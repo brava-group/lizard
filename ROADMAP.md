@@ -6,7 +6,7 @@
 
 > **Local plugin work:** Figma `manifest.json` inspection, development registration and native JavaScript workers run six official open-source sample plugins from local source on macOS. Ten user-supplied published bundles were checked: nine requested an HTML UI, and one showed its UI before closing with a missing-image notice. Mockup and Figma to Code rendered in the native WebView; an Iconify UI message inserted an editable SVG. The bridge now handles manifest-scoped HTTPS, client storage, nested selected layers and image paints. Full workflows across those ten packages are not yet verified; broad Figma plugin compatibility remains open. Headline estimates remain unchanged.
 
-Lizard is a clean-room, open-source, pure-Rust reimplementation of the Figma design workflow,
+Lizard is an open-source Rust interface design editor based on FigCraft,
 native on macOS, Windows, Linux and FreeBSD and in the browser, fully drivable by agents through
 the CLI, a JSON control channel and MCP. This page is the one-page summary; agents choosing work
 start with [`docs/gaps.md`](docs/gaps.md).
@@ -319,6 +319,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Updated inherited project wording and generated Lizard's white-and-black app icon from its existing navigation mark. The macOS bundle now uses the Lizard name and icon; feature estimates unchanged. |
 | 2026-10-22 | minor | Began the independent Lizard identity: desktop window, home screen, help text and executable use Lizard; the original project's marks were removed, while `.figcraft` files and internal crate names remain compatible. Inherited release automation is disabled until packaging identifiers migrate. Feature estimates unchanged. |
 | 2026-10-22 | minor | Matched the owner-supplied properties designs for effect rows and settings, including layered shadow icons, the Glass light illustration and compact sliders. The colour picker now exposes Libraries and adjacent style/variable creation, with an eyedropper preview. Behaviour scores unchanged pending user workflow checks. |
 | 2026-10-22 | minor | Integrated command.batch named references (#1003), vector path replacement through node.set (#1004), fillable-shape image paste (#921), and plugin API 4 with panel grid controls (#926). Existing canvas rendering and theme decisions remain in this branch; area estimates are pending broader usage checks. |

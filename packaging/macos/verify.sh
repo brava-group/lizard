@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Check the macOS release artifacts exactly as users download them:
 #
-#   $DIST/figcraft-<version>-macos-<arch>.dmg       signed, notarized, ticket stapled
+#   $DIST/lizard-<version>-macos-<arch>.dmg         signed, notarized, ticket stapled
 #   $DIST/figcraft-cli-<version>-macos-<arch>.zip   (when apps/figcraft-cli exists) unpacked here; the binary inside must be
 #                                                    Developer ID signed with the hardened runtime,
 #                                                    timestamped and notarized
@@ -37,7 +37,7 @@ case "$ARCH" in
   *) echo "unknown --arch $ARCH" >&2; exit 2 ;;
 esac
 
-DMG="$DIST/figcraft-$VERSION-macos-$ARCH.dmg"
+DMG="$DIST/lizard-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/figcraft-cli-$VERSION-macos-$ARCH.zip"
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 STRICT=0

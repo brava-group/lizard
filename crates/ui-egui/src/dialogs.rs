@@ -130,9 +130,7 @@ fn about_body(ui: &mut egui::Ui, t: &Tokens) {
         });
     });
     ui.add_space(12.0);
-    ui.label(tr(
-        "Interface design and prototyping. A free, open-source, clean-room design tool written from scratch in Rust, part of the ArtCraft Crafting Apps.",
-    ));
+    ui.label(tr("Lizard is an open-source interface design and prototyping app built with Rust."));
     ui.add_space(8.0);
     ui.hyperlink_to("getartcraft.com/apps/figcraft", "https://getartcraft.com/apps/figcraft");
     ui.hyperlink_to(tr("Join us on Discord"), "https://discord.gg/artcraft");

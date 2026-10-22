@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build, sign and (optionally) notarize the macOS release artifacts:
 #
-#   $DIST/figcraft-<version>-macos-<arch>.dmg          FigCraft.app on a drag-to-Applications DMG
+#   $DIST/lizard-<version>-macos-<arch>.dmg            Lizard.app on a drag-to-Applications DMG
 #   $DIST/figcraft-cli-<version>-macos-<arch>.zip      the headless CLI (when apps/figcraft-cli exists)
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
@@ -39,9 +39,11 @@ export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%-*}"
 WORK="$CARGO_TARGET_DIR/macos-package"
-APP="$WORK/FigCraft.app"
-DMG="$DIST/figcraft-$VERSION-macos-$ARCH.dmg"
+APP="$WORK/Lizard.app"
+DMG="$DIST/lizard-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/figcraft-cli-$VERSION-macos-$ARCH.zip"
+BINS=(lizard)
+[ "$HAS_CLI" = 1 ] && BINS+=(figcraft-cli)
 
 NOTARIZE=0
 if [ "$IDENTITY" = "-" ]; then
@@ -52,13 +54,16 @@ else
   warn "macOS: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete; signed but not notarized"
 fi
 
-echo "==> FigCraft $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, notarize: $NOTARIZE"
+echo "==> Lizard $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, notarize: $NOTARIZE"
 
 # ---- build -------------------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = 0 ]; then
-  args=()
-  for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
-  (cd "$ROOT" && cargo build --release --locked "${CARGO_PKGS[@]}" "${args[@]}")
+  for t in "${TARGETS[@]}"; do
+    (cd "$ROOT" && cargo build --release --locked -p figcraft --bin lizard --target "$t")
+    if [ "$HAS_CLI" = 1 ]; then
+      (cd "$ROOT" && cargo build --release --locked -p figcraft-cli --bin figcraft-cli --target "$t")
+    fi
+  done
 fi
 
 rm -rf "$WORK"
@@ -101,20 +106,20 @@ notarize() {
 # The .icns is generated here from the committed PNGs (assets/app-icon/figcraft-<size>.png, made by
 # `cargo xtask icon`); it is never committed.
 ICONS="$ROOT/assets/app-icon"
-ICONSET="$WORK/FigCraft.iconset"
+ICONSET="$WORK/Lizard.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
   cp "$ICONS/figcraft-$s.png" "$ICONSET/icon_${s}x${s}.png"
   cp "$ICONS/figcraft-$((s * 2)).png" "$ICONSET/icon_${s}x${s}@2x.png"
 done
-iconutil -c icns -o "$WORK/FigCraft.icns" "$ICONSET"
+iconutil -c icns -o "$WORK/Lizard.icns" "$ICONSET"
 
-# ---- FigCraft.app ------------------------------------------------------------------------------
+# ---- Lizard.app -------------------------------------------------------------------------------
 echo "==> assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
-cp "$WORK/bin/figcraft" "$APP/Contents/MacOS/FigCraft"
-cp "$WORK/FigCraft.icns" "$APP/Contents/Resources/FigCraft.icns"
+cp "$WORK/bin/lizard" "$APP/Contents/MacOS/Lizard"
+cp "$WORK/Lizard.icns" "$APP/Contents/Resources/Lizard.icns"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
 if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   mkdir -p "$APP/Contents/Resources/Licenses"
@@ -128,13 +133,13 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
 # Today the only nested code is the main executable; frameworks/helpers would be signed here too.
-sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/FigCraft"
+sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/Lizard"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
 
 if [ "$NOTARIZE" = 1 ]; then
-  ditto -c -k --keepParent "$APP" "$WORK/FigCraft-notarize.zip"
-  notarize "$WORK/FigCraft-notarize.zip"
+  ditto -c -k --keepParent "$APP" "$WORK/Lizard-notarize.zip"
+  notarize "$WORK/Lizard-notarize.zip"
   retry xcrun stapler staple "$APP"
   retry xcrun stapler validate "$APP"
   spctl --assess --type execute -vvv "$APP"
@@ -144,12 +149,12 @@ fi
 echo "==> building $DMG"
 STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/FigCraft.app"
+ditto "$APP" "$STAGE/Lizard.app"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG" "$WORK/raw.dmg"
 # makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
 # which is flaky on CI runners ("Resource busy") and hangs in sandboxed sessions.
-hdiutil makehybrid -hfs -hfs-volume-name "FigCraft" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
+hdiutil makehybrid -hfs -hfs-volume-name "Lizard" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
 hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -f "$WORK/raw.dmg"
 sign "$DMG"
@@ -183,6 +188,6 @@ else
   rm -f "$CLI_ZIP"
 fi
 
-"$WORK/bin/figcraft" --version
+"$WORK/bin/lizard" --version
 echo "==> done (check the artifacts as shipped with packaging/macos/verify.sh --arch $ARCH)"
-ls -lh "$DIST"/figcraft*-"$VERSION"-macos-"$ARCH".*
+ls -lh "$DMG"
