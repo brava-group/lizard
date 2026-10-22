@@ -425,6 +425,11 @@ fn every_command_survives_junk_params() {
         // Rotation origins and placing with a tool as junk.
         json!({"tool": [1], "x": 1e308, "y": "NaN", "reset": "maybe", "on": {"x": 1}}),
         json!({"tool": "frame", "x": -1e308, "y": 1e308, "reset": true, "on": "yes"}),
+        // Batch step names and reference paths as junk.
+        json!({"commands": [{"command": "select.none", "as": "a"}, {"command": "select.none", "as": [1]}, {"command": "select.none", "as": "a"}]}),
+        json!({"commands": [{"command": "select.all", "as": "\u{0}"}, {"command": "node.set", "params": {"ids": [
+            {"$ref": "\u{0}", "field": "ids/18446744073709551616/x"}, {"$ref": {"x": 1}}, {"$step": 0, "field": "//"}, {"$ref": "\u{0}", "field": "/"}],
+            "props": {"name": {"$ref": "nope", "field": 5}}}}]}),
     ];
     for spec in all_commands() {
         if matches!(
