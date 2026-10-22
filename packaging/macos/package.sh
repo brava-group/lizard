@@ -113,6 +113,16 @@ for s in 16 32 128 256 512; do
   cp "$ICONS/figcraft-$((s * 2)).png" "$ICONSET/icon_${s}x${s}@2x.png"
 done
 iconutil -c icns -o "$WORK/Lizard.icns" "$ICONSET"
+if xcrun --find actool >/dev/null 2>&1; then
+  APPLE_ICON="$WORK/icon-composer"
+  mkdir -p "$APPLE_ICON"
+  if ! xcrun actool "$ICONS/Lizard.icon" --app-icon Lizard --compile "$APPLE_ICON" \
+    --output-partial-info-plist "$APPLE_ICON/partial.plist" \
+    --minimum-deployment-target 11.0 --platform macosx --target-device mac \
+    >"$APPLE_ICON/actool-output.plist" || [ ! -s "$APPLE_ICON/Assets.car" ]; then
+    warn "Icon Composer compilation failed; packaging the .icns fallback"
+  fi
+fi
 
 # ---- Lizard.app -------------------------------------------------------------------------------
 echo "==> assembling $APP"
@@ -120,6 +130,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/lizard" "$APP/Contents/MacOS/Lizard"
 cp "$WORK/Lizard.icns" "$APP/Contents/Resources/Lizard.icns"
+if [ -n "${APPLE_ICON:-}" ] && [ -s "$APPLE_ICON/Assets.car" ]; then
+  cp "$APPLE_ICON/Assets.car" "$APP/Contents/Resources/Assets.car"
+fi
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
 if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   mkdir -p "$APP/Contents/Resources/Licenses"

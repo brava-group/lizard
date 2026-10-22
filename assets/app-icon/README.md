@@ -8,6 +8,11 @@ Lizard's navigation panel by the project owner. It is black on a white backgroun
 canvas, matching the native Dock icon grid. The Windows and Linux fallback fills its canvas.
 No shadow, highlight or glass effect is baked into either source.
 
+`Lizard.icon/` holds the same black mark as a separate vector layer over a white Icon Composer
+background. macOS packaging compiles it with Xcode's `actool` into `Assets.car` for the native
+Liquid Glass appearance on macOS 26 and newer. The `.icns` stays available for older systems and
+for local builds without `actool`.
+
 The legacy `figcraft-*` asset filenames remain until the remaining packaging paths are migrated.
 `figcraft.svg` is the padded macOS source; `figcraft-small.svg` is the full-size fallback. Both are
 generated from the navigation logo by `cargo xtask icon`.

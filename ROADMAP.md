@@ -319,6 +319,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Added a layered Icon Composer source and macOS asset catalog for the Lizard mark, with the rounded `.icns` retained for older systems. Feature estimates unchanged. |
 | 2026-10-22 | minor | Updated inherited project wording and generated Lizard's white-and-black app icon from its existing navigation mark. The macOS bundle now uses the Lizard name and icon; feature estimates unchanged. |
 | 2026-10-22 | minor | Began the independent Lizard identity: desktop window, home screen, help text and executable use Lizard; the original project's marks were removed, while `.figcraft` files and internal crate names remain compatible. Inherited release automation is disabled until packaging identifiers migrate. Feature estimates unchanged. |
 | 2026-10-22 | minor | Matched the owner-supplied properties designs for effect rows and settings, including layered shadow icons, the Glass light illustration and compact sliders. The colour picker now exposes Libraries and adjacent style/variable creation, with an eyedropper preview. Behaviour scores unchanged pending user workflow checks. |

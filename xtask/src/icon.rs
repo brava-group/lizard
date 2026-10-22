@@ -1,16 +1,21 @@
 //! Build the app icon from the same vector mark used in Lizard's navigation panel.
-//! `resvg` rasterises the macOS icon inside its transparent canvas and a rounded fallback.
+//! `resvg` rasterises the macOS icon inside its transparent canvas, a rounded fallback,
+//! and the vector layer compiled by Apple's Icon Composer tool.
 
 use std::path::Path;
 use std::process::Command;
 
 const MARK: &str = "crates/ui-egui/assets/nav-logo.svg";
 
+fn placed_mark(mark: &str, x: u32, y: u32, width: u32, height: u32) -> String {
+    mark.replacen("<svg ", &format!("<svg x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" "), 1).replace("fill=\"#fff\"", "fill=\"#000\"")
+}
+
 fn icon_svg(mark: &str, padded: bool) -> Option<String> {
     if !mark.starts_with("<svg ") || !mark.contains("fill=\"#fff\"") {
         return None;
     }
-    let mark = mark.replacen("<svg ", "<svg x=\"82\" y=\"66\" width=\"348\" height=\"380\" ", 1).replace("fill=\"#fff\"", "fill=\"#000\"");
+    let mark = placed_mark(mark, 82, 66, 348, 380);
     let tile = format!("<rect width=\"512\" height=\"512\" rx=\"112\" fill=\"#fff\"/>{mark}");
     let content = if padded {
         // A legacy .icns is not masked by macOS. Keep the 824/1024 icon body inside a
@@ -44,7 +49,13 @@ pub fn generate(root: &Path) -> bool {
     let tmp = root.join("target/icon");
     let mac_svg = dir.join("figcraft.svg");
     let tile_svg = dir.join("figcraft-small.svg");
-    let mut ok = std::fs::create_dir_all(&tmp).is_ok() && std::fs::write(&mac_svg, mac).is_ok() && std::fs::write(&tile_svg, tile).is_ok();
+    let glass_svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\">{}</svg>", placed_mark(&mark, 164, 132, 696, 760));
+    let glass_dir = dir.join("Lizard.icon/Assets");
+    let mut ok = std::fs::create_dir_all(&tmp).is_ok()
+        && std::fs::create_dir_all(&glass_dir).is_ok()
+        && std::fs::write(&mac_svg, mac).is_ok()
+        && std::fs::write(&tile_svg, tile).is_ok()
+        && std::fs::write(glass_dir.join("Mark.svg"), glass_svg).is_ok();
     if !ok {
         eprintln!("icon: cannot write {}", tmp.display());
         return false;
