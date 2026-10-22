@@ -174,6 +174,7 @@ in the table. `crates/ui-egui/src/shortcut_keys_tests.rs` drives the keys a look
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | A copied image pastes as the fill of one selected fillable layer, preserving its outline and size. With no suitable selection or with Paste here, the image remains a separate layer. Synthetic clipboard tests cover external and FigCraft copies, exported pixels and Undo. Counts and hours unchanged. |
 | 2026-10-21 | minor | All panels now share `#2B2B2B` in dark mode; the Agent sidebar follows the white panel background in light mode. Desktop screenshots and pixel samples checked both themes; parity estimate unchanged. |
 | 2026-10-20 | minor | Measuring while nudging (#894): with Alt held over another layer, the arrows nudge the selection (Shift: the big step) and the distances follow every nudge (Alt+arrows used to do nothing); while measuring, the selection's handles and size label hide and both layers keep their outlines (`measure_nudge_tests`). Numbers unchanged |
 | 2026-10-20 | minor | Upstream #890 changed disabled and selected text rendering. This branch retains its blue selection palette and dim text tokens; the upstream green contrast measurements do not apply here. Numbers unchanged. |

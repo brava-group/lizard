@@ -57,6 +57,23 @@ impl Services for DesignWithPreview {
 }
 
 #[test]
+fn editable_design_layers_take_priority_over_a_png_representation() {
+    let mut session = Session::new();
+    let selected = session.execute("shape.ellipse", &json!({"x": 100, "y": 100, "width": 80, "height": 80})).unwrap()["id"].as_u64().unwrap();
+    let mut app = FigApp::new(session, Box::new(DesignWithPreview(copied_html())));
+    let before = app.session.doc().unwrap().node_count();
+
+    crate::menus::paste(&mut app, None, None);
+
+    assert_eq!(selected_names(&app), ["Copied layer"]);
+    assert_eq!(app.session.doc().unwrap().node_count(), before + 1);
+    assert!(matches!(
+        app.session.doc().unwrap().node(figcraft_doc::NodeId(selected)).unwrap().fills[0].kind,
+        figcraft_color::PaintKind::Solid { .. }
+    ));
+}
+
+#[test]
 fn editable_layers_win_over_clipboard_preview_image() {
     let mut app = FigApp::new(Session::new(), Box::new(DesignWithPreview(copied_html())));
     crate::menus::paste(&mut app, None, None);
