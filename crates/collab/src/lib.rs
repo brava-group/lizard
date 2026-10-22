@@ -1,4 +1,4 @@
-//! Real-time collaboration core for FigCraft: the synced object/property model over
+//! Real-time collaboration core for Lizard: the synced object/property model over
 //! [`Document`], change sets, the session server's ordering and validation, the client's
 //! optimistic state, and the wire messages. Pure library: no networking, no UI (the WebSocket
 //! transport comes on top). The design is `docs/collab-protocol.md`.

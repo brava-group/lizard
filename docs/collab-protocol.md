@@ -41,7 +41,7 @@ server code also builds as a standalone `figcraft-server` binary for self-hostin
 ## Why this shape
 
 Public engineering write-ups about multiplayer design tools converge on the same choices, and they
-fit FigCraft's architecture:
+fit Lizard's architecture:
 
 - **WebSockets**: one long-lived, bidirectional, ordered connection; works natively (tungstenite)
   and in the browser build (the browser's WebSocket API through `web-sys`), passes through proxies
@@ -52,10 +52,10 @@ fit FigCraft's architecture:
   general CRDTs carry metadata and tombstones we don't need when a server orders everything. With
   per-property last-writer-wins plus a few tree rules (below), every client converges to the
   server's state, and the server can reject invalid changes (cycles, edits to deleted objects).
-- **State-based changes instead of replaying commands**: FigCraft's commands are deterministic
+- **State-based changes instead of replaying commands**: Lizard's commands are deterministic
   locally, but replaying them on other clients would require identical documents, fonts and
   floating point everywhere. Instead a command runs once, on the client that issued it, and the
-  resulting document difference is what gets sent. FigCraft's document is a persistent map of
+  resulting document difference is what gets sent. Lizard's document is a persistent map of
   `Arc<Node>` with dirty tracking, so computing the exact changed nodes and properties after a
   command is cheap.
 - **Binary encoding**: cursor traffic is frequent and documents are large; a compact, schema-based
@@ -809,12 +809,12 @@ installing: [`plugins.md`](plugins.md#plugin-directories)):
   link and the reason. Other arguments are files, as paths or `file://` URLs.
 - **Windows**: the app registers itself per user as the opener of `figcraft://` under
   `HKEY_CURRENT_USER\Software\Classes\figcraft` (no administrator rights): the scheme, its icon
-  and `"<figcraft.exe>" "%1"`. Preferences ▸ **Open invite links in FigCraft** (and
+  and `"<figcraft.exe>" "%1"`. Preferences ▸ **Open invite links in Lizard** (and
   `collab.registerLinks {on?}`) turns it on or off; it defaults to on for installed builds, which
   register on first run, and off for builds from source (inside a Cargo build directory, or debug
   builds), which leave any registration alone. Turning it off removes only this copy's
   registration. The registry sits behind a trait, so tests use a fake.
-- **macOS**: the bundle declares the scheme (`CFBundleURLTypes`), so links open FigCraft; the
+- **macOS**: the bundle declares the scheme (`CFBundleURLTypes`), so links open Lizard; the
   link itself arrives as an Apple Event, which the windowing layer doesn't pass on yet, so the app
   opens without joining (paste the link) until it does.
 - **Linux and FreeBSD**: the desktop entry declares `x-scheme-handler/figcraft` and passes URLs
@@ -901,7 +901,7 @@ chooses to share on the network; the default is the invite link with a random to
   new for every session (stopping and starting again invalidates old links). It is compared in
   constant time (the hub's backend). It is in the invite link by design, so whoever holds the link
   can join until the session stops: share it like a password. It never travels in the WebSocket
-  request (the path is `/`), so proxies don't log it; FigCraft never logs it (logs name addresses
+  request (the path is `/`), so proxies don't log it; Lizard never logs it (logs name addresses
   and ports only), and errors about links never echo the link. Traffic is not encrypted (`ws://`):
   on a shared network, others on the path could read presence and the token. Use a trusted LAN
   or a VPN; TLS (`wss://`) comes from a reverse proxy in front of a `figcraft-server`.

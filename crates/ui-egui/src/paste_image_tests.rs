@@ -15,7 +15,7 @@ use crate::{FigApp, Services};
 /// What the system clipboard holds when a paste chord is pressed (#716).
 #[derive(Clone, Copy, Debug)]
 enum Held {
-    /// FigCraft's own copy (its SVG text).
+    /// Lizard's own copy (its SVG text).
     Ours,
     /// Text copied in another app.
     Text,
@@ -113,7 +113,7 @@ impl Win {
         self.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
     }
 
-    /// A red rectangle A copied in FigCraft, and a grey rectangle B selected; then `held` on the
+    /// A red rectangle A copied in Lizard, and a grey rectangle B selected; then `held` on the
     /// system clipboard. Returns (A, B).
     fn copy_a_select_b(&mut self, held: Held) -> (NodeId, NodeId) {
         let s = &mut self.app.session;

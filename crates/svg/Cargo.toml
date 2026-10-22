@@ -3,7 +3,7 @@ name = "figcraft-svg"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft SVG export (shapes, gradients, images, strokes, effects as filters, text as outlines) and import (via usvg)"
+description = "Lizard SVG export (shapes, gradients, images, strokes, effects as filters, text as outlines) and import (via usvg)"
 
 [lints]
 workspace = true

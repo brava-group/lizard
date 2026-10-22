@@ -32,12 +32,12 @@ pub fn start(port: u16, queue: Queue, ctx: CtxSlot) -> Option<u16> {
         Ok(l) => l,
         Err(e) => {
             log::error!("control server: can't bind 127.0.0.1:{port}: {e} (another app may own it; pick another port)");
-            eprintln!("FigCraft control server failed to bind port {port}: {e}");
+            eprintln!("Lizard control server failed to bind port {port}: {e}");
             return None;
         }
     };
     let port = listener.local_addr().ok()?.port();
-    eprintln!("FigCraft control server listening on 127.0.0.1:{port}");
+    eprintln!("Lizard control server listening on 127.0.0.1:{port}");
     let spawned = std::thread::Builder::new().name("figcraft-control".into()).spawn(move || {
         let mut workers = Vec::new();
         for stream in listener.incoming().flatten() {
@@ -179,7 +179,7 @@ fn serve_guarded(
                     },
                     Err(_) => {
                         cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
-                        json!({"id": id, "ok": false, "error": "timed out waiting for the UI: screenshots and input need the FigCraft window on screen (is it minimised or covered?)"})
+                        json!({"id": id, "ok": false, "error": "timed out waiting for the UI: screenshots and input need the Lizard window on screen (is it minimised or covered?)"})
                     }
                 }
             }

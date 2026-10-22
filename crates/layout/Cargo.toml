@@ -3,7 +3,7 @@ name = "figcraft-layout"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft layout: auto layout (horizontal, vertical, wrap, grid; hug/fill/fixed), constraints, layout grid geometry"
+description = "Lizard layout: auto layout (horizontal, vertical, wrap, grid; hug/fill/fixed), constraints, layout grid geometry"
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 //! Prototype player behaviour, written from the public documentation of prototype triggers,
 //! actions, overlays, animations and scrolling. Each case states the rule, what it implies and a
-//! one-line derivation; where the documentation is silent the case says so and pins what FigCraft
+//! one-line derivation; where the documentation is silent the case says so and pins what Lizard
 //! does. Gestures go through egui headless (the harness is `present_tests`'); the rest drives the
 //! player directly. Model rules (drag directions, key combinations, easing, interactive
 //! components, hotspots) are in the engine's `proto_behaviour_tests`.

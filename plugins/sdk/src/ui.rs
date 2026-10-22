@@ -1,4 +1,4 @@
-//! Builders for what a plugin describes to FigCraft: a widget's layers ([`Node`]) and property
+//! Builders for what a plugin describes to Lizard: a widget's layers ([`Node`]) and property
 //! menu ([`menu_action`] and its siblings), and the controls of a panel that plugin API 4 added
 //! ([`slider`], [`image`], [`progress`], [`divider`], [`section`]). They only assemble the JSON
 //! that `docs/plugins.md` documents; [`Node::set`] reaches anything they don't name, and plain
@@ -199,7 +199,7 @@ impl Node {
     }
 
     /// API 4. What changes while the pointer is over the layer: its fill, its stroke and its
-    /// opacity (`None`: as it is). FigCraft shows it; the plugin isn't called.
+    /// opacity (`None`: as it is). Lizard shows it; the plugin isn't called.
     pub fn hover(self, fill: Option<&str>, stroke: Option<&str>, opacity: Option<f64>) -> Node {
         self.set("hover", json!({"fill": fill, "stroke": stroke, "opacity": opacity}))
     }
@@ -255,7 +255,7 @@ pub fn menu_separator() -> Value {
     json!({"type": "separator"})
 }
 
-/// API 4. A link (http or https) FigCraft opens when it's clicked; the plugin isn't called.
+/// API 4. A link (http or https) Lizard opens when it's clicked; the plugin isn't called.
 pub fn menu_link(name: &str, label: &str, url: &str) -> Value {
     json!({"type": "link", "name": name, "label": label, "url": url})
 }

@@ -99,7 +99,7 @@ pub(crate) fn read<R: Read + Seek>(
 }
 
 /// Read the published library of a `.figcraft` file (only its library entries are read): `None`
-/// when the file was never published, an error when it isn't a FigCraft archive or is damaged.
+/// when the file was never published, an error when it isn't a Lizard archive or is damaged.
 pub fn read_library<R: Read + Seek>(r: R) -> Result<Option<PublishedLibrary>, FormatError> {
     let mut z = zip::ZipArchive::new(r).map_err(corrupt)?;
     read(&mut z, &BTreeMap::new(), u64::MAX)

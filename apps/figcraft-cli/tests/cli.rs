@@ -25,7 +25,7 @@ fn bad_arguments_exit_2_without_panicking() {
         &["render", "a", "-o"],
         &["perf", "--shapes", "lots"],
         &["mcp", "--attach", "notaport"],
-        // An attached app confines itself: roots go to `figcraft --control`.
+        // An attached app confines itself: roots go to `lizard --control`.
         &["mcp", "--attach", "7979", "--automation-read-root", "."],
         &["mcp", "--automation-write-root"],
         &["convert", "a"],

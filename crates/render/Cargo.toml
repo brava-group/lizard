@@ -3,7 +3,7 @@ name = "figcraft-render"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft renderer: the scene graph to pixels on tiny-skia (fills, gradients, images, aligned strokes, shadows, blurs, masks, blend modes, text)"
+description = "Lizard renderer: the scene graph to pixels on tiny-skia (fills, gradients, images, aligned strokes, shadows, blurs, masks, blend modes, text)"
 
 [lints]
 workspace = true

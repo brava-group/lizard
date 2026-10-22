@@ -1,6 +1,6 @@
 //! Starter templates: documents to begin from, built in code by running commands (no template
 //! files ship with the app). Everything in them is original and synthetic: the Ridgeline names,
-//! people and figures are invented, the pictures are drawn from shapes and the icons are FigCraft's
+//! people and figures are invented, the pictures are drawn from shapes and the icons are Lizard's
 //! own ([`glyphs`]).
 //!
 //! Each template is real, editable content: shared colour and text styles, auto layout,

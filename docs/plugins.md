@@ -1,7 +1,7 @@
-# FigCraft plugins
+# Lizard plugins
 
-A FigCraft plugin is a WebAssembly module with a small JSON manifest. It acts on the document only
-through FigCraft's commands, the same ones the menus, the CLI, the control channel and the MCP
+A Lizard plugin is a WebAssembly module with a small JSON manifest. It acts on the document only
+through Lizard's commands, the same ones the menus, the CLI, the control channel and the MCP
 server run (`figcraft-cli commands` lists them), so a plugin can do what a script can do, within the
 permissions its manifest asks for, and nothing more.
 
@@ -13,18 +13,18 @@ permissions its manifest asks for, and nothing more.
   so is everything one callback from its panel does. When a run or a callback fails (the plugin
   returns an error, traps, panics or runs out of fuel or memory), the document, selection and page
   are put back as they were.
-- **Panels and settings (API 2).** A plugin can show a small panel of its own while it runs: FigCraft
+- **Panels and settings (API 2).** A plugin can show a small panel of its own while it runs: Lizard
   draws its fields and buttons with its own widgets and calls the plugin back when one is used. A
   plugin can also keep settings from one run to the next.
 - **Widgets (API 3).** A plugin can put a layer of its own on the canvas: it describes the layer
-  (frames with auto layout, text, shapes, images), FigCraft builds it, and a click on one of its
+  (frames with auto layout, text, shapes, images), Lizard builds it, and a click on one of its
   parts calls the plugin back to redraw it from its state, which is kept in the document.
 - **More for widgets and panels (API 4).** A widget's texts can be edited in place, a selected
   widget shows a property menu the plugin declares, its parts can have a hover style and a
   tooltip, and it can ask to be called back after a delay. Widgets draw lines, vectors, gradients
   and shadows too, and panels get sliders, pictures, progress bars, dividers and sections.
 - **Permissions.** The manifest says whether the plugin only reads the document or may edit it, and
-  can narrow the commands it may call. FigCraft enforces both.
+  can narrow the commands it may call. Lizard enforces both.
 - **Distribution.** A team's own `figcraft-server` can keep a plugin directory: plugins are
   published to it with the server's key, browsed and installed from Plugins ▸ Manage plugins, and
   updated when a newer version is published (see [Plugin directories](#plugin-directories)). No
@@ -61,10 +61,10 @@ large data instead of logging it in full.
   killed app never loses them; it doesn't wait until it quits.
 - The installed plugins head the **Plugins** menu: a plugin with one command is an item, one with
   several a submenu. A command with parameters (an ellipsis after its name) first opens a small form
-  with a field per parameter, drawn with FigCraft's own widgets; **Run** runs it.
+  with a field per parameter, drawn with Lizard's own widgets; **Run** runs it.
 - **Plugins ▸ Run last plugin** (⌥⌘P on macOS, Ctrl+Alt+Shift+P on Windows and Linux, where
   Ctrl+Alt+P is Pixel preview) runs the last plugin command again with the same parameters.
-- **Plugins ▸ Manage plugins…** has three tabs. **Installed** lists the installed plugins (version,
+- **Plugins ▸ Manage plugins…** has four tabs. **Installed** lists the installed plugins (version,
   access, where each comes from: its manifest path or the server it was installed from) with a
   Remove button for each, and an Import button. **Browse** shows a server's plugin directory, with
   Install, Update and Remove (see [Plugin directories](#plugin-directories)). **Figma local**
@@ -83,7 +83,7 @@ manifest declares HTML UI, and a link to the original page. Searches use Figma's
 `/api/search/resources` endpoint, which is not part of its public REST contract and can change or
 stop working. Requests have a timeout and size cap; responses are validated and never executed.
 The listing does not include a verified downloadable package. Community results therefore cannot
-be installed or opened as working plugin UI in FigCraft. The separate **Figma local** tab accepts
+be installed or opened as working plugin UI in Lizard. The separate **Figma local** tab accepts
 packages supplied by the plugin author or user. On macOS, a supported local plugin opens its HTML
 UI in a child WebView.
 
@@ -96,7 +96,7 @@ files and oversized packages. A manifest `build` command is never run.
 `plugin.figma.import {"path":"/path/to/manifest.json","mode":"development"}` records that
 source and digest in preferences. `plugin.figma.status {"id":"…"}` reads it again and reports
 `changedSinceImport`; `plugin.figma.remove {"id":"…"}` forgets it. These commands are separate
-from FigCraft's native WebAssembly plugin commands.
+from Lizard's native WebAssembly plugin commands.
 
 On native builds, `plugin.figma.run {"id":"…","command":"optional menu command",
 "parameters":{"width":"240"}}` executes compiled `main` JavaScript in a one-shot Boa
@@ -134,8 +134,8 @@ records which published bundles opened and what still needs validation.
 The official MIT `figma/plugin-samples` examples `create-rects-shapes`, `resizer` (absolute and
 relative), `text-review`, `styles-to-variables`, `post-message` and `barchart` were tested from
 local source on macOS on 2026-10-18. Creation, editable chart layers, resize and scale, text
-suggestions, colour variables and aliases, delayed UI reply and undo all executed in FigCraft.
-The sample source is not bundled with FigCraft. The manager shows the resizer's parameter
+suggestions, colour variables and aliases, delayed UI reply and undo all executed in Lizard.
+The sample source is not bundled with Lizard. The manager shows the resizer's parameter
 suggestions and validation errors. Registered text-review plugins underline their returned ranges
 on the canvas after typing settles; the manager lists and applies their suggestions to unchanged
 selected text. The chart sample's declared remote stylesheet loads in the macOS WebView when the
@@ -143,8 +143,8 @@ network is available.
 
 **Plugin panels.** A plugin written for API 2 can show a panel while it runs: a floating window,
 first placed beside the properties panel (drag its title bar to move it), with the plugin's notes,
-fields (text, number, checkbox, menu, list, colour) and buttons, drawn with FigCraft's own widgets
-and named for screen readers. A colour field's swatch opens FigCraft's colour picker (the plugin hears
+fields (text, number, checkbox, menu, list, colour) and buttons, drawn with Lizard's own widgets
+and named for screen readers. A colour field's swatch opens Lizard's colour picker (the plugin hears
 of the colour when a drag in the picker ends); its hex can also be typed. Pressing a button or
 changing a field calls the plugin back with every field's value; what that callback does is one
 undo step (none when it changes nothing), and the plugin can update the panel or close it. The
@@ -170,7 +170,7 @@ plugin isn't installed stays as it was drawn; clicking it says the plugin is mis
 A widget written for API 4 can do more:
 
 - **Text typed in place.** A text the plugin made editable shows an I-beam; a click edits it in
-  place with FigCraft's text editor (caret, selection, the input method), all of it selected. What
+  place with Lizard's text editor (caret, selection, the input method), all of it selected. What
   you type shows at once, stops at the text's maximum length, and stays on one line unless the
   text takes several. Enter (Escape or a click elsewhere too; in a text of several lines Enter
   starts a new line) commits: the plugin is called back with the text and redraws the widget, as
@@ -182,7 +182,7 @@ A widget written for API 4 can do more:
   value, as one undo step. A link opens only when it is clicked, only if it is an `http` or `https`
   address, and its plugin isn't called.
 - **Hover styles and tooltips.** A part can change its fill, stroke or opacity while the pointer
-  is over it, and show a tooltip. FigCraft does that itself: the plugin isn't called for pointer
+  is over it, and show a tooltip. Lizard does that itself: the plugin isn't called for pointer
   moves, and the look is never part of the document (it isn't saved, synced or undone).
 - **Timers.** A callback can ask for the widget to be called back after 100 ms to an hour. A
   widget has one timer at most; asking again replaces it. Timers are kept with the open file, not
@@ -288,9 +288,9 @@ checked like an imported plugin (manifest, plugin API version, the module compil
 asset names) before anything is written. A plugin installed this way runs in the same sandbox,
 with the same limits and its manifest's permissions, as any other.
 
-The desktop app keeps such plugins per user, beside its settings (`Plugins/` in FigCraft's settings
-folder: `%APPDATA%\FigCraft` on Windows, `~/Library/Application Support/FigCraft` on macOS,
-`~/.config/FigCraft` elsewhere), each in a folder of its own named by a hash of its id, with its
+The desktop app keeps such plugins per user, beside its settings (`Plugins/` in Lizard's settings
+folder: `%APPDATA%\Lizard` on Windows, `~/Library/Application Support/Lizard` on macOS,
+`~/.config/Lizard` elsewhere), each in a folder of its own named by a hash of its id, with its
 module and its assets. The CLI and the MCP server install for the session only.
 
 **Updating.** When the directory has a newer version than the one installed, the plugin's row
@@ -350,7 +350,7 @@ plugin directory requests (`plugin.directory.*` says so). Import plugins with `p
 | `version`, `description` | Optional text. A plugin published to a [directory](#plugin-directories) needs a `version` of one to four numbers (`1.2.0`), each version newer than the last. |
 | `author` | Optional: who made it, as you type it (64 characters at most); plugin directories show it. |
 | `main` | Required. The module, a `.wasm` path relative to the manifest, inside its folder. |
-| `api` | The plugin API version the plugin was written for: `1` (the default), `2` (panels and settings), `3` (widgets) or `4` (text input, property menus, hover, timers and richer drawing in widgets; sliders, pictures and sections in panels). A manifest asking for a newer one than FigCraft runs is refused, so a plugin that needs panels or widgets fails clearly on an older FigCraft. What a version added is read only from plugins that ask for it: an older plugin's descriptions are read as its version read them, so it behaves as it always did. |
+| `api` | The plugin API version the plugin was written for: `1` (the default), `2` (panels and settings), `3` (widgets) or `4` (text input, property menus, hover, timers and richer drawing in widgets; sliders, pictures and sections in panels). A manifest asking for a newer one than Lizard runs is refused, so a plugin that needs panels or widgets fails clearly on an older Lizard. What a version added is read only from plugins that ask for it: an older plugin's descriptions are read as its version read them, so it behaves as it always did. |
 | `widget` | API 3: `true` when the plugin draws a widget (it's listed in Plugins ▸ Widgets). |
 | `permissions.access` | `read` (the default): commands that leave the document as it is; such plugins also run from Dev Mode's Inspect tab. `write`: edits too. |
 | `permissions.commands` | Optional allowlist: exact command ids or prefixes ending in `*` (`node.*`). Empty: any command the access allows. |
@@ -359,7 +359,7 @@ plugin directory requests (`plugin.directory.*` says so). Import plugins with `p
 
 ## What a plugin can't do
 
-Whatever its manifest says, FigCraft refuses these calls (the plugin gets the refusal as an error
+Whatever its manifest says, Lizard refuses these calls (the plugin gets the refusal as an error
 it can handle):
 
 - files and the app: `file.*`, `app.*`, `pref.*`, `help.*`, `library.add`, `libraries.*`,
@@ -450,7 +450,7 @@ included, is refused when the plugin is imported):
 | `selection` | `() -> len` | The reply becomes the selected layer ids, a JSON array. |
 | `reply_len` | `() -> len` | The reply's length in bytes. |
 | `reply_read` | `(ptr, len) -> copied` | Copies up to `len` bytes of the reply to `ptr`. |
-| `log` | `(ptr, len)` | A line of the run's log (returned in `logs`, and written to FigCraft's log). |
+| `log` | `(ptr, len)` | A line of the run's log (returned in `logs`, and written to Lizard's log). |
 | `notify` | `(ptr, len)` | A short message for the user (a toast in the app). |
 | `set_output` | `(ptr, len)` | The run's result (JSON or text), or its error message when it fails. |
 | `ui_show` | `(ptr, len) -> status` | API 2. Shows the plugin's panel, or replaces the one showing (the panel spec below, as JSON). `1`: the spec is invalid, the reply says why. |
@@ -484,7 +484,7 @@ plugin is removed.
 1,000 characters, no `name` needed), in order, each `name` unique. A field shows its `value`; a
 field without one keeps what the user entered before the panel was updated, so a plugin can update
 a note without resetting the other fields. Buttons next to each other share a row; the first button
-is the primary one. FigCraft checks the whole spec (sizes, kinds, options, bounds) and drops values
+is the primary one. Lizard checks the whole spec (sizes, kinds, options, bounds) and drops values
 that don't fit their field.
 
 API 4 adds these controls and fields:
@@ -541,7 +541,7 @@ None of these needs a `name` except `slider`. An API 4 panel may be 1 MB.
 ```
 
 `state` is the widget's new state, a JSON object (left out: it keeps the one it has). `root` is the
-widget itself, a frame; FigCraft replaces everything inside it with the layers described and keeps
+widget itself, a frame; Lizard replaces everything inside it with the layers described and keeps
 the widget where it is (and its size, unless the description gives one). Every layer has a `type`
 (`frame`, `text`, `rectangle`, `ellipse`, `image`) and may have a `name`, a `target` (clicking it
 calls the plugin back with that name: letters, digits, `.`, `-`, `_`), `x` and `y` (in its frame,
@@ -552,7 +552,7 @@ layout) and `children`;
 with auto layout it hugs its contents on an axis without a size. A text has `text`, `size`,
 `color` and `bold` (with a `width` it wraps). An image has `data`, the image's bytes (PNG, JPEG…)
 as base64, usually carried in the module itself; without a size it takes the image's.
-FigCraft checks the whole description (kinds, sizes, numbers, colours, lengths, counts, depth,
+Lizard checks the whole description (kinds, sizes, numbers, colours, lengths, counts, depth,
 image sizes) and refuses it if anything is off.
 
 API 4 adds:
@@ -565,7 +565,7 @@ API 4 adds:
   {"type": "dropdown", "name": "length", "label": "Countdown", "options": ["30 seconds", "1 minute"], "value": "30 seconds"},
   {"type": "color", "name": "paper", "label": "Paper", "options": ["#FFF3B0", "#D9F2E3"], "value": "#FFF3B0"},
   {"type": "separator"},
-  {"type": "link", "name": "help", "label": "About FigCraft", "url": "https://getartcraft.com/apps/figcraft"}],
+  {"type": "link", "name": "help", "label": "About Lizard", "url": "https://getartcraft.com/apps/figcraft"}],
  "root": {"type": "frame", "layout": "vertical", "width": 272, "gap": 10, "padding": [16, 16, 20, 16], "radius": [2, 2, 14, 2],
   "gradient": {"type": "linear", "angle": 90, "stops": [{"at": 0, "color": "#FFF7C7"}, {"at": 1, "color": "#FFF3B0"}]},
   "shadow": {"x": 0, "y": 4, "blur": 12, "color": "#00000030"}, "children": [
@@ -604,7 +604,7 @@ API 4 adds:
   `toggle` (`value`: true or false), `dropdown` (`value`: one of `options`), `color` (`value`:
   one of the hex colours in `options`), `separator` and `link` (`url`, http or https). Every item
   but a separator has a `name`, used once, and a `label`. Left out, the widget keeps the menu it
-  has; an empty list removes it. FigCraft remembers a toggle's, dropdown's or colour's new value
+  has; an empty list removes it. Lizard remembers a toggle's, dropdown's or colour's new value
   when it's chosen, so a callback needn't hand the menu back.
 
 A plugin written for API 3 gets none of this: the fields are ignored as unknown fields always
@@ -751,7 +751,7 @@ import what you need from `figcraft`.
   execution remain unsupported.
 - Widgets: they can't open a panel, their layers can't be components or use styles or variables,
   an image is bytes in the description (the module carries it; a widget can't name a file from
-  the plugin's `assets/` folder), there are no pointer events beyond clicks and FigCraft's own
+  the plugin's `assets/` folder), there are no pointer events beyond clicks and Lizard's own
   hover styles (no drag, no callback on hover), and a timer doesn't run while its file is closed
   or behind another tab. In a presented prototype, typed text is one line and can't be emptied.
 - Panels: no free layout or tabs inside a panel (sections fold; controls stack), and a slider has

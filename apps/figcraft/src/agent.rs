@@ -1,5 +1,5 @@
 //! A small ACP v1 client for the Agent sidebar. The agent runs off the UI thread and receives
-//! FigCraft's existing MCP server, attached to this window's control channel.
+//! Lizard's existing MCP server, attached to this window's control channel.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -135,7 +135,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
         &mut stdin,
         Some(1),
         "initialize",
-        json!({"protocolVersion":1, "clientCapabilities":{}, "clientInfo":{"name":"figcraft", "title":"FigCraft", "version":env!("CARGO_PKG_VERSION")}}),
+        json!({"protocolVersion":1, "clientCapabilities":{}, "clientInfo":{"name":"figcraft", "title":"Lizard", "version":env!("CARGO_PKG_VERSION")}}),
     ) {
         let _ = output.send(AgentEvent::Error(e));
         let _ = child.kill();
@@ -179,7 +179,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                             .unwrap_or_default();
                         let _ = output.send(AgentEvent::Permission { id, title, options });
                     } else if let Some(id) = message.get("id") {
-                        let reply = json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32601,"message":"Método não disponível no FigCraft"}});
+                        let reply = json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32601,"message":"Método não disponível no Lizard"}});
                         let _ = writeln!(stdin, "{reply}").and_then(|_| stdin.flush());
                     }
                     Ok(())
@@ -339,7 +339,7 @@ fn start_codex_with_program(program: &std::ffi::OsStr, document: u64, conversati
 
 fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, output: Sender<AgentEvent>, cwd: String) {
     if let Err(error) =
-        send(&mut stdin, Some(1), "initialize", json!({"clientInfo":{"name":"figcraft","title":"FigCraft","version":env!("CARGO_PKG_VERSION")}}))
+        send(&mut stdin, Some(1), "initialize", json!({"clientInfo":{"name":"figcraft","title":"Lizard","version":env!("CARGO_PKG_VERSION")}}))
     {
         let _ = output.send(AgentEvent::Error(error));
         let _ = child.kill();
@@ -518,7 +518,7 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
                         &mut stdin,
                         Some(1),
                         "initialize",
-                        json!({"clientInfo":{"name":"figcraft","title":"FigCraft","version":env!("CARGO_PKG_VERSION")}}),
+                        json!({"clientInfo":{"name":"figcraft","title":"Lizard","version":env!("CARGO_PKG_VERSION")}}),
                     )?;
                     let mut requested = false;
                     loop {
@@ -578,7 +578,7 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                         &mut stdin,
                         Some(1),
                         "initialize",
-                        json!({"clientInfo":{"name":"figcraft","title":"FigCraft","version":env!("CARGO_PKG_VERSION")}}),
+                        json!({"clientInfo":{"name":"figcraft","title":"Lizard","version":env!("CARGO_PKG_VERSION")}}),
                     )?;
                     let mut started = false;
                     let mut url_sent = false;

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "FigCraft command line: info, export, convert, render, scripted commands, MCP server, perf"
+description = "Lizard command line: info, export, convert, render, scripted commands, MCP server, perf"
 
 [[bin]]
 name = "figcraft-cli"

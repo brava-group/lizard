@@ -551,7 +551,7 @@ fn nodes_response_flows_and_detection() {
     assert_eq!((flows[0].name.as_str(), flows[0].start), ("Onboarding", named(&doc, "Home").id));
     assert!(warnings.iter().any(|w| w.contains("interactions")) && warnings.iter().any(|w| w.contains("variables bound to")), "{warnings:?}");
 
-    // Native FigCraft JSON and other text are left to the other loaders.
+    // Native Lizard JSON and other text are left to the other loaders.
     let native = serde_json::to_vec(&crate::to_json(&Document::new("x")).unwrap()).unwrap();
     assert!(try_import(&native, &no_images).is_none());
     assert!(try_import(b"PK\x03\x04", &no_images).is_none());

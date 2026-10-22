@@ -3,7 +3,7 @@ name = "figcraft-figma-plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Validation of local Figma plugin manifests, separate from FigCraft WASM plugins"
+description = "Validation of local Figma plugin manifests, separate from Lizard WASM plugins"
 
 [lints]
 workspace = true

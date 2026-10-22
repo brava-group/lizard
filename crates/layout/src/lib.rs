@@ -1,4 +1,4 @@
-//! FigCraft layout.
+//! Lizard layout.
 //!
 //! - [`layout_page`] / [`layout_frame`]: Figma-style auto layout. Children of an auto layout frame
 //!   are stacked horizontally or vertically (optionally wrapping, optionally aligned on their first

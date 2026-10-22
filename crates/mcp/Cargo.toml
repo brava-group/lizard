@@ -3,7 +3,7 @@ name = "figcraft-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft MCP server: JSON-RPC 2.0 over stdio, driving a headless engine session or a running FigCraft app"
+description = "Lizard MCP server: JSON-RPC 2.0 over stdio, driving a headless engine session or a running Lizard app"
 
 [lints]
 workspace = true

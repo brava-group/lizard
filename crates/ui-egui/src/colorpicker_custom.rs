@@ -1,7 +1,6 @@
 //! The compact UI3 solid-colour picker. Coordinates follow the 240 × 513 reference dialog.
 
 use super::*;
-use crate::style_picker::{self, StyleSlot};
 
 pub(super) const WIDTH: f32 = 240.0;
 const HEIGHT: f32 = 513.0;
@@ -229,10 +228,6 @@ fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut 
                 target,
                 PickerTarget::Effect { .. } | PickerTarget::PageBackground | PickerTarget::Variable { .. } | PickerTarget::PluginField { .. }
             );
-            let style_slot = match target {
-                PickerTarget::Paint { fills, .. } => Some(if *fills { StyleSlot::Fill } else { StyleSlot::Stroke }),
-                _ => None,
-            };
 
             // 40 pt header: tabs, new style, close.
             label_tab(
@@ -248,17 +243,12 @@ fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut 
                 if stop.is_some() { "cp_stop_libraries_tab" } else { "cp_libraries_tab" },
                 "Libraries",
                 false,
-            ) && let Some(slot) = style_slot
-            {
-                style_picker::open(app, ui, &app.session.selection(), slot);
-                close_now = true;
+            ) {
+                library_tab::activate(ctx);
             }
-            if stop.is_none()
-                && vector_button(ui, at(header_origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, tr("New style")).clicked()
-                && let Some(slot) = style_slot
-            {
-                style_picker::open(app, ui, &app.session.selection(), slot);
-                close_now = true;
+            if stop.is_none() && vector_button(ui, at(header_origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, tr("New style")).clicked() {
+                library_tab::create(ctx, paint.clone());
+                library_tab::activate(ctx);
             }
             if vector_button(
                 ui,

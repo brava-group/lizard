@@ -260,7 +260,7 @@ fn func_type(params: usize, results: usize) -> FuncType {
     FuncType::new(vec![ValType::I32; params], vec![ValType::I32; results])
 }
 
-/// Compile and check a module: its size, that it imports only FigCraft's host functions (no WASI)
+/// Compile and check a module: its size, that it imports only Lizard's host functions (no WASI)
 /// and exports `memory` and `figcraft_run`.
 pub fn check_module(bytes: &[u8], limits: &Limits) -> Result<(), PluginError> {
     compile(&engine(), bytes, limits).map(|_| ())
@@ -283,7 +283,7 @@ fn compile(engine: &Engine, bytes: &[u8], limits: &Limits) -> Result<Module, Plu
             }
             (None, _) => {
                 return Err(PluginError::InvalidModule(format!(
-                    "it imports `{}.{}`, which FigCraft doesn't provide (plugins get no file system, network or clock)",
+                    "it imports `{}.{}`, which Lizard doesn't provide (plugins get no file system, network or clock)",
                     imp.module(),
                     imp.name()
                 )));

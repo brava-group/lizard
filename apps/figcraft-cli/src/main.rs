@@ -1,4 +1,4 @@
-//! `figcraft-cli`: FigCraft without a window. Inspect, export, convert and render documents, run
+//! `figcraft-cli`: Lizard without a window. Inspect, export, convert and render documents, run
 //! command scripts, list commands, serve MCP on stdio, publish plugins to a server's plugin
 //! directory and measure performance.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use args::Args;
 use serde_json::{Value, json};
 
-pub const USAGE: &str = "figcraft-cli — FigCraft without a window
+pub const USAGE: &str = "figcraft-cli — Lizard without a window
 
 USAGE:
   figcraft-cli info <file> [--json]
@@ -30,10 +30,10 @@ USAGE:
   figcraft-cli help | --help | --version
 
 Every subcommand takes --no-system-fonts (or set FIGCRAFT_NO_SYSTEM_FONTS=1): text uses only the
-fonts built into FigCraft, for renders that match on every machine. Otherwise installed fonts are
+fonts built into Lizard, for renders that match on every machine. Otherwise installed fonts are
 indexed the first time text is laid out, as in the app.
 
-Files: .figcraft (native), .json (FigCraft or REST API file JSON), .fig (best effort; `info` lists what
+Files: .figcraft (native), .json (Lizard or REST API file JSON), .fig (best effort; `info` lists what
 wasn't imported), .svg, .png/.jpg/.webp/.gif/.bmp (open as an image layer). `export` writes one file
 per top-level frame into the <out> directory, or one file when <out> has an image extension or --node
 is given (`fig`, or an <out> ending in .fig: the whole file as .fig, experimental; other apps may
@@ -49,7 +49,7 @@ only inside a write root, everything else refused -- so giving no write root den
 altogether. They are taken by `mcp`, to confine the agent's commands, and by `info`, `export`,
 `convert`, `render` and `run`, to confine that one run; without them a subcommand reads and writes
 as the user who started it, as before. A running app confines itself: start it with
-`figcraft --control PORT` and the same flags (`--attach` refuses them).
+`lizard --control PORT` and the same flags (`--attach` refuses them).
 See docs/cli.md and docs/mcp.md.";
 
 /// The automation roots a file subcommand was given, if any. Omitting both leaves the run
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
         return match figcraft_figma_plugin::worker::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("FigCraft plugin worker: {e}");
+                eprintln!("Lizard plugin worker: {e}");
                 ExitCode::from(1)
             }
         };
@@ -85,7 +85,7 @@ fn main() -> ExitCode {
         return match figcraft_figma_plugin::worker_ui::run_stdio() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("FigCraft plugin UI worker: {e}");
+                eprintln!("Lizard plugin UI worker: {e}");
                 ExitCode::from(1)
             }
         };
@@ -189,7 +189,7 @@ fn run(argv: &[String]) -> CliResult<ExitCode> {
             // The app runs the commands: only its own roots can confine them.
             if attach.is_some() && ROOT_FLAGS.iter().any(|f| !a.values(f).is_empty()) {
                 return Err(CliError::Usage(
-                    "--attach can't take automation roots: start the app with them instead (`figcraft --control PORT --automation-read-root DIR ...`)"
+                    "--attach can't take automation roots: start the app with them instead (`lizard --control PORT --automation-read-root DIR ...`)"
                         .into(),
                 ));
             }
@@ -270,7 +270,7 @@ fn mcp(attach: Option<&str>, roots: Option<figcraft_engine::file_access::Roots>)
                 format!("127.0.0.1:{}", p.parse::<u16>().map_err(|_| CliError::Usage(format!("--attach needs a port number, got `{p}`")))?)
             };
             let b = figcraft_mcp::Attached::connect(&addr)
-                .map_err(|e| format!("can't reach the FigCraft app at {addr}: {e} (start it with `figcraft --control PORT`)"))?;
+                .map_err(|e| format!("can't reach the Lizard app at {addr}: {e} (start it with `lizard --control PORT`)"))?;
             Box::new(b)
         }
         None => Box::new(figcraft_mcp::Headless::new()),

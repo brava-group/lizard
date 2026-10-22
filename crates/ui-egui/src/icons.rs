@@ -1,5 +1,5 @@
 //! UI3 icons are tessellated from SVG paths. The original icon drawings
-//! remain for the FigCraft brand mark and as a fallback if an SVG is unavailable.
+//! remain for the Lizard brand mark and as a fallback if an SVG is unavailable.
 //!
 //! The grid is pixel-exact at 16 px: 1-unit strokes sit on half coordinates (pixel centres) and
 //! fills on whole ones. Larger boxes scale by whole steps and smaller ones are hinted: straight
@@ -580,6 +580,10 @@ pub fn paint_appearance(painter: &Painter, rect: Rect, icon: AppearanceIcon, col
 
 pub fn paint_colorpicker(painter: &Painter, rect: Rect, index: usize, color: Color32) {
     ui3::paint_colorpicker(painter, rect, index, color);
+}
+
+pub fn paint_panel_reference(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_panel_reference(painter, rect, index, color);
 }
 
 pub fn paint_property(painter: &Painter, rect: Rect, index: usize, color: Color32) {
@@ -1267,7 +1271,7 @@ fn draw(p: &P, icon: Icon) {
             p.dot(8.0, 11.5, 0.9);
         }
         Logo => {
-            // FigCraft's own mark: the curled tail of the chameleon on the app icon. One bold
+            // Lizard's own mark: the curled tail of the chameleon on the app icon. One bold
             // stroke: a shaft along the bottom, then three half turns, each tighter than the last.
             let mut tail = vec![(13.75, 13.0)];
             tail.extend(arc_pts(7.25, 8.0, 5.0, FRAC_PI_2, 3.0 * FRAC_PI_2));

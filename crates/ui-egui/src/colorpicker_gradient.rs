@@ -2,7 +2,6 @@
 
 use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, paint_kind_button, vector_button};
 use super::*;
-use crate::style_picker::{self, StyleSlot};
 
 const BASE_HEIGHT: f32 = 329.0;
 const SELECTED_ROW: Color32 = Color32::from_rgb(0x39, 0x43, 0x60);
@@ -250,23 +249,13 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
             let mut changed = false;
             let mut done = false;
             let mut selection: usize = ui.data(|d| d.get_temp(stop_id())).unwrap_or(0).min(visible_stops.saturating_sub(1));
-            let style_slot = match target {
-                PickerTarget::Paint { fills, .. } => Some(if *fills { StyleSlot::Fill } else { StyleSlot::Stroke }),
-                _ => None,
-            };
-
             label_tab(ui, at(origin, 8.0, 8.0, 91.609, 24.0), "cp_custom_tab", "Custom", true);
-            if label_tab(ui, at(origin, 103.609, 8.0, 74.914, 24.0), "cp_libraries_tab", "Libraries", false)
-                && let Some(slot) = style_slot
-            {
-                style_picker::open(app, ui, &app.session.selection(), slot);
-                close_now = true;
+            if label_tab(ui, at(origin, 103.609, 8.0, 74.914, 24.0), "cp_libraries_tab", "Libraries", false) {
+                library_tab::activate(ctx);
             }
-            if vector_button(ui, at(origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, "New style").clicked()
-                && let Some(slot) = style_slot
-            {
-                style_picker::open(app, ui, &app.session.selection(), slot);
-                close_now = true;
+            if vector_button(ui, at(origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, "New style").clicked() {
+                library_tab::create(ctx, paint.clone());
+                library_tab::activate(ctx);
             }
             if vector_button(ui, at(origin, 208.0, 8.0, 24.0, 24.0), "cp_close", 9, false, "Close").clicked() {
                 close_now = true;

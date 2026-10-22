@@ -1,17 +1,17 @@
 # Agent chat
 
 The **Agent** button in the left rail opens a chat for the current document. The desktop app
-starts the selected local agent and gives it FigCraft's existing MCP server, attached to that
+starts the selected local agent and gives it Lizard's existing MCP server, attached to that
 document. Design changes still go through
 the normal engine commands, appear on the canvas and enter Undo history.
 
 The in-app harness prepares each turn before it reaches the selected provider. A new local
-agent process receives FigCraft's own editing instructions: use the attached MCP tools, make
+agent process receives Lizard's own editing instructions: use the attached MCP tools, make
 changes through commands, verify structure and screenshots, and report only confirmed work. Every turn
 also gets a bounded JSON snapshot of the current document, page, revision, selected layers and
 top-level layers. The agent can request more detail through `inspect_document` and `get_node`;
 the snapshot is not assumed to stay current after later edits. A running local session keeps its
-original instructions, so FigCraft sends only fresh context and the user's next request. The
+original instructions, so Lizard sends only fresh context and the user's next request. The
 first turn after reopening a chat repeats the instructions in case its ACP adapter cannot restore
 the prior remote session. Recent transcript text is supplied to ACP after a local restart;
 Codex relies on its saved thread instead.
@@ -32,11 +32,11 @@ previews appear under separate agent labels. Side-by-side mode asks each agent t
 independent root frame, while split mode assigns each a distinct part of the same request. Variants
 run in successive rounds after all agents in the previous round finish. The variants control can
 request changes in layout or visual style. Parallel edits still share one canvas, so the agents'
-instructions coordinate their work without hard layer ownership. FigCraft stores neither tokens
+instructions coordinate their work without hard layer ownership. Lizard stores neither tokens
 nor API keys. Install the
 corresponding executable:
 
-| Choice | Executable started by FigCraft |
+| Choice | Executable started by Lizard |
 |---|---|
 | Codex | `codex app-server --stdio` |
 | Claude Code | `claude-agent-acp` |
@@ -45,13 +45,13 @@ corresponding executable:
 
 The other agents use [ACP](https://agentclientprotocol.com/) and their own CLI account
 configuration. The panel links to each provider's installation instructions when its executable
-is missing. FigCraft starts `figcraft-cli mcp --attach <private-port>` for the agent; installed builds
+is missing. Lizard starts `figcraft-cli mcp --attach <private-port>` for the agent; installed builds
 should keep `figcraft-cli` beside `figcraft`, or make it available on `PATH`. The private MCP
 bridge checks the active document before accepting an operation and is revoked when the chat
 session changes. ACP tool approvals appear in the chat before the adapter continues.
 
 Replies stream into the panel with their tool calls. **Stop** cancels the current session. The
-history is kept locally in `agent-chats.json` in FigCraft's user configuration directory (owner
+history is kept locally in `agent-chats.json` in Lizard's user configuration directory (owner
 read/write permissions on Unix), grouped by document. Each Codex worker resumes by its saved thread ID;
 ACP workers resume a saved session when their `loadSession` capability is available. Recent transcript
 text remains available as context for ACP agents. A completed answer offers **Undo this

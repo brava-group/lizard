@@ -17,6 +17,16 @@ use crate::widgets;
 
 #[path = "colorpicker_custom.rs"]
 mod custom;
+#[path = "colorpicker_library.rs"]
+mod library_tab;
+
+pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
+    library_tab::create_variable(ctx, color);
+}
+
+pub(crate) fn show_standalone_creation(app: &mut FigApp, ctx: &egui::Context) {
+    library_tab::show_standalone(app, ctx);
+}
 #[path = "colorpicker_gradient.rs"]
 mod gradient;
 #[path = "colorpicker_image.rs"]
@@ -494,7 +504,12 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
 }
 
 pub fn show(app: &mut FigApp, ctx: &egui::Context) {
-    let Some(target) = app.ui.picker.clone() else { return };
+    let Some(target) = app.ui.picker.clone() else {
+        if library_tab::active(ctx) {
+            library_tab::deactivate(ctx);
+        }
+        return;
+    };
     // A layer's picker belongs to the selection it was opened for: once that changes, close it
     // rather than keep editing layers that are no longer selected.
     let stale = match &target {
@@ -508,8 +523,13 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
             finish(app);
         }
         app.ui.picker = None;
+        library_tab::deactivate(ctx);
         return;
     };
+    if library_tab::active(ctx) {
+        library_tab::show(app, ctx, &target, paint);
+        return;
+    }
     if matches!(paint.kind, PaintKind::Solid { .. }) {
         custom::show(app, ctx, &target, paint);
         return;

@@ -1,7 +1,7 @@
 # Local Figma plugin compatibility check
 
 Checked on macOS on 2026-10-18 with ten user-supplied local packages. Their JavaScript, HTML,
-images and manifests stay outside this repository. FigCraft reads each package through
+images and manifests stay outside this repository. Lizard reads each package through
 `plugin.figma.import` and verifies its digest again before execution.
 With a synthetic image selected and the relevant menu command for the two background-removal
 plugins, all ten returned an open HTML UI with no startup warning.
@@ -23,8 +23,8 @@ These are startup and targeted interaction checks, **not full compatibility clai
 runtime now supports embedded and manifest HTML, message exchange, timers, manifest-scoped HTTPS
 access, persistent client storage, nested selected layers, editable SVG insertion, image paints and
 bounded access to the bytes of selected images.
-Plugins can still request Figma APIs not implemented in FigCraft. External services may require
-accounts, API keys or availability outside FigCraft's control. The macOS WebView is the only native
+Plugins can still request Figma APIs not implemented in Lizard. External services may require
+accounts, API keys or availability outside Lizard's control. The macOS WebView is the only native
 UI host implemented so far.
 
 The native Figma to Code check used a synthetic frame, rectangle and text. Its preview and code

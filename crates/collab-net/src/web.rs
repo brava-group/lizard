@@ -170,7 +170,7 @@ impl LiveLink for NetLink {
     fn join(&mut self, session: SessionId, link: &str, name: &str) -> Result<(), String> {
         let (invite, code) = Invite::parse_join(link)?;
         if secure_page() && !invite.server.secure && !invite.loopback() {
-            return Err("this page was loaded over https, and browsers block unencrypted ws:// connections; use a wss:// link (a server behind TLS), open FigCraft from an http:// address (like http://localhost:8767), or join from the desktop app".into());
+            return Err("this page was loaded over https, and browsers block unencrypted ws:// connections; use a wss:// link (a server behind TLS), open Lizard from an http:// address (like http://localhost:8767), or join from the desktop app".into());
         }
         let id = NEXT_ID.with(|n| n.replace(n.get() + 1));
         let inbox = self.sessions.inbox();

@@ -17,7 +17,7 @@ pub enum ReadError {
 pub fn list() -> Value {
     json!({"resources": [
         {"uri": DOC_URI, "name": "document", "title": "Active document", "description": "The active document as JSON (current page's layer tree, pages, styles, selection, history), like inspect_document.", "mimeType": "application/json"},
-        {"uri": COMMANDS_URI, "name": "commands", "title": "Command catalog", "description": "Every FigCraft command with label, menu, shortcut and parameter docs.", "mimeType": "application/json"},
+        {"uri": COMMANDS_URI, "name": "commands", "title": "Command catalog", "description": "Every Lizard command with label, menu, shortcut and parameter docs.", "mimeType": "application/json"},
     ]})
 }
 

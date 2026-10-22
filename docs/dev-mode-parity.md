@@ -17,8 +17,8 @@ inside generated layer trees. Remaining: 0–1 h.
 | Focus view (one frame, previous / next) | done | |
 | Compare changes (before/after side by side or overlaid, property diffs) | done | only against the snapshot taken when a frame was marked ready; not against any named version |
 | Code connect (map components to repository code) | done | per language (React, Leptos, SwiftUI, Compose): import path, name and a template with `{property}` and `{property ? "a" : "b"}` placeholders; instances (also inside generated layer trees) show the snippet with their values; edited in the Inspect panel with a live preview; `figcraft.connect.json` export/import. Inside a generated layer tree, connected instances' imports aren't collected |
-| Plugins in Dev Mode (Jira, GitHub, etc.) | partial | FigCraft's own WASM plugins that only read run from the Inspect tab; no plugin UI at run time, no third-party integrations |
-| VS Code extension | out of scope | FigCraft's MCP server and control channel already serve design data, code and connected snippets to agents and editors |
+| Plugins in Dev Mode (Jira, GitHub, etc.) | partial | Lizard's own WASM plugins that only read run from the Inspect tab; no plugin UI at run time, no third-party integrations |
+| VS Code extension | out of scope | Lizard's MCP server and control channel already serve design data, code and connected snippets to agents and editors |
 | Dev resources links on layers | done | a URL and a name per link on any layer (`devResource.*`, saved, synced, undoable); instances list their main component's (and its set's) read-only; URLs checked as http/https and never fetched (no page titles: a link without a name is named after its URL); the Inspect tab lists, adds, edits and removes them; `get_node` returns them |
 
 ## Revision history

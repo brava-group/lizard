@@ -1,4 +1,4 @@
-//! Paint behaviour, written from the public documentation of the design tools FigCraft follows:
+//! Paint behaviour, written from the public documentation of the design tools Lizard follows:
 //! fill stacking and opacity, paint and layer blend modes (pass-through and isolating groups),
 //! the four gradient kinds and their handles, image scale modes, rotation and adjustments, the
 //! colour models and the document colour profile. Each case says in one line why it expects what

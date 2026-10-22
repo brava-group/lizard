@@ -1,4 +1,4 @@
-# FigCraft control protocol
+# Lizard control protocol
 
 The desktop app can be driven by other programs (tests, scripts, `figcraft-cli mcp --attach`,
 sibling Crafting Apps) through a loopback socket:
@@ -60,7 +60,7 @@ unknown id is an error.
 ## Confining file access
 
 ```sh
-figcraft --control 7979 --automation-read-root /work/project --automation-write-root /work/project/out
+lizard --control 7979 --automation-read-root /work/project --automation-write-root /work/project/out
 ```
 
 `--automation-read-root <dir>` and `--automation-write-root <dir>` (each repeatable, `--flag=<dir>`
@@ -73,7 +73,7 @@ read or write root and written only inside a write root; anything else is an ord
 resolved as `docs/mcp.md` › Confining file access describes. A root that isn't an existing folder
 stops the app before its window opens, and so does any option the app doesn't know (a mistyped
 flag such as `--automation-write-roots` exits with `unknown option`, never starts unconfined).
-Without the flags nothing changes. The flags arrived in FigCraft 0.7.0: 0.6.0 and earlier ignore
+Without the flags nothing changes. The flags arrived in Lizard 0.7.0: 0.6.0 and earlier ignore
 them and confine nothing.
 
 Not confined: opening the files given on the command line when the app starts and the documents
@@ -143,7 +143,7 @@ that `node.set` accepts are listed in [mcp.md](mcp.md#conventions-agents-must-kn
 
 ### `ui.inspect {}`
 
-UI state: panels and tabs (`panels`: the `left` and `right` panels' widths as asked for and whether the left one is closed, `leftCollapsed`), the cursor the canvas shows (`cursor`: a CSS cursor name such as `default`, `crosshair`, `ew-resize`, `grab`, `copy`, `not-allowed`, `zoom-in`, or one FigCraft draws: `rotate <degrees>`, `pen`, `pen-close`, `pen-add`, `pen-bend`, `eyedropper`, `comment`; `null` while the pointer is elsewhere or over something with a cursor of its own, a ruler guide or a gradient handle; the engine's own hint is `tool.overlay.cursor`), current tool (`tool`: its id, overlay hints and, for a selected
+UI state: panels and tabs (`panels`: the `left` and `right` panels' widths as asked for and whether the left one is closed, `leftCollapsed`), the cursor the canvas shows (`cursor`: a CSS cursor name such as `default`, `crosshair`, `ew-resize`, `grab`, `copy`, `not-allowed`, `zoom-in`, or one Lizard draws: `rotate <degrees>`, `pen`, `pen-close`, `pen-add`, `pen-bend`, `eyedropper`, `comment`; `null` while the pointer is elsewhere or over something with a cursor of its own, a ruler guide or a gradient handle; the engine's own hint is `tool.overlay.cursor`), current tool (`tool`: its id, overlay hints and, for a selected
 ellipse, its arc handles `arcHandles`, for a selected rectangle, frame, polygon or star, its corner radius and ratio handles `shapeHandles`; see [mcp.md](mcp.md#measuring-the-scale-tool-arc-handles-and-selecting)), canvas rect, dialogs, view, timings (`frameMs`,
 `renderMs`), frames drawn since start or the last `ui.set {resetFrameStats: true}` (`framesDrawn`;
 an idle window draws none) with the most frequent repaint requests behind them (`repaintCauses`:
@@ -356,7 +356,7 @@ Close the app (every window, without asking about unsaved changes).
 
 ```sh
 port=7979
-figcraft --control $port &
+lizard --control $port &
 exec 3<>/dev/tcp/127.0.0.1/$port
 echo '{"id":1,"method":"engine.execute","params":{"command":"frame.create","params":{"preset":"iPhone 16","x":0,"y":0}}}' >&3
 read -r reply <&3; echo "$reply"

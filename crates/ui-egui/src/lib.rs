@@ -1,4 +1,4 @@
-//! The FigCraft egui frontend.
+//! The Lizard egui frontend.
 //!
 //! A thin shell over [`figcraft_engine::Session`]: panels read engine state and act by running
 //! commands; the canvas forwards pointer events to the engine's tools and draws overlays. Nothing
@@ -656,7 +656,7 @@ pub struct UiState {
     /// Dev Mode: annotations on the canvas and the ready-for-dev list.
     pub dev: dev_mode::DevUi,
 
-    /// What FigCraft last put on the system clipboard: when the clipboard still holds it, a paste
+    /// What Lizard last put on the system clipboard: when the clipboard still holds it, a paste
     /// uses our copied layers; anything else there (an image, SVG, text) came from another app.
     pub last_copy: Option<String>,
     /// Since the last V key release: whether its press arrived, and whether a paste event did
@@ -806,7 +806,7 @@ impl Default for UiState {
     }
 }
 
-/// The whole FigCraft UI.
+/// The whole Lizard UI.
 pub struct FigApp {
     pub session: Session,
     pub ui: UiState,
@@ -1757,6 +1757,7 @@ impl FigApp {
         menus::popups(self, &ctx);
         variable_ui::picker(self, &ctx);
         style_picker::show(self, &ctx);
+        colorpicker::show_standalone_creation(self, &ctx);
         self.end_unwanted_text_preview(&ctx);
         self.end_pen_outside_design();
         dialogs::show(self, &ctx);

@@ -18,6 +18,7 @@ use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
 
 pub struct CanvasState {
     pub rect: Rect,
+    eyedrop_sample: Option<(Pos2, Point, std::time::Instant, Vec<u8>)>,
     texture: Option<egui::TextureHandle>,
     tiles: Vec<CanvasTile>,
     tex_view: Option<figcraft_render::View>,
@@ -72,6 +73,7 @@ impl Default for CanvasState {
     fn default() -> Self {
         Self {
             rect: Rect::NOTHING,
+            eyedrop_sample: None,
             texture: None,
             tiles: Vec::new(),
             tex_view: None,
@@ -967,6 +969,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     crate::dev_mode::focus_bar(app, &ctx, rect);
     crate::widget_ui::menu_bar(app, ui, rect);
     crate::widget_ui::pointer(app, &resp);
+    eyedropper_preview(app, &ctx);
     // The cursor: the tool's, unless something on the canvas with its own has the pointer.
     app.canvas.cursor = None;
     if own_cursor && resp.hovered() && ctx.input(|i| i.pointer.hover_pos()).is_some() {
@@ -975,6 +978,89 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         shown.show(&ctx, &mut app.canvas.cursor_textures);
         app.canvas.cursor = Some(shown);
     }
+}
+
+/// The eyedropper's colour and pixel magnifier follow the pointer's lower-right corner.
+fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
+    if app.session.tool.tool != ToolId::Eyedropper {
+        app.canvas.eyedrop_sample = None;
+        return;
+    }
+    let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()).filter(|p| app.canvas.rect.contains(*p)) else { return };
+    let point = app.to_page(pointer);
+    let refresh = app
+        .canvas
+        .eyedrop_sample
+        .as_ref()
+        .is_none_or(|(at, page, when, _)| (*at != pointer || *page != point) && when.elapsed() >= std::time::Duration::from_millis(16));
+    if refresh && let Ok(ds) = app.session.ds() {
+        let scale = ds.view.zoom.clamp(0.01, 64.0);
+        let view = figcraft_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
+        if let Some(pix) = figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()) {
+            app.canvas.eyedrop_sample = Some((pointer, point, std::time::Instant::now(), figcraft_render::to_rgba8(&pix)));
+        }
+    }
+    let Some((_, _, _, pixels)) = &app.canvas.eyedrop_sample else { return };
+    let center = pixels.get(160..164).unwrap_or(&[0, 0, 0, 255]);
+    let color = figcraft_color::Color::from_rgba8(center[0], center[1], center[2], 255);
+    let screen = ctx.content_rect();
+    let x = (pointer.x + 18.0).min(screen.max.x - 357.0).max(screen.min.x + 8.0);
+    let y = (pointer.y + 18.0).min(screen.max.y - 95.0).max(screen.min.y + 8.0);
+    let pixels = pixels.clone();
+    egui::Area::new(egui::Id::new("eyedropper_preview")).order(egui::Order::Foreground).fixed_pos(pos2(x, y)).show(ctx, |ui| {
+        let (panel, _) = ui.allocate_exact_size(vec2(349.0, 87.0), Sense::hover());
+        ui.painter().rect_filled(panel, CornerRadius::same(8), Color32::from_rgb(46, 46, 46));
+        ui.painter().rect_stroke(panel, CornerRadius::same(8), Stroke::new(1.0, Color32::from_rgb(65, 65, 65)), StrokeKind::Inside);
+        let preview = Rect::from_min_size(panel.min + vec2(11.0, 11.0), vec2(65.0, 65.0));
+        ui.painter().rect_filled(preview, CornerRadius::same(4), Color32::BLACK);
+        for row in 0..9usize {
+            for col in 0..9usize {
+                let p = (row * 9 + col) * 4;
+                if let Some(rgb) = pixels.get(p..p + 3) {
+                    let r = Rect::from_min_size(
+                        preview.min + vec2(col as f32 * 65.0 / 9.0, row as f32 * 65.0 / 9.0),
+                        vec2(65.0 / 9.0 + 0.5, 65.0 / 9.0 + 0.5),
+                    );
+                    ui.painter().rect_filled(r.intersect(preview), 0.0, Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+                }
+            }
+        }
+        ui.painter().rect_stroke(
+            Rect::from_min_size(preview.min + vec2(4.0 * 65.0 / 9.0, 4.0 * 65.0 / 9.0), vec2(65.0 / 9.0, 65.0 / 9.0)),
+            0.0,
+            Stroke::new(1.0, Color32::WHITE),
+            StrokeKind::Inside,
+        );
+        for n in 1..9 {
+            let line = n as f32 * 65.0 / 9.0;
+            ui.painter().vline(preview.min.x + line, preview.min.y..=preview.max.y, Stroke::new(0.5, Color32::from_black_alpha(55)));
+            ui.painter().hline(preview.min.x..=preview.max.x, preview.min.y + line, Stroke::new(0.5, Color32::from_black_alpha(55)));
+        }
+        let swatch = Rect::from_min_size(panel.min + vec2(92.0, 15.0), vec2(21.0, 21.0));
+        ui.painter().rect_filled(swatch, CornerRadius::same(3), Color32::from_rgb(center[0], center[1], center[2]));
+        ui.painter().text(panel.min + vec2(120.0, 25.0), Align2::LEFT_CENTER, color.to_css_hex(), semibold(13.0), Color32::from_rgb(220, 220, 220));
+        let create = Rect::from_min_size(panel.min + vec2(92.0, 44.0), vec2(155.0, 28.0));
+        let response = ui.interact(create, egui::Id::new("eyedrop_create_variable"), Sense::click());
+        if response.hovered() {
+            ui.painter().rect_filled(create, CornerRadius::same(5), Color32::from_rgb(64, 64, 64));
+        }
+        crate::icons::paint_panel_reference(
+            ui.painter(),
+            Rect::from_center_size(pos2(create.min.x + 12.0, create.center().y), vec2(14.0, 14.0)),
+            49,
+            Color32::WHITE,
+        );
+        ui.painter().text(pos2(create.min.x + 28.0, create.center().y), Align2::LEFT_CENTER, tr("Create variable"), semibold(13.0), Color32::WHITE);
+        for (x, label) in [(271.0, "shift"), (313.0, "⌘")] {
+            let key = Rect::from_min_size(panel.min + vec2(x, 45.0), vec2(if x < 300.0 { 38.0 } else { 25.0 }, 25.0));
+            ui.painter().rect_filled(key, CornerRadius::same(6), Color32::from_rgb(51, 51, 51));
+            ui.painter().rect_stroke(key, CornerRadius::same(6), Stroke::new(1.0, Color32::from_rgb(81, 81, 81)), StrokeKind::Inside);
+            ui.painter().text(key.center(), Align2::CENTER_CENTER, label, regular(13.0), Color32::from_rgb(238, 238, 238));
+        }
+        if response.clicked() {
+            crate::colorpicker::open_creation_from_eyedropper(ctx, color);
+        }
+    });
 }
 
 fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option<(u64, NodeId)>) {

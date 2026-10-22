@@ -1,6 +1,6 @@
-# Translating FigCraft
+# Translating Lizard
 
-FigCraft's interface strings live in one TOML catalog per language in
+Lizard's interface strings live in one TOML catalog per language in
 [`crates/ui-egui/locales/`](../crates/ui-egui/locales). The build bakes every catalog into the
 binary (desktop and web); nothing is read at run time. Preferences ▸ Language picks the language
 and the interface switches at once. System takes the first of the OS's preferred languages that has

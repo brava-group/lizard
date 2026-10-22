@@ -1,4 +1,4 @@
-# FigCraft plugins written in Rust: the SDK and example plugins. A workspace of its own (not part of
+# Lizard plugins written in Rust: the SDK and example plugins. A workspace of its own (not part of
 # the app's): it builds for wasm32-unknown-unknown with `cargo xtask plugins` (from the repository
 # root), which puts each example's .wasm next to its figcraft-plugin.json under target/plugins/.
 [workspace]

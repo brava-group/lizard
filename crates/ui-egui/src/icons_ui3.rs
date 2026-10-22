@@ -14,6 +14,7 @@ use usvg::tiny_skia_path::PathSegment;
 mod mapping;
 
 const VECTORS: &str = include_str!("../assets/ui3-vectors.json");
+const PANEL_REFERENCE: &str = include_str!("../assets/panel-reference-icons.json");
 const TAB_DOCUMENT_SVG: &str = include_str!("../assets/tab-document.svg");
 const MODE_SVGS: [&str; 4] = [
     include_str!("../assets/mode-draw.svg"),
@@ -478,6 +479,31 @@ pub(super) fn paint_colorpicker(painter: &Painter, rect: Rect, index: usize, col
     }
 }
 
+/// Exact SVG paths supplied with the properties-panel design reference.
+pub(super) fn paint_panel_reference(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    type PanelIcon = Option<(Geometry, [f32; 2])>;
+    static ICONS: OnceLock<Vec<PanelIcon>> = OnceLock::new();
+    let icons = ICONS.get_or_init(|| {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(PANEL_REFERENCE).unwrap_or_default();
+        entries
+            .iter()
+            .map(|entry| {
+                let svg = entry.get("svg")?.as_str()?;
+                let size = entry.get("size")?.as_array()?;
+                let w = size.first()?.as_f64()? as f32;
+                let h = size.get(1)?.as_f64()? as f32;
+                if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+                    return None;
+                }
+                Some((build(svg, true)?, [w, h]))
+            })
+            .collect()
+    });
+    if let Some(Some((geometry, size))) = icons.get(index) {
+        paint_geometry(painter, rect, geometry, color, *size);
+    }
+}
+
 pub(super) fn paint_property(painter: &Painter, rect: Rect, index: usize, color: Color32) {
     static PROPERTY: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
     let icons = PROPERTY.get_or_init(|| PROPERTY_SVGS.iter().map(|svg| build(svg, true)).collect());
@@ -685,6 +711,23 @@ mod tests {
     fn layout_reference_svgs_have_renderable_paths() {
         for (svg, _) in LAYOUT_SVGS {
             assert!(build(svg, true).is_some(), "layout SVG did not produce vector geometry");
+        }
+    }
+
+    #[test]
+    fn panel_reference_svgs_have_renderable_paths() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(PANEL_REFERENCE).expect("panel SVG catalog is valid JSON");
+        assert_eq!(entries.len(), 78);
+        for (index, entry) in entries.iter().enumerate() {
+            let svg = entry["svg"].as_str().expect("SVG source");
+            let size = entry["size"].as_array().expect("SVG dimensions");
+            assert!(size.iter().all(|axis| axis.as_f64().is_some_and(|n| n.is_finite() && n > 0.0)));
+            // The four gradient illustration layers are rendered together into the bundled
+            // Glass light preview, since this path tessellator paints solid colours only.
+            if (73..=76).contains(&index) {
+                continue;
+            }
+            assert!(build(svg, true).is_some(), "panel SVG {index} did not produce vector geometry");
         }
     }
 }

@@ -3,7 +3,7 @@ name = "figcraft-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft text: font database (embedded craft-fonts + system fonts), shaping, line layout, glyph outlines"
+description = "Lizard text: font database (embedded craft-fonts + system fonts), shaping, line layout, glyph outlines"
 
 [lints]
 workspace = true

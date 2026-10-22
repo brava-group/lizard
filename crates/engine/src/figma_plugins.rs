@@ -1,5 +1,5 @@
 //! Local Figma JavaScript plugin diagnosis and a small, bounded execution slice. This is separate
-//! from `plugin.import`, which only accepts FigCraft's metered WebAssembly plugins.
+//! from `plugin.import`, which only accepts Lizard's metered WebAssembly plugins.
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, BufReader, Read, Write};

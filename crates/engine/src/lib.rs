@@ -1,4 +1,4 @@
-//! The FigCraft engine.
+//! The Lizard engine.
 //!
 //! Every user-visible action is a command with a stable id (`node.create`, `align.left`,
 //! `layout.add`, `component.create`…) taking JSON params. The egui UI, the CLI, the control channel

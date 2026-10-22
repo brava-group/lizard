@@ -5,7 +5,7 @@
 //! the SVG names when it's installed (else the first installed of its fallbacks or generic family).
 //!
 //! usvg lays text out before handing it over and drops what it can't lay out, so one face from
-//! FigCraft's font database stands in for every family while parsing; FigCraft then lays the text
+//! Lizard's font database stands in for every family while parsing; Lizard then lays the text
 //! out with the real fonts. Text on one path comes in as text on a path; text on several paths,
 //! with per-glyph rotation or vertical comes in as outlines.
 
@@ -21,7 +21,7 @@ use super::paint::{Target, paint};
 use super::shape::place;
 use super::{Ctx, children, finish, finite, layer_name, xf};
 
-/// Family names FigCraft can draw (lower case).
+/// Family names Lizard can draw (lower case).
 pub(crate) struct Fonts(HashSet<String>);
 
 impl Fonts {

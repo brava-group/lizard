@@ -1,7 +1,7 @@
-//! Write FigCraft plugins in Rust.
+//! Write Lizard plugins in Rust.
 //!
 //! A plugin is a `cdylib` built for `wasm32-unknown-unknown`. It gets the command the user picked
-//! with its parameters and the selection, and acts on the document by calling FigCraft commands
+//! with its parameters and the selection, and acts on the document by calling Lizard commands
 //! (the ids `figcraft-cli commands` lists) with JSON parameters. Everything one run does is one
 //! undo step; when the run returns an error (or panics), the document is put back.
 //!
@@ -18,7 +18,7 @@
 //! entry!(run);
 //! ```
 //!
-//! A plugin can also show a panel ([`show_ui`]): FigCraft draws its controls and calls the plugin
+//! A plugin can also show a panel ([`show_ui`]): Lizard draws its controls and calls the plugin
 //! again for each button press or changed value, with [`Input::event`] set. The module stays
 //! loaded while the panel is open, so statics keep their values between those calls. Settings
 //! ([`setting`], [`set_setting`]) last from one run to the next.
@@ -126,7 +126,7 @@ pub struct Event {
 }
 
 impl Input {
-    /// Parse the input JSON FigCraft hands to the plugin.
+    /// Parse the input JSON Lizard hands to the plugin.
     pub fn parse(text: &str) -> Result<Input> {
         let v: Value = serde_json::from_str(text).map_err(|e| format!("input: {e}"))?;
         Ok(Input {
@@ -165,7 +165,7 @@ fn ids(v: Option<&Value>) -> Vec<u64> {
     v.and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default()
 }
 
-/// Run FigCraft command `command` with `params`: its result, or why it was refused or failed.
+/// Run Lizard command `command` with `params`: its result, or why it was refused or failed.
 pub fn call(command: &str, params: &Value) -> Result<Value> {
     let params = serde_json::to_string(params).map_err(|e| e.to_string())?;
     let status = host::call(command.as_bytes(), params.as_bytes());
@@ -183,7 +183,7 @@ pub fn selection() -> Vec<u64> {
     ids(serde_json::from_slice::<Value>(&reply).ok().as_ref())
 }
 
-/// A line for the run's log (returned with the result, and in FigCraft's log).
+/// A line for the run's log (returned with the result, and in Lizard's log).
 pub fn log(line: &str) {
     host::log(line.as_bytes());
 }
@@ -273,7 +273,7 @@ macro_rules! entry {
     };
 }
 
-/// The host functions FigCraft provides (module `figcraft`).
+/// The host functions Lizard provides (module `figcraft`).
 #[cfg(target_arch = "wasm32")]
 #[allow(unsafe_code)]
 mod host {
@@ -359,7 +359,7 @@ mod host {
         0
     }
     pub fn reply() -> Vec<u8> {
-        b"not running inside FigCraft".to_vec()
+        b"not running inside Lizard".to_vec()
     }
     pub fn log(_s: &[u8]) {}
     pub fn notify(_s: &[u8]) {}

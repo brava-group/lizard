@@ -75,8 +75,8 @@ impl std::fmt::Display for FormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FormatError::Io(e) => write!(f, "{e}"),
-            FormatError::Corrupt(e) => write!(f, "not a valid FigCraft file: {e}"),
-            FormatError::Newer(v) => write!(f, "this file was saved by a newer FigCraft (format version {v})"),
+            FormatError::Corrupt(e) => write!(f, "not a valid Lizard file: {e}"),
+            FormatError::Newer(v) => write!(f, "this file was saved by a newer Lizard (format version {v})"),
         }
     }
 }
@@ -284,7 +284,7 @@ impl<'de> Deserialize<'de> for Header {
         impl<'de> Visitor<'de> for HeaderVisitor {
             type Value = Header;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a FigCraft document object")
+                f.write_str("a Lizard document object")
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Header, A::Error> {
                 let mut h = Header::default();

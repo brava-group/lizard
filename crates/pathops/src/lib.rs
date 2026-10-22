@@ -1,4 +1,4 @@
-//! FigCraft path operations.
+//! Lizard path operations.
 //!
 //! - [`boolean`]: Union, Subtract, Intersect and Exclude over any number of closed paths (robust
 //!   sweep-line topology from `linesweeper`); results use the even-odd rule.

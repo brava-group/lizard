@@ -345,7 +345,7 @@ fn bad_library_files_are_errors() {
     assert!(s.execute("library.add", &json!({"path": path_str(&junk)})).is_err());
     std::fs::write(&junk, b"{\"name\": \"json\"}").unwrap();
     assert!(s.execute("library.add", &json!({"path": path_str(&junk)})).is_err());
-    // A FigCraft file that was never published.
+    // A Lizard file that was never published.
     let plain = d.join("plain.figcraft");
     std::fs::write(&plain, figcraft_format::save_bytes(&Document::new("Plain"), None).unwrap()).unwrap();
     let e = s.execute("library.add", &json!({"path": path_str(&plain)})).unwrap_err();

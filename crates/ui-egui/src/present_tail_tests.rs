@@ -2,7 +2,7 @@
 //! buttons play key/gamepad triggers (from the system's controllers and injected through the
 //! control channel; no physical controller needed), and widgets react to clicks in a presented
 //! prototype. Each case states the rule and a one-line derivation; "docs silent" cases pin what
-//! FigCraft does. The model's side is the engine's `proto_tail_tests`.
+//! Lizard does. The model's side is the engine's `proto_tail_tests`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};

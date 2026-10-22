@@ -3,7 +3,7 @@ name = "figcraft-doc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FigCraft document model: pages, the node tree, properties, components, styles, variables, prototype data"
+description = "Lizard document model: pages, the node tree, properties, components, styles, variables, prototype data"
 
 [lints]
 workspace = true

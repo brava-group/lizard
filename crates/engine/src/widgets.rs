@@ -1,6 +1,6 @@
 //! Widgets: layers on the canvas that a plugin draws (plugin API 3). A widget is a frame owned by
 //! its plugin: the plugin describes it ([`WidgetRender`]: frames with auto layout, text, shapes and
-//! images) and FigCraft builds the layers inside it, locked, so the widget moves as one layer.
+//! images) and Lizard builds the layers inside it, locked, so the widget moves as one layer.
 //! Each widget keeps its plugin's id and a small state (a JSON object) in its own layer data, so it
 //! is saved, copied, undone, exported and synced in a live session like any layer. Clicking a part
 //! of it the plugin named as a target calls the plugin back with that state, in a fresh sandbox
@@ -11,7 +11,7 @@
 //! Plugin API 4 adds more events, each a callback like a click: a text the user edited in place
 //! ([`Input`], `widget.setText`), an item of the widget's property menu (`widget.menuAction`) and a
 //! timer the widget asked for (`widget.fireTimer`; [`run_timers`] in the app). Hover styles and
-//! tooltips are FigCraft's to show ([`set_hover`]): the plugin isn't called for pointer moves.
+//! tooltips are Lizard's to show ([`set_hover`]): the plugin isn't called for pointer moves.
 //! Everything read back from layer data is checked again: a file or a peer may hold anything.
 //!
 //! **Timers** are kept with the open document, not in it: closing the file cancels them, and they
@@ -40,7 +40,7 @@ use crate::params::{get, id, num, string};
 use crate::plugins::{InstalledPlugin, call_plugin, installed, limits, module_of, plugin_error};
 use crate::{EngineError, Result, Session, bad, spec};
 
-/// Layer data FigCraft keeps for widgets starts with this; plugins can't write it.
+/// Layer data Lizard keeps for widgets starts with this; plugins can't write it.
 pub const DATA_PREFIX: &str = "figcraft.widget";
 /// On a widget's own layer: its plugin's id, its state (JSON), its property menu (JSON) and the
 /// stamp of the session whose timer for it is running.

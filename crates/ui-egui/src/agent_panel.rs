@@ -1820,7 +1820,7 @@ mod tests {
         assert!(app.ui.agent.busy);
         assert!(app.ui.agent.draft.is_empty());
         assert!(sent.lock().unwrap()[0].text.contains("Crie um frame"));
-        assert!(sent.lock().unwrap()[0].text.contains("FigCraft agent instructions:"));
+        assert!(sent.lock().unwrap()[0].text.contains("Lizard agent instructions:"));
         events.lock().unwrap().extend([
             AgentEvent::Session("remote-session".into()),
             AgentEvent::Text("Frame criado.".into()),
@@ -1833,7 +1833,7 @@ mod tests {
         send_prompt(&mut app);
         let sent = sent.lock().unwrap();
         assert_eq!(sent[1].resume.as_deref(), Some("remote-session"));
-        assert!(!sent[1].text.contains("FigCraft agent instructions:"));
+        assert!(!sent[1].text.contains("Lizard agent instructions:"));
         assert!(sent[1].text.contains("Current document snapshot"));
     }
 

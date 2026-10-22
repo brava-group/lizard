@@ -1,9 +1,9 @@
 //! macOS open-documents and quit Apple events (#289).
 //!
-//! Finder double-clicks, Open With, drops on the Dock icon and `open -a FigCraft file.figcraft`
+//! Finder double-clicks, Open With, drops on the Dock icon and `open -a Lizard file.figcraft`
 //! don't pass paths on the command line: LaunchServices sends the running (or just-launched) app a
 //! `kAEOpenDocuments` ('odoc') Apple event. winit 0.30 doesn't handle it and owns the
-//! `NSApplicationDelegate`, so AppKit answered "FigCraft cannot open files in the FigCraft Document
+//! `NSApplicationDelegate`, so AppKit answered "Lizard cannot open files in the Lizard Document
 //! format". Handling it ourselves needs Objective-C class declarations, i.e. `unsafe`, which this
 //! workspace forbids. The `fmv-macos-events` crate (also used by GridCraft, EffectCraft and
 //! PhotoCraft) wraps exactly that, an `NSAppleEventManager` handler registered before Finder's

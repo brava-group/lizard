@@ -489,10 +489,9 @@ fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, bool, eg
     out
 }
 
-/// The glass effect's light intensity field is labelled (#256): drawn in the Design panel with the
-/// effect's settings open.
+/// The glass reference groups angle and intensity beside a single Light label.
 #[test]
-fn the_glass_light_intensity_field_has_a_label() {
+fn the_glass_light_controls_have_their_group_label_and_values() {
     let mut s = Session::new();
     let r = NodeId(s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 100, "height": 80})).unwrap()["id"].as_u64().unwrap());
     s.execute("select.set", &json!({"ids": [r]})).unwrap();
@@ -501,35 +500,11 @@ fn the_glass_light_intensity_field_has_a_label() {
     u.ctx.data_mut(|d| d.insert_temp(Id::new(("fx_open", 0usize)), true));
     u.frame(vec![]);
     let shapes = u.frame_output(vec![]).shapes;
-    let lead = u.ctx.read_response(Id::new(("fx_gi", 0usize)).with("lead")).expect("the intensity field is shown").rect;
-    let labels: Vec<(String, bool)> =
-        painted_texts(&shapes).into_iter().filter(|(_, _, at)| lead.contains(at.center())).map(|(text, cut, _)| (text, cut)).collect();
-    assert_eq!(labels, [("Intensity".to_string(), false)], "labelled, and not cut short");
-    let field = u.ctx.read_response(Id::new(("fx_gi", 0usize)).with("field")).expect("its value").rect;
-    assert_eq!(field.max.x - lead.min.x, GLASS_FIELD_W, "the width the next test measures against");
-}
-
-/// A glass settings field's width in the Design panel at its default width.
-const GLASS_FIELD_W: f32 = 98.5;
-
-/// The light intensity label this fix adds fits whole beside its value in every language (#256).
-/// Other glass labels may end in "…" in some languages (es "Profundidad"); a longer
-/// "Intensity" translation fails here.
-#[test]
-fn the_intensity_label_fits_whole_in_every_language() {
-    use crate::i18n::{self, Text};
-    let ctx = egui::Context::default();
-    let mut out = ctx.run_ui(Default::default(), |ui| {
-        let width = |s: &str| ui.painter().layout_no_wrap(s.to_string(), crate::theme::regular(11.0), egui::Color32::WHITE).size().x;
-        for lang in i18n::languages() {
-            let label = lang.ui.iter().find(|(k, _)| *k == "Intensity").map_or("Intensity", |(_, t)| match t {
-                Text::Plain(s) | Text::Plural { other: s, .. } => s,
-            });
-            let lead = crate::widgets::text_lead_width(ui, label, GLASS_FIELD_W);
-            assert!(lead >= 12.0 + width(label), "{}: {label:?} would end in \"…\"", lang.code);
-        }
-    });
-    out.textures_delta.clear();
+    assert!(painted_texts(&shapes).iter().any(|(text, cut, _)| text == "Light" && !cut), "the light controls have a group label");
+    let intensity = u.ctx.read_response(Id::new(("fx_gi", 0usize)).with("field")).expect("the intensity field is shown").rect;
+    let angle = u.ctx.read_response(Id::new(("fx_gl", 0usize)).with("field")).expect("the angle field is shown").rect;
+    assert!(intensity.width() >= 60.0 && angle.width() >= 60.0);
+    assert!(intensity.min.y > angle.max.y, "the intensity is below the angle");
 }
 
 #[test]

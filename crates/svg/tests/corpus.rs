@@ -1,7 +1,7 @@
 //! The SVG import corpus: synthetic files covering what design and illustration tools write.
 //!
 //! Each `tests/corpus/*.svg` carries its expected pixels as `<!-- probe X Y #RRGGBBAA ~TOL -->`
-//! comments, worked out by hand from the SVG. The import is rendered with FigCraft's renderer and
+//! comments, worked out by hand from the SVG. The import is rendered with Lizard's renderer and
 //! every probe checked; the layer structure is checked per file; and every file must survive an
 //! export and a second import looking the same.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

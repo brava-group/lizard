@@ -1,4 +1,4 @@
-//! Widgets (ABI v3): a plugin draws a layer on the canvas by describing it, and FigCraft builds the
+//! Widgets (ABI v3): a plugin draws a layer on the canvas by describing it, and Lizard builds the
 //! layers. The description comes from the plugin, so it is untrusted: [`WidgetRender::parse`]
 //! checks its size, node count, depth, numbers, strings, colours and image sizes before the engine
 //! sees it. The engine decides where the layers go (only inside the widget's own layer).
@@ -48,7 +48,7 @@ pub const MAX_TIMER_MS: u32 = 60 * 60 * 1000;
 /// The first plugin API with what's marked "API 4" here.
 pub(crate) const API_4: u32 = 4;
 
-/// What a widget is made of: FigCraft's own layer kinds.
+/// What a widget is made of: Lizard's own layer kinds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WidgetKind {
@@ -142,7 +142,7 @@ pub struct WidgetShadow {
     pub color: Option<String>,
 }
 
-/// API 4. What changes while the pointer is over a layer; FigCraft applies it itself (the plugin
+/// API 4. What changes while the pointer is over a layer; Lizard applies it itself (the plugin
 /// isn't called for pointer moves).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WidgetHover {

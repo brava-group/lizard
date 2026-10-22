@@ -1,4 +1,4 @@
-//! FigCraft text: fonts, shaping and layout.
+//! Lizard text: fonts, shaping and layout.
 //!
 //! Fonts come from the optional craft-fonts build input (Inter and friends, embedded at build time)
 //! and, on desktop, from the system's font folders. [`layout`] turns a text node's

@@ -1,6 +1,6 @@
 //! Instructions and live document context for the in-app design agent.
 //!
-//! The model runs in a provider CLI. FigCraft owns this context and the document-bound MCP
+//! The model runs in a provider CLI. Lizard owns this context and the document-bound MCP
 //! bridge; no provider-specific prompt or third-party design instructions are embedded here.
 
 use figcraft_engine::DocState;
@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::agent_panel::ChatNodeRef;
 
-const INSTRUCTIONS: &str = "You are the design assistant inside FigCraft. Work in the open document through the figcraft MCP server. The editor's command engine is the source of truth for changes and Undo history.\n\
+const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in the open document through the figcraft MCP server. The editor's command engine is the source of truth for changes and Undo history.\n\
 \n\
 Workflow:\n\
 1. Read the provided document snapshot. If you need more detail, call inspect_document or get_node. Use the selected layer IDs as references, not as a request to modify them all.\n\
@@ -61,7 +61,7 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     });
     let mut text = String::with_capacity(INSTRUCTIONS.len() + request.len() + prior.len() + 1_024);
     if new_session {
-        text.push_str("FigCraft agent instructions:\n");
+        text.push_str("Lizard agent instructions:\n");
         text.push_str(INSTRUCTIONS);
         text.push_str("\n\n");
     }
@@ -87,9 +87,9 @@ mod tests {
         let ds = DocState::new(doc, None);
         let first = build_turn(&ds, &[], "Create a card", "", true);
         let next = build_turn(&ds, &[], "Change its fill", "", false);
-        assert!(first.contains("FigCraft agent instructions:"));
+        assert!(first.contains("Lizard agent instructions:"));
         assert!(first.contains("figcraft MCP server"));
-        assert!(!next.contains("FigCraft agent instructions:"));
+        assert!(!next.contains("Lizard agent instructions:"));
         assert!(next.contains("\"document_name\":\"Example\""));
         assert!(next.contains("Change its fill"));
     }

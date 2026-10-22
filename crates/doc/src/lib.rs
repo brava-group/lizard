@@ -1,4 +1,4 @@
-//! The FigCraft document model.
+//! The Lizard document model.
 //!
 //! A [`Document`] holds pages; each page is the root of a tree of [`Node`]s (frames, groups, shapes,
 //! text, components, instances…). Nodes are stored by id in a map of `Arc`s, so cloning a document

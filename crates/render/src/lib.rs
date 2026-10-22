@@ -1,4 +1,4 @@
-//! The FigCraft renderer.
+//! The Lizard renderer.
 //!
 //! [`render_view`] draws a page region at any zoom into a premultiplied RGBA pixmap (the canvas);
 //! [`render_node`] rasterises one node for export at a scale. Everything is CPU (tiny-skia) so it

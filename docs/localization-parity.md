@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (macOS finds its downloadable CJK system fonts (#406); string counts re-measured: 2,272 entries, the drafts at 95–99%; Swedish command labels and menu wordings; Russian, Swedish, Turkish, Czech and Indonesian listed; a duplicated paragraph removed; draft catalogs catch up: every draft translates every string again; Simplified Chinese draft catalog) · **Target:** Figma Design (desktop app 126.10.7)
 
-FigCraft's interface has a localization layer with an English catalog, a Russian catalog reviewed
+Lizard's interface has a localization layer with an English catalog, a Russian catalog reviewed
 by a native speaker, and Spanish (with a Latin American overlay), French, German, Brazilian
 Portuguese, Japanese, Korean, Simplified Chinese, Indonesian and Czech drafts (machine-drafted,
 waiting for native speakers' review), plus Swedish and Turkish catalogs. This page lists the twelve key
@@ -18,7 +18,7 @@ browser's page translation. The `.lproj` folders in `/Applications/Figma.app` (6
 Electron/Chromium locale packs, not Figma's own UI languages. Text *content* in any script is
 supported by both apps (CJK, Arabic and Devanagari shaping, IME); Figma has no vertical text.
 
-## What FigCraft has (measured 2026-10-17, from source)
+## What Lizard has (measured 2026-10-17, from source)
 
 - **Layer:** one TOML catalog per language in `crates/ui-egui/locales/`, baked into the binary by
   the UI crate's build script (desktop and web; nothing read at run time). Keys are the English text

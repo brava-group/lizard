@@ -1,8 +1,8 @@
-# FigCraft architecture
+# Lizard architecture
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (the shared hub in `collab-net` and the `figcraft-server` app) · **Target:** Figma Design
 
-How FigCraft is built today. Engine first, a thin swappable UI, everything a command; a Figma-shaped
+How Lizard is built today. Engine first, a thin swappable UI, everything a command; a Figma-shaped
 data model (a scene graph of frames with auto layout, components and variables). ~108,800 lines of
 Rust (2026-10-10).
 

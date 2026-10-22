@@ -1,5 +1,5 @@
 //! Opening invite links from the system: a `figcraft://join?…` link clicked in a browser, a chat
-//! or an email opens FigCraft, which joins the session (milestone M9).
+//! or an email opens Lizard, which joins the session (milestone M9).
 //!
 //! The app makes itself the opener of the `figcraft` URL scheme. Where the app registers it at run
 //! time (Windows: per user, no administrator rights), the desktop app installs a
@@ -72,7 +72,7 @@ fn register(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn specs() -> Vec<CommandSpec> {
     vec![spec!(
         "collab.registerLinks",
-        "Open invite links in FigCraft",
+        "Open invite links in Lizard",
         "{on? (default: switch)} → {on, registered}: make this app the opener of figcraft:// invite links (or stop); also the Preferences checkbox",
         false,
         register

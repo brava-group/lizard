@@ -38,12 +38,23 @@ pub fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("APPDATA").map(PathBuf::from);
     #[cfg(all(unix, not(target_os = "macos")))]
     let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    base.map(|b| b.join("FigCraft"))
+    base.map(|b| b.join("Lizard"))
 }
 
 impl Desktop {
     pub fn load(recovery: crate::recovery::Shared) -> Self {
-        Self::load_from(config_dir(), recovery)
+        let dir = config_dir();
+        if let Some(current) = &dir {
+            let current_state = current.join(STATE);
+            if !current_state.exists()
+                && let Some(legacy) = current.parent().map(|base| base.join("FigCraft").join(STATE))
+                && let Ok(bytes) = std::fs::read(legacy)
+                && std::fs::create_dir_all(current).is_ok()
+            {
+                let _ = std::fs::write(current_state, bytes);
+            }
+        }
+        Self::load_from(dir, recovery)
     }
 
     /// With the preferences kept in `dir`.
@@ -89,7 +100,7 @@ impl Desktop {
         } else {
             crate::control_server::start_agent_scoped(document, index, queue.clone(), context.clone())
         };
-        let (port, enabled) = bridge.ok_or("Não foi possível abrir o canal de controle do FigCraft")?;
+        let (port, enabled) = bridge.ok_or("Não foi possível abrir o canal de controle do Lizard")?;
         self.agent_bridges.push((port, enabled));
         Ok(port)
     }
@@ -293,7 +304,7 @@ fn read_clipboard<T>(c: &mut arboard::Clipboard, read: fn(&mut arboard::Clipboar
 /// Native Save as filters; other callers keep their existing combined filter.
 fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
     if exts == ["figcraft", "fig"] {
-        vec![("FigCraft (.figcraft)", &exts[..1]), (figcraft_ui_egui::i18n::tr(".fig (experimental)"), &exts[1..])]
+        vec![("Lizard (.figcraft)", &exts[..1]), (figcraft_ui_egui::i18n::tr(".fig (experimental)"), &exts[1..])]
     } else {
         vec![("File", exts)]
     }
@@ -315,7 +326,7 @@ impl Services for Desktop {
                 .filter(|p| p.is_file())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "figcraft-cli".into());
-            let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("FigCraft Agent"));
+            let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
             std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
             for index in 0..count {
                 let port = match self.agent_port(document, index) {
@@ -556,7 +567,7 @@ mod save_filter_tests {
         let extensions = ["figcraft", "fig"];
         assert_eq!(
             save_filters(&extensions),
-            vec![("FigCraft (.figcraft)", &extensions[..1]), (figcraft_ui_egui::i18n::tr(".fig (experimental)"), &extensions[1..])]
+            vec![("Lizard (.figcraft)", &extensions[..1]), (figcraft_ui_egui::i18n::tr(".fig (experimental)"), &extensions[1..])]
         );
     }
 

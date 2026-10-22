@@ -125,7 +125,7 @@ fn refusal(m: &Manifest, command: &str, params: &Value) -> Option<String> {
     if DENIED.iter().any(|p| command.starts_with(p)) && !ALLOWED.contains(&command) {
         return Some(format!("`{command}` isn't available to plugins"));
     }
-    // A widget's own data is FigCraft's to write, so no plugin can forge or retarget a widget.
+    // A widget's own data is Lizard's to write, so no plugin can forge or retarget a widget.
     if writes_widget_data(params, 0) {
         return Some(format!("plugins can't write `{}…` layer data", crate::widgets::DATA_PREFIX));
     }

@@ -1,6 +1,6 @@
 # figcraft-cli
 
-FigCraft without a window: inspect, export, convert and render documents, run command scripts, list
+Lizard without a window: inspect, export, convert and render documents, run command scripts, list
 commands, serve MCP and measure performance. Build it with
 `cargo build --release -p figcraft-cli` (binary `target/release/figcraft-cli`).
 
@@ -8,7 +8,7 @@ Bad arguments print usage and exit with code 2; failures exit with 1. The CLI ne
 
 ## Fonts
 
-Text lays out and renders with the same fonts as the desktop app: the fonts built into FigCraft
+Text lays out and renders with the same fonts as the desktop app: the fonts built into Lizard
 plus the installed system fonts. The system fonts are indexed once per run, the first time text is
 laid out (about 60 ms warm on a Windows machine with ~900 font files; a run without text skips it).
 Every subcommand takes `--no-system-fonts` (or set `FIGCRAFT_NO_SYSTEM_FONTS=1`, which the desktop
@@ -55,7 +55,7 @@ page 1 "Screens": 380 nodes, 4 top-level
 - `--node` takes a layer id (`12` or `0:12`) or a layer name.
 - `--format fig` (or an `<out>` ending in `.fig`) writes the whole file as `.fig`, experimental:
   written from public format notes, including variables with their modes and bindings and shared
-  styles with their layer links. Checked by opening it again in FigCraft and, on the example
+  styles with their layer links. Checked by opening it again in Lizard and, on the example
   documents and small test files, in other software; other apps may not open every file. What was
   left out (comments, Dev Mode data, some bindings and settings…) is printed as `note:` lines;
   `docs/file-format-parity.md` lists what was checked and what is unchecked.
@@ -74,7 +74,7 @@ page 1 "Screens": 380 nodes, 4 top-level
   outside the bleed; the page boxes are set (MediaBox the sheet, BleedBox, TrimBox the frame).
   `--cmyk` writes CMYK colour, images included, converted from sRGB with the naive formula
   `K = 1 − max(R, G, B)`, `C = (1 − R − K) / (1 − K)` (M and Y alike): DeviceCMYK without an
-  output intent (no CMYK profile ships with FigCraft), so proof against your printer's profile.
+  output intent (no CMYK profile ships with Lizard), so proof against your printer's profile.
 
 ```sh
 figcraft-cli export app.figcraft -o exports/ --scale 2
@@ -86,9 +86,9 @@ figcraft-cli export app.figcraft -o handoff.fig
 
 ### `convert <in> <out>`
 
-By extension. Inputs: `.figcraft`, `.json` (FigCraft or REST API file JSON), `.fig` (best effort), `.svg` (an editable frame: groups,
+By extension. Inputs: `.figcraft`, `.json` (Lizard or REST API file JSON), `.fig` (best effort), `.svg` (an editable frame: groups,
 shapes, text, gradients, masks and effects; `info` lists what it left out as `note:` lines), `.png/.jpg/.webp/.gif/.tif/.bmp`
-(an image layer). Outputs: `.figcraft`, `.json` (FigCraft JSON, pretty-printed), `.svg`,
+(an image layer). Outputs: `.figcraft`, `.json` (Lizard JSON, pretty-printed), `.svg`,
 `.png/.jpg/.webp` (the current page rendered at 1x with its background), `.pdf` (the current page's
 frames, one page each), `.fig` (the whole file, experimental, as `export --format fig`).
 
@@ -187,7 +187,7 @@ machines.
 ### `mcp [--attach PORT] [--automation-read-root DIR]… [--automation-write-root DIR]…`
 
 Serve MCP on stdio: headless by default, or attached to a running app started with
-`figcraft --control PORT`. See [mcp.md](mcp.md). The automation roots (each repeatable; existing
+`lizard --control PORT`. See [mcp.md](mcp.md). The automation roots (each repeatable; existing
 folders) confine the files the agent's calls read (inside a read or write root) and write (inside a
 write root); everything else is refused ([mcp.md › Confining file access](mcp.md#confining-file-access)).
 With `--attach` they are refused: start the app with them instead. The headless session can host, join and publish

@@ -1,4 +1,4 @@
-//! `figcraft-server`: FigCraft's standalone collaboration server (milestone M9, step 5 of
+//! `figcraft-server`: Lizard's standalone collaboration server (milestone M9, step 5 of
 //! `docs/collab-protocol.md`; running it: `docs/server.md`).
 //!
 //! It keeps many files in a data directory ([`store`]), each with share links that let people

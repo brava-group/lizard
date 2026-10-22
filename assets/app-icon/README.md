@@ -1,4 +1,4 @@
-# FigCraft app icon
+# Lizard app icon
 
 A **chameleon**: an engraving portrait in profile with a curled tail, in the Crafting Apps'
 owl-template framing (full-bleed field, head and body filling the tile, body running off the edges).
@@ -11,7 +11,7 @@ Exactly three colours:
 |---|---|---|
 | Ink | `#0b0b0c` | line work and contours |
 | Paper | `#efe9dc` | the figure |
-| FigCraft green (app colour) | `#02da96` | the full-bleed field |
+| Lizard green (app colour) | `#02da96` | the full-bleed field |
 
 ## Geometry
 
@@ -21,8 +21,8 @@ its rounded corners, like the other Crafting Apps.
 
 ## Provenance
 
-The owner's original engraving-style drawing (1500 px, keyed to the palette), supplied for
-FigCraft and vectorised with craftrules `assets/logo-options/_tools/vectorize_tile.py`. The source
+The owner's original engraving-style drawing (1500 px, keyed to the palette), first supplied for
+FigCraft and now used in Lizard, was vectorised with craftrules `assets/logo-options/_tools/vectorize_tile.py`. The source
 image is not kept in this repo. License: see `LICENSE.txt`.
 
 ## Files
