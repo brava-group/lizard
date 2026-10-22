@@ -50,8 +50,34 @@ const GROUPS: &[Group] = &[
     Group { key: "comment", name: tr_noop("Comment"), tools: &[(ToolId::Comment, Icon::Comment)] },
 ];
 
-const MODE_CELL: f32 = 30.0;
-const MODE_SEGMENT_WIDTH: f32 = 4.0 * MODE_CELL + 4.0;
+const MODE_CELL: f32 = 28.0;
+const MODE_GAP: f32 = 2.0;
+const MODE_SEGMENT_WIDTH: f32 = 4.0 * MODE_CELL + 3.0 * MODE_GAP + 4.0;
+const MODE_SECTION_WIDTH: f32 = 138.0;
+const TOOL_GAP: f32 = 8.0;
+const FLYOUT_WIDTH: f32 = 16.0;
+
+fn toolbar_icon_index(icon: Icon) -> Option<usize> {
+    match icon {
+        Icon::Move => Some(0),
+        Icon::Frame => Some(1),
+        Icon::Rectangle => Some(2),
+        Icon::Pen => Some(3),
+        Icon::Text => Some(4),
+        Icon::Comment => Some(5),
+        Icon::Actions => Some(6),
+        Icon::Chevron => Some(7),
+        _ => None,
+    }
+}
+
+fn paint_tool_icon(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
+    if let Some(index) = toolbar_icon_index(icon) {
+        icons::paint_toolbar(ui.painter(), rect, index, color);
+    } else {
+        icons::paint(ui.painter(), rect, icon, color);
+    }
+}
 
 fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
     ui.data(|d| d.get_temp::<u8>(egui::Id::new(("tb_last", key)))).and_then(|i| ToolId::ALL.get(i as usize).copied()).unwrap_or(default)
@@ -81,14 +107,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 
 /// The main toolbar pill's width: the Actions palette matches it so the two read as one bar.
 pub(crate) fn main_width() -> f32 {
-    let (cell, gap) = (32.0, 4.0);
-    8.0 + GROUPS.len() as f32 * (cell + gap) + 4.0 * 10.0 + 2.0 * (cell + 4.0) + 8.0 + MODE_SEGMENT_WIDTH + 8.0
+    // Five 32 + 1 + 16 tool groups, Comment and Actions, six 8 px gaps, 8 px side padding.
+    16.0 + 5.0 * (32.0 + 1.0 + FLYOUT_WIDTH) + 2.0 * 32.0 + 6.0 * TOOL_GAP + MODE_SECTION_WIDTH
 }
 
-/// The main toolbar pill: the tool groups with their flyouts, Resources and Actions, then the
+/// The main toolbar pill: the tool groups with their flyouts, Comment and Actions, then the
 /// Draw · Design · Prototype · Inspect mode switcher.
 fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
-    let (cell, gap) = (32.0, 4.0);
+    let cell = 32.0;
     let width = main_width();
     let rect = pill(ui, &mut app.ui.nav, canvas, width, t);
     let current = app.session.tool.tool;
@@ -115,8 +141,9 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
         }
         x += cell;
         // Flyout chevron.
-        if g.tools.len() > 1 {
-            let cr = Rect::from_center_size(pos2(x + 5.0, cy), vec2(10.0, cell));
+        if g.tools.len() > 1 || g.key == "text" {
+            x += 1.0;
+            let cr = Rect::from_min_size(pos2(x, cy - cell / 2.0), vec2(FLYOUT_WIDTH, cell));
             let cresp = ui.interact(cr, ui.id().with(("flyout", g.key)), Sense::click());
             let open = app.ui.tool_flyout == Some(g.key);
             a11y::menu_button(&cresp, tr(g.name), open);
@@ -126,46 +153,40 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             if cresp.hovered() {
                 ui.painter().rect_filled(cr, CornerRadius::same(4), t.hover);
             }
-            icons::paint(ui.painter(), Rect::from_center_size(cr.center(), vec2(24.0, 24.0)), Icon::Chevron, t.icon_secondary);
+            paint_tool_icon(
+                ui,
+                Rect::from_center_size(cr.center(), vec2(24.0, 24.0)),
+                Icon::Chevron,
+                if t.dark { Color32::WHITE } else { t.icon_secondary },
+            );
             if cresp.clicked() {
                 app.ui.tool_flyout = if app.ui.tool_flyout == Some(g.key) { None } else { Some(g.key) };
             }
-            x += 10.0;
+            x += FLYOUT_WIDTH;
         }
-        x += gap;
+        x += TOOL_GAP;
         if app.ui.tool_flyout == Some(g.key) {
             flyout(app, ui, g, pos2(r.min.x, rect.min.y - 8.0));
         }
     }
-    // Resources (components, plugins) opens the Assets panel; Actions palette.
-    for (icon, tip, id) in [
-        (Icon::Assets, crate::shortcuts::key_tip(tr("Resources"), "Shift+I"), "resources"),
-        (Icon::Actions, crate::shortcuts::tip(tr("Actions"), "app.actions"), "actions"),
-    ] {
-        let r = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
-        let resp = ui.interact(r, ui.id().with(id), Sense::click()).tip(tip);
-        if id == "actions" {
-            app.ui.actions_rect = Some(r);
-        }
-        // The Actions button reads on while its panel is open; clicking it again closes it.
-        let actions_open = id == "actions" && app.ui.palette.is_some();
-        if actions_open {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.accent);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
-        }
-        icons::paint(ui.painter(), r.shrink(6.0), icon, if actions_open { Color32::WHITE } else { t.icon });
-        if resp.clicked() {
-            if id == "actions" {
-                crate::menus::toggle_palette(&mut app.ui);
-            } else {
-                app.select_left_tab(crate::LeftTab::Assets);
-            }
-        }
-        x += cell + 4.0;
+    let actions = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
+    let resp = ui.interact(actions, ui.id().with("actions"), Sense::click()).tip(crate::shortcuts::tip(tr("Actions"), "app.actions"));
+    app.ui.actions_rect = Some(actions);
+    let actions_open = app.ui.palette.is_some();
+    if actions_open {
+        ui.painter().rect_filled(actions, CornerRadius::same(5), toolbar_accent(t));
+    } else if resp.hovered() {
+        ui.painter().rect_filled(actions, CornerRadius::same(5), t.hover);
     }
-    divider(ui, t, x, cy);
-    x += 8.0;
+    paint_tool_icon(ui, actions.shrink(4.0), Icon::Actions, if actions_open || t.dark { Color32::WHITE } else { t.icon });
+    if resp.clicked() {
+        crate::menus::toggle_palette(&mut app.ui);
+    }
+    let mode_x = rect.max.x - MODE_SECTION_WIDTH;
+    ui.painter().line_segment(
+        [pos2(mode_x, rect.min.y), pos2(mode_x, rect.max.y)],
+        Stroke::new(1.0, if t.dark { Color32::from_rgb(0x3e, 0x3c, 0x3e) } else { t.border }),
+    );
     // Mode switcher: Draw · Design · Prototype · Inspect (code).
     let modes = [tr("Draw"), tr("Design"), tr("Prototype"), tr("Inspect")];
     let active = match app.ui.right_tab {
@@ -174,33 +195,44 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
         crate::RightTab::Prototype => 2,
         crate::RightTab::Inspect => 3,
     };
-    let seg = Rect::from_min_size(pos2(x, cy - 16.0), vec2(MODE_SEGMENT_WIDTH, 32.0));
-    ui.painter().rect_filled(seg, CornerRadius::same(8), t.field);
-    let mode_rect = |i: f32| Rect::from_min_size(pos2(seg.min.x + 2.0 + i * MODE_CELL, seg.min.y + 1.0), vec2(MODE_CELL, MODE_CELL));
+    let seg = Rect::from_min_size(pos2(mode_x + 8.0, cy - 16.0), vec2(MODE_SEGMENT_WIDTH, 32.0));
+    ui.painter().rect_filled(seg, CornerRadius::same(5), if t.dark { Color32::from_rgb(0x44, 0x44, 0x44) } else { t.field });
+    let mode_rect = |i: f32| Rect::from_min_size(pos2(seg.min.x + 2.0 + i * (MODE_CELL + MODE_GAP), seg.min.y + 2.0), vec2(MODE_CELL, MODE_CELL));
     let responses =
         std::array::from_fn::<_, 4, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).on_hover_text(modes[i]));
     for (i, resp) in responses.iter().enumerate() {
         if resp.hovered() && i != active {
             let r = mode_rect(i as f32);
-            ui.painter().rect_filled(r, CornerRadius::same(6), t.pressed);
+            ui.painter().rect_filled(r, CornerRadius::same(3), t.pressed);
         }
     }
     // One shared selected surface slides between the four radio options.
     let selected = ui.ctx().animate_value_with_time(ui.id().with("mode_selected_position"), active as f32, 0.18);
     let selected_rect = mode_rect(selected);
-    ui.painter().rect_filled(selected_rect, CornerRadius::same(6), t.panel);
-    ui.painter().rect_stroke(selected_rect, CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    ui.painter().rect_filled(selected_rect, CornerRadius::same(3), if t.dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel });
+    ui.painter().rect_stroke(
+        selected_rect,
+        CornerRadius::same(3),
+        Stroke::new(1.0, if t.dark { Color32::from_rgb(0x37, 0x37, 0x37) } else { t.border }),
+        StrokeKind::Inside,
+    );
     if responses[active].hovered() {
-        ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(5), t.pressed);
+        ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(3), t.pressed);
     }
     for (i, (tip, resp)) in modes.iter().zip(responses.iter()).enumerate() {
         let r = mode_rect(i as f32);
         a11y::toggle(resp, tip, i == active);
-        icons::paint_mode(
+        icons::paint_toolbar(
             ui.painter(),
             Rect::from_center_size(r.center(), vec2(24.0, 24.0)),
-            i,
-            if i == active { t.accent_text } else { t.icon_secondary },
+            8 + i,
+            if i == active {
+                if t.dark { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.accent_text }
+            } else if t.dark {
+                Color32::from_white_alpha(178)
+            } else {
+                t.icon_secondary
+            },
         );
         if resp.clicked() {
             match i {
@@ -377,12 +409,19 @@ fn pill(ui: &Ui, nav: &mut Nav, canvas: Rect, width: f32, t: &Tokens) -> Rect {
     a11y::area(nav, Region::Toolbar, rect);
     a11y::container_bounds(ui, rect);
     let painter = ui.painter();
-    for (i, a) in [(6.0, 10u8), (3.0, 16), (1.0, 24)] {
-        painter.rect_filled(rect.expand(i).translate(vec2(0.0, i * 0.5)), CornerRadius::same((13.0 + i) as u8), Color32::from_black_alpha(a));
+    for (i, a) in [(3.0, 12u8), (1.0, 30)] {
+        painter.rect_filled(rect.expand(i).translate(vec2(0.0, 1.0)), CornerRadius::same((12.0 + i) as u8), Color32::from_black_alpha(a));
     }
-    painter.rect_filled(rect, CornerRadius::same(13), t.panel);
-    painter.rect_stroke(rect, CornerRadius::same(13), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    painter.rect_filled(rect, CornerRadius::same(12), if t.dark { Color32::from_rgb(0x27, 0x27, 0x27) } else { t.panel });
+    painter.line_segment(
+        [pos2(rect.min.x + 12.0, rect.min.y + 0.5), pos2(rect.max.x - 12.0, rect.min.y + 0.5)],
+        Stroke::new(1.0, if t.dark { Color32::from_rgb(0x3e, 0x3c, 0x3e) } else { t.border }),
+    );
     rect
+}
+
+fn toolbar_accent(t: &Tokens) -> Color32 {
+    if t.dark { Color32::from_rgb(0x0c, 0x8c, 0xe9) } else { t.accent }
 }
 
 /// A square tool button: accent when active, tinted on hover; `tip` is its tooltip and name.
@@ -392,14 +431,14 @@ fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Ic
     });
     a11y::toggle(&resp, tip, active);
     let bg = if active {
-        t.accent
+        toolbar_accent(t)
     } else if resp.hovered() {
         t.hover
     } else {
         Color32::TRANSPARENT
     };
     ui.painter().rect_filled(r, CornerRadius::same(5), bg);
-    icons::paint(ui.painter(), r.shrink(6.0), icon, if active { Color32::WHITE } else { t.icon });
+    paint_tool_icon(ui, r.shrink(4.0), icon, if active || t.dark { Color32::WHITE } else { t.icon });
     resp
 }
 
@@ -420,31 +459,90 @@ fn done_button(ui: &mut Ui, t: &Tokens, x: f32, cy: f32, tip: &str) -> bool {
     resp.clicked()
 }
 
+/// The Pencil export specifies shadows in CSS layout pixels. The toolbar uses one egui point per
+/// layout pixel; the display scale is only used when sampling the subpixel inset blur. Drawing a
+/// 0.438-point stroke at its full source opacity makes a much brighter border than CSS's inset
+/// shadow, which clips the blurred colour to the *inside* of the menu.
+fn inset_blur_edge_alpha(source_alpha: u8, blur_px: f32, pixels_per_point: f32) -> u8 {
+    // Approximate the coverage of the first physical pixel inside a Gaussian-blurred edge.
+    // Treat the CSS blur radius as its full width at half maximum, and sample at the pixel centre.
+    let sigma = blur_px / 2.354_82;
+    let distance = 0.5 / pixels_per_point.max(1.0);
+    let z = distance / (sigma * std::f32::consts::SQRT_2);
+    let t = 1.0 / (1.0 + 0.327_591_1 * z);
+    let erf = 1.0 - (((((1.061_405_4 * t - 1.453_152) * t) + 1.421_413_8) * t - 0.284_496_72) * t + 0.254_829_6) * t * (-z * z).exp();
+    (f32::from(source_alpha) * (1.0 - erf) * 0.5).round().clamp(0.0, 255.0) as u8
+}
+
+fn paint_flyout_surface(ui: &Ui, rect: Rect, t: &Tokens) {
+    let radius = CornerRadius::same(13);
+    let painter = ui.painter();
+    // panels-design.pen: two drop shadows, in CSS layout pixels and in CSS back-to-front order.
+    for (offset_y_px, blur_px) in [(10.0, 14.0), (2.0, 4.375)] {
+        painter.add(
+            egui::epaint::RectShape::filled(rect.translate(vec2(0.0, offset_y_px)), radius, Color32::from_black_alpha(0x59))
+                .with_blur_width(blur_px)
+                .with_round_to_pixels(false),
+        );
+    }
+    painter.rect_filled(rect, radius, t.menu);
+
+    // inset 0px 0px 0.438px #ffffff59: rasterize its inward coverage instead of painting a
+    // full-opacity border. A one-device-pixel stroke follows the rounded path and stays inside.
+    let ppp = ui.ctx().pixels_per_point();
+    let glow_alpha = inset_blur_edge_alpha(0x59, 0.438, ppp);
+    painter.add(
+        egui::epaint::RectShape::stroke(rect, radius, Stroke::new(1.0 / ppp.max(1.0), Color32::from_white_alpha(glow_alpha)), StrokeKind::Inside)
+            .with_round_to_pixels(false),
+    );
+
+    // inset 0px 0.5px 0px #ffffff14. Keep the half-pixel Y offset and zero blur as exported;
+    // a filled 0.5-layout-pixel strip avoids egui's stroke-centre rounding at Retina scale.
+    painter.rect_filled(
+        Rect::from_min_max(pos2(rect.min.x + 13.0, rect.min.y), pos2(rect.max.x - 13.0, rect.min.y + 0.5)),
+        CornerRadius::ZERO,
+        Color32::from_white_alpha(0x14),
+    );
+}
+
 fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, bottom_left: egui::Pos2) {
     let t = Tokens::get(ui.ctx());
-    let item_h = 32.0;
-    let w = 220.0;
+    let item_h = 24.0;
+    let w = match g.key {
+        "move" => 202.0,
+        "frame" => 143.0,
+        "shape" => 206.0,
+        "pen" => 138.0,
+        "text" => 169.0,
+        _ => 202.0,
+    };
     let h = item_h * g.tools.len() as f32 + 16.0;
     let mut chosen = None;
     egui::Area::new(flyout_id(g.key)).fixed_pos(pos2(bottom_left.x, bottom_left.y - h)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
-        ui.painter().rect_filled(rect, CornerRadius::same(13), t.menu);
+        paint_flyout_surface(ui, rect, &t);
         let mut y = rect.min.y + 8.0;
         for (tid, icon) in g.tools {
-            let r = Rect::from_min_size(pos2(rect.min.x + 8.0, y), vec2(w - 16.0, item_h));
+            let r = Rect::from_min_size(pos2(rect.min.x, y), vec2(w, item_h));
             let resp = ui.interact(r, ui.id().with(("fly", tid.id())), Sense::click());
             a11y::menu_item(&resp, tr(tid.label()), tid.shortcut(), Some(*tid == app.session.tool.tool));
             // The keyboard's item is highlighted like the hovered one.
             a11y::own_focus(&resp);
             if resp.hovered() || resp.has_focus() {
-                ui.painter().rect_filled(r, CornerRadius::same(5), t.menu_hover);
+                ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), CornerRadius::same(5), t.menu_hover);
             }
             if *tid == app.session.tool.tool {
-                icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 10.0, r.center().y), vec2(12.0, 12.0)), Icon::Check, t.menu_text);
+                // The reference checkmark sits at (3.499, 3.512) in the row's 16 px icon slot.
+                icons::paint_stroke_side(
+                    ui.painter(),
+                    Rect::from_min_size(pos2(r.min.x + 15.499, r.min.y + 7.512), vec2(8.992_507, 8.487_045)),
+                    0,
+                    t.menu_text,
+                );
             }
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 32.0, r.center().y), vec2(16.0, 16.0)), *icon, t.menu_text);
-            ui.painter().text(pos2(r.min.x + 48.0, r.center().y), Align2::LEFT_CENTER, tr(tid.label()), regular(12.0), t.menu_text);
-            ui.painter().text(pos2(r.max.x - 8.0, r.center().y), Align2::RIGHT_CENTER, pretty_shortcut(tid.shortcut()), regular(12.0), t.menu_dim);
+            icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 44.0, r.center().y), vec2(16.0, 16.0)), *icon, t.menu_text);
+            ui.painter().text(pos2(r.min.x + 60.0, r.center().y), Align2::LEFT_CENTER, tr(tid.label()), regular(11.0), t.menu_text);
+            ui.painter().text(pos2(r.max.x - 16.0, r.center().y), Align2::RIGHT_CENTER, pretty_shortcut(tid.shortcut()), regular(11.0), t.menu_dim);
             if resp.clicked() {
                 chosen = Some(*tid);
             }

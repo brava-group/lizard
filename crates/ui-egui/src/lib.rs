@@ -1162,6 +1162,9 @@ impl FigApp {
 
     /// Change the left view, preserving the explorer width while the Agent view is open.
     pub fn select_left_tab(&mut self, tab: LeftTab) {
+        if tab != LeftTab::File {
+            self.ui.versions = Default::default();
+        }
         if tab == LeftTab::Agent && self.ui.left_tab != LeftTab::Agent {
             self.ui.explorer_width = Some(self.ui.left_width);
             self.ui.left_width = 417.0;

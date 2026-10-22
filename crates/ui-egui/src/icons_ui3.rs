@@ -16,12 +16,30 @@ mod mapping;
 const VECTORS: &str = include_str!("../assets/ui3-vectors.json");
 const PANEL_REFERENCE: &str = include_str!("../assets/panel-reference-icons.json");
 const TAB_DOCUMENT_SVG: &str = include_str!("../assets/tab-document.svg");
-const MODE_SVGS: [&str; 4] = [
-    include_str!("../assets/mode-draw.svg"),
-    include_str!("../assets/mode-design.svg"),
-    include_str!("../assets/mode-motion.svg"),
-    include_str!("../assets/mode-dev.svg"),
+// Exact 24 × 24 icon compositions from the Lizard toolbar design. Each SVG preserves the
+// artwork's position inside its icon box, including the intentionally small chevron.
+const TOOLBAR_SVGS: [&str; 12] = [
+    include_str!("../assets/toolbar-move.svg"),
+    include_str!("../assets/toolbar-frame.svg"),
+    include_str!("../assets/toolbar-rectangle.svg"),
+    include_str!("../assets/toolbar-pen.svg"),
+    include_str!("../assets/toolbar-text.svg"),
+    include_str!("../assets/toolbar-comment.svg"),
+    include_str!("../assets/toolbar-actions.svg"),
+    include_str!("../assets/toolbar-chevron.svg"),
+    include_str!("../assets/toolbar-mode-draw.svg"),
+    include_str!("../assets/toolbar-mode-design.svg"),
+    include_str!("../assets/toolbar-mode-prototype.svg"),
+    include_str!("../assets/toolbar-mode-dev.svg"),
 ];
+
+pub(super) fn paint_toolbar(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    static ICONS: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
+    let icons = ICONS.get_or_init(|| TOOLBAR_SVGS.iter().map(|svg| build(svg, true)).collect());
+    if let Some(Some(geometry)) = icons.get(index) {
+        paint_geometry(painter, rect, geometry, color, [24.0, 24.0]);
+    }
+}
 const LAYER_SVGS: [(&str, [f32; 2]); 8] = [
     (include_str!("../assets/layer-frame.svg"), [10.0, 10.0]),
     (include_str!("../assets/layer-layout-horizontal.svg"), [10.0, 10.0]),
@@ -327,14 +345,6 @@ pub(super) fn paint(painter: &Painter, rect: Rect, icon: super::Icon, color: Col
     let Some(geometry) = cached(index, icon == super::Icon::Chevron) else { return false };
     paint_geometry(painter, rect, &geometry, color, [24.0, 24.0]);
     true
-}
-
-pub(super) fn paint_mode(painter: &Painter, rect: Rect, index: usize, color: Color32) {
-    static MODES: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
-    let modes = MODES.get_or_init(|| MODE_SVGS.iter().map(|svg| build(svg, true)).collect());
-    if let Some(Some(geometry)) = modes.get(index) {
-        paint_geometry(painter, rect, geometry, color, [24.0, 24.0]);
-    }
 }
 
 pub(super) fn paint_tab_document(painter: &Painter, rect: Rect, color: Color32) {
@@ -676,10 +686,10 @@ mod tests {
     }
 
     #[test]
-    fn mode_icons_use_their_original_svg_paths() {
-        for svg in MODE_SVGS {
-            let geometry = build(svg, true).expect("mode icon has valid SVG geometry");
-            assert!(geometry.0.iter().all(|part| part.opacity == 1.0));
+    fn toolbar_icons_use_their_original_svg_paths() {
+        for svg in TOOLBAR_SVGS {
+            let geometry = build(svg, true).expect("toolbar icon has valid SVG geometry");
+            assert!(geometry.0.iter().all(|part| !part.indices.is_empty()));
         }
     }
 

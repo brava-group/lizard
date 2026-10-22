@@ -551,9 +551,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     draw(&p, icon);
 }
 
-/// Paint one of the four toolbelt mode icons from its original 24 × 24 SVG path.
-pub fn paint_mode(painter: &Painter, rect: Rect, index: usize, color: Color32) {
-    ui3::paint_mode(painter, rect, index, color);
+/// Paint an exact icon composition from the owner's bottom toolbar reference.
+pub fn paint_toolbar(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_toolbar(painter, rect, index, color);
 }
 
 /// Paint the document tab's original 19 × 19 vector artwork.
