@@ -638,6 +638,10 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
             if let Some(h) = p.get("iconGallery").and_then(Value::as_bool) {
                 app.ui.icon_gallery = h;
             }
+            #[cfg(debug_assertions)]
+            if let Some(open) = p.get("componentLibrary").and_then(Value::as_bool) {
+                app.ui.component_library.open = open;
+            }
             // Comment thread popover: an id opens it, null closes it.
             if let Some(v) = p.get("commentOpen") {
                 match v.as_u64() {

@@ -17,6 +17,8 @@ pub mod canvas;
 pub mod cjk;
 pub mod colorpicker;
 pub mod comments;
+#[cfg(debug_assertions)]
+mod component_library;
 pub mod component_panel;
 pub mod control;
 pub mod credits;
@@ -575,6 +577,8 @@ pub struct UiState {
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
     pub icon_gallery: bool,
+    #[cfg(debug_assertions)]
+    pub component_library: component_library::State,
     /// A message at the bottom of the window and how long it has been showing.
     pub toast: Option<(String, ToastClock)>,
     pub present: Option<present::Presenter>,
@@ -737,6 +741,8 @@ impl Default for UiState {
             home_view: home::Home::default(),
             title_bar: TitleBar::Native,
             icon_gallery: false,
+            #[cfg(debug_assertions)]
+            component_library: component_library::State::default(),
             toast: None,
             present: None,
             paused_present: None,
@@ -1664,6 +1670,8 @@ impl FigApp {
         self.session.tool.redlines = self.ui.right_tab == RightTab::Inspect;
         self.end_pen_outside_design();
         tabs::tab_bar(self, ui);
+        #[cfg(debug_assertions)]
+        component_library::show(&ctx, &mut self.ui.component_library);
         if self.ui.present.is_some() {
             // A close request can arrive while the presenter fills the window. Let its unsaved
             // changes dialog take Escape and draw above the player just as it does in the editor.

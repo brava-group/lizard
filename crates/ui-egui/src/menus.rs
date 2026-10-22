@@ -227,6 +227,8 @@ pub fn record_recent(app: &mut FigApp, key: &str) {
 /// clipboard) are handled here, the rest go to the engine.
 pub fn invoke(app: &mut FigApp, id: &str) {
     match id {
+        #[cfg(debug_assertions)]
+        "debug.componentLibrary" => app.ui.component_library.open = true,
         // Edit ▸ Delete (and the Delete binding) with an interaction open in the Prototype tab
         // removes that interaction, not the layer (#767).
         "edit.delete" if app.ui_context.clone().is_some_and(|ctx| crate::proto_panel::delete_selected_interaction(app, &ctx)) => {}
@@ -426,6 +428,14 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
                     return true;
                 }
             }
+        }
+    }
+    #[cfg(debug_assertions)]
+    if prefix == "Help" {
+        separator(ui);
+        if item(ui, "UI Library (dev)", "", true, false, &t) {
+            invoke(app, "debug.componentLibrary");
+            return true;
         }
     }
     if let Some(id) = clicked {

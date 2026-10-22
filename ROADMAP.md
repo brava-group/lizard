@@ -319,6 +319,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Added a debug-only UI library window with sidebar pages for reusable controls, interactive states, icon families, and live theme tokens. Release builds exclude it; product parity estimates unchanged. |
 | 2026-10-22 | minor | Matched the main toolbelt to the owner's `y2Qne` reference: exact SVG geometry, 48 px layout, spacing, surfaces and mode controls. Removed the obsolete Resources button while keeping Assets accessible from the sidebar and Shift+I. Feature estimates unchanged. |
 | 2026-10-22 | minor | Added a layered Icon Composer source and macOS asset catalog for the Lizard mark, with the rounded `.icns` retained for older systems. Feature estimates unchanged. |
 | 2026-10-22 | minor | Updated inherited project wording and generated Lizard's white-and-black app icon from its existing navigation mark. The macOS bundle now uses the Lizard name and icon; feature estimates unchanged. |
