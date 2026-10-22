@@ -19,6 +19,7 @@ use crate::theme::{ACCENT, COMPONENT, Tokens, doc_c32, regular, semibold};
 pub struct CanvasState {
     pub rect: Rect,
     texture: Option<egui::TextureHandle>,
+    tiles: Vec<CanvasTile>,
     tex_view: Option<figcraft_render::View>,
     /// The file ([`figcraft_engine::DocState::uid`]) and page the texture shows: it is drawn only
     /// on them.
@@ -72,6 +73,7 @@ impl Default for CanvasState {
         Self {
             rect: Rect::NOTHING,
             texture: None,
+            tiles: Vec::new(),
             tex_view: None,
             tex_of: None,
             tex_doc: None,
@@ -104,11 +106,18 @@ impl Default for CanvasState {
 }
 
 struct ZoomFallback {
-    texture: egui::TextureHandle,
+    texture: Option<egui::TextureHandle>,
+    tiles: Vec<CanvasTile>,
     view: figcraft_render::View,
     of: (u64, NodeId),
     doc: Arc<Document>,
     style: RenderStyle,
+}
+
+struct CanvasTile {
+    view: figcraft_render::View,
+    image: Arc<egui::ColorImage>,
+    texture: egui::TextureHandle,
 }
 
 impl ZoomFallback {
@@ -122,8 +131,15 @@ fn view_area(view: &figcraft_render::View) -> f64 {
 }
 
 impl CanvasState {
+    pub(crate) fn tile_count(&self) -> usize {
+        self.tiles.len()
+    }
+
     pub(crate) fn texture_current(&self, ds: &figcraft_engine::DocState) -> bool {
-        self.tex_of == Some((ds.uid, ds.page)) && !self.tex_coarse && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
+        (self.texture.is_some() || !self.tiles.is_empty())
+            && self.tex_of == Some((ds.uid, ds.page))
+            && !self.tex_coarse
+            && self.tex_doc.as_ref().is_some_and(|doc| Arc::ptr_eq(doc, &ds.doc))
     }
 
     /// Device pixels without any current image source. This measures texture coverage, including
@@ -333,7 +349,7 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     if app.canvas.tex_coarse
         || app.canvas.tex_of != Some((ds.uid, ds.page))
         || !app.canvas.tex_doc.as_ref().is_some_and(|shown| Arc::ptr_eq(shown, &ds.doc))
-        || app.canvas.texture.is_none()
+        || (app.canvas.texture.is_none() && app.canvas.tiles.is_empty())
     {
         return;
     }
@@ -896,11 +912,17 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                 && covers(current, visible)
         })
     {
-        let tl = app.to_screen(fallback.view.origin.0, fallback.view.origin.1);
         let zoom = ds.view.zoom;
-        let w = (f64::from(fallback.view.width) / fallback.view.scale * zoom) as f32;
-        let h = (f64::from(fallback.view.height) / fallback.view.scale * zoom) as f32;
-        painter.image(fallback.texture.id(), Rect::from_min_size(tl, vec2(w, h)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        if let Some(texture) = &fallback.texture {
+            let tl = app.to_screen(fallback.view.origin.0, fallback.view.origin.1);
+            let image_rect = presented_image_rect(tl, &fallback.view, zoom, ppp, false);
+            painter.image(texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        for tile in &fallback.tiles {
+            let tl = app.to_screen(tile.view.origin.0, tile.view.origin.1);
+            let image_rect = presented_image_rect(tl, &tile.view, zoom, ppp, false);
+            painter.image(tile.texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
     }
     if let (Some(tex), Some(v), true) = (&app.canvas.texture, &app.canvas.tex_view, !painted_drag && shown.is_some() && app.canvas.tex_of == shown) {
         // Re-project the last render onto the current view.
@@ -909,6 +931,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         let pixel_preview = app.session.ds().ok().and_then(|ds| ds.view.pixel_preview_scale()) == Some(v.scale);
         let image_rect = presented_image_rect(tl, v, zoom, ppp, pixel_preview);
         painter.image(tex.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    if !painted_drag && shown.is_some() && app.canvas.tex_of == shown {
+        let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
+        for tile in &app.canvas.tiles {
+            let tl = app.to_screen(tile.view.origin.0, tile.view.origin.1);
+            let image_rect = presented_image_rect(tl, &tile.view, zoom, ppp, false);
+            painter.image(tile.texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
     }
     app.session.tool.labels = overlays(app, &painter, &t);
     // The zoom tool's area.
@@ -968,7 +998,7 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
     // Keep the broadest refined view across a zoom-in. Once zooming back out, its pixels fill
     // the margins immediately while the worker renders the new view. A texture handle must be
     // moved, not cloned: `set` would otherwise mutate the cached image as well.
-    if matches!(done.update, TextureUpdate::Full(_)) && !app.canvas.tex_coarse && !same_view {
+    if matches!(done.update, TextureUpdate::Full(_) | TextureUpdate::Tiles(_)) && !app.canvas.tex_coarse && !same_view {
         let previous = app.canvas.tex_view.as_ref().zip(app.canvas.tex_doc.as_ref()).zip(app.canvas.tex_style.as_ref());
         if let Some(((view, doc), style)) = previous
             && app.canvas.tex_of == Some((done.uid, done.page))
@@ -976,10 +1006,16 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
             && style == &done.style
             && view_area(view) > view_area(&done.view) * 1.25
             && app.canvas.zoom_fallback.as_ref().is_none_or(|old| view_area(view) > view_area(&old.view) * 1.1)
-            && let Some(texture) = app.canvas.texture.take()
+            && (app.canvas.texture.is_some() || !app.canvas.tiles.is_empty())
         {
-            app.canvas.zoom_fallback =
-                Some(ZoomFallback { texture, view: view.clone(), of: (done.uid, done.page), doc: doc.clone(), style: style.clone() });
+            app.canvas.zoom_fallback = Some(ZoomFallback {
+                texture: app.canvas.texture.take(),
+                tiles: std::mem::take(&mut app.canvas.tiles),
+                view: view.clone(),
+                of: (done.uid, done.page),
+                doc: doc.clone(),
+                style: style.clone(),
+            });
         }
     }
     if app.canvas.zoom_fallback.as_ref().is_some_and(|old| old.of != (done.uid, done.page) || !Arc::ptr_eq(&old.doc, &done.doc)) {
@@ -998,13 +1034,37 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
             true
         }
         (Some(t), TextureUpdate::Full(image)) => {
+            app.canvas.tiles.clear();
             app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
             t.set(image, filter);
             true
         }
         (slot @ None, TextureUpdate::Full(image)) => {
+            app.canvas.tiles.clear();
             app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
             *slot = Some(ctx.load_texture("figcraft-canvas", image, filter));
+            true
+        }
+        (slot, TextureUpdate::Tiles(tiles)) => {
+            *slot = None;
+            let mut old = std::mem::take(&mut app.canvas.tiles);
+            let mut next = Vec::with_capacity(tiles.len());
+            let mut uploaded = 0;
+            for tile in tiles {
+                if let Some(index) = old.iter().position(|cached| {
+                    cached.view.origin == tile.view.origin
+                        && cached.view.scale.to_bits() == tile.view.scale.to_bits()
+                        && Arc::ptr_eq(&cached.image, &tile.image)
+                }) {
+                    next.push(old.swap_remove(index));
+                } else {
+                    uploaded += u64::from(tile.view.width) * u64::from(tile.view.height);
+                    let texture = ctx.load_texture("figcraft-canvas-tile", (*tile.image).clone(), filter);
+                    next.push(CanvasTile { view: tile.view, image: tile.image, texture });
+                }
+            }
+            app.canvas.tiles = next;
+            app.canvas.upload_pixels = uploaded;
             true
         }
         _ => false,
@@ -1191,12 +1251,14 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     if exposed_zoom_out
         && job.zoom_preview
         && !fallback_covers
+        && !crate::render_worker::uses_tiles(&job.view, &job.doc, job.proof)
         && let Some(preview) = preview_now(&job)
     {
         apply_render(app, ctx, preview, Some((job.uid, job.page)));
-        // The preview is already on screen; skip the worker's duplicate preview.
-        job.zoom_preview = false;
     }
+    // The UI keeps its last sharp image, or made a sharp exposed-area fill above. A delayed
+    // half-resolution worker preview would replace either with visibly blurred pixels.
+    job.zoom_preview = false;
     worker.submit(job);
     app.canvas.submitted = Some(key);
 }

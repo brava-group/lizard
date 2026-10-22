@@ -1,6 +1,6 @@
 # Hardware and platform parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (measured ultrawide Retina canvas and idle frame drag preparation; native canvas cursors and page-attached agent presence; merged upstream 0.7.0 updates; retained wide-view zoom-out coverage; bounded frame drag previews at high zoom and large window sizes; native composited drags for eligible topmost frames; measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (cached 512 px wide-canvas regions and native-resolution zoom fill; measured ultrawide Retina canvas and idle frame drag preparation; native canvas cursors and page-attached agent presence; merged upstream 0.7.0 updates; retained wide-view zoom-out coverage; bounded frame drag previews at high zoom and large window sizes; native composited drags for eligible topmost frames; measured pixel-wheel zoom path on macOS/browser; sharper zoom previews and same-frame vector updates for cheap drags; localized canvas texture uploads; copy and paste in the browser; Windows QA pass; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; pen pressure for the Pencil and brushes on Windows and from browser styluses) · **Target:** Figma Design (desktop app 126.10.7)
 
 How FigCraft uses hardware and which platforms it runs on, against Figma. Figma's desktop app is
 Electron with a GPU helper process; its canvas renders on the GPU (WebGL, with WebGPU rolling out
@@ -12,7 +12,7 @@ since 2025). FigCraft renders the canvas on the CPU and presents it through wgpu
 
 | Feature | Figma | FigCraft (macOS / Windows / Linux / web) | Hours |
 |---|---|---|---|
-| Canvas rendering | GPU | CPU (tiny-skia), banded across cores, retained (re-renders only what an edit or pan touches); same-view edits convert and upload only damaged texture regions; levels of detail below 50% zoom; shown through wgpu (WebGPU or WebGL2 in the browser) | 30–60 for a GPU path |
+| Canvas rendering | GPU | CPU (tiny-skia), banded across cores; wide viewports use cached 512 px region textures composed by wgpu, while smaller ones retain a whole-view image with damaged-region uploads; levels of detail below 50% zoom | 30–60 for a GPU vector path |
 | Effects (blurs, glass, noise) | GPU | CPU | in the above |
 | HiDPI / Retina | yes | yes (all); a canvas image rendered at the screen's density is placed on whole device pixels, so fractional pans, zooms and display scales don't blur it (#359; geometry tests, the snapping not judged by eye) | — |
 | Wide-gamut display (Display P3) | yes, on capable displays | colours stored and exported in P3; the screen shows sRGB: eframe/egui-wgpu 0.36 configure an 8-bit sRGB surface with no colour space option, although wgpu 30 can present Display P3 or extended sRGB on Metal, DX12, Vulkan and WebGPU (see gaps #18). The colour picker warns about colours outside sRGB and View ▸ Soft-proof sRGB stripes them on the canvas | 2–5 |
@@ -69,6 +69,17 @@ egui's frame rate. These are control-channel and render measurements, not physic
 cursor-to-display latency. The brief stretched window during macOS titlebar expansion precedes
 FigCraft's re-layout; the wide full render and GPU presentation remain measurable limits.
 
+In the same ultrawide window, 512 px page-aligned region textures replaced the single canvas
+texture when the request exceeded four million device pixels. The first view uploaded 45 regions
+(11.8 million pixels including cell edges, versus 8.99 million in the former whole texture) and
+rendered in about 71 ms in the `dev` build. A 100% zoom of BetterDeck rendered 40 regions in about
+63 ms after parallelization (186 ms when those regions were serial). A 150-unit pan at that zoom
+rendered and uploaded one new five-region column (1.31 million pixels) in about 1.5 ms. Tile
+overdraw makes the first upload larger; the benefit is reuse after pan and localized edits. A
+whole-frame drag at 400% with only the top-left corner visible stayed in composited mode at
+1.3–1.6 ms inspected UI frames after 111 ms of idle preparation. The window control channel does
+not measure GPU presentation or physical cursor-to-display latency.
+
 A second synthetic dashboard benchmark (142 nested frame, shape and text nodes) at 2880×1800
 rendered 10 alternating large moves with a median of 16.9–18.6 ms for vector rendering plus
 texture conversion across runs; document edits took under 0.1 ms. In the 1440×900 headless editor,
@@ -77,10 +88,10 @@ one run whose last render took 7.9 ms showed the current vector texture in all 1
 previous render exceeded the 10 ms fast-path threshold. These are CPU and egui texture timings,
 not measured screen presentation. Large or slow renders can still trail the pointer.
 During a smooth zoom, a covering full-resolution texture is kept until the new vector render is
-ready; when a new preview is needed it has half, rather than quarter, device resolution per axis.
-When zooming out exposes area beyond the cached texture, a half-resolution vector preview is
-rendered in that input frame to fill the viewport while the worker refines it. This may lengthen
-one input frame for a complex document, but avoids blank strips while the background render waits.
+ready. The UI no longer presents the worker's half-resolution preview. When a smaller viewport
+zooms out beyond its cached image, it makes a native-resolution vector fill in the input frame;
+wide viewports use the region worker. An old image can still look soft while it is being enlarged
+before new vector pixels arrive, and a complex native-resolution fill can lengthen one input frame.
 Continuous pinch/Cmd-scroll has 0.8× logarithmic gain, keeping reciprocal gestures symmetric.
 The drag benchmark used Cargo's `dev` profile (`opt-level=1` for the workspace). In a separate
 `release` run with the same synthetic dashboard plus an imported screenshot, the initial 2880×1800
@@ -106,6 +117,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Wide viewports now use cached 512 px textures composed by wgpu, with CPU rendering of new regions in parallel. On BetterDeck at 5120×2100 physical window pixels, 100% zoom refined in about 63 ms after parallelization versus 186 ms with serial regions; a 150-page-unit pan rasterized and uploaded one 1.31-million-pixel column in about 1.5 ms. A composited whole-frame drag with only its top-left corner visible showed 1.3–1.6 ms inspected UI frames after its idle preparation. These are control/render timings, not physical cursor latency. Native-resolution zoom fills replace the old half-resolution UI preview; full GPU vector rendering remains open. |
 | 2026-10-21 | minor | Tested a real 5120×2160 ultrawide at 2× Retina with BetterDeck. The wide canvas requests about 3× the visible pixels of the initial window and a full texture of 8.99 million pixels. Eligible frame drag layers now prepare while selected and idle; the first inspected move used composition. Canvas tool cursors use native OS images rather than a painted overlay, and agent presence follows page coordinates with frame shimmer during tool work. GPU canvas work and estimates remain open. |
 | 2026-10-17 | minor | Zoom-out retains the broadest refined canvas texture as a one-view fallback and paints it under the current view only when new area is exposed. With a 2,880×1,740 desktop window, the 248-node BetterDeck scene's old synchronous preview took 4.7–6.4 ms at 800%→100%→25%, with refinement 17–38 ms. On a synthetic dark page with 1,005 nodes at four corners, the old 25% preview took 1.2–19.2 ms over 12 alternating runs; after warming the retained view, 12 runs each at 100% and 25% reported zero uncovered pixels in the first inspected frame and no synchronous preview. The inspected UI frames took 0.17–0.45 ms. Control inspection does not capture every presented frame or display latency; GPU rendering remains open. |
 | 2026-10-17 | minor | High zoom frame dragging now uses a bounded moving preview plus a sharp visible tile and remains eligible when the canvas texture exceeds 8 million pixels. Pages with only the moving frame skip a background render; pages with siblings use a bounded background preview. On the 248-node BetterDeck wrapper at 800%, measured preparation fell from about 357 ms to about 40 ms. Ultra-wide screen presentation was not measured; estimates remain. |

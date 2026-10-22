@@ -33,6 +33,9 @@ lyon_tessellation = "1.0"
 usvg = "0.48"
 tiny-skia = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"
+
 [build-dependencies]
 serde_json = { workspace = true }
 toml = "1"

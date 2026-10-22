@@ -1735,6 +1735,7 @@ impl FigApp {
             "ranges": self.ui.figma_text_review.marks.iter().map(|mark| json!({"start":mark.start,"end":mark.end})).collect::<Vec<_>>(),
         });
         state["canvas"]["uncoveredPixels"] = json!(self.session.ds().ok().and_then(|ds| self.canvas.uncovered_pixels(ds)));
+        state["canvas"]["tileCount"] = json!(self.canvas.tile_count());
         state["pendingOpens"] = json!(self.ui.pending_opens.len());
         state
     }

@@ -177,16 +177,13 @@ fn immediate_zoom_out_preview_covers_the_new_view() {
 }
 
 #[test]
-fn immediate_preview_matches_the_worker_preview() {
+fn immediate_preview_keeps_native_resolution() {
     let (s, _) = document();
     let ds = s.ds().unwrap();
     let j = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 1.0, 800, 600));
     let immediate = preview_now(&j).unwrap();
-    let mut renders = Renders::with_threshold(0.0);
-    let initial = job(&ds.doc, ds.page, ds.uid, view_at((300.0, 200.0), 2.0, 800, 600));
-    renders.refine(&initial).unwrap();
-    let worker = renders.preview(&j).unwrap();
-    assert!(immediate.coarse && same_pixels(&immediate, &worker));
+    let full = render_now(&j).unwrap();
+    assert!(immediate.coarse && same_pixels(&immediate, &full));
 }
 
 #[test]

@@ -149,7 +149,8 @@ there was one). `canvas.uncoveredPixels` estimates device pixels in the visible 
 outside both the current image and its retained wide-view fallback; zero means the zoomed view
 has complete image coverage before refinement. `canvas.uploadPixels` is the number of pixels converted and sent to the canvas
 texture in the last update; `canvas.textureCurrent` says whether that texture represents the
-current document revision. `importReport` holds the Import report window's content (`{name, pages, layers, images, appended, placed, warnings, warningCount}`,
+current document revision. `canvas.tileCount` reports the number of region textures in a wide
+view (zero on the whole-image path). `importReport` holds the Import report window's content (`{name, pages, layers, images, appended, placed, warnings, warningCount}`,
 `null` while none is open). The window opens only for a file the user opened or imported in the app
 (File ▸ Open or Import, Open recent, a recent file on the home screen, a drop, a paste, the system's open event).
 Emulated user input counts as the user's action: `ui.input` and `ui.key` (for example a Cmd+V paste or a click

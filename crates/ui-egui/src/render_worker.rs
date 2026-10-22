@@ -1,19 +1,19 @@
 //! Canvas rendering off the UI thread (desktop) or inline (web). The latest request wins (queued
 //! older ones are skipped); the UI shows each finished image, re-projected to the current view,
 //! until the next one arrives.
-//! The renderer keeps its last image ([`figcraft_render::Retained`]): a pan renders only the
-//! uncovered strips and an edit only the areas of the layers that changed.
-//! A new zoom can't reuse that image, and the old one, re-projected, covers little of the view
-//! after a zoom out (an eighth of the width from 800% to 100%). When full renders are slow, the
-//! whole view is first rendered coarsely ([`PREVIEW_FACTOR`] times fewer pixels each way, kept
-//! apart from the full image so pans and edits still build on it), then refined unless a newer
-//! request is already waiting.
+//! Small viewports keep a whole image ([`figcraft_render::Retained`]): a pan renders only the
+//! uncovered strips and an edit only the areas of the layers that changed. Wide viewports keep
+//! page-aligned regions, rendered in parallel and composed as separate GPU textures. The UI keeps
+//! its current image during zoom rather than displaying the worker's lower-resolution preview.
+//! Direct worker callers may still request that preview through [`Job::zoom_preview`].
 
 use std::sync::Arc;
 
 use figcraft_color::ColorProfile;
 use figcraft_doc::{Document, NodeId};
 use figcraft_render::{DamageRect, Pixmap, Retained, View, Work};
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 // A monotonic clock in the browser too: preview decisions rest on how long renders take there.
 use web_time::Instant;
 
@@ -21,6 +21,23 @@ use web_time::Instant;
 pub const PREVIEW_FACTOR: f64 = 2.0;
 /// Full renders quicker than this (about a frame) show without a preview first.
 pub const PREVIEW_AFTER_MS: f64 = 12.0;
+/// Wide Retina canvases are split into GPU textures of this size instead of one viewport image.
+pub const TILE_SIDE: u32 = 512;
+const TILED_MIN_PIXELS: u64 = 4_000_000;
+
+pub fn uses_tiles(view: &View, doc: &Document, proof: bool) -> bool {
+    u64::from(view.width) * u64::from(view.height) >= TILED_MIN_PIXELS
+        && !proof
+        // A huge backdrop kernel would make every tile redraw most of its neighbours.
+        && doc.max_backdrop_radius() * view.scale * 1.5 + 3.0 <= 256.0
+        && tile_views(view).is_some()
+}
+
+#[derive(Clone)]
+pub struct RenderTile {
+    pub view: View,
+    pub image: Arc<egui::ColorImage>,
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RenderStyle {
@@ -78,6 +95,7 @@ pub enum TextureUpdate {
     Full(egui::ColorImage),
     Partial(Vec<([usize; 2], egui::ColorImage)>),
     Reused,
+    Tiles(Vec<RenderTile>),
 }
 
 pub struct Done {
@@ -180,6 +198,61 @@ fn same_view(a: &View, b: &View) -> bool {
         && a.height == b.height
 }
 
+/// Grid cells have stable page coordinates at one scale. Panning across a cell boundary can
+/// therefore keep the existing GPU textures and render only the newly visible column or row.
+fn tile_views(view: &View) -> Option<(View, Vec<View>)> {
+    let scale = view.scale;
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let side = f64::from(TILE_SIDE);
+    let (x0, y0) = ((view.origin.0 * scale / side).floor(), (view.origin.1 * scale / side).floor());
+    let (x1, y1) =
+        (((view.origin.0 * scale + f64::from(view.width)) / side).ceil(), ((view.origin.1 * scale + f64::from(view.height)) / side).ceil());
+    if ![x0, y0, x1, y1].iter().all(|n| n.is_finite() && n.abs() < 1e12) {
+        return None;
+    }
+    let (nx, ny) = ((x1 - x0) as u32, (y1 - y0) as u32);
+    if nx == 0 || ny == 0 || u64::from(nx) * u64::from(ny) > 512 {
+        return None;
+    }
+    let mut tiles = Vec::with_capacity((nx * ny) as usize);
+    for y in 0..ny {
+        for x in 0..nx {
+            tiles.push(View {
+                origin: ((x0 + f64::from(x)) * side / scale, (y0 + f64::from(y)) * side / scale),
+                scale,
+                width: TILE_SIDE,
+                height: TILE_SIDE,
+            });
+        }
+    }
+    let covered = View { origin: (x0 * side / scale, y0 * side / scale), scale, width: nx * TILE_SIDE, height: ny * TILE_SIDE };
+    Some((covered, tiles))
+}
+
+fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
+    let bleed = (job.doc.max_backdrop_radius() * view.scale * 1.5 + 3.0).ceil().clamp(0.0, 256.0) as u32;
+    let expanded = View {
+        origin: (view.origin.0 - f64::from(bleed) / view.scale, view.origin.1 - f64::from(bleed) / view.scale),
+        scale: view.scale,
+        width: view.width + bleed * 2,
+        height: view.height + bleed * 2,
+    };
+    let opts = figcraft_render::Options {
+        outline_mode: job.outline,
+        outline: job.outline_extras,
+        outlined: job.outlined.clone(),
+        skip: job.skip.clone(),
+        solo: job.solo,
+        lod: true,
+        ..Default::default()
+    };
+    let pix = figcraft_render::render_view(&job.doc, job.page, &expanded, &opts)?;
+    let (_, image) = patch_image(&pix, job.doc.color_profile, DamageRect { x: bleed, y: bleed, width: TILE_SIDE, height: TILE_SIDE })?;
+    Some(Arc::new(image))
+}
+
 /// Render `view` of the job (its own view, or the coarse one standing in for it).
 fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, base_doc: Option<Arc<Document>>) -> Option<Done> {
     let t0 = Instant::now();
@@ -277,6 +350,10 @@ pub fn coarse_view(view: &View) -> View {
 pub struct Renders {
     full: Retained,
     preview: Retained,
+    tiles: Vec<RenderTile>,
+    tile_doc: Option<Arc<Document>>,
+    tile_style: Option<RenderStyle>,
+    tile_page: Option<(u64, NodeId)>,
     /// The last full render's document, page and scale.
     last: Option<(u64, NodeId, f64)>,
     last_doc: Option<Arc<Document>>,
@@ -295,14 +372,25 @@ impl Default for Renders {
 impl Renders {
     /// Previews when renders from scratch take at least `ms` (tests: 0, always).
     pub fn with_threshold(ms: f64) -> Self {
-        Self { full: Retained::default(), preview: Retained::default(), last: None, last_doc: None, full_ms: 0.0, preview_after_ms: ms }
+        Self {
+            full: Retained::default(),
+            preview: Retained::default(),
+            tiles: Vec::new(),
+            tile_doc: None,
+            tile_style: None,
+            tile_page: None,
+            last: None,
+            last_doc: None,
+            full_ms: 0.0,
+            preview_after_ms: ms,
+        }
     }
 
     /// Whether `job` gets a preview first. A nearby zoom whose currently visible, full-resolution
     /// texture covers the requested area keeps that texture while the vector render catches up.
     /// Replacing it with a lower-resolution preview makes a smooth pinch visibly pixelated.
     fn wants_preview(&self, job: &Job) -> bool {
-        if !job.zoom_preview || self.full_ms < self.preview_after_ms {
+        if !job.zoom_preview || self.full_ms < self.preview_after_ms || uses_tiles(&job.view, &job.doc, job.proof) {
             return false;
         }
         let changed = self.last.is_some_and(|(uid, page, scale)| uid != job.uid || page != job.page || scale.to_bits() != job.view.scale.to_bits());
@@ -336,6 +424,23 @@ impl Renders {
 
     /// The image of `job`'s view, built on the kept one where it can be.
     pub fn refine(&mut self, job: &Job) -> Option<Done> {
+        if uses_tiles(&job.view, &job.doc, job.proof) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.refine_tiles(job)));
+            return match result {
+                Ok(done) => done,
+                Err(_) => {
+                    self.tiles.clear();
+                    self.tile_doc = None;
+                    self.tile_style = None;
+                    self.tile_page = None;
+                    None
+                }
+            };
+        }
+        self.tiles.clear();
+        self.tile_doc = None;
+        self.tile_style = None;
+        self.tile_page = None;
         let base_doc = self.last_doc.clone();
         let done = guarded(&mut self.full, |r| run(job, &job.view, r, false, base_doc));
         if let Some(d) = &done {
@@ -346,6 +451,64 @@ impl Renders {
             }
         }
         done
+    }
+
+    fn refine_tiles(&mut self, job: &Job) -> Option<Done> {
+        let start = Instant::now();
+        let (view, desired) = tile_views(&job.view)?;
+        let style = job.style();
+        let same_content = self.tile_page == Some((job.uid, job.page)) && self.tile_style.as_ref() == Some(&style);
+        let make_tile = |tile_view: &View| -> Option<(RenderTile, bool)> {
+            let cached = same_content.then(|| self.tiles.iter().find(|tile| same_view(&tile.view, tile_view))).flatten();
+            let reuse = cached.is_some_and(|_| {
+                self.tile_doc.as_ref().is_some_and(|old| {
+                    Arc::ptr_eq(old, &job.doc)
+                        || figcraft_render::retained::damage_between(old, &job.doc, job.page, tile_view).is_some_and(|damage| damage.is_empty())
+                })
+            });
+            let image = if reuse { cached?.image.clone() } else { render_tile(job, tile_view)? };
+            Some((RenderTile { view: tile_view.clone(), image }, reuse))
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let rendered: Vec<_> = desired.par_iter().map(make_tile).collect();
+        #[cfg(target_arch = "wasm32")]
+        let rendered: Vec<_> = desired.iter().map(make_tile).collect();
+        let rendered: Vec<_> = rendered.into_iter().collect::<Option<Vec<_>>>()?;
+        let reused = rendered.iter().filter(|(_, reused)| *reused).count() as u64 * u64::from(TILE_SIDE) * u64::from(TILE_SIDE);
+        let tiles: Vec<_> = rendered.into_iter().map(|(tile, _)| tile).collect();
+        let total = u64::from(view.width) * u64::from(view.height);
+        let work = if reused == total {
+            Work::Reused
+        } else if reused == 0 {
+            Work::Full
+        } else {
+            Work::Partial { pixels: total - reused }
+        };
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        self.tiles = tiles.clone();
+        self.tile_doc = Some(job.doc.clone());
+        self.tile_style = Some(style.clone());
+        self.tile_page = Some((job.uid, job.page));
+        self.last = Some((job.uid, job.page, job.view.scale));
+        self.last_doc = Some(job.doc.clone());
+        if work == Work::Full {
+            self.full_ms = ms;
+        }
+        Some(Done {
+            update: TextureUpdate::Tiles(tiles),
+            #[cfg(test)]
+            image: egui::ColorImage::from_rgba_premultiplied([1, 1], &[0, 0, 0, 0]),
+            base_docs: Vec::new(),
+            doc: job.doc.clone(),
+            view,
+            style,
+            ms,
+            work,
+            uid: job.uid,
+            page: job.page,
+            coarse: false,
+            at: job.at,
+        })
     }
 }
 
@@ -490,11 +653,10 @@ pub fn render_now(job: &Job) -> Option<Done> {
 }
 
 /// Fill an exposed viewport immediately while a zoom-out's vector render is still pending.
-/// This renders only a quarter of the target pixels and does not replace the worker's retained
-/// full-resolution image.
+/// Keep native device resolution: the earlier half-resolution fill was visibly blurry during
+/// trackpad zoom. The worker's retained image is still refined independently.
 pub fn preview_now(job: &Job) -> Option<Done> {
-    let view = coarse_view(&job.view);
-    guarded(&mut Retained::default(), |retained| run(job, &view, retained, true, None))
+    guarded(&mut Retained::default(), |retained| run(job, &job.view, retained, true, None))
 }
 
 #[cfg(test)]
@@ -516,4 +678,133 @@ fn local_patch_matches_full_screen_conversion_in_both_profiles() {
         }
     }
     assert!(patch_image(&pix, ColorProfile::Srgb, DamageRect { x: 4, y: 1, width: 2, height: 2 }).is_none());
+}
+
+#[cfg(test)]
+#[test]
+fn stable_tile_grid_covers_pans_without_changing_existing_cells() {
+    let at = |x| View { origin: (x, -20.0), scale: 2.0, width: 2400, height: 1400 };
+    let (a, first) = tile_views(&at(0.0)).unwrap();
+    let (b, second) = tile_views(&at(100.0)).unwrap();
+    assert!(a.page_rect().x0 <= 0.0 && a.page_rect().x1 >= 1200.0);
+    assert!(b.page_rect().x0 <= 100.0 && b.page_rect().x1 >= 1300.0);
+    assert!(first.iter().any(|one| second.iter().any(|two| same_view(one, two))));
+    assert!(first.iter().all(|tile| tile.width == TILE_SIDE && tile.height == TILE_SIDE));
+}
+
+#[cfg(test)]
+#[test]
+fn adjacent_tiles_match_one_vector_render_through_a_blur() {
+    use serde_json::json;
+    let mut session = figcraft_engine::Session::new();
+    let back = session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 2048, "height": 1024})).unwrap();
+    let front = session.execute("shape.rectangle", &json!({"x": 980, "y": 160, "width": 120, "height": 600})).unwrap();
+    let _ = back;
+    let id = front["id"].as_u64().unwrap();
+    session.execute("effect.add", &json!({"ids": [id], "type": "BACKGROUND_BLUR"})).unwrap();
+    let ds = session.ds().unwrap();
+    let view = View { origin: (0.0, 0.0), scale: 1.0, width: 2048, height: 1024 };
+    let job = Job {
+        doc: ds.doc.clone(),
+        page: ds.page,
+        view: view.clone(),
+        outline: false,
+        outline_extras: Default::default(),
+        outlined: Vec::new(),
+        skip: Vec::new(),
+        solo: None,
+        proof: false,
+        uid: ds.uid,
+        zoom_preview: false,
+        at: Instant::now(),
+        texture_base: None,
+        texture_view: None,
+        texture_style: None,
+    };
+    let reference = figcraft_render::render_view(&ds.doc, ds.page, &view, &figcraft_render::Options { lod: true, ..Default::default() }).unwrap();
+    let full = screen_image(&reference, ds.doc.color_profile);
+    for x in [0.0, 512.0, 1024.0, 1536.0] {
+        for y0 in [0.0, 512.0] {
+            let tile = View { origin: (x, y0), scale: 1.0, width: TILE_SIDE, height: TILE_SIDE };
+            let image = render_tile(&job, &tile).unwrap();
+            for y in 0..TILE_SIDE as usize {
+                let start = (y0 as usize + y) * full.size[0] + x as usize;
+                let end = start + TILE_SIDE as usize;
+                let local = y * TILE_SIDE as usize;
+                assert_eq!(&image.pixels[local..local + TILE_SIDE as usize], &full.pixels[start..end], "tile x={x}, y={y0}, row={y}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn wide_pan_reuses_gpu_tile_images() {
+    let session = figcraft_engine::Session::new();
+    let ds = session.ds().unwrap();
+    let mut job = Job {
+        doc: ds.doc.clone(),
+        page: ds.page,
+        view: View { origin: (0.0, 0.0), scale: 1.0, width: 2048, height: 2048 },
+        outline: false,
+        outline_extras: Default::default(),
+        outlined: Vec::new(),
+        skip: Vec::new(),
+        solo: None,
+        proof: false,
+        uid: ds.uid,
+        zoom_preview: true,
+        at: Instant::now(),
+        texture_base: None,
+        texture_view: None,
+        texture_style: None,
+    };
+    assert!(uses_tiles(&job.view, &job.doc, job.proof));
+    let mut renders = Renders::default();
+    assert!(renders.preview(&job).is_none(), "wide zoom never substitutes a blurry half-resolution image");
+    let first = renders.refine(&job).unwrap();
+    let TextureUpdate::Tiles(first) = first.update else { panic!("expected tiles") };
+    assert_eq!(first.len(), 16);
+    job.view.origin.0 = 100.0;
+    let second = renders.refine(&job).unwrap();
+    assert!(matches!(second.work, Work::Partial { .. }));
+    let TextureUpdate::Tiles(second_tiles) = second.update else { panic!("expected tiles") };
+    assert_eq!(second_tiles.len(), 20);
+    assert_eq!(second_tiles.iter().filter(|tile| first.iter().any(|old| Arc::ptr_eq(&old.image, &tile.image))).count(), 16);
+}
+
+#[cfg(test)]
+#[test]
+fn wide_edit_replaces_only_the_affected_tile() {
+    use serde_json::json;
+    let mut session = figcraft_engine::Session::new();
+    let made = session.execute("shape.rectangle", &json!({"x": 80, "y": 80, "width": 100, "height": 100})).unwrap();
+    let id = figcraft_engine::params::id_of(&made["id"]).unwrap();
+    let ds = session.ds().unwrap();
+    let mut job = Job {
+        doc: ds.doc.clone(),
+        page: ds.page,
+        view: View { origin: (0.0, 0.0), scale: 1.0, width: 2048, height: 2048 },
+        outline: false,
+        outline_extras: Default::default(),
+        outlined: Vec::new(),
+        skip: Vec::new(),
+        solo: None,
+        proof: false,
+        uid: ds.uid,
+        zoom_preview: false,
+        at: Instant::now(),
+        texture_base: None,
+        texture_view: None,
+        texture_style: None,
+    };
+    let mut renders = Renders::default();
+    let first = renders.refine(&job).unwrap();
+    let TextureUpdate::Tiles(before) = first.update else { panic!("expected tiles") };
+    session.execute("node.set", &json!({"id": id, "props": {"x": 160}})).unwrap();
+    job.doc = session.ds().unwrap().doc.clone();
+    let second = renders.refine(&job).unwrap();
+    let TextureUpdate::Tiles(after) = second.update else { panic!("expected tiles") };
+    assert_eq!(after.iter().filter(|tile| before.iter().any(|old| Arc::ptr_eq(&old.image, &tile.image))).count(), 15);
+    assert_eq!(second.work, Work::Partial { pixels: u64::from(TILE_SIDE) * u64::from(TILE_SIDE) });
 }
