@@ -176,18 +176,18 @@ struct RestrictedHooks {
 
 impl HostHooks for RestrictedHooks {
     fn promise_rejection_tracker(&self, promise: &JsObject<Promise>, operation: OperationType, context: &mut Context) {
-        if operation == OperationType::Reject {
-            if let PromiseState::Rejected(reason) = JsPromise::from(promise.clone()).state() {
-                let summary = reason.to_string(context).map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
-                let stack = reason
-                    .as_object()
-                    .and_then(|object| object.get(boa_engine::js_string!("stack"), context).ok())
-                    .filter(|stack| !stack.is_undefined())
-                    .unwrap_or(reason)
-                    .to_string(context)
-                    .map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
-                *self.rejected_promise.borrow_mut() = Some(format!("{summary}\n{stack}").chars().take(1024).collect());
-            }
+        if operation == OperationType::Reject
+            && let PromiseState::Rejected(reason) = JsPromise::from(promise.clone()).state()
+        {
+            let summary = reason.to_string(context).map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
+            let stack = reason
+                .as_object()
+                .and_then(|object| object.get(boa_engine::js_string!("stack"), context).ok())
+                .filter(|stack| !stack.is_undefined())
+                .unwrap_or(reason)
+                .to_string(context)
+                .map_or_else(|_| "unknown reason".to_string(), |s| s.to_std_string_escaped());
+            *self.rejected_promise.borrow_mut() = Some(format!("{summary}\n{stack}").chars().take(1024).collect());
         }
     }
 

@@ -216,7 +216,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
             let shown = crate::bidi::paint_name(
                 ui.painter(),
                 pos2(r.min.x + 36.0, r.center().y),
-                &name,
+                name,
                 regular(12.0),
                 t.text.linear_multiply(progress),
                 (w - mark_w - if dirty { 72.0 } else { 60.0 }).max(0.0),

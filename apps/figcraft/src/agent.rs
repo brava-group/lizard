@@ -269,11 +269,11 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
             }
             let mut blocks = vec![json!({"type":"text", "text":prompt.text})];
             blocks.extend(prompt.images.into_iter().map(|image| json!({"type":"image", "mimeType":image.mime, "data":image.data})));
-            if let Some(model) = prompt.model.as_deref() {
-                if let Err(error) = send(&mut stdin, Some(9), "session/set_model", json!({"sessionId":sid,"modelId":model})) {
-                    let _ = output.send(AgentEvent::Error(error));
-                    break;
-                }
+            if let Some(model) = prompt.model.as_deref()
+                && let Err(error) = send(&mut stdin, Some(9), "session/set_model", json!({"sessionId":sid,"modelId":model}))
+            {
+                let _ = output.send(AgentEvent::Error(error));
+                break;
             }
             prompt_id = prompt_id.saturating_add(1);
             if let Err(error) = send(&mut stdin, Some(prompt_id), "session/prompt", json!({"sessionId":sid, "prompt":blocks})) {

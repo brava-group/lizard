@@ -120,11 +120,8 @@ fn layout_job(markdown: &str, color: Color32, accent: Color32) -> LayoutJob {
                     style.code_block = style.code_block.saturating_sub(1);
                     newline(&mut job, &style, color, accent, true);
                 }
-                TagEnd::Paragraph => {
-                    if item_depth == 0 {
-                        newline(&mut job, &style, color, accent, true);
-                    }
-                }
+                TagEnd::Paragraph if item_depth == 0 => newline(&mut job, &style, color, accent, true),
+                TagEnd::Paragraph => {}
                 TagEnd::Item => {
                     item_depth = item_depth.saturating_sub(1);
                     newline(&mut job, &style, color, accent, false);
