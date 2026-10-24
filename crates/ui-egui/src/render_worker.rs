@@ -294,7 +294,11 @@ fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, base_doc: 
             base_docs.push(previous.clone());
         }
     }
-    let update = if same_texture_view && !base_docs.is_empty() {
+    // A patch against only the worker's latest image cannot update an older image still on
+    // screen. Some edits (including changes to style definitions) have no safe damage map from
+    // the visible document, even though the worker can reuse its own newer render.
+    let visible_base_supported = job.texture_base.as_ref().is_some_and(|shown| base_docs.iter().any(|base| Arc::ptr_eq(base, shown)));
+    let update = if same_texture_view && visible_base_supported {
         let regions = merge_damage(regions);
         if regions.is_empty() {
             TextureUpdate::Reused

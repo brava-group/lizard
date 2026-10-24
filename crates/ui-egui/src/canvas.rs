@@ -1303,6 +1303,13 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
         fonts: figcraft_text::layout_generation(),
         proof,
     };
+    // A completed request is not a usable cache entry if its result was dropped or could not
+    // update the texture. This can happen while several style or paint edits arrive in quick
+    // succession. Retry the same view once the worker is idle.
+    let texture_ready = app.canvas.texture_current(ds) && app.canvas.tex_view.as_ref().is_some_and(|view| covers(view, &visible_view));
+    if !worker.in_flight() && !texture_ready {
+        app.canvas.submitted = None;
+    }
     if let Some(previous) = &app.canvas.submitted {
         let previous_origin = (previous.origin.0 as f64 / 1000.0, previous.origin.1 as f64 / 1000.0);
         let same_content = JobKey { origin: previous.origin, size: previous.size, ..key.clone() } == *previous;
@@ -2513,6 +2520,59 @@ pub fn fmt(v: f64) -> String {
 #[cfg(test)]
 #[path = "zoom_preview_tests.rs"]
 mod zoom_preview_tests;
+
+#[cfg(test)]
+mod stale_render_tests {
+    use std::{sync::Arc, time::Duration};
+
+    use figcraft_engine::Session;
+    use serde_json::json;
+
+    use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn a_style_change_retries_when_the_submitted_render_left_a_stale_texture() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = Session::new();
+        let created = session.execute("shape.rectangle", &json!({"x": 40, "y": 40, "width": 80, "height": 60, "props": {"fill": "#D9D9D9"}}))?;
+        let Some(rect) = figcraft_engine::params::id_of(&created["id"]) else { return Err("rectangle command returned no ID".into()) };
+        let mut ui = Ui::new(session);
+        for _ in 0..300 {
+            ui.frame(vec![]);
+            if ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "the initial texture must be ready");
+        let Some(before) = ui.app.session.ds().ok().map(|ds| ds.doc.clone()) else { return Err("no document".into()) };
+        let created = ui.app.session.execute("style.create", &json!({"type": "paint", "name": "Accent", "value": "#B91C6A"}))?;
+        let Some(style) = created["id"].as_str() else { return Err("style command returned no ID".into()) };
+        assert!(ui.app.session.execute("style.apply", &json!({"ids": [rect], "style": style})).is_ok());
+        for _ in 0..300 {
+            ui.frame(vec![]);
+            if ui.app.worker.as_ref().is_some_and(|worker| !worker.in_flight())
+                && ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds))
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "applying the style must refresh the canvas");
+        // A discarded render can leave the last submitted key current while the texture still
+        // belongs to a prior document. The next frame must submit again and eventually recover.
+        ui.app.canvas.tex_doc = Some(before.clone());
+        assert!(ui.app.session.ds().ok().is_some_and(|ds| !Arc::ptr_eq(&before, &ds.doc) && !ui.app.canvas.texture_current(ds)));
+        for _ in 0..300 {
+            ui.frame(vec![]);
+            if ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "the style's canvas texture must recover");
+        Ok(())
+    }
+}
 
 /// The branch's blue canvas overlay color.
 fn accent(p: &egui::Painter) -> Color32 {
