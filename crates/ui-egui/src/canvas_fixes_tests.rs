@@ -51,6 +51,33 @@ fn frame_outlines_and_slices_draw_when_shown() {
     assert!(!outlined(&shapes, quad(&u, inner)) && dashes_along(&shapes, sq[0], sq[1]) == 0, "both turn off again");
 }
 
+#[test]
+fn open_vector_hover_and_selection_show_the_path_and_selection_box() {
+    let mut s = Session::new();
+    let vector = id(&s.execute("vector.create", &json!({
+        "path": "M0 120 L100 0 L200 120", "x": 80, "y": 80,
+        "props": {"fills": [], "strokes": ["#000000"], "strokeWeight": 1},
+    })).unwrap());
+    s.execute("select.none", &json!({})).unwrap();
+    let mut u = Ui::new(s);
+    let blue = egui::epaint::ColorMode::Solid(crate::theme::ACCENT);
+    let blue_path = |shapes: &[Shape]| {
+        shapes.iter().any(|shape| matches!(shape, Shape::Path(path)
+            if !path.closed && path.points.len() >= 3 && path.stroke.color == blue))
+    };
+    let hover = u.app.to_screen(130.0, 140.0);
+    let shapes = flat(&u.frame_output(vec![egui::Event::PointerMoved(hover)]).shapes);
+    assert_eq!(u.app.session.ds().unwrap().hover, Some(vector));
+    assert!(blue_path(&shapes), "hover outlines the open vector, not its empty fill path");
+
+    u.app.run("select.set", json!({"ids": [vector]}));
+    let shapes = flat(&u.frame_output(vec![]).shapes);
+    let doc = u.app.session.doc().unwrap();
+    let box_corners = crate::canvas::node_quad(&u.app, doc, vector).unwrap();
+    assert!(blue_path(&shapes), "selection outlines the vector's full stroke path");
+    assert!(outlined(&shapes, box_corners), "selection draws all four sides of the vector's box");
+}
+
 /// A job a few hundred milliseconds of rendering big.
 fn big_job(doc: &Arc<figcraft_doc::Document>, page: figcraft_doc::NodeId, scale: f64) -> crate::render_worker::Job {
     crate::render_worker::Job {

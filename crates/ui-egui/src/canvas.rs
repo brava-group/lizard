@@ -1790,7 +1790,12 @@ fn outline_shape(app: &FigApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos
     ) {
         return None;
     }
-    let (path, _) = figcraft_render::node_outline(doc, n)?;
+    // A vector's fill path contains only closed regions. Open pen and pencil strokes must
+    // follow the network's segments, including any dangling segments on a filled vector.
+    let path = match &n.kind {
+        NodeKind::Vector { network } => network.stroke_path(),
+        _ => figcraft_render::node_outline(doc, n)?.0,
+    };
     let w = doc.world_transform(id);
     let mut out = Vec::new();
     let mut cur: Vec<Pos2> = Vec::new();
@@ -2012,7 +2017,9 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
             } else {
                 4
             };
-            size_label = transform_box(app, painter, b.map(|p| app.to_screen(p.x, p.y)), col, sel.len() > 1, handles, (!measuring).then_some(label));
+            let is_vector = sel.len() == 1
+                && sel.first().and_then(|id| doc.node(*id)).is_some_and(|n| matches!(n.kind, NodeKind::Vector { .. }));
+            size_label = transform_box(app, painter, b.map(|p| app.to_screen(p.x, p.y)), col, sel.len() > 1 || is_vector, handles, (!measuring).then_some(label));
             if !measuring {
                 arc_overlay(app, painter, col);
                 shape_overlay(app, painter, col);
