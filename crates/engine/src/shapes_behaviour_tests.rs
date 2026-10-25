@@ -421,6 +421,29 @@ fn flatten_keeps_open_paths() {
 }
 
 #[test]
+fn flatten_bakes_vector_corner_radius_into_editable_curves() {
+    let mut s = Session::new();
+    let source = create(&mut s, "vector.create", json!({
+        "path": "M0 0 L100 0 L100 100 L0 100 Z",
+    }));
+    ex(&mut s, "node.set", json!({"ids": [source], "props": {"cornerRadius": 20}}));
+    let NodeKind::Vector { network: original } = node(&s, source).kind else { panic!("source is a vector") };
+    let visible_path = original.fill_path();
+    assert_eq!(original.vertices.len(), 4);
+    assert!(original.vertices.iter().all(|v| v.radius > 0.0));
+
+    let flattened = create(&mut s, "vector.flatten", json!({"ids": [source]}));
+    let NodeKind::Vector { network } = node(&s, flattened).kind else { panic!("flatten makes a vector") };
+    assert_eq!((network.vertices.len(), network.segments.len()), (8, 8), "each rounded corner becomes a curve between two points");
+    assert!(network.vertices.iter().all(|v| v.radius == 0.0), "the rounded geometry no longer depends on radius settings");
+    assert!(network.stroke_path().elements().iter().any(|el| matches!(el, figcraft_geom::kurbo::PathEl::CurveTo(..))));
+    let baked_path = network.fill_path();
+    for p in [Point::new(2.0, 2.0), Point::new(50.0, 2.0), Point::new(50.0, 50.0), Point::new(98.0, 98.0)] {
+        assert_eq!(baked_path.winding(p), visible_path.winding(p), "the fill stays where it was before flattening at {p:?}");
+    }
+}
+
+#[test]
 fn flatten_and_outline_stroke() {
     // Flatten: one vector layer from the selection, in one step; Alt+Shift+F does it.
     let mut s = Session::new();

@@ -371,10 +371,10 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     let mut net = VectorNetwork::default();
     for i in &ids {
         let Some(n) = doc.node(*i) else { continue };
-        // Vectors keep their own network (open paths and unfilled loops have no fill outline);
-        // booleans flatten to their result; strokes don't get outlined.
+        // Keep open paths and unfilled loops, but bake rounded vector points into real curves.
+        // Booleans flatten to their result; strokes don't get outlined.
         let mut part = match &n.kind {
-            NodeKind::Vector { network } => network.clone(),
+            NodeKind::Vector { network } => network.rounded().unwrap_or_else(|| network.clone()),
             _ => {
                 let Some((op, rule)) = (match &n.kind {
                     NodeKind::Group | NodeKind::Frame | NodeKind::Component { .. } | NodeKind::Instance { .. } => {
