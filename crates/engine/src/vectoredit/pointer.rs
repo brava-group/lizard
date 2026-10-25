@@ -184,7 +184,7 @@ impl Session {
     }
 
     /// Feed a pointer event to vector edit mode (the canvas is in edit mode and the main tool is
-    /// Move). Returns false when edit mode ended and the event should go to the normal tool.
+    /// Move). Returns false if editing has already ended so the normal tool can handle it.
     pub(crate) fn vector_pointer(&mut self, ev: &PointerEvent) -> Result<bool> {
         let Ok(ve) = editing(self) else { return Ok(false) };
         match ev.kind {
@@ -195,10 +195,13 @@ impl Session {
             PointerKind::DoubleClick => {
                 let tol = 6.0 / ev.zoom.max(1e-6);
                 let doc = self.doc()?.clone();
+                let on_edited_layer = hit_any(&doc, &ve, ev.p(), tol).is_some()
+                    || ve.parts().iter().any(|part| doc.world_render_bounds(part.id).is_some_and(|bounds| bounds.inflate(tol, tol).contains(ev.p())));
                 if ve.anchor.is_some() {
                     super::escape(self)?;
-                } else if hit_any(&doc, &ve, ev.p(), tol).is_none() && ve.tool == VTool::Move {
+                } else if !on_edited_layer && ve.tool == VTool::Move {
                     super::end(self)?;
+                    self.tool.gesture = Gesture::None;
                 }
                 Ok(true)
             }
@@ -483,7 +486,7 @@ impl Session {
         Ok(())
     }
 
-    /// Returns false when the click left edit mode (the caller then runs the normal tool).
+    /// Start a vector gesture without leaving edit mode on a single press outside the vector.
     fn vector_down(&mut self, ve: &VectorEdit, ev: &PointerEvent) -> Result<bool> {
         let doc = self.doc()?.clone();
         let tol = 6.0 / ev.zoom.max(1e-6);
@@ -661,13 +664,8 @@ impl Session {
                     }
                 }
                 None => {
-                    // Outside every edited layer (and not shift): leave edit mode.
-                    let inside =
-                        ve.parts().iter().any(|p| doc.world_render_bounds(p.id).is_some_and(|b| b.inflate(tol * 4.0, tol * 4.0).contains(ev.p())));
-                    if !inside && !ev.shift {
-                        super::end(self)?;
-                        return Ok(false);
-                    }
+                    // A marquee can start anywhere on the canvas, including outside the layer's
+                    // bounds. Only a double-click outside leaves vector edit mode.
                     if !ev.shift {
                         set_state(self, VectorEdit::clear_selection)?;
                     }

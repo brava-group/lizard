@@ -184,6 +184,29 @@ fn lasso_marquee_and_segment_selection() {
 }
 
 #[test]
+fn marquee_can_start_outside_the_vector_and_only_double_click_exits() {
+    let mut s = Session::new();
+    let _id = rect(&mut s);
+
+    click(&mut s, -100.0, -100.0);
+    assert!(s.ds().unwrap().vector_edit.is_some(), "a single click outside keeps edit mode");
+
+    s.pointer(&ev(PointerKind::Down, -30.0, -30.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 20.0, 20.0)).unwrap();
+    assert!(s.tool.overlay.marquee.is_some(), "a drag from outside starts a marquee");
+    s.pointer(&ev(PointerKind::Up, 20.0, 20.0)).unwrap();
+    assert_eq!(ve(&s).vertices.len(), 1, "the marquee selects the corner point");
+
+    s.pointer(&ev(PointerKind::DoubleClick, 50.0, 50.0)).unwrap();
+    assert!(s.ds().unwrap().vector_edit.is_some(), "a double-click inside the vector keeps edit mode");
+
+    s.pointer(&ev(PointerKind::Down, -100.0, -100.0)).unwrap();
+    s.pointer(&ev(PointerKind::DoubleClick, -100.0, -100.0)).unwrap();
+    assert!(s.ds().unwrap().vector_edit.is_none(), "a double-click outside ends edit mode");
+    assert!(!s.tool.busy(), "leaving edit mode clears the pending marquee gesture");
+}
+
+#[test]
 fn alt_click_adds_a_point_that_drags_in_the_same_gesture() {
     let mut s = Session::new();
     let id = rect(&mut s);
