@@ -37,8 +37,14 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
         (Cursor::Pen(PenCursor::Close), Drawn(Glyph::Pen(PenCursor::Close)), "pen-close"),
         (Cursor::Pen(PenCursor::Add), Drawn(Glyph::Pen(PenCursor::Add)), "pen-add"),
         (Cursor::Pen(PenCursor::Bend), Drawn(Glyph::Pen(PenCursor::Bend)), "pen-bend"),
+        (Cursor::Pen(PenCursor::BendCurve), Drawn(Glyph::Pen(PenCursor::BendCurve)), "pen-bend-curve"),
         (Cursor::Pencil, Drawn(Glyph::Pencil), "pencil"),
         (Cursor::PaintBucket, Drawn(Glyph::PaintBucket), "paint-bucket"),
+        (Cursor::PaintBucketAdd, Drawn(Glyph::PaintBucketAdd), "paint-bucket-add"),
+        (Cursor::PaintBucketRemove, Drawn(Glyph::PaintBucketRemove), "paint-bucket-remove"),
+        (Cursor::Lasso, Drawn(Glyph::Lasso), "lasso"),
+        (Cursor::Cut, Drawn(Glyph::Cut), "cut"),
+        (Cursor::Eraser, Drawn(Glyph::Eraser), "eraser"),
         (Cursor::Copy, Drawn(Glyph::Copy), "copy"),
         (Cursor::Pointer, Drawn(Glyph::Pointer), "pointer"),
         (Cursor::Eyedropper, Drawn(Glyph::Eyedropper), "eyedropper"),
@@ -162,6 +168,29 @@ fn the_window_asks_for_the_cursor_of_the_tool_under_the_pointer() {
     assert_eq!(u.app.inspect()["cursor"], "eyedropper");
     u.frame(vec![Event::PointerMoved(pos2(100.0, 300.0))]);
     assert_eq!(u.app.inspect()["cursor"], json!(null), "over the layers panel");
+}
+
+#[test]
+fn vector_edit_uses_its_action_cursor_images_on_the_canvas() {
+    let mut session = Session::new();
+    let vector = id(session.execute("shape.rectangle", &json!({"x": 100, "y": 100, "width": 100, "height": 100})).unwrap());
+    session.execute("vector.edit.begin", &json!({"id": vector})).unwrap();
+    let mut ui = Ui::new(session);
+
+    for (tool, point, expected) in [
+        ("paint", (150.0, 150.0), "paint-bucket-remove"),
+        ("bend", (150.0, 100.0), "pen-bend-curve"),
+        ("pen", (100.0, 100.0), "pen-close"),
+        ("lasso", (250.0, 250.0), "lasso"),
+        ("cut", (150.0, 100.0), "cut"),
+        ("eraser", (250.0, 250.0), "eraser"),
+    ] {
+        ui.app.run("vector.edit.tool", json!({"tool": tool}));
+        let position = ui.app.to_screen(point.0, point.1);
+        let (icon, shown, image) = at(&mut ui, position, &[], Modifiers::NONE);
+        assert_eq!((icon, shown.as_deref()), (CursorIcon::Crosshair, Some(expected)), "{tool}");
+        assert!(image, "{tool} should use its supplied cursor image");
+    }
 }
 
 #[test]

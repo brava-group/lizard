@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::EngineError;
-use crate::tools::{PointerEvent, PointerKind};
+use crate::tools::{Cursor, PointerEvent, PointerKind};
 
 fn ex(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"))
@@ -80,6 +80,7 @@ fn width_tool_drags_add_slide_and_size_points_in_one_step_each() {
     // Hovering the stroke offers to add a point there.
     s.pointer(&ev(PointerKind::Hover, 50.0, 52.0)).unwrap();
     assert!(matches!(s.tool.overlay.width_hover, Some(WHit::Path { t, side: WidthSide::Right }) if (t - 0.5).abs() < 1e-9));
+    assert_eq!(s.tool.overlay.cursor, Cursor::Crosshair);
     // Dragging from the path adds a point and sets its width: 20 from the centre = 40 wide.
     drag(&mut s, (50.0, 50.0), (50.0, 70.0));
     assert_eq!(points(&s, id), vec![(0.0, 1.0), (0.5, 4.0), (1.0, 1.0)]);
@@ -95,8 +96,11 @@ fn width_tool_drags_add_slide_and_size_points_in_one_step_each() {
     assert!((h.sides[0][1] - 70.0).abs() < 1e-6 || (h.sides[1][1] - 70.0).abs() < 1e-6, "{h:?}");
     s.pointer(&ev(PointerKind::Hover, 50.0, 30.0)).unwrap();
     assert_eq!(s.tool.overlay.width_hover, Some(WHit::Handle { index: 1, side: WidthSide::Left }));
+    assert!(matches!(s.tool.overlay.cursor, Cursor::Resize(angle) if (angle.rem_euclid(180.0) - 90.0).abs() < 1e-6));
     drag(&mut s, (50.0, 30.0), (50.0, 45.0));
     assert_eq!(points(&s, id), vec![(0.0, 1.0), (0.5, 1.0), (1.0, 1.0)]);
+    s.pointer(&ev(PointerKind::Hover, 50.0, 50.0)).unwrap();
+    assert_eq!(s.tool.overlay.cursor, Cursor::Move);
     // Dragging the point slides it along the path.
     drag(&mut s, (50.0, 50.0), (80.0, 58.0));
     assert_eq!(points(&s, id), vec![(0.0, 1.0), (0.8, 1.0), (1.0, 1.0)]);

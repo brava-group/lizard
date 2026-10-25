@@ -349,16 +349,22 @@ impl Session {
         ov.guides.clear();
         ov.brush = (ve.tool == VTool::Eraser).then(|| [ev.x, ev.y, ERASER_PX / ev.zoom.max(1e-6)]);
         // What a press here would do (see `vector_down`).
-        ov.cursor = match (ve.tool, h) {
+        ov.cursor = match (ve.tool, shown.map(|(_, part)| part)) {
+            (VTool::Bend, Some(VHit::Segment { .. })) => Cursor::Pen(PenCursor::BendCurve),
             (VTool::Bend, _) => Cursor::Pen(PenCursor::Bend),
+            (VTool::Move, Some(VHit::Segment { .. })) if ev.cmd => Cursor::Pen(PenCursor::BendCurve),
             (VTool::Move, Some(_)) if ev.cmd => Cursor::Pen(PenCursor::Bend),
             (VTool::Move, _) if ev.cmd => Cursor::Crosshair,
             (VTool::Move, Some(VHit::Segment { .. })) if ev.alt => Cursor::Pen(PenCursor::Add),
             (VTool::Move, _) => Cursor::Default,
-            (VTool::Pen, Some(VHit::Vertex { .. })) => Cursor::Pen(PenCursor::Close),
-            (VTool::Pen, Some(VHit::Segment { .. })) => Cursor::Pen(PenCursor::Add),
+            (VTool::Pen, _) if matches!(h, Some(VHit::Vertex { .. })) => Cursor::Pen(PenCursor::Close),
+            (VTool::Pen, _) if matches!(h, Some(VHit::Segment { .. })) => Cursor::Pen(PenCursor::Add),
             (VTool::Pen, _) => Cursor::Pen(PenCursor::New),
-            _ => Cursor::Crosshair,
+            (VTool::Paint, _) => Cursor::PaintBucket,
+            (VTool::Lasso, _) => Cursor::Lasso,
+            (VTool::Cut, _) => Cursor::Cut,
+            (VTool::Eraser, _) => Cursor::Eraser,
+            (VTool::Width, _) => Cursor::Crosshair,
         };
         let w = doc.world_transform(ve.id);
         // The Move tool hatches the region under the pointer, clear of anything a press would take
@@ -391,12 +397,17 @@ impl Session {
             }
             VTool::Paint => {
                 // Highlight the closed area the bucket would fill (skipped on huge networks).
-                if let Some(net) = network(&doc, ve.id).filter(|n| n.segments.len() <= 3000)
-                    && let Some(face) = net.face_at(w.inverse() * ev.p())
-                {
+                let target = std::iter::once(ve.id).chain(ve.others.iter().map(|part| part.id)).find_map(|id| {
+                    let net = network(&doc, id).filter(|net| net.segments.len() <= 3000)?;
+                    let transform = doc.world_transform(id);
+                    let local = transform.inverse() * ev.p();
+                    Some((net, transform, net.face_at(local)?, local))
+                });
+                if let Some((net, transform, face, local)) = target {
+                    self.tool.overlay.cursor = if net.fill_contains(local) { Cursor::PaintBucketRemove } else { Cursor::PaintBucketAdd };
                     let mut polys: Vec<Vec<[f64; 2]>> = Vec::new();
                     let mut path = face.path.clone();
-                    path.apply_affine(w);
+                    path.apply_affine(transform);
                     figcraft_geom::kurbo::flatten(path.iter(), 0.25 / ev.zoom.max(1e-6), |el| {
                         use figcraft_geom::kurbo::PathEl;
                         match el {

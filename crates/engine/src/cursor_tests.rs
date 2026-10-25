@@ -281,22 +281,37 @@ fn vector_edit_mode_shows_each_tool_and_modifier() {
         ("move", NONE, empty, Default, "the arrow elsewhere"),
         ("move", ALT, segment, Pen(PenCursor::Add), "Alt over a segment adds a point there"),
         ("move", ALT, point, Default, "Alt over a point adds nothing"),
-        ("move", CMD, segment, Pen(PenCursor::Bend), "Cmd/Ctrl bends the segment"),
+        ("move", CMD, segment, Pen(PenCursor::BendCurve), "Cmd/Ctrl bends the segment"),
         ("move", CMD, point, Pen(PenCursor::Bend), "Cmd/Ctrl bends the point's handles"),
         ("move", CMD, empty, Crosshair, "Cmd/Ctrl over nothing"),
         ("pen", NONE, empty, Pen(PenCursor::New), "the pen: a new point"),
         ("pen", NONE, point, Pen(PenCursor::Close), "the pen over a point: connects to it or goes on from it"),
         ("pen", NONE, segment, Pen(PenCursor::Add), "the pen over a segment: adds a point"),
-        ("bend", NONE, segment, Pen(PenCursor::Bend), "the Bend tool"),
+        ("bend", NONE, segment, Pen(PenCursor::BendCurve), "the Bend tool on a segment"),
+        ("bend", NONE, point, Pen(PenCursor::Bend), "the Bend tool on a point"),
         ("bend", NONE, empty, Pen(PenCursor::Bend), "the Bend tool anywhere"),
-        ("paint", NONE, empty, Crosshair, "paint bucket"),
-        ("lasso", NONE, empty, Crosshair, "lasso"),
-        ("cut", NONE, segment, Crosshair, "cut"),
-        ("eraser", NONE, empty, Crosshair, "eraser (its brush is drawn around the pointer)"),
+        ("paint", NONE, empty, PaintBucket, "paint bucket"),
+        ("lasso", NONE, empty, Lasso, "lasso"),
+        ("cut", NONE, segment, Cut, "cut"),
+        ("eraser", NONE, empty, Eraser, "eraser (its brush is drawn around the pointer)"),
         ("width", NONE, segment, Crosshair, "variable width"),
     ];
     for (tool, m, at, want, why) in rows {
         ex(&mut s, "vector.edit.tool", json!({"tool": tool}));
         assert_eq!(hover(&mut s, at, m), want, "{tool} at {at:?}: {why}");
     }
+}
+
+#[test]
+fn paint_cursor_shows_whether_a_face_will_be_filled_or_cleared() {
+    let mut s = Session::new();
+    let id = id(&ex(&mut s, "shape.rectangle", json!({"x": 0, "y": 0, "width": 100, "height": 100})));
+    ex(&mut s, "vector.edit.begin", json!({"id": id}));
+    ex(&mut s, "vector.edit.tool", json!({"tool": "paint"}));
+
+    assert_eq!(hover(&mut s, (50.0, 50.0), NONE), Cursor::PaintBucketRemove);
+    s.pointer(&ev(PointerKind::Down, (50.0, 50.0), NONE)).unwrap();
+    s.pointer(&ev(PointerKind::Up, (50.0, 50.0), NONE)).unwrap();
+    assert_eq!(hover(&mut s, (50.0, 50.0), NONE), Cursor::PaintBucketAdd);
+    assert_eq!(hover(&mut s, (150.0, 150.0), NONE), Cursor::PaintBucket);
 }

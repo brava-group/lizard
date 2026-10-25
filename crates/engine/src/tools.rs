@@ -215,6 +215,11 @@ pub enum Cursor {
     Comment,
     Pencil,
     PaintBucket,
+    PaintBucketAdd,
+    PaintBucketRemove,
+    Lasso,
+    Cut,
+    Eraser,
     /// What the gesture is doing will be undone when it ends (an edit only a main component can
     /// make).
     NotAllowed,
@@ -232,6 +237,8 @@ pub enum PenCursor {
     Add,
     /// Bends the segment or the point's handles (the Bend tool; Cmd/Ctrl in vector edit mode).
     Bend,
+    /// Bends a segment of a vector path.
+    BendCurve,
 }
 
 impl ToolId {

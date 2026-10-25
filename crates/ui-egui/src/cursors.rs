@@ -20,6 +20,11 @@ pub enum Glyph {
     Zoom(bool),
     Pencil,
     PaintBucket,
+    PaintBucketAdd,
+    PaintBucketRemove,
+    Lasso,
+    Cut,
+    Eraser,
     Rotate(f32),
     Pen(PenCursor),
     Eyedropper,
@@ -55,12 +60,18 @@ enum Asset {
     ZoomIn,
     ZoomOut,
     Pen,
-    PenSnap,
+    PenDot,
     PenInsert,
     Bend,
+    BendCurve,
+    Lasso,
+    Cut,
+    Eraser,
     Eyedropper,
     Comment,
     PaintBucket,
+    PaintBucketInsert,
+    PaintBucketRemove,
     Click,
 }
 
@@ -81,12 +92,18 @@ impl Asset {
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
             Self::Pen => "pen",
-            Self::PenSnap => "pen-snap",
+            Self::PenDot => "pen-dot",
             Self::PenInsert => "pen-insert",
             Self::Bend => "bend",
+            Self::BendCurve => "bend-curve",
+            Self::Lasso => "lasso",
+            Self::Cut => "cut",
+            Self::Eraser => "eraser",
             Self::Eyedropper => "eyedropper",
             Self::Comment => "comment",
             Self::PaintBucket => "paint-bucket",
+            Self::PaintBucketInsert => "paint-bucket-insert",
+            Self::PaintBucketRemove => "paint-bucket-remove",
             Self::Click => "click",
         }
     }
@@ -106,12 +123,18 @@ impl Asset {
             Self::ZoomIn => include_bytes!("../assets/cursors/zoom-in.png"),
             Self::ZoomOut => include_bytes!("../assets/cursors/zoom-out.png"),
             Self::Pen => include_bytes!("../assets/cursors/pen.png"),
-            Self::PenSnap => include_bytes!("../assets/cursors/pen-snap.png"),
+            Self::PenDot => include_bytes!("../assets/cursors/pen-dot.png"),
             Self::PenInsert => include_bytes!("../assets/cursors/pen-insert.png"),
             Self::Bend => include_bytes!("../assets/cursors/bend.png"),
+            Self::BendCurve => include_bytes!("../assets/cursors/bend-curve.png"),
+            Self::Lasso => include_bytes!("../assets/cursors/lasso.png"),
+            Self::Cut => include_bytes!("../assets/cursors/cut.png"),
+            Self::Eraser => include_bytes!("../assets/cursors/eraser.png"),
             Self::Eyedropper => include_bytes!("../assets/cursors/eyedropper.png"),
             Self::Comment => include_bytes!("../assets/cursors/comment.png"),
             Self::PaintBucket => include_bytes!("../assets/cursors/paint-bucket.png"),
+            Self::PaintBucketInsert => include_bytes!("../assets/cursors/paint-bucket-insert.png"),
+            Self::PaintBucketRemove => include_bytes!("../assets/cursors/paint-bucket-remove.png"),
             Self::Click => include_bytes!("../assets/cursors/click.png"),
         }
     }
@@ -119,10 +142,10 @@ impl Asset {
     /// Hot spot in the 32 × 32 image, in logical points.
     fn hotspot(self) -> egui::Vec2 {
         match self {
-            Self::Move | Self::Duplicate | Self::Pen | Self::PenSnap | Self::PenInsert | Self::Click => vec2(0.0, 0.0),
+            Self::Move | Self::Duplicate | Self::Pen | Self::PenDot | Self::PenInsert | Self::Lasso | Self::Cut | Self::Click => vec2(0.0, 0.0),
             Self::Eyedropper => vec2(5.0, 27.0),
             Self::Comment => vec2(6.0, 27.0),
-            Self::PaintBucket => vec2(8.0, 24.0),
+            Self::PaintBucket | Self::PaintBucketInsert | Self::PaintBucketRemove => vec2(8.0, 24.0),
             _ => vec2(16.0, 16.0),
         }
     }
@@ -185,10 +208,16 @@ impl Glyph {
             Self::Zoom(false) => Asset::ZoomIn,
             Self::Zoom(true) => Asset::ZoomOut,
             Self::Pencil | Self::Pen(PenCursor::New) => Asset::Pen,
-            Self::Pen(PenCursor::Close) => Asset::PenSnap,
+            Self::Pen(PenCursor::Close) => Asset::PenDot,
             Self::Pen(PenCursor::Add) => Asset::PenInsert,
             Self::Pen(PenCursor::Bend) => Asset::Bend,
+            Self::Pen(PenCursor::BendCurve) => Asset::BendCurve,
             Self::PaintBucket => Asset::PaintBucket,
+            Self::PaintBucketAdd => Asset::PaintBucketInsert,
+            Self::PaintBucketRemove => Asset::PaintBucketRemove,
+            Self::Lasso => Asset::Lasso,
+            Self::Cut => Asset::Cut,
+            Self::Eraser => Asset::Eraser,
             Self::Rotate(_) => Asset::Rotate,
             Self::Eyedropper => Asset::Eyedropper,
             Self::Comment => Asset::Comment,
@@ -226,6 +255,11 @@ pub fn of(cursor: Cursor) -> Shown {
         Cursor::Pen(p) => Drawn(Glyph::Pen(p)),
         Cursor::Pencil => Drawn(Glyph::Pencil),
         Cursor::PaintBucket => Drawn(Glyph::PaintBucket),
+        Cursor::PaintBucketAdd => Drawn(Glyph::PaintBucketAdd),
+        Cursor::PaintBucketRemove => Drawn(Glyph::PaintBucketRemove),
+        Cursor::Lasso => Drawn(Glyph::Lasso),
+        Cursor::Cut => Drawn(Glyph::Cut),
+        Cursor::Eraser => Drawn(Glyph::Eraser),
         Cursor::Copy => Drawn(Glyph::Copy),
         Cursor::Pointer => Drawn(Glyph::Pointer),
         Cursor::Eyedropper => Drawn(Glyph::Eyedropper),
@@ -249,7 +283,17 @@ impl Shown {
             Self::System(i) => i,
             Self::Drawn(glyph) => match glyph {
                 Glyph::Arrow | Glyph::Move => CursorIcon::Default,
-                Glyph::Crosshair | Glyph::Pen(_) | Glyph::Pencil | Glyph::PaintBucket | Glyph::Rotate(_) | Glyph::Eyedropper => CursorIcon::Crosshair,
+                Glyph::Crosshair
+                | Glyph::Pen(_)
+                | Glyph::Pencil
+                | Glyph::PaintBucket
+                | Glyph::PaintBucketAdd
+                | Glyph::PaintBucketRemove
+                | Glyph::Lasso
+                | Glyph::Cut
+                | Glyph::Eraser
+                | Glyph::Rotate(_)
+                | Glyph::Eyedropper => CursorIcon::Crosshair,
                 Glyph::Resize(degrees) => resize_icon(f64::from(degrees)),
                 Glyph::Hand(false) => CursorIcon::Grab,
                 Glyph::Hand(true) => CursorIcon::Grabbing,
@@ -289,11 +333,17 @@ impl Shown {
                 Glyph::Zoom(true) => "zoom-out".into(),
                 Glyph::Pencil => "pencil".into(),
                 Glyph::PaintBucket => "paint-bucket".into(),
+                Glyph::PaintBucketAdd => "paint-bucket-add".into(),
+                Glyph::PaintBucketRemove => "paint-bucket-remove".into(),
+                Glyph::Lasso => "lasso".into(),
+                Glyph::Cut => "cut".into(),
+                Glyph::Eraser => "eraser".into(),
                 Glyph::Rotate(a) => format!("rotate {}", a.round()),
                 Glyph::Pen(PenCursor::New) => "pen".into(),
                 Glyph::Pen(PenCursor::Close) => "pen-close".into(),
                 Glyph::Pen(PenCursor::Add) => "pen-add".into(),
                 Glyph::Pen(PenCursor::Bend) => "pen-bend".into(),
+                Glyph::Pen(PenCursor::BendCurve) => "pen-bend-curve".into(),
                 Glyph::Eyedropper => "eyedropper".into(),
                 Glyph::Comment => "comment".into(),
                 Glyph::Pointer => "pointer".into(),
@@ -339,12 +389,18 @@ mod tests {
             Asset::ZoomIn,
             Asset::ZoomOut,
             Asset::Pen,
-            Asset::PenSnap,
+            Asset::PenDot,
             Asset::PenInsert,
             Asset::Bend,
+            Asset::BendCurve,
+            Asset::Lasso,
+            Asset::Cut,
+            Asset::Eraser,
             Asset::Eyedropper,
             Asset::Comment,
             Asset::PaintBucket,
+            Asset::PaintBucketInsert,
+            Asset::PaintBucketRemove,
             Asset::Click,
         ] {
             let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).unwrap();
@@ -353,9 +409,15 @@ mod tests {
         assert_eq!(Glyph::Move.asset(), Asset::Move);
         assert_eq!(Glyph::Crosshair.asset(), Asset::Crosshair);
         assert_eq!(Glyph::Copy.asset(), Asset::Duplicate);
-        assert_eq!(Glyph::Pen(PenCursor::Close).asset(), Asset::PenSnap);
+        assert_eq!(Glyph::Pen(PenCursor::Close).asset(), Asset::PenDot);
         assert_eq!(Glyph::Pen(PenCursor::Add).asset(), Asset::PenInsert);
         assert_eq!(Glyph::Pen(PenCursor::Bend).asset(), Asset::Bend);
+        assert_eq!(Glyph::Pen(PenCursor::BendCurve).asset(), Asset::BendCurve);
+        assert_eq!(Glyph::PaintBucketAdd.asset(), Asset::PaintBucketInsert);
+        assert_eq!(Glyph::PaintBucketRemove.asset(), Asset::PaintBucketRemove);
+        assert_eq!(Glyph::Lasso.asset(), Asset::Lasso);
+        assert_eq!(Glyph::Cut.asset(), Asset::Cut);
+        assert_eq!(Glyph::Eraser.asset(), Asset::Eraser);
         assert_eq!(Glyph::Pointer.asset(), Asset::Click);
     }
 

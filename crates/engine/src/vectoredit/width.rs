@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use super::{editing, set_state};
 use crate::cmd::CommandSpec;
 use crate::params::*;
-use crate::tools::{Gesture, PointerEvent};
+use crate::tools::{Cursor, Gesture, PointerEvent};
 use crate::{Result, Session, bad, spec};
 
 /// Width handles sit at least this far from the path on screen, so thin points stay grabbable.
@@ -253,7 +253,20 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
 impl Session {
     /// Hover with the Variable width tool: highlight what a press would grab.
     pub(crate) fn width_hover(&mut self, ve: &super::VectorEdit, ev: &PointerEvent) -> Result<()> {
-        self.tool.overlay.width_hover = width_hit(self.doc()?, ve, ev.p(), ev.zoom);
+        let hit = width_hit(self.doc()?, ve, ev.p(), ev.zoom);
+        self.tool.overlay.cursor = match hit {
+            Some(WHit::Handle { index, side }) => width_handles(self.doc()?, ve, ev.zoom)
+                .into_iter()
+                .find(|handle| handle.index == index)
+                .map(|handle| {
+                    let point = handle.sides[if side == WidthSide::Right { 0 } else { 1 }];
+                    Cursor::Resize((Point::new(point[0], point[1]) - Point::new(handle.at[0], handle.at[1])).atan2().to_degrees())
+                })
+                .unwrap_or(Cursor::Crosshair),
+            Some(WHit::Point { .. }) => Cursor::Move,
+            _ => Cursor::Crosshair,
+        };
+        self.tool.overlay.width_hover = hit;
         Ok(())
     }
 
