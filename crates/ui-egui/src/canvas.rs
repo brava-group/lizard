@@ -1887,16 +1887,22 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
         }
         if view.layout_grids && !n.grids.is_empty() && figcraft_layout::grids_shown(&doc, *c) {
             let w = doc.world_transform(*c);
-            for g in n.grids.iter().filter(|g| g.visible) {
-                let col = doc_c32(painter.ctx(), g.color);
-                for r in figcraft_layout::grid_lines(g, n.width, n.height) {
-                    let a = w * Point::new(r.x0, r.y0);
-                    let b = w * Point::new(r.x1, r.y1);
-                    let (sa, sb) = (app.to_screen(a.x, a.y), app.to_screen(b.x, b.y));
-                    if g.kind == figcraft_doc::GridKind::Grid {
-                        painter.line_segment([sa, sb], stroke(col, 1.0));
-                    } else {
-                        painter.rect_filled(Rect::from_two_pos(sa, sb), CornerRadius::ZERO, col);
+            let a = w * Point::new(0.0, 0.0);
+            let b = w * Point::new(n.width, n.height);
+            let frame_clip = Rect::from_two_pos(app.to_screen(a.x, a.y), app.to_screen(b.x, b.y)).intersect(app.canvas.rect);
+            if frame_clip.is_positive() {
+                let grid_painter = painter.with_clip_rect(frame_clip);
+                for g in n.grids.iter().filter(|g| g.visible) {
+                    let col = doc_c32(painter.ctx(), g.color);
+                    for r in figcraft_layout::grid_lines(g, n.width, n.height) {
+                        let a = w * Point::new(r.x0, r.y0);
+                        let b = w * Point::new(r.x1, r.y1);
+                        let (sa, sb) = (app.to_screen(a.x, a.y), app.to_screen(b.x, b.y));
+                        if g.kind == figcraft_doc::GridKind::Grid {
+                            grid_painter.line_segment([sa, sb], stroke(col, 1.0));
+                        } else {
+                            grid_painter.rect_filled(Rect::from_two_pos(sa, sb), CornerRadius::ZERO, col);
+                        }
                     }
                 }
             }

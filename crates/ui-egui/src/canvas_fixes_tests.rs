@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use egui::{Pos2, Shape};
+use egui::{Pos2, Rect, Shape};
+use figcraft_color::Color;
+use figcraft_doc::{GridAlign, GridKind, LayoutGrid};
 use figcraft_engine::Session;
 use serde_json::json;
 
@@ -23,6 +25,35 @@ fn outlined(shapes: &[Shape], q: [Pos2; 4]) -> bool {
 fn dashes_along(shapes: &[Shape], a: Pos2, b: Pos2) -> usize {
     let on = |p: Pos2| (p.y - a.y).abs() < 0.5 && p.x >= a.x - 0.5 && p.x <= b.x + 0.5;
     shapes.iter().filter(|s| matches!(s, Shape::LineSegment { points: [p, q], .. } if on(*p) && on(*q))).count()
+}
+
+#[test]
+fn layout_grid_tracks_are_clipped_to_their_frame() {
+    let mut s = Session::new();
+    let frame = id(&s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 32, "height": 32})).unwrap());
+    let grid = LayoutGrid {
+        kind: GridKind::Rows,
+        align: GridAlign::Min,
+        count: 5,
+        size: 4.0,
+        gutter: 24.0,
+        color: Color::new(1.0, 0.0, 0.0, 0.1),
+        ..LayoutGrid::default()
+    };
+    s.doc_mut().unwrap().get_mut(frame).unwrap().grids = vec![grid.clone(), LayoutGrid { kind: GridKind::Columns, ..grid.clone() }];
+    s.execute("view.layoutGrids", &json!({"on": true})).unwrap();
+    let mut ui = Ui::new(s);
+    let bounds = Rect::from_two_pos(ui.app.to_screen(100.0, 100.0), ui.app.to_screen(132.0, 132.0));
+    assert!(ui.app.canvas.rect.contains_rect(bounds), "the frame is visible on the test canvas");
+    let color = crate::theme::doc_c32(&ui.ctx, grid.color);
+    let output = ui.frame_output(vec![]);
+    let grid_clips: Vec<_> = output.shapes.iter().filter_map(|clipped| {
+        matches!(&clipped.shape, Shape::Rect(rect) if rect.fill == color).then_some(clipped.clip_rect)
+    }).collect();
+    assert_eq!(grid_clips.len(), 10, "all configured rows and columns still exist");
+    for clip in grid_clips {
+        assert!((clip.min - bounds.min).length() < 0.5 && (clip.max - bounds.max).length() < 0.5, "grid clip {clip:?} exceeds frame {bounds:?}");
+    }
 }
 
 #[test]
