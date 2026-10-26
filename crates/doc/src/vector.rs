@@ -105,6 +105,7 @@ struct Corner {
     s1_at_a: bool,
     s2: usize,
     s2_at_a: bool,
+    trim: f64,
     a: Point,
     b: Point,
     ta: (f64, f64),
@@ -342,10 +343,9 @@ impl VectorNetwork {
     }
 
     /// The network with its rounded points drawn in: each sharp point with a corner radius becomes
-    /// an arc between its two segments (the radius shrinks so the arc fits in half of each
-    /// segment, like a polygon's corners). A curved segment is cut where the arc meets it and keeps
-    /// the rest of its curve, the arc leaving along its direction there. `None` when no point is
-    /// rounded.
+    /// an arc between its two segments. Adjacent corners share their segment's length; an isolated
+    /// corner can use the entire segment. Curved segments keep the remainder of their curves.
+    /// `None` when no point is rounded.
     pub fn rounded(&self) -> Option<VectorNetwork> {
         if !self.vertices.iter().any(|v| v.radius > 0.0) {
             return None;
@@ -358,7 +358,30 @@ impl VectorNetwork {
                 }
             }
         }
-        let corners: Vec<Corner> = (0..self.vertices.len()).filter_map(|v| self.corner(v, incident.get(v)?)).collect();
+        let candidates: Vec<Corner> = (0..self.vertices.len()).filter_map(|v| self.corner(v, incident.get(v)?, f64::INFINITY)).collect();
+        let mut requested = vec![0.0; self.segments.len()];
+        for corner in &candidates {
+            for segment in [corner.s1, corner.s2] {
+                if let Some(total) = requested.get_mut(segment) {
+                    *total += corner.trim;
+                }
+            }
+        }
+        let limits: Vec<f64> = requested
+            .iter()
+            .enumerate()
+            .map(|(index, total)| {
+                let available = self.cubic(index).map(|curve| length(&curve)).unwrap_or(0.0);
+                if *total > available && available > 0.0 { (available / *total).min(1.0) } else { 1.0 }
+            })
+            .collect();
+        let corners: Vec<Corner> = candidates
+            .into_iter()
+            .filter_map(|corner| {
+                let factor = limits.get(corner.s1)?.min(*limits.get(corner.s2)?);
+                if factor >= 1.0 { Some(corner) } else { self.corner(corner.v, incident.get(corner.v)?, corner.trim * factor) }
+            })
+            .collect();
         let mut out = self.clone();
         for v in &mut out.vertices {
             v.radius = 0.0;
@@ -415,7 +438,7 @@ impl VectorNetwork {
 
     /// How point `v` (its `incident` segments) is rounded, if it is: not where the two segments
     /// run on smoothly or fold back.
-    fn corner(&self, v: usize, incident: &[(usize, bool)]) -> Option<Corner> {
+    fn corner(&self, v: usize, incident: &[(usize, bool)], max_trim: f64) -> Option<Corner> {
         let r = self.vertices.get(v)?.radius;
         let [(s1, a1), (s2, a2)] = *incident else { return None };
         if !(r > 0.0 && r.is_finite()) || s1 == s2 {
@@ -431,7 +454,7 @@ impl VectorNetwork {
         if !(l1 > 1e-9 && l2 > 1e-9) {
             return None;
         }
-        let t = (r / (angle / 2.0).tan()).min(l1.min(l2) / 2.0);
+        let t = (r / (angle / 2.0).tan()).min(l1.min(l2)).min(max_trim);
         let ((a, d1, k1), (b, d2, k2)) = (trim(&c1, t, l1), trim(&c2, t, l2));
         // A cubic arc: handles of 4/3·tan(φ/4)·ρ along each end's direction, φ the turn between
         // them and ρ the radius of the circle through both ends (the corner radius between lines).
@@ -448,6 +471,7 @@ impl VectorNetwork {
             s1_at_a: a1,
             s2,
             s2_at_a: a2,
+            trim: t,
             a,
             b,
             ta: (d1.x * k, d1.y * k),

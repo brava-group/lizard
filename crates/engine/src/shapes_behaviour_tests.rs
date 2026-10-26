@@ -248,6 +248,21 @@ fn rounded_vector_points_are_drawn() {
 }
 
 #[test]
+fn open_l_vector_accepts_radius_as_large_as_its_edges() -> Result<(), &'static str> {
+    let mut session = Session::new();
+    let id = create(&mut session, "vector.create", json!({"path": "M0 10 L10 10 L10 0"}));
+    ex(&mut session, "node.set", json!({"ids": [id], "props": {"cornerRadius": 10}}));
+    let vector = node(&session, id);
+    assert_eq!(vector.corners.uniform(), Some(10.0));
+    let NodeKind::Vector { network } = vector.kind else { return Err("missing vector") };
+    let rounded = network.rounded().ok_or("missing rounded network")?;
+    let arc = rounded.cubic(network.segments.len()).ok_or("missing corner arc")?;
+    assert!((arc.p0 - Point::new(0.0, 10.0)).hypot() < 1e-6);
+    assert!((arc.p3 - Point::new(10.0, 0.0)).hypot() < 1e-6);
+    Ok(())
+}
+
+#[test]
 fn point_counts_and_star_ratios() {
     // (layer, pointCount set, count kept, derivation)
     let rows: Vec<(&str, f64, u32, &str)> = vec![

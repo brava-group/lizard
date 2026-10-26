@@ -254,6 +254,34 @@ fn vector_paint_path_includes_open_subpaths_next_to_regions() {
 }
 
 #[test]
+fn isolated_vector_corner_can_use_the_full_edge() -> Result<(), &'static str> {
+    use figcraft_geom::Shape;
+    let mut open = VectorNetwork::from_points(&[Point::new(0.0, 10.0), Point::new(10.0, 10.0), Point::new(10.0, 0.0)], false);
+    for vertex in &mut open.vertices {
+        vertex.radius = 10.0;
+    }
+    let rounded = open.rounded().ok_or("L corner did not round")?;
+    let arc = rounded.cubic(open.segments.len()).ok_or("missing L arc")?;
+    assert!((arc.p0 - Point::new(0.0, 10.0)).hypot() < 1e-9);
+    assert!((arc.p3 - Point::new(10.0, 0.0)).hypot() < 1e-9);
+    assert!((rounded.stroke_path().bounding_box().width() - 10.0).abs() < 1e-9);
+
+    let mut square = VectorNetwork::from_points(
+        &[Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0), Point::new(0.0, 10.0)],
+        true,
+    );
+    for vertex in &mut square.vertices {
+        vertex.radius = 10.0;
+    }
+    let shared = square.rounded().ok_or("square corners did not round")?;
+    let path = shared.fill_path();
+    assert_ne!(path.winding(Point::new(5.0, 5.0)), 0);
+    assert_eq!(path.winding(Point::new(0.5, 0.5)), 0);
+    assert!((path.bounding_box().width() - 10.0).abs() < 1e-8);
+    Ok(())
+}
+
+#[test]
 fn variables_resolve_modes_and_aliases() {
     let mut v = Variables::default();
     v.collections.push(Collection {
