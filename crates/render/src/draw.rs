@@ -293,7 +293,8 @@ fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, F
         NodeKind::Vector { network } => {
             let rule =
                 if network.regions.iter().any(|r| r.winding == figcraft_doc::WindingRule::EvenOdd) { FillRule::EvenOdd } else { FillRule::Winding };
-            Some((network.fill_path(), rule))
+            let path = if n.fills.iter().any(|fill| fill.visible) { network.paint_path() } else { network.fill_path() };
+            Some((path, rule))
         }
         _ => figcraft_doc::geometry::shape_path(n).map(|p| (p, FillRule::Winding)),
     }
@@ -716,7 +717,7 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             let outline = if splatted && !(clips && n.corners.uniform() != Some(0.0)) { None } else { node_outline(doc, n) };
             if !splatted
                 && let Some((path, rule)) = &outline
-                && closed
+                && figcraft_doc::geometry::has_fill_geometry(n)
                 && let Some(tp) = ts_path(path)
             {
                 fill_with(pix, &tp, &n.fills, w, h, xf, *rule, ctx, None);

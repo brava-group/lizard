@@ -429,6 +429,7 @@ impl W<'_> {
             NodeKind::Group | NodeKind::Page { .. } => None,
             _ => figcraft_render::node_outline(self.doc, n),
         };
+        let fillable = figcraft_doc::geometry::has_fill_geometry(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
         let closed = figcraft_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
         let live_text = if self.opts.outline_text { None } else { self.text_element(n, xf) };
         let run_paths = if live_text.is_none() { text_run_paths(n) } else { None };
@@ -445,7 +446,7 @@ impl W<'_> {
                 }
             }
         } else if let Some((path, rule)) = &outline
-            && closed
+            && fillable
         {
             let fr = if *rule == figcraft_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
             for p in &n.fills {

@@ -54,7 +54,7 @@ fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) ->
     let outline = node_outline(doc, n);
     let mut out = Vec::new();
     if has_fill
-        && closed
+        && figcraft_doc::geometry::has_fill_geometry(n)
         && let Some(o) = outline.clone()
     {
         out.push(o);

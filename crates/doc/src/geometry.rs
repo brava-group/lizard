@@ -42,11 +42,21 @@ pub fn stroke_geometry(n: &Node) -> Option<BezPath> {
     }
 }
 
-/// Whether the shape's path is closed (fills apply).
+/// Whether the shape has a stored closed outline. Open vector paths may still paint a fill.
 pub fn is_closed(n: &Node) -> bool {
     match &n.kind {
         NodeKind::Line => false,
         NodeKind::Vector { network } => !network.regions.is_empty(),
+        _ => true,
+    }
+}
+
+/// Whether a node has geometry that can receive a fill. An open vector subpath is closed only
+/// while painting its fill; its stroke keeps its original endpoints.
+pub fn has_fill_geometry(n: &Node) -> bool {
+    match &n.kind {
+        NodeKind::Line => false,
+        NodeKind::Vector { network } => !network.regions.is_empty() || !network.segments.is_empty(),
         _ => true,
     }
 }
@@ -72,7 +82,16 @@ fn hits_node_itself(doc: &Document, id: NodeId, n: &Node, pt: Point, tol: f64, o
         NodeKind::Frame | NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. } | NodeKind::Section { .. } => {
             n.local_rect().inflate(tol_l, tol_l).contains(lp)
         }
-        _ => shape_path(n).is_some_and(|path| hits_path(n, &path, lp, tol_l, !outline && is_closed(n) && path.winding(lp) != 0)),
+        _ => shape_path(n).is_some_and(|path| {
+            let inside = if outline || !has_fill_geometry(n) {
+                false
+            } else if let NodeKind::Vector { network } = &n.kind {
+                (is_closed(n) || n.fills.iter().any(|fill| fill.visible)) && network.paint_path().winding(lp) != 0
+            } else {
+                path.winding(lp) != 0
+            };
+            hits_path(n, &path, lp, tol_l, inside)
+        }),
     }
 }
 

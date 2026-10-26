@@ -487,6 +487,49 @@ impl VectorNetwork {
         path
     }
 
+    /// The area painted by a fill. SVG fills implicitly close open subpaths, while their strokes
+    /// remain open. Imported paths may contain both stored regions and open subpaths.
+    pub fn paint_path(&self) -> BezPath {
+        use figcraft_geom::kurbo::PathEl;
+        let mut path = self.fill_path();
+        let mut assigned = vec![false; self.segments.len()];
+        for region in &self.regions {
+            for loop_segments in &region.loops {
+                for &index in loop_segments {
+                    if let Some(segment) = assigned.get_mut(index) {
+                        *segment = true;
+                    }
+                }
+            }
+        }
+        if assigned.iter().all(|assigned| *assigned) {
+            return path;
+        }
+        let unassigned = VectorNetwork {
+            vertices: self.vertices.clone(),
+            segments: self.segments.iter().enumerate().filter(|(index, _)| !assigned[*index]).map(|(_, segment)| *segment).collect(),
+            regions: Vec::new(),
+        };
+        let mut open = false;
+        for element in unassigned.stroke_path().elements() {
+            match *element {
+                PathEl::MoveTo(_) => {
+                    if open {
+                        path.close_path();
+                    }
+                    open = true;
+                }
+                PathEl::ClosePath => open = false,
+                _ => {}
+            }
+            path.push(*element);
+        }
+        if open {
+            path.close_path();
+        }
+        path
+    }
+
     fn append_loop(&self, path: &mut BezPath, lp: &[usize]) {
         // Walk the loop, orienting each segment to continue from the previous end vertex.
         let segs: Vec<&Segment> = lp.iter().filter_map(|i| self.segments.get(*i)).collect();

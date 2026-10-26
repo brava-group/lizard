@@ -29,6 +29,52 @@ fn solid_rect_and_page_background() {
 }
 
 #[test]
+fn open_vector_with_fill_paints_area_without_closing_stroke() -> Result<(), &'static str> {
+    use figcraft_doc::VectorNetwork;
+    use figcraft_geom::Point;
+    let mut doc = figcraft_doc::Document::new("open vector fill");
+    let page = doc.first_page().ok_or("missing page")?;
+    let network = VectorNetwork::from_points(
+        &[Point::new(0.0, 0.0), Point::new(30.0, 0.0), Point::new(30.0, 30.0), Point::new(0.0, 30.0)],
+        false,
+    );
+    let id = doc.create(page, NodeKind::Vector { network }, "Open", 10.0, 10.0, 30.0, 30.0).map_err(|_| "missing vector")?;
+    let node = doc.get_mut(id).map_err(|_| "missing vector node")?;
+    node.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
+    let pix = render_view(&doc, page, &view(60, 60), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 25, 25), [0xF6, 0x34, 0x34, 255]);
+    assert_eq!(figcraft_doc::geometry::hit_leaf(&doc, page, Point::new(25.0, 25.0), 1.0, None), Some(id));
+    let Some(NodeKind::Vector { network }) = doc.node(id).map(|node| &node.kind) else { return Err("missing vector network") };
+    assert!(network.regions.is_empty());
+    assert!(!matches!(network.stroke_path().elements().last(), Some(figcraft_geom::kurbo::PathEl::ClosePath)));
+    Ok(())
+}
+
+#[test]
+fn mixed_closed_and_open_vector_subpaths_both_paint() -> Result<(), &'static str> {
+    let mut path = figcraft_geom::BezPath::new();
+    path.move_to((0.0, 0.0));
+    path.line_to((10.0, 0.0));
+    path.line_to((10.0, 10.0));
+    path.line_to((0.0, 10.0));
+    path.close_path();
+    path.move_to((20.0, 0.0));
+    path.line_to((30.0, 0.0));
+    path.line_to((30.0, 10.0));
+    path.line_to((20.0, 10.0));
+    let network = figcraft_doc::VectorNetwork::from_path(&path);
+    let mut doc = figcraft_doc::Document::new("mixed vector fill");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Mixed", 10.0, 10.0, 30.0, 10.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing vector node")?.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
+    let pix = render_view(&doc, page, &view(60, 30), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 15, 15), [0xF6, 0x34, 0x34, 255]);
+    assert_eq!(px(&pix, 35, 15), [0xF6, 0x34, 0x34, 255]);
+    assert_eq!(px(&pix, 25, 15), [0xF5, 0xF5, 0xF5, 255]);
+    Ok(())
+}
+
+#[test]
 fn zoom_scales() {
     let (d, p, _) = doc_with_rect(Color::BLACK);
     let v = View { origin: (0.0, 0.0), scale: 2.0, width: 200, height: 200 };

@@ -31,6 +31,27 @@ fn import_rejects_garbage() {
 }
 
 #[test]
+fn open_svg_path_keeps_its_stroke_open_and_exports_its_fill() -> Result<(), &'static str> {
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">
+        <path d="M 10 10 L 40 10 L 40 40 L 10 40" fill="#F63434" stroke="#000000"/>
+    </svg>"##;
+    let mut doc = Document::new("open svg fill");
+    let page = doc.first_page().ok_or("missing page")?;
+    let frame = import_svg(&mut doc, svg, page, 0.0, 0.0, "Pasted SVG").map_err(|_| "import failed")?;
+    let vector_id = doc
+        .subtree(frame)
+        .into_iter()
+        .find(|id| doc.node(*id).is_some_and(|node| matches!(node.kind, NodeKind::Vector { .. })))
+        .ok_or("missing imported vector")?;
+    let Some(NodeKind::Vector { network }) = doc.node(vector_id).map(|node| &node.kind) else { return Err("missing vector network") };
+    assert!(network.regions.is_empty());
+    assert!(!matches!(network.stroke_path().elements().last(), Some(figcraft_geom::kurbo::PathEl::ClosePath)));
+    let exported = export_svg(&doc, &[vector_id], &SvgOptions::default()).ok_or("export failed")?;
+    assert!(exported.contains("#F63434"), "{exported}");
+    Ok(())
+}
+
+#[test]
 fn import_gradient_and_groups() {
     let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
       <defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs>

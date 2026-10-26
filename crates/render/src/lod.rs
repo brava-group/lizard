@@ -216,7 +216,7 @@ pub fn splat_subtree(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, clip: Op
         NodeKind::Page { .. } | NodeKind::Group => {}
         NodeKind::Text(t) => paint(pix, local, &mut text_paints(n, t), text_share(t, n.width, n.height)),
         _ => {
-            if figcraft_doc::geometry::is_closed(n) {
+            if figcraft_doc::geometry::has_fill_geometry(n) {
                 paint(pix, local, &mut n.fills.iter(), fill_share(n));
             }
         }
