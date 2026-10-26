@@ -1956,6 +1956,7 @@ dependencies = [
  "figcraft-render",
  "figcraft-svg",
  "figcraft-text",
+ "flate2",
  "image",
  "log",
  "regex",

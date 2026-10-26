@@ -52,6 +52,34 @@ fn tools_list_is_complete_and_schemas_are_objects() {
 }
 
 #[test]
+fn icon_search_and_creation_render_the_requested_library_asset() {
+    use base64::Engine as _;
+
+    let mut c = Client::new();
+    let same = c.ok("search_icons", json!({"query":"home", "preferredLibrary":"lucide"}));
+    assert_eq!(same["search"]["usedFallback"], false);
+    assert_eq!(same["search"]["matches"][0]["library"], "lucide");
+    let fallback = c.ok("search_icons", json!({"query":"analytics", "preferredLibrary":"feather"}));
+    assert_eq!(fallback["search"]["usedFallback"], true);
+    let id = c.create(json!({"type":"icon", "library":"lucide", "icon":"home", "color":"#E32636", "x":30, "y":40, "width":48}));
+    let node = c.node(&id);
+    assert_eq!(node["width"].as_f64(), Some(48.0));
+    assert!(node["children"].as_array().is_some_and(|children| !children.is_empty()));
+    let shot = c.call("screenshot", json!({"ids":[id], "scale":3, "maxSize":256}));
+    assert_eq!(shot["isError"], false, "{shot}");
+    let bytes = shot["content"][0]["data"].as_str().and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok());
+    let image = bytes.as_deref().and_then(|data| image::load_from_memory(data).ok()).map(|image| image.to_rgba8());
+    assert!(image.as_ref().is_some_and(|image| image.pixels().any(|pixel| pixel[0] > 150 && pixel[1] < 100 && pixel[2] < 120 && pixel[3] > 50)));
+    c.run("icon.set", json!({"id":id, "icon":"search", "color":"#2563EB"}));
+    let updated = c.node(&id);
+    assert_eq!(updated["pluginData"]["lizard.icon.name"], "search");
+    let shot = c.call("screenshot", json!({"ids":[id], "scale":3, "maxSize":256}));
+    let bytes = shot["content"][0]["data"].as_str().and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok());
+    let image = bytes.as_deref().and_then(|data| image::load_from_memory(data).ok()).map(|image| image.to_rgba8());
+    assert!(image.as_ref().is_some_and(|image| image.pixels().any(|pixel| pixel[2] > 150 && pixel[0] < 100 && pixel[3] > 50)));
+}
+
+#[test]
 fn tools_call_happy_and_error_paths() {
     let mut c = Client::new();
     // Happy path.

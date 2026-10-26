@@ -53,7 +53,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "node.create",
             "Create layer",
-            "{type: rectangle|ellipse|polygon|star|line|arrow|vector|text|frame|section|component|slice, x?, y? (relative to the parent frame; groups don't count), width?, height?, parent? (id; default: the page), index?, name?, text? (for text), path? (SVG path data for vector), props? {node.set keys}, select? (default true)}",
+            "{type: rectangle|ellipse|polygon|star|line|arrow|vector|icon|text|frame|section|component|slice, x?, y? (relative to the parent frame; groups don't count), width?, height?, parent? (id; default: the page), index?, name?, text? (for text), path? (SVG path data for vector), library? and icon? (required for icon; search_icons first), color? (#hex for icon), props? {node.set keys}, select? (default true)}",
             true,
             create
         ),
@@ -236,6 +236,9 @@ fn vector_scale(width: Option<f64>, height: Option<f64>, bw: f64, bh: f64, what:
 pub fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "node.create";
     let t = string(p, "type").ok_or_else(|| bad(cmd, "`type` is required"))?;
+    if t.eq_ignore_ascii_case("icon") {
+        return super::icon::create(s, p);
+    }
     let (mut kind, base) = kind_for(&t).ok_or_else(|| bad(cmd, format!("unknown type `{t}`")))?;
     let page = s.page()?;
     let parent = crate::params::opt_id(cmd, p, "parent")?.unwrap_or(page);

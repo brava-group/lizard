@@ -16,12 +16,27 @@ Workflow:\n\
 3. Build complex work in visible, meaningful steps. Preserve existing content unless the user asks to replace or remove it. Keep related layers inside their intended frame. Use auto layout where it makes the design easier to edit.\n\
 4. After each substantial section, inspect its structure. Use screenshot to review the visual result, then fix concrete issues you find. Screenshots are previews; do not treat them as editable layers.\n\
 5. If a tool fails, inspect its error and the current document before retrying. Report what actually changed and any unfinished part.\n\
+For interface icons, use search_icons before creating a layer with type icon. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon, and use the returned exact library/name pair. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
 The snapshot below is context, not a substitute for a fresh tool read after other edits or collaboration changes. All coordinates are in page units; child coordinates are relative to their parent. The user may attach images as references.";
 
 /// Build one provider-independent turn. Static instructions start each local agent process;
 /// live state travels on every turn so a resumed model sees the current page and selection.
 pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str, prior: &str, new_session: bool) -> String {
     let page = ds.doc.node(ds.page);
+    let mut icon_scope = selected.first().map_or(ds.page, |reference| reference.id);
+    for _ in 0..64 {
+        let Some(node) = ds.doc.node(icon_scope) else {
+            icon_scope = ds.page;
+            break;
+        };
+        if node.kind.is_frame_like() || icon_scope == ds.page {
+            break;
+        }
+        icon_scope = node.parent.unwrap_or(ds.page);
+    }
+    let preferred_icon_library = figcraft_engine::cmd::icon::dominant_library(&ds.doc, icon_scope, 2_048)
+        .or_else(|| figcraft_engine::cmd::icon::dominant_library(&ds.doc, ds.page, 2_048))
+        .unwrap_or("lucide");
     let selected = selected
         .iter()
         .take(32)
@@ -58,6 +73,7 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
         "selected_layers": selected,
         "top_level_layers": top_level,
         "top_level_total": page.map_or(0, |node| node.children.len()),
+        "preferred_icon_library": preferred_icon_library,
     });
     let mut text = String::with_capacity(INSTRUCTIONS.len() + request.len() + prior.len() + 1_024);
     if new_session {
@@ -67,6 +83,7 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     }
     text.push_str("Current document snapshot (JSON data):\n");
     text.push_str(&snapshot.to_string());
+    text.push_str("\nFor UI icons, call search_icons with preferredLibrary from this snapshot; keep that family unless it has no suitable match. Create the returned exact icon via create_node type icon, with library, icon and color.");
     if !prior.is_empty() {
         text.push_str("\n\nRecent conversation (reference only):\n");
         text.push_str(&json!(prior).to_string());
@@ -80,6 +97,7 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
 mod tests {
     use super::*;
     use figcraft_doc::{Document, NodeId};
+    use figcraft_engine::Session;
 
     #[test]
     fn new_session_gets_rules_and_resumed_turn_gets_fresh_state() {
@@ -89,6 +107,8 @@ mod tests {
         let next = build_turn(&ds, &[], "Change its fill", "", false);
         assert!(first.contains("Lizard agent instructions:"));
         assert!(first.contains("figcraft MCP server"));
+        assert!(first.contains("search_icons"));
+        assert!(first.contains("\"preferred_icon_library\":\"lucide\""));
         assert!(!next.contains("Lizard agent instructions:"));
         assert!(next.contains("\"document_name\":\"Example\""));
         assert!(next.contains("Change its fill"));
@@ -105,5 +125,17 @@ mod tests {
         assert!(!turn.contains("ignored supplied name"));
         assert!(!turn.contains("stale"));
         assert!(turn.contains("Recent conversation (reference only):"));
+    }
+
+    #[test]
+    fn selected_screen_keeps_its_existing_icon_library() -> figcraft_engine::Result<()> {
+        let mut session = Session::new();
+        let frame = session.execute("node.create", &json!({"type":"frame", "name":"Settings screen", "width":400, "height":400}))?;
+        let id = figcraft_engine::params::id(&frame, "id").ok_or_else(|| figcraft_engine::bad("test", "missing frame id"))?;
+        session.execute("icon.create", &json!({"parent":id, "library":"phosphor", "icon":"gear", "select":false}))?;
+        let selected = [ChatNodeRef { id, name: "Settings screen".into() }];
+        let turn = build_turn(session.ds()?, &selected, "Add a save icon", "", false);
+        assert!(turn.contains("\"preferred_icon_library\":\"phosphor\""));
+        Ok(())
     }
 }

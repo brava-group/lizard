@@ -6,6 +6,7 @@ pub mod component;
 pub mod create;
 pub mod edit;
 pub mod file;
+pub mod icon;
 pub mod image;
 pub mod layout;
 pub mod library;
@@ -69,6 +70,7 @@ fn registry() -> &'static Registry {
     R.get_or_init(|| {
         let mut list = Vec::new();
         list.extend(create::specs());
+        list.extend(icon::specs());
         list.extend(edit::specs());
         list.extend(lists::specs());
         list.extend(crate::selection_colors::specs());

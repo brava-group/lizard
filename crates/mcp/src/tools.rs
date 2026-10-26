@@ -85,6 +85,7 @@ fn tool(name: &str, title: &str, desc: &str, schema: Value, read_only: bool) -> 
 /// Tool names, in `tools/list` order.
 pub const TOOL_NAMES: &[&str] = &[
     "list_commands",
+    "search_icons",
     "run_command",
     "batch",
     "create_node",
@@ -116,6 +117,20 @@ pub fn tool_definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "search_icons",
+            "Search UI icons",
+            "Search the bundled Lucide, Feather, Phosphor and Material Symbols icon catalogs by English name. Give preferredLibrary to keep one visual family across a screen: matches from that family are returned first, and other families are used only when it has no match. The response contains exact library/name pairs for create_node {type: icon} or icon.create. A document's current preferred family is in the agent snapshot.",
+            obj(
+                json!({
+                    "query": string("Icon meaning or name, for example home, settings, arrow-right, analytics"),
+                    "preferredLibrary": string("Preferred library, default lucide: lucide, feather, phosphor, material-symbols-outlined, material-symbols-rounded or material-symbols-sharp"),
+                    "limit": int("Maximum matches (default 12, maximum 40)"),
+                }),
+                &["query"],
+            ),
+            true,
+        ),
+        tool(
             "run_command",
             "Run command",
             "Execute one Lizard command by id with JSON params (ids and params from list_commands). Mutating commands are one undo step each; a failing command leaves the document unchanged. Examples: {\"command\":\"align.left\",\"params\":{\"ids\":[3,4]}}, {\"command\":\"layout.add\",\"params\":{\"ids\":[2],\"direction\":\"vertical\"}}, {\"command\":\"style.create\",\"params\":{\"type\":\"paint\",\"name\":\"Brand/Primary\",\"from\":5}}. Returns the command's result (creation commands return {\"id\"}). Programmatic calls never open dialogs.",
@@ -141,10 +156,10 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "create_node",
             "Create layer",
-            "Create a layer (engine `node.create`) and return its id and inspected properties. Coordinates are page units, y down; x/y are relative to the parent frame (the page when there is none, so then they are page coordinates; groups don't count). Inside an auto-layout frame the position is decided by the layout. The new layer becomes the selection.",
+            "Create a layer (engine `node.create`) and return its id and inspected properties. For UI icons use type icon with library and icon from search_icons; keep the preferred library across a screen. Coordinates are page units, y down; x/y are relative to the parent frame (the page when there is none, so then they are page coordinates; groups don't count). Inside an auto-layout frame the position is decided by the layout. The new layer becomes the selection.",
             obj(
                 json!({
-                    "type": {"type": "string", "enum": ["frame", "rectangle", "ellipse", "polygon", "star", "line", "arrow", "text", "vector", "section", "component", "slice"], "description": "Layer type"},
+                    "type": {"type": "string", "enum": ["frame", "rectangle", "ellipse", "polygon", "star", "line", "arrow", "text", "vector", "icon", "section", "component", "slice"], "description": "Layer type"},
                     "x": num("Left, relative to the parent frame (default 0)"),
                     "y": num("Top, relative to the parent frame (default 0)"),
                     "width": num("Width (default 100; text hugs its content unless width is set, which makes it wrap; for a vector with path, width/height scale the path, one alone keeping its proportion, and without them the path's own box is used)"),
@@ -154,6 +169,9 @@ pub fn tool_definitions() -> Vec<Value> {
                     "name": string("Layer name"),
                     "text": string("Characters, for type text"),
                     "path": string("SVG path data, for type vector (e.g. \"M0 0 L100 0 L50 80 Z\")"),
+                    "library": string("For type icon: the library ID returned by search_icons"),
+                    "icon": string("For type icon: the exact icon name returned by search_icons"),
+                    "color": string("For type icon: one colour for the vector paths, e.g. #334155"),
                     "props": {"type": "object", "description": "Any set_properties keys applied at creation, e.g. {\"fill\":\"#3366FF\",\"cornerRadius\":12,\"fontSize\":24,\"layout\":\"vertical\",\"gap\":8,\"padding\":16}"},
                 }),
                 &["type"],
@@ -411,6 +429,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
     }
     let r = match name {
         "list_commands" => list_commands(b, &a),
+        "search_icons" => search_icons(&a),
         "run_command" => run_command(b, &a),
         "batch" => batch(b, &a),
         "create_node" => create_node(b, &a),
@@ -514,6 +533,20 @@ fn list_commands(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResu
     Ok(ToolResult::text(out))
 }
 
+fn search_icons(a: &Map<String, Value>) -> Result<ToolResult, String> {
+    let query = req_s(a, "query")?;
+    let preferred = Some(s_arg(a, "preferredLibrary")?.unwrap_or("lucide"));
+    let limit = match a.get("limit") {
+        None | Some(Value::Null) => 12,
+        Some(value) => value.as_u64().filter(|limit| (1..=40).contains(limit)).ok_or("`limit` must be between 1 and 40")? as usize,
+    };
+    let result = figcraft_engine::icon_catalog::search(query, preferred, limit)?;
+    let families = figcraft_engine::icon_catalog::counts()?;
+    Ok(ToolResult::json(
+        &json!({"search": result, "libraries": families.iter().map(|(name, count)| json!({"id": name, "count": count})).collect::<Vec<_>>() }),
+    ))
+}
+
 fn run_command(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
     let cmd = req_s(a, "command")?;
     let params = match a.get("params") {
@@ -563,7 +596,10 @@ fn create_node(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult
         return Err("`props` must be an object".into());
     }
     let mut params = Map::new();
-    for k in ["type", "x", "y", "width", "height", "parent", "index", "name", "text", "path", "points", "closed", "props", "select"] {
+    for k in [
+        "type", "x", "y", "width", "height", "parent", "index", "name", "text", "path", "points", "closed", "library", "icon", "color", "props",
+        "select",
+    ] {
         if let Some(v) = a.get(k).filter(|v| !v.is_null()) {
             params.insert(k.into(), v.clone());
         }

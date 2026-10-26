@@ -36,7 +36,8 @@ reports both x/y relative to the parent frame (groups don't count) and absoluteB
 positioned by the layout (set layout, gap, padding, mainAlign, crossAlign, sizingH/sizingV instead). \
 Every menu item, panel action and shortcut is a command: find ids and params with list_commands (use a filter) \
 and run them with run_command, or several as one undo step with batch. Commands act on `ids` when given, else \
-on the selection; new layers become the selection. Colours are \"#RRGGBB\" or \"#RRGGBBAA\". Verify your work: \
+on the selection; new layers become the selection. Colours are \"#RRGGBB\" or \"#RRGGBBAA\". \
+For ordinary UI glyphs, search_icons with a preferredLibrary, then create_node type icon using the returned exact library/name. Keep one icon library across a screen; use a fallback family only when the preferred one has no suitable match. Verify your work: \
 inspect_document / get_node return the layer tree as JSON (check sizes, fills, layout, overrides), and \
 screenshot returns a PNG of the page or of given layers to look at. undo/redo step through history. \
 Resources: figcraft://document, figcraft://node/{id}, figcraft://command/{id}. prompts/list has workflows.";

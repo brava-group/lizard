@@ -34,6 +34,7 @@ pub mod file_access;
 pub mod fonts;
 pub mod guard;
 pub mod guides;
+pub mod icon_catalog;
 pub mod inspect;
 pub mod invite_links;
 pub mod keymap;
