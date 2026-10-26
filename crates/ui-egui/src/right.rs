@@ -22,6 +22,48 @@ pub(crate) fn common<T: PartialEq + Clone>(doc: &Document, ids: &[NodeId], f: im
     if it.all(|n| f(n) == first) { Some(first) } else { None }
 }
 
+/// A value for the edited points, including the ends of selected segments. The outer `None`
+/// means no points are selected; the inner `None` means their radii differ.
+fn selected_point_radius(doc: &Document, edit: &figcraft_engine::vectoredit::VectorEdit) -> Option<Option<f64>> {
+    let mut first = None;
+    let mut mixed = false;
+    for part in edit.parts() {
+        let Some(net) = figcraft_engine::vectoredit::network(doc, part.id) else { continue };
+        let mut points = part.vertices;
+        for segment in part.segments.iter().filter_map(|index| net.segments.get(*index)) {
+            points.extend([segment.a, segment.b]);
+        }
+        points.sort_unstable();
+        points.dedup();
+        for radius in points.iter().filter_map(|index| net.vertices.get(*index).map(|vertex| vertex.radius)) {
+            let radius = (radius * 100.0).round() / 100.0;
+            if let Some(value) = first {
+                mixed |= value != radius;
+            } else {
+                first = Some(radius);
+            }
+        }
+    }
+    first.map(|radius| (!mixed).then_some(radius))
+}
+
+fn layer_corner_radius(node: &Node) -> Option<f64> {
+    if let NodeKind::Vector { network } = &node.kind
+        && let Some(first) = network.vertices.first()
+    {
+        let radius = (first.radius * 100.0).round() / 100.0;
+        return network.vertices.iter().all(|point| (point.radius * 100.0).round() / 100.0 == radius).then_some(radius);
+    }
+    node.corners.uniform().map(|radius| (radius * 100.0).round() / 100.0)
+}
+
+fn layer_corner_radius_base(node: &Node) -> f64 {
+    match &node.kind {
+        NodeKind::Vector { network } => network.vertices.iter().map(|point| point.radius).fold(0.0, f64::max),
+        _ => node.corners.uniform().unwrap_or_else(|| node.corners.radii.iter().copied().fold(0.0, f64::max)),
+    }
+}
+
 impl FigApp {
     /// Set properties on `ids` (one undo step).
     pub fn set_props(&mut self, ids: &[NodeId], props: Value) {
@@ -913,30 +955,35 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     }
     let op_of = |n: &Node| (f64::from(n.opacity) * 100.0).round();
     let op = common(doc, sel, op_of);
-    let radius_ok = sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.has_corner_radius()));
+    let point_radius = app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref().and_then(|edit| selected_point_radius(doc, edit)));
+    let radius_ok = point_radius.is_some() || sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.has_corner_radius()));
     // Only rectangles and frames round each corner on its own.
     let indep_ok = radius_ok && sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.has_independent_corners()));
-    let r = common(doc, sel, |n| n.corners.uniform().map(|r| (r * 100.0).round() / 100.0));
+    let r = match point_radius {
+        Some(radius) => Some(radius),
+        None => common(doc, sel, layer_corner_radius),
+    };
     ui.add_space(3.0);
     row(ui, 24.0, |ui| {
         let lead = Lead::AppearanceIcon(AppearanceIcon::Opacity, tr("Opacity"));
         let e = crate::variable_ui::number_field_mixed(app, ui, &ids, "opacity", Id::new("ap_op"), lead, op, "%", col);
         app.field_of(&ids, "opacity", e, op_of, |v| json!((v / 100.0).clamp(0.0, 1.0)));
         if radius_ok {
-            let e = crate::variable_ui::number_field_mixed(
-                app,
-                ui,
-                &ids,
-                "cornerRadius",
-                Id::new("ap_rad"),
-                Lead::AppearanceIcon(AppearanceIcon::Corners, tr("Corner radius")),
-                r.flatten(),
-                "",
-                col,
-            );
-            // A layer with corners of its own starts from its largest.
-            let radius_of = |n: &Node| n.corners.uniform().unwrap_or_else(|| n.corners.radii.iter().copied().fold(0.0, f64::max));
-            app.field_of(&ids, "cornerRadius", e, radius_of, |v| json!(v.max(0.0)));
+            let lead = Lead::AppearanceIcon(AppearanceIcon::Corners, tr("Corner radius"));
+            if point_radius.is_some() {
+                let edit = widgets::number_field_mixed(ui, Id::new("ap_rad"), lead, r.flatten(), "", col, 1.0);
+                match edit {
+                    Some(Edit::All(field)) => app.field_run(Some(field), "vector.edit.cornerRadius", |v| json!({"radius": v.max(0.0)})),
+                    Some(Edit::Each(widgets::Rel::Add(v))) => { app.run("vector.edit.cornerRadius", json!({"add": v})); }
+                    Some(Edit::Each(widgets::Rel::Mul(v))) => { app.run("vector.edit.cornerRadius", json!({"multiply": v})); }
+                    Some(Edit::Each(widgets::Rel::Div(v))) => { app.run("vector.edit.cornerRadius", json!({"divide": v})); }
+                    None => {}
+                }
+            } else {
+                let e = crate::variable_ui::number_field_mixed(app, ui, &ids, "cornerRadius", Id::new("ap_rad"), lead, r.flatten(), "", col);
+                // A layer with different corner values starts relative edits from its largest.
+                app.field_of(&ids, "cornerRadius", e, layer_corner_radius_base, |v| json!(v.max(0.0)));
+            }
             let open = ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false);
             if indep_ok {
                 let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), Sense::click());

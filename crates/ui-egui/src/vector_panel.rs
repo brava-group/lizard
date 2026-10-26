@@ -1,5 +1,5 @@
 //! Design panel in vector edit mode: the selected points' position and dimensions (their
-//! transform box), corner radius, handle mirroring and the stroke's cap and join at them, or the
+//! transform box), handle mirroring and the stroke's cap and join at them, or the
 //! selected width point with the Variable width tool (in place of the layer's position and
 //! dimensions).
 
@@ -104,17 +104,10 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
         });
     }
     let vertex = |v: &usize| net.vertices.get(*v).copied();
-    let radius = same(pts.iter().map(|v| vertex(v).map(|x| x.radius))).flatten();
     let mirror = same(pts.iter().map(|v| net.mirroring(*v)));
     // A point's own cap and join (`Some(None)`: the layer's; `None`: mixed).
     let cap = same(pts.iter().map(|v| vertex(v).map(|x| x.cap))).flatten();
     let join = same(pts.iter().map(|v| vertex(v).map(|x| x.join))).flatten();
-    widgets::sublabels(ui, tr("Corner radius"), None);
-    row(ui, 32.0, |ui| {
-        let e =
-            widgets::number_field(ui, Id::new("vpt_radius"), Lead::Icon(Icon::CornerRadius, tr("Corner radius")), radius.map(round), "", col, 1.0);
-        point_field(app, "vector.edit.cornerRadius", e, |v| json!({"radius": v.max(0.0)}));
-    });
     widgets::sublabels(ui, tr("Mirroring"), None);
     row(ui, 32.0, |ui| {
         let label = |m: HandleMirroring| match m {

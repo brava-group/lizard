@@ -1002,10 +1002,31 @@ pub fn specs() -> Vec<CommandSpec> {
             delete_selection(s, parts, false)?;
             Ok(json!({"ok": true}))
         }),
-        spec!("vector.edit.cornerRadius", "Point corner radius", "{radius, vertices?}", true, |s, p| {
-            let r = req_num("vector.edit.cornerRadius", p, "radius")?.clamp(0.0, 1e6);
+        spec!("vector.edit.cornerRadius", "Point corner radius", "{radius|add|multiply|divide, vertices?}", true, |s, p| {
+            let cmd = "vector.edit.cornerRadius";
+            #[derive(Clone, Copy)]
+            enum RadiusEdit { Set(f64), Add(f64), Multiply(f64), Divide(f64) }
+            let edit = if let Some(radius) = num(p, "radius") {
+                RadiusEdit::Set(radius)
+            } else if let Some(add) = num(p, "add") {
+                RadiusEdit::Add(add)
+            } else if let Some(multiply) = num(p, "multiply") {
+                RadiusEdit::Multiply(multiply)
+            } else if let Some(divide) = num(p, "divide").filter(|v| *v != 0.0) {
+                RadiusEdit::Divide(divide)
+            } else {
+                return Err(bad(cmd, "provide radius, add, multiply or a nonzero divide"));
+            };
             let sets = point_sets(s, p, true)?;
-            edit_sets(s, sets, |net, v, _| set_points(net, v, |x| x.radius = r))?;
+            edit_sets(s, sets, |net, v, _| set_points(net, v, |x| {
+                let radius = match edit {
+                    RadiusEdit::Set(value) => value,
+                    RadiusEdit::Add(value) => x.radius + value,
+                    RadiusEdit::Multiply(value) => x.radius * value,
+                    RadiusEdit::Divide(value) => x.radius / value,
+                };
+                x.radius = radius.clamp(0.0, 1e6);
+            }))?;
             Ok(json!({"ok": true}))
         }),
         spec!(

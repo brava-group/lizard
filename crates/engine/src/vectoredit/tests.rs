@@ -51,6 +51,25 @@ pub(super) fn pt(x: f64, y: f64) -> Point {
 }
 
 #[test]
+fn corner_radius_updates_only_selected_points_and_undoes_together() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0, 2]}));
+    ex(&mut s, "vector.edit.cornerRadius", json!({"radius": 8}));
+    let radii = |s: &Session| net(s, id).vertices.iter().map(|v| v.radius).collect::<Vec<_>>();
+    assert_eq!(radii(&s), vec![8.0, 0.0, 8.0, 0.0]);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0, 1]}));
+    ex(&mut s, "vector.edit.cornerRadius", json!({"add": 2}));
+    assert_eq!(radii(&s), vec![10.0, 2.0, 8.0, 0.0]);
+    assert_eq!(s.doc().unwrap().node(id).unwrap().corners.radii, [0.0; 4], "the layer radius stays separate");
+    assert!(s.undo().unwrap());
+    assert_eq!(radii(&s), vec![8.0, 0.0, 8.0, 0.0]);
+    ex(&mut s, "vector.edit.cornerRadius", json!({"multiply": 2}));
+    assert_eq!(radii(&s), vec![16.0, 0.0, 8.0, 0.0]);
+    assert!(s.execute("vector.edit.cornerRadius", &json!({"divide": 0})).is_err());
+}
+
+#[test]
 fn pen_extends_branches_and_closes_paths() {
     let mut s = Session::new();
     let r = ex(&mut s, "vector.create", json!({"points": [[0, 0], [100, 0]], "closed": false}));

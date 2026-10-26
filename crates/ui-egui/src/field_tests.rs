@@ -213,6 +213,38 @@ fn type_into(u: &mut Ui, name: &str, text: &str, end: Key) {
     u.frame(vec![]);
 }
 
+#[test]
+fn appearance_corner_radius_edits_selected_vector_points() {
+    let mut s = Session::new();
+    let vector = id(s.execute("vector.create", &json!({"points": [[0, 0], [100, 0], [100, 100], [0, 100]], "closed": true})).unwrap());
+    s.execute("select.set", &json!({"ids": [vector]})).unwrap();
+    s.execute("vector.edit.begin", &json!({})).unwrap();
+    s.execute("vector.edit.select", &json!({"vertices": [0]})).unwrap();
+    let mut u = Ui::new(s);
+    u.ctx.enable_accesskit();
+    u.frame(vec![]);
+    let radii = |u: &Ui| {
+        figcraft_engine::vectoredit::network(u.app.session.doc().unwrap(), vector)
+            .unwrap()
+            .vertices
+            .iter()
+            .map(|point| point.radius)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(field(&mut u, "Corner radius").1, "0");
+    type_into(&mut u, "Corner radius", "8", Key::Enter);
+    assert_eq!(radii(&u), vec![8.0, 0.0, 0.0, 0.0]);
+    u.app.run("vector.edit.select", json!({"vertices": [0, 1]}));
+    assert_eq!(field(&mut u, "Corner radius").1, "Mixed");
+    type_into(&mut u, "Corner radius", "+2", Key::Enter);
+    assert_eq!(radii(&u), vec![10.0, 2.0, 0.0, 0.0]);
+    assert_eq!(u.app.session.doc().unwrap().node(vector).unwrap().corners.radii, [0.0; 4]);
+    u.app.run("vector.edit.end", json!({}));
+    assert_eq!(field(&mut u, "Corner radius").1, "Mixed");
+    type_into(&mut u, "Corner radius", "5", Key::Enter);
+    assert_eq!(radii(&u), vec![5.0; 4], "the field applies to the whole vector outside point edit mode");
+}
+
 /// Scrub field `name` by its label: `dx` points with `modifiers` held, then let go.
 fn scrub(u: &mut Ui, name: &str, dx: f32, modifiers: Modifiers) {
     let from = label(u, name);
