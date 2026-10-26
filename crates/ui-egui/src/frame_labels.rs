@@ -1,5 +1,5 @@
 //! Name labels of top-level frames and sections on the canvas. A frame's name sits just above its
-//! top edge and a section's name is a pill inside its top-left corner; on a rotated frame or
+//! top edge and a section's name is a pill above its top-left corner; on a rotated frame or
 //! section the label runs along the top edge as shown, turned with it, and is cut to the edge's
 //! length. Each label's area goes to the engine (`ToolState::labels`), so pressing a label selects
 //! and drags its frame like pressing the frame itself.
@@ -12,7 +12,7 @@ use figcraft_geom::Point;
 use crate::FigApp;
 use crate::canvas::status_badge;
 use crate::i18n::tr;
-use crate::theme::{ACCENT, COMPONENT, Tokens, regular, semibold};
+use crate::theme::{COMPONENT, Tokens, regular, semibold};
 
 /// Where a label goes on screen: the corner it starts at, the angle it reads along (radians,
 /// clockwise on screen) and the length of the frame's edge along that direction.
@@ -110,19 +110,27 @@ pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: Nod
     // Drawn upright at the corner, then turned with the frame.
     let from = painter.add(Shape::Noop);
     let area = if matches!(n.kind, NodeKind::Section { .. }) {
-        // Section titles are pills inside the top-left; a section hiding its contents shows an
-        // eye in its pill and says so in the middle.
+        // A section title sits outside the top edge and uses the section's own fill colour.
+        // A section hiding its contents shows an eye in its pill and says so in the middle.
         let hidden = n.hides_contents();
-        let fg = if selected { Color32::WHITE } else { t.text };
+        let fill = n.fills.iter().rev().find(|p| p.visible).and_then(|p| p.solid_color());
+        let bg = fill.map(|c| crate::theme::doc_c32(painter.ctx(), c.with_alpha(1.0))).unwrap_or(t.hover);
+        let colour = figcraft_color::Color::from_rgba8(bg.r(), bg.g(), bg.b(), 255);
+        let fg = if colour.contrast(figcraft_color::Color::WHITE) >= colour.contrast(figcraft_color::Color::BLACK) {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
         let eye = if hidden { 16.0 } else { 0.0 };
         let galley = crate::bidi::name_galley(painter, &n.name, semibold(11.0), fg, (edge.len - 16.0 - eye).clamp(20.0, 480.0));
-        let r = Rect::from_min_size(tl, galley.size() + vec2(16.0 + eye, 8.0));
-        painter.rect_filled(r, CornerRadius::same(4), if selected { ACCENT } else { t.hover });
+        let size = galley.size() + vec2(16.0 + eye, 10.0);
+        let r = Rect::from_min_size(pos2(tl.x, tl.y - size.y - 6.0), size);
+        painter.rect_filled(r, CornerRadius::same(4), bg);
         if hidden {
             let ir = Rect::from_center_size(pos2(r.min.x + 14.0, r.center().y), vec2(12.0, 12.0));
             crate::icons::paint(painter, ir, crate::icons::Icon::EyeOff, fg);
         }
-        painter.galley(r.min + vec2(8.0 + eye, 4.0), galley, fg);
+        painter.galley(r.min + vec2(8.0 + eye, 5.0), galley, fg);
         status_badge(painter, n, pos2(r.max.x + 6.0, r.center().y));
         r
     } else {

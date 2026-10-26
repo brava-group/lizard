@@ -156,3 +156,17 @@ fn a_sections_label_renames_it_and_a_click_elsewhere_commits() {
     assert!(u.app.ui.rename_label.is_none());
     assert_eq!(u.app.session.ds().unwrap().history.undo.len(), undo + 1, "one undo step");
 }
+
+#[test]
+fn a_sections_label_sits_above_its_top_edge() {
+    let mut s = Session::new();
+    let section = id(s.execute("node.create", &json!({"type": "section", "x": 0, "y": 0, "width": 300, "height": 200, "name": "Area"})).unwrap());
+    s.execute("select.set", &json!({"ids": [section]})).unwrap();
+    let mut u = Ui::new(s);
+    u.frame(vec![]);
+    let q = label(&u, section);
+    let top = local(&u, section, 0.0, 0.0);
+    assert!((q[0].x - top.x).abs() < 0.5, "{q:?} vs {top:?}");
+    assert!(q[3].y <= top.y - 5.5, "the whole pill remains above the section: {q:?} vs {top:?}");
+    assert!(u.app.session.shape_handles().is_empty(), "sections have no corner-radius handles");
+}
