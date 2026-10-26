@@ -1836,6 +1836,7 @@ version = "0.9.0"
 dependencies = [
  "arboard",
  "craft-window",
+ "dispatch2",
  "eframe",
  "egui",
  "env_logger",

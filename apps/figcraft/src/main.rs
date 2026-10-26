@@ -75,7 +75,10 @@ struct App {
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
-        traffic_lights::center_in_header();
+        {
+            traffic_lights::center_in_header();
+            figcraft_ui_egui::tabs::enable_deferred_maximize(ctx);
+        }
         {
             let mut slot = self.ctx_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if slot.is_none() {
@@ -132,6 +135,23 @@ impl eframe::App for App {
             }
         }
         services::parented(frame, || with_app(|fig| figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui))));
+        #[cfg(target_os = "macos")]
+        if figcraft_ui_egui::tabs::take_deferred_maximize(&ctx).is_some()
+            && let Some(window) = frame.winit_window().cloned()
+        {
+            // `NSWindow::zoom` blocks while AppKit animates. Running it during eframe's
+            // RedrawRequested handler prevents the intermediate resize events from reaching
+            // egui, so macOS stretches the old frame. The next main-queue turn runs after that
+            // handler has returned and allows AppKit to deliver each resize/redraw normally.
+            let ctx = ctx.clone();
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                // Use AppKit's actual state: the traffic-light button can also zoom this window,
+                // while egui-winit avoids polling maximized state on macOS during frames.
+                let maximized = !window.is_maximized();
+                window.set_maximized(maximized);
+                figcraft_ui_egui::tabs::set_native_maximized(&ctx, maximized);
+            });
+        }
         #[cfg(target_os = "macos")]
         {
             let snapshot = with_app(|fig| {

@@ -81,6 +81,22 @@ fn window_buttons_minimise_maximise_and_close() {
     assert!(u.frame(vec![]).contains(&ViewportCommand::Close));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn root_maximize_waits_for_native_main_queue() {
+    let mut u = Ui::new(TitleBar::Custom);
+    crate::tabs::enable_deferred_maximize(&u.ctx);
+    let commands = u.click(window_button(1));
+    assert!(!commands.contains(&ViewportCommand::Maximized(true)));
+    assert_eq!(crate::tabs::take_deferred_maximize(&u.ctx), Some(true));
+    assert_eq!(crate::tabs::take_deferred_maximize(&u.ctx), None);
+    // egui-winit deliberately does not query the native maximized state each frame on macOS.
+    // The next click must use the state kept by this bridge and restore the window.
+    let commands = u.click(window_button(1));
+    assert!(!commands.contains(&ViewportCommand::Maximized(false)));
+    assert_eq!(crate::tabs::take_deferred_maximize(&u.ctx), Some(false));
+}
+
 #[test]
 fn titlebar_close_asks_over_the_presenter_when_a_file_is_unsaved() {
     let mut u = Ui::new(TitleBar::Custom);

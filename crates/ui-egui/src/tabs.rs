@@ -351,8 +351,8 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
             if drag.double_clicked() {
-                let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                let max = window_maximized(ui);
+                request_maximized(ui.ctx(), !max);
             }
         }
         if let Some(i) = switch {
@@ -425,7 +425,7 @@ pub fn live_mark(app: &FigApp, uid: u64) -> Option<bool> {
 fn window_buttons(app: &mut FigApp, ui: &mut Ui, bar: Rect) -> f32 {
     const W: f32 = 46.0;
     let t = Tokens::get(ui.ctx());
-    let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+    let max = window_maximized(ui);
     let buttons = [
         (Icon::WinMinimize, tr("Minimize"), egui::ViewportCommand::Minimized(true)),
         (
@@ -453,11 +453,66 @@ fn window_buttons(app: &mut FigApp, ui: &mut Ui, bar: Rect) -> f32 {
             if close {
                 crate::windows::request_close(app, ui.ctx());
             } else {
-                ui.ctx().send_viewport_cmd(cmd);
+                if let egui::ViewportCommand::Maximized(maximized) = cmd {
+                    request_maximized(ui.ctx(), maximized);
+                } else {
+                    ui.ctx().send_viewport_cmd(cmd);
+                }
             }
         }
     }
     W * 3.0
+}
+
+/// macOS performs `NSWindow::zoom` synchronously. If eframe asks winit to maximize from a
+/// `RedrawRequested` callback, AppKit cannot deliver the animation's intermediate redraws until
+/// that callback returns and stretches the old frame instead. The desktop app consumes this
+/// request and schedules `Window::set_maximized` on the next main-queue turn. Headless tests,
+/// other platforms, and secondary windows continue through egui's viewport command.
+fn request_maximized(ctx: &egui::Context, maximized: bool) {
+    #[cfg(target_os = "macos")]
+    if ctx.viewport_id() == egui::ViewportId::ROOT
+        && ctx.data(|data| data.get_temp::<bool>(egui::Id::new("native_deferred_maximize_enabled"))) == Some(true)
+    {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("native_deferred_maximize_request"), maximized));
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("native_deferred_maximize_state"), maximized));
+        return;
+    }
+    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(maximized));
+}
+
+/// Enable native maximize dispatch for the root viewport of the macOS desktop app.
+#[cfg(target_os = "macos")]
+pub fn enable_deferred_maximize(ctx: &egui::Context) {
+    let reported = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new("native_deferred_maximize_enabled"), true);
+        if data.get_temp::<bool>(egui::Id::new("native_deferred_maximize_state")).is_none() {
+            data.insert_temp(egui::Id::new("native_deferred_maximize_state"), reported);
+        }
+    });
+}
+
+/// Return the pending root-window request once, after its UI has run.
+#[cfg(target_os = "macos")]
+pub fn take_deferred_maximize(ctx: &egui::Context) -> Option<bool> {
+    ctx.data_mut(|data| data.remove_temp(egui::Id::new("native_deferred_maximize_request")))
+}
+
+#[cfg(target_os = "macos")]
+pub fn set_native_maximized(ctx: &egui::Context, maximized: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("native_deferred_maximize_state"), maximized));
+    ctx.request_repaint();
+}
+
+fn window_maximized(ui: &Ui) -> bool {
+    #[cfg(target_os = "macos")]
+    if ui.ctx().viewport_id() == egui::ViewportId::ROOT
+        && let Some(state) = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("native_deferred_maximize_state")))
+    {
+        return state;
+    }
+    ui.input(|input| input.viewport().maximized.unwrap_or(false))
 }
 
 /// Invisible strips along a frameless window's edges and corners that resize it.
