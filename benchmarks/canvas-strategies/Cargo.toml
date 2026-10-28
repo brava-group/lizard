@@ -16,6 +16,7 @@ vello_gpu = "0.3.0"
 wgpu = "30.0.1"
 winit = "0.30.13"
 pollster = "0.4"
+png = "0.18"
 
 [profile.release]
 debug = 0

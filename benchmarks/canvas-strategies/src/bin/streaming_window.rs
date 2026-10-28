@@ -131,8 +131,18 @@ fn render_preview(
     bleed: u32,
     clear: [f32; 3],
 ) -> Result<wgpu::Texture, Box<dyn Error>> {
-    gpu.render_with_backdrop_blurs_indexed(doc, page, &preview_view(camera, bleed), clear, backdrop)?;
-    Ok(gpu.snapshot_submit())
+    let view = preview_view(camera, bleed);
+    let fallback = has_unhandled_effects_in_view(doc, &view);
+    let started = Instant::now();
+    if fallback {
+        let preview = render_view(doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect preview failed")?;
+        gpu.upload_premul(preview.data())?;
+    } else {
+        gpu.render_with_backdrop_blurs_indexed(doc, page, &view, clear, backdrop)?;
+    }
+    let snapshot = gpu.snapshot_submit();
+    println!("preview path={} render_submit_ms={:.2}", if fallback { "cpu_fidelity" } else { "gpu" }, started.elapsed().as_secs_f64() * 1000.0);
+    Ok(snapshot)
 }
 
 fn render_key(
@@ -368,7 +378,12 @@ impl State {
             Some(NodeKind::Page { background, .. }) => (f64::from(background.r), f64::from(background.g), f64::from(background.b)),
             _ => (1.0, 1.0, 1.0),
         };
-        let cameras = trace();
+        let trace_repeats = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--trace-repeats=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(1)
+            .clamp(1, 100);
+        let base_trace = trace();
+        let cameras: Vec<Camera> = (0..trace_repeats).flat_map(|_| base_trace.iter().copied()).collect();
         let capacity = std::env::args().find_map(|arg| arg.strip_prefix("--slots=").and_then(|value| value.parse::<usize>().ok())).unwrap_or(160);
         let stress = std::env::args().any(|arg| arg == "--stress");
         let warm_in_background = std::env::args().any(|arg| arg == "--background-warm");
@@ -409,7 +424,7 @@ impl State {
             verify_composition(&doc, page, &compositor, max_zoom, clear, "detail")?;
         }
         println!(
-            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} base_slots={} detail_slots={DETAIL_SLOTS} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps}",
+            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} base_slots={} detail_slots={DETAIL_SLOTS} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps} trace_repeats={trace_repeats}",
             size.width,
             size.height,
             window.scale_factor(),
@@ -812,7 +827,7 @@ impl State {
         }
         self.latencies.push(start.elapsed().as_secs_f64() * 1000.0);
         self.late.push(late_ms);
-        self.zoom_phase.push(self.frame >= 60);
+        self.zoom_phase.push(self.frame % 120 >= 60);
         self.frame += 1;
         Ok(())
     }

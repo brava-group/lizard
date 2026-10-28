@@ -25,6 +25,22 @@ fn color(c: Color, opacity: f32) -> peniko::Color {
     peniko::Color::new([c.r, c.g, c.b, c.a * opacity])
 }
 
+#[cfg(test)]
+mod effect_capability_tests {
+    use super::*;
+
+    #[test]
+    fn drop_shadow_uses_fidelity_fallback_until_gpu_output_matches() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Drop shadow capability");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Shadow", 20.0, 20.0, 80.0, 80.0)?;
+        doc.node_mut(id).ok_or("shadow node missing")?.effects.push(figcraft_doc::Effect::drop_shadow());
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 512, height: 512 };
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct ImageInfo {
     pub id: TextureId,
@@ -439,10 +455,15 @@ fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: b
                     && (!unsupported_only
                         || match &effect.kind {
                             // The GPU inner shadow is experimental; retain the fidelity fallback.
-                            EffectKind::InnerShadow(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::Glass(_) => true,
+                            // Vello's drop-shadow filter is currently omitted by this Metal path.
+                            // Keep the CPU tile until the output matches the document renderer.
+                            EffectKind::DropShadow(_)
+                            | EffectKind::InnerShadow(_)
+                            | EffectKind::Noise(_)
+                            | EffectKind::Texture(_)
+                            | EffectKind::Glass(_) => true,
                             EffectKind::BackgroundBlur(blur) => !gpu_backdrop || blur.is_progressive(),
                             EffectKind::LayerBlur(blur) => blur.is_progressive(),
-                            EffectKind::DropShadow(_) => false,
                         })
             })
             && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| bounds.intersect(rect).area() > 0.0)

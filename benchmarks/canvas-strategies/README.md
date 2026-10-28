@@ -22,17 +22,19 @@ CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
   --bin streaming_window -- --slots=240 --background-warm --interact-during-warm
 ```
 
-Measured on an Apple M1 Metal display at 5120 × 2100 and 75 Hz, using the 3,887-node, 77-frame workbook. Values are from one run per mode of the persisted benchmark source. Times start when the benchmark creates the window and end when it submits the indicated frame to the GPU; they are not photon-on-screen measurements. Repeat runs vary with system load.
+The measured fixture has 3,887 nodes and 77 frames. On an Apple M1, the current 240-slot atlas occupies 471.3 MiB. That is one fixed GPU allocation, not the process's total memory. The prototype's 60-trace run presented 7,199 of 7,200 scheduled camera states after preparation, with no missing base tiles or stale zoom-detail frames, one coalesced input, a 1,091 MiB peak macOS memory footprint, and a 36.54 ms p95 GPU queue completion. Initial preparation took 8.69 s in that run because drop shadows require a CPU fidelity fallback. The initial low-resolution preview also uses that fallback when needed: a later ten-trace run generated it in 36.48 ms and submitted the first visual frame at 0.77 s. Early zoom during preparation still showed 28 stale-detail frames in a separate run.
 
-| Mode | First image submitted | Initial full-resolution area | Pan area ready | All 238 tiles ready | Missing base frames | Stale zoom-detail frames |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Synchronous preparation | 4.78 s | 4.78 s | 4.78 s | 4.78 s | 0 | 0 |
-| Background preparation, trace after ready | 1.45 s | 2.70 s | 4.89 s | 6.29 s | 0 | 0 |
-| Background preparation, early trace | 1.15 s | 2.58 s | 4.68 s | 6.72 s | 0 | 26 |
+See [the dated measurement report](RESULTS-2026-10-28.md) for methods, memory, effect parity, edit latency, comparison limitations, and outstanding gates. The prototype is not the editor's default renderer.
 
-The background mode opens visibly earlier, but it does **not** meet a four-second full-ready target on this fixture. Early pan stays covered; early zoom still shows stale detail for roughly 0.3 seconds while detail tiles are generated. The early-interaction run coalesced 8 of 120 synthetic input states. The verified run had 0 missing/stale frames, 120 completed states, 35.27 ms p95 GPU queue completion, and 0 completions over 50 ms. Its pixel difference from the CPU reference was 0.891% at base zoom and 0.914% at detail zoom using a 4/255 threshold. The atlas occupies about 471 MiB, excluding other GPU allocations.
+Use `--trace-repeats=10` to replay the same 120 positions ten times and check whether retained memory stabilizes. On macOS, prefix the command with `/usr/bin/time -l` to capture the process's peak resident set size and peak memory footprint. The Metal atlas estimate above is only one allocation and should not be compared directly with either process-wide number.
 
-The overview is deliberately low resolution and may look soft until full-resolution tiles replace it. The prototype needs a sharp initial path, complete effect parity, a smaller memory budget, and a documented handoff before it can replace the current editor canvas. The benchmark uses a synthetic camera trace; it does not yet measure real pointer input or the editor's text-edit latency.
+Run the controlled effect parity probe with:
+
+```sh
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
+  --bin effect_parity
+```
 
 Run the focused regression tests with:
 

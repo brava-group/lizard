@@ -311,6 +311,7 @@ dependencies = [
  "figcraft-format",
  "figcraft-geom",
  "figcraft-render",
+ "png",
  "pollster",
  "vello_common",
  "vello_gpu",
