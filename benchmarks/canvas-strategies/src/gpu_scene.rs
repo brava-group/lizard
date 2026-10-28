@@ -6,8 +6,8 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use figcraft_color::{BlendMode, Color, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
-use figcraft_doc::{Document, EffectKind, Node, NodeId, NodeKind};
-use figcraft_geom::{Affine, Rect};
+use figcraft_doc::{Document, EffectKind, Node, NodeId, NodeKind, Shadow};
+use figcraft_geom::{Affine, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
 use vello_common::TextureId;
 use vello_common::filter_effects::{EdgeMode, Filter, FilterFunction, FilterPrimitive};
@@ -30,12 +30,55 @@ mod effect_capability_tests {
     use super::*;
 
     #[test]
-    fn drop_shadow_uses_fidelity_fallback_until_gpu_output_matches() -> Result<(), Box<dyn Error>> {
+    fn analytic_rectangle_shadow_is_gpu_supported_but_other_shapes_fallback() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Drop shadow capability");
         let page = doc.current_page.ok_or("new document has no page")?;
         let id = doc.create(page, NodeKind::Rectangle, "Shadow", 20.0, 20.0, 80.0, 80.0)?;
-        doc.node_mut(id).ok_or("shadow node missing")?.effects.push(figcraft_doc::Effect::drop_shadow());
+        let node = doc.node_mut(id).ok_or("shadow node missing")?;
+        node.fills.push(Paint::solid(Color::BLACK));
+        node.effects.push(figcraft_doc::Effect::drop_shadow());
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 512, height: 512 };
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+        let node = doc.node_mut(id).ok_or("shadow node missing")?;
+        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = node.effects.first_mut() {
+            shadow.spread = -2.0;
+        }
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
+            doc.node_mut(id).ok_or("shadow node missing")?.effects.first_mut()
+        {
+            shadow.spread = 0.0;
+            shadow.color.a = 0.7;
+        }
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
+            doc.node_mut(id).ok_or("shadow node missing")?.effects.first_mut()
+        {
+            shadow.color.a = 0.25;
+        }
+        doc.node_mut(id).ok_or("shadow node missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 0.0, 0.2))];
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+        Ok(())
+    }
+
+    #[test]
+    fn masks_and_unimplemented_paints_use_fidelity_fallback() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU content capability");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let group = doc.create(page, NodeKind::Group, "Masked group", 0.0, 0.0, 120.0, 120.0)?;
+        let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 0.0, 60.0, 120.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let content = doc.create(group, NodeKind::Rectangle, "Content", 0.0, 0.0, 120.0, 120.0)?;
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 512, height: 512 };
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = false;
+        doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Multiply;
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+
+        doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Normal;
+        doc.node_mut(content).ok_or("content missing")?.fills =
+            vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))];
         assert!(has_unhandled_effects_in_view(&doc, &view));
         Ok(())
     }
@@ -336,11 +379,72 @@ fn draw_inner_shadows(scene: &mut Scene, doc: &Document, node: &Node, transform:
     }
 }
 
+pub fn gpu_drop_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
+    let opaque_fill = node
+        .fills
+        .iter()
+        .any(|paint| paint.visible && paint.opacity >= 0.999 && matches!(paint.kind, PaintKind::Solid { color } if color.a >= 0.999));
+    let frame_is_opaque = matches!(node.kind, NodeKind::Frame) && opaque_fill;
+    let children_inside = if frame_is_opaque && !node.clip {
+        let radius = node.corners.uniform().unwrap_or(0.0).max(0.0);
+        let safe = Rect::new(radius, radius, node.width - radius, node.height - radius);
+        let inv = doc.world_transform(node.id).inverse();
+        node.children.iter().all(|child| {
+            doc.world_render_bounds(*child)
+                .map(|bounds| figcraft_geom::transform_rect_bbox(inv, bounds))
+                .is_some_and(|bounds| bounds.x0 >= safe.x0 && bounds.y0 >= safe.y0 && bounds.x1 <= safe.x1 && bounds.y1 <= safe.y1)
+        })
+    } else {
+        true
+    };
+    (matches!(node.kind, NodeKind::Rectangle) && node.children.is_empty() && (opaque_fill || shadow.spread > 0.0)
+        || frame_is_opaque && (node.clip || children_inside))
+        && node.width > 0.0
+        && node.height > 0.0
+        && node.strokes.is_empty()
+        && node.corners.uniform().is_some()
+        && node.corners.smoothing.abs() < 1e-6
+        && node.fills.iter().any(|paint| paint.visible && paint.opacity > 0.0)
+        && node.fills.iter().all(|paint| matches!(paint.kind, PaintKind::Solid { .. }) && paint.blend == BlendMode::Normal)
+        && shadow.blend == BlendMode::Normal
+        && shadow.color.a <= 0.25
+        && [shadow.radius, shadow.spread, shadow.offset.0, shadow.offset.1].into_iter().all(f64::is_finite)
+        && shadow.radius >= 0.0
+        && shadow.spread >= 0.0
+}
+
 fn draw_shadow(scene: &mut Scene, doc: &Document, node: &Node, transform: Affine) {
     let Some((path, rule)) = draw::node_outline(doc, node) else { return };
     for effect in &node.effects {
         let EffectKind::DropShadow(shadow) = &effect.kind else { continue };
         if !effect.visible {
+            continue;
+        }
+        if gpu_drop_shadow_supported(doc, node, shadow)
+            && let Some(radius) = node.corners.uniform()
+        {
+            let spread = shadow.spread;
+            let rect = Rect::new(
+                shadow.offset.0 - spread,
+                shadow.offset.1 - spread,
+                node.width + shadow.offset.0 + spread,
+                node.height + shadow.offset.1 + spread,
+            );
+            scene.set_transform(transform);
+            scene.reset_paint_transform();
+            scene.set_paint(color(shadow.color, 1.0));
+            if !shadow.show_behind {
+                let pad = spread + shadow.radius * 2.0 + shadow.offset.0.abs().max(shadow.offset.1.abs()) + 10.0;
+                let outer = Rect::new(-pad, -pad, node.width + pad, node.height + pad);
+                let mut clip = outer.to_path(0.1);
+                clip.extend(path.elements().iter().copied());
+                scene.set_fill_rule(Fill::EvenOdd);
+                scene.push_clip_path(&clip);
+            }
+            scene.fill_blurred_rounded_rect(&rect, (radius + spread) as f32, (shadow.radius / 2.0) as f32, false);
+            if !shadow.show_behind {
+                scene.pop_clip();
+            }
             continue;
         }
         scene.set_transform(transform * Affine::translate(shadow.offset));
@@ -438,7 +542,35 @@ pub fn has_unsupported_effects_in_view(doc: &Document, view: &View) -> bool {
 }
 
 pub fn has_unhandled_effects_in_view(doc: &Document, view: &View) -> bool {
-    has_matching_effects_in_view(doc, view, true, true)
+    if has_matching_effects_in_view(doc, view, true, true) {
+        return true;
+    }
+    let rect = view.page_rect();
+    doc.nodes().any(|node| {
+        if !node.visible {
+            return false;
+        }
+        let unsupported = node.is_mask
+            || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+            || node.fills.iter().chain(&node.strokes).any(|paint| {
+                paint.visible
+                    && paint.opacity > 0.0
+                    && (paint.blend != BlendMode::Normal
+                        || match &paint.kind {
+                            PaintKind::Gradient(gradient) => gradient.kind == GradientKind::Diamond,
+                            PaintKind::Image(image) => !image.filters.is_identity(),
+                            PaintKind::Pattern(_) | PaintKind::Shader(_) => true,
+                            PaintKind::Solid { .. } => false,
+                        })
+            });
+        unsupported
+            && (if node.is_mask {
+                node.parent.and_then(|parent| doc.world_render_bounds(parent))
+            } else {
+                figcraft_render::raster_bounds(doc, node.id)
+            })
+            .is_none_or(|bounds| bounds.intersect(rect).area() > 0.0)
+    })
 }
 
 fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: bool, gpu_backdrop: bool) -> bool {
@@ -454,14 +586,10 @@ fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: b
                 effect.visible
                     && (!unsupported_only
                         || match &effect.kind {
-                            // The GPU inner shadow is experimental; retain the fidelity fallback.
-                            // Vello's drop-shadow filter is currently omitted by this Metal path.
-                            // Keep the CPU tile until the output matches the document renderer.
-                            EffectKind::DropShadow(_)
-                            | EffectKind::InnerShadow(_)
-                            | EffectKind::Noise(_)
-                            | EffectKind::Texture(_)
-                            | EffectKind::Glass(_) => true,
+                            // Only the measured low-opacity analytic rectangle/frame shadow
+                            // uses the GPU. Other shadows retain the faithful CPU route.
+                            EffectKind::DropShadow(shadow) => !gpu_drop_shadow_supported(doc, node, shadow),
+                            EffectKind::InnerShadow(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::Glass(_) => true,
                             EffectKind::BackgroundBlur(blur) => !gpu_backdrop || blur.is_progressive(),
                             EffectKind::LayerBlur(blur) => blur.is_progressive(),
                         })

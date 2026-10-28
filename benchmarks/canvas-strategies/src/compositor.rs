@@ -221,6 +221,10 @@ impl Compositor {
         if capacity == 0 {
             return Err("tile atlas needs at least one slot".into());
         }
+        let max_layers = device.limits().max_texture_array_layers;
+        if capacity > max_layers {
+            return Err(format!("tile atlas requests {capacity} layers, but this GPU supports {max_layers}").into());
+        }
         let side = tile_size + bleed * 2;
         let atlas = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("bounded streaming tile atlas"),
@@ -533,6 +537,19 @@ impl Compositor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_atlas_returns_an_error_before_gpu_validation() -> Result<(), Box<dyn Error>> {
+        let instance = wgpu::Instance::default();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            return Ok(());
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+        let too_many = device.limits().max_texture_array_layers + 1;
+        let result = Compositor::empty_slots(64, 32, 16, 0, too_many, device, queue);
+        assert!(result.is_err());
+        Ok(())
+    }
 
     #[test]
     fn streaming_slot_moves_without_leaving_old_pixels_and_respects_zoom() -> Result<(), Box<dyn Error>> {

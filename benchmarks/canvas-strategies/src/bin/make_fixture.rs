@@ -10,7 +10,7 @@ use figcraft_doc::proto::{Action, Easing, Flow, Interaction, Transition, Trigger
 use figcraft_doc::{Document, ImageData, Node, NodeId, NodeKind};
 use figcraft_geom::Affine;
 
-const OUTPUT: &str = "examples/ultrawide-workbook.figcraft";
+const OUTPUT: &str = "benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft";
 
 fn add_source(dest: &mut Document, page: NodeId, path: &str, offset: (f64, f64)) -> Result<Vec<NodeId>, Box<dyn Error>> {
     let (source, warnings) = figcraft_format::load_file(Path::new(path))?;

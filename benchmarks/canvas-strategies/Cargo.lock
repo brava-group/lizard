@@ -313,6 +313,7 @@ dependencies = [
  "figcraft-render",
  "png",
  "pollster",
+ "rayon",
  "vello_common",
  "vello_gpu",
  "wgpu",

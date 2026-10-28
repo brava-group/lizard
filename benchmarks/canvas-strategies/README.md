@@ -1,6 +1,6 @@
 # GPU canvas background preparation experiment
 
-This standalone Rust package exercises a retained GPU tile compositor on a saved Lizard document. It is a benchmark prototype, not the editor's shipped renderer. Run it from the repository root on macOS with a Metal GPU. If `examples/ultrawide-workbook.figcraft` is missing, generate it from Lizard's example documents first:
+This standalone Rust package exercises a retained GPU tile compositor on a saved Lizard document. It is a benchmark prototype, not the editor's shipped renderer. Run it from the repository root on macOS with a Metal GPU. If `benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft` is missing, generate it from Lizard's example documents first:
 
 ```sh
 CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
@@ -14,7 +14,7 @@ CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
   --bin streaming_window -- --slots=240 --background-warm --verify
 ```
 
-`--background-warm` presents the window before preparing tiles. A GPU worker first generates a small overview, then fills the visible viewport, nearby pan tiles, and zoom detail tiles. The main thread installs completed textures in a bounded atlas and redraws in batches. Live tile requests take priority over planned work. A 100 ms redraw watchdog covers a missed initial or final wakeup. The ordinary pan/zoom trace starts after preparation; `--interact-during-warm` starts it when the base pan area is ready. The latter mode cannot be combined with `--verify`, whose pixel reference assumes that the initial camera's tiles remain resident.
+`--background-warm` presents the window before preparing tiles. A GPU worker first generates a small overview, then fills the visible viewport, nearby pan tiles, and zoom detail tiles. The main thread installs completed textures in a bounded atlas and redraws in batches. Live tile requests take priority over planned work, including when a tile was previously rendered and then evicted. A 100 ms redraw watchdog covers a missed initial or final wakeup. The ordinary pan/zoom trace starts after preparation; `--interact-during-warm` starts it when the initial visible base and detail tiles are ready. Add `--interact-at-preview` to begin at the first low-resolution overview. These early-interaction modes cannot be combined with `--verify`, whose pixel reference assumes that the initial camera's tiles remain resident.
 
 ```sh
 CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
@@ -22,7 +22,7 @@ CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
   --bin streaming_window -- --slots=240 --background-warm --interact-during-warm
 ```
 
-The measured fixture has 3,887 nodes and 77 frames. On an Apple M1, the current 240-slot atlas occupies 471.3 MiB. That is one fixed GPU allocation, not the process's total memory. The prototype's 60-trace run presented 7,199 of 7,200 scheduled camera states after preparation, with no missing base tiles or stale zoom-detail frames, one coalesced input, a 1,091 MiB peak macOS memory footprint, and a 36.54 ms p95 GPU queue completion. Initial preparation took 8.69 s in that run because drop shadows require a CPU fidelity fallback. The initial low-resolution preview also uses that fallback when needed: a later ten-trace run generated it in 36.48 ms and submitted the first visual frame at 0.77 s. Early zoom during preparation still showed 28 stale-detail frames in a separate run.
+The measured fixture has 3,887 nodes and 77 frames. On an Apple M1, the 240-slot atlas occupies 471.3 MiB. That is one fixed GPU allocation, not the process's total memory. A later four-worker asynchronous run completed background preparation in 3.89 s and presented a verified 120-position trace after preparation with no missing base or detail tiles. Its peak process memory footprint was 1.41 GiB. The seeded random trace found an eviction bug, now fixed, and a remaining 133 ms stale-detail streak in the best observed post-preparation configuration. Starting interaction at the first overview exposed a 1.27 s missing-base streak. The low-resolution overview is soft at full UltraWide resolution. The prototype is not ready to replace the editor's renderer yet.
 
 See [the dated measurement report](RESULTS-2026-10-28.md) for methods, memory, effect parity, edit latency, comparison limitations, and outstanding gates. The prototype is not the editor's default renderer.
 
@@ -35,6 +35,27 @@ CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
   --manifest-path benchmarks/canvas-strategies/Cargo.toml \
   --bin effect_parity
 ```
+
+The retained-tile scheduler and the broader parity probes can be repeated with:
+
+```sh
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
+  --bin streaming_window -- --slots=240 --background-warm --cpu-workers=4 --cpu-scheduler=async --verify
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
+  --bin streaming_window -- --slots=240 --background-warm --cpu-workers=4 --cpu-scheduler=async --interact-during-warm
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml --bin corpus_parity
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml --bin shadow_parity
+```
+
+Keep the benchmark window frontmost during timed runs. `--diagnose-routes` prints the number of tiles requiring the CPU fidelity path. The corpus parity probe saves selected PNG pairs below the ignored `target/canvas-strategies/parity/` directory.
+
+Use `--trace=random --trace-repeats=3` for the deterministic pointer-like pan and reversing-scroll stress trace. `--cpu-regions=2 --cpu-workers=4 --cpu-scheduler=async` enables faithful 2×2 CPU region jobs. `--region-inflight=2` limits simultaneous region work; `--slots=255 --detail-slots=95` gives the measured 500.6 MiB atlas that performed best in one sweep. The single texture-array atlas must fit the device's array-layer limit. See the report for the measured tradeoffs and remaining quality failures.
+
+`cargo run --release --manifest-path benchmarks/canvas-strategies/Cargo.toml --bin geometry_overlay_parity` measures a sharp geometry pass over a soft effect preview. Add `-- --icon` to test the saved Lizard icon. The workbook improves, but the icon loses inner-effect fidelity, so this remains a diagnostic experiment.
 
 Run the focused regression tests with:
 

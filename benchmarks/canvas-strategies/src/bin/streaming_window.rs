@@ -1,6 +1,6 @@
 //! Bounded retained tile cache measured through a real macOS Metal swapchain.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -13,6 +13,7 @@ use canvas_strategies_bench::compositor::Compositor;
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view};
 use figcraft_doc::{Document, NodeId, NodeKind};
 use figcraft_render::{Options, View, render_view};
+use rayon::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
@@ -49,6 +50,8 @@ struct Key {
     x: i32,
     y: i32,
 }
+
+type CpuDone = (Key, Result<Vec<u8>, String>, Instant);
 
 impl Key {
     fn scale(self) -> f64 {
@@ -105,9 +108,15 @@ fn pan_candidates(camera: Camera) -> Vec<Key> {
     keys
 }
 
-fn warm_plan(camera: Camera, base_slots: usize) -> Vec<Key> {
-    let mut keys: Vec<Key> = pan_candidates(camera).into_iter().take(base_slots).collect();
+fn warm_plan(camera: Camera, base_slots: usize, pan_before_detail: usize) -> Vec<Key> {
+    let visible_base = visible(camera, 0);
+    let mut keys: Vec<Key> = pan_candidates(camera).into_iter().filter(|key| visible_base.contains(key)).take(base_slots).collect();
+    let pan: Vec<Key> =
+        pan_candidates(camera).into_iter().filter(|key| !visible_base.contains(key)).take(base_slots.saturating_sub(visible_base.len())).collect();
+    let early = pan_before_detail.min(pan.len());
+    keys.extend(pan.iter().take(early).copied());
     keys.extend(visible(camera, 1));
+    keys.extend(pan.into_iter().skip(early));
     keys
 }
 
@@ -164,6 +173,82 @@ fn render_key(
     Ok(gpu.snapshot_submit())
 }
 
+/// CPU effect rasterization must not hold the presentation gate. The main thread can keep
+/// presenting cached tiles while the fallback tile is prepared, then briefly lock for upload.
+fn render_key_with_gate(
+    gpu: &mut GpuCanvas,
+    gate: &Mutex<()>,
+    doc: &Document,
+    page: NodeId,
+    backdrop: &BackdropIndex,
+    key: Key,
+    bleed: u32,
+    clear: [f32; 3],
+) -> Result<wgpu::Texture, Box<dyn Error>> {
+    let view = key.view(bleed);
+    if has_unhandled_effects_in_view(doc, &view) {
+        let tile = render_view(doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect fallback failed")?;
+        let _guard = gate.lock().map_err(|_| "GPU presentation gate poisoned")?;
+        gpu.upload_premul(tile.data())?;
+        Ok(gpu.snapshot_submit())
+    } else {
+        let _guard = gate.lock().map_err(|_| "GPU presentation gate poisoned")?;
+        render_key(gpu, doc, page, backdrop, key, bleed, clear)
+    }
+}
+
+/// Rasterize a compact group once, then extract independently addressable retained tiles.
+/// Every tile keeps its original bleed and pixel origin, so the compositor needs no special case.
+fn render_region_tiles(doc: &Document, page: NodeId, keys: &[Key], bleed: u32) -> Result<Vec<(Key, Vec<u8>)>, String> {
+    let first = keys.first().ok_or("empty CPU region")?;
+    let (min_x, max_x) = keys.iter().fold((first.x, first.x), |(lo, hi), key| (lo.min(key.x), hi.max(key.x)));
+    let (min_y, max_y) = keys.iter().fold((first.y, first.y), |(lo, hi), key| (lo.min(key.y), hi.max(key.y)));
+    let scale = first.scale();
+    let width = (max_x - min_x + 1) as u32 * TILE + bleed * 2;
+    let height = (max_y - min_y + 1) as u32 * TILE + bleed * 2;
+    let view = View {
+        origin: ((f64::from(min_x * TILE as i32) - f64::from(bleed)) / scale, (f64::from(min_y * TILE as i32) - f64::from(bleed)) / scale),
+        scale,
+        width,
+        height,
+    };
+    let image = render_view(doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU region render failed")?;
+    let side = (TILE + bleed * 2) as usize;
+    let mut result = Vec::with_capacity(keys.len());
+    for &key in keys {
+        let x = (key.x - min_x) as usize * TILE as usize;
+        let y = (key.y - min_y) as usize * TILE as usize;
+        let mut pixels = vec![0u8; side * side * 4];
+        for row in 0..side {
+            let from = ((y + row) * width as usize + x) * 4;
+            let to = row * side * 4;
+            pixels[to..to + side * 4].copy_from_slice(&image.data()[from..from + side * 4]);
+        }
+        result.push((key, pixels));
+    }
+    Ok(result)
+}
+
+fn spawn_region(pool: &rayon::ThreadPool, doc: &Arc<Document>, page: NodeId, keys: Vec<Key>, bleed: u32, done: &Sender<CpuDone>) {
+    let job_doc = Arc::clone(doc);
+    let job_tx = done.clone();
+    pool.spawn(move || {
+        let started = Instant::now();
+        match render_region_tiles(&job_doc, page, &keys, bleed) {
+            Ok(tiles) => {
+                for (key, pixels) in tiles {
+                    let _ = job_tx.send((key, Ok(pixels), started));
+                }
+            }
+            Err(error) => {
+                for key in keys {
+                    let _ = job_tx.send((key, Err(error.clone()), started));
+                }
+            }
+        }
+    });
+}
+
 fn verify_composition(
     doc: &Document,
     page: NodeId,
@@ -195,6 +280,40 @@ struct TileReady {
     ms: f64,
 }
 
+fn publish_tile(
+    key: Key,
+    result: Result<wgpu::Texture, String>,
+    ms: f64,
+    ready_tx: &Sender<Result<Ready, String>>,
+    window: &Window,
+    warm_set: &HashSet<Key>,
+    rendered: &mut HashSet<Key>,
+    warm_sent: &mut usize,
+) -> bool {
+    let new_warm_tile = result.is_ok() && warm_set.contains(&key) && !rendered.contains(&key);
+    let failed = result.is_err();
+    let ready = result.map(|texture| Ready::Tile(TileReady { key, texture, ms }));
+    if ready.is_ok() {
+        rendered.insert(key);
+    }
+    if ready_tx.send(ready).is_err() {
+        return false;
+    }
+    if new_warm_tile {
+        *warm_sent += 1;
+    }
+    if failed || !new_warm_tile || warm_sent.is_multiple_of(4) || *warm_sent == warm_set.len() {
+        window.request_redraw();
+    }
+    true
+}
+
+fn needs_render(key: Key, live: bool, rendered: &HashSet<Key>, pending: &HashSet<Key>) -> bool {
+    // `rendered` prevents duplicate warm-up work. A live request originates from the
+    // atlas, so a previously rendered tile can have been evicted and must be rebuilt.
+    !pending.contains(&key) && (live || !rendered.contains(&key))
+}
+
 enum Ready {
     Preview(wgpu::Texture),
     Tile(TileReady),
@@ -216,14 +335,14 @@ struct Cache {
 }
 
 impl Cache {
-    fn new(capacity: usize, atlas_offset: u32) -> Result<Self, Box<dyn Error>> {
-        if capacity < DETAIL_SLOTS + 56 {
-            return Err("cache needs at least 136 slots to cover the initial viewport".into());
+    fn new(capacity: usize, detail_slots: usize, atlas_offset: u32) -> Result<Self, Box<dyn Error>> {
+        if capacity < detail_slots + 56 {
+            return Err(format!("cache needs at least {} slots to cover the initial viewport", detail_slots + 56).into());
         }
         Ok(Self {
             slots: vec![Slot { key: None, last_touch: 0 }; capacity],
             resident: HashMap::new(),
-            base_slots: capacity - DETAIL_SLOTS,
+            base_slots: capacity - detail_slots,
             evictions: 0,
             forced_evictions: 0,
             atlas_offset,
@@ -289,6 +408,38 @@ fn trace() -> Vec<Camera> {
     result
 }
 
+fn random_trace() -> Vec<Camera> {
+    // A reproducible pointer-like walk with bounded acceleration. Keep the pan and
+    // scroll phases separate so the existing per-phase metrics remain comparable.
+    let mut seed = 0x91e1_0da5_83f4_22f1_u64;
+    let mut random = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / ((1_u64 << 53) as f64)
+    };
+    let mut result = Vec::with_capacity(120);
+    let mut center = (1600.0, 1150.0);
+    let mut velocity = (0.0, 0.0);
+    for _ in 0..60 {
+        velocity.0 = (velocity.0 * 0.72 + (random() - 0.5) * 110.0).clamp(-120.0, 120.0);
+        velocity.1 = (velocity.1 * 0.72 + (random() - 0.5) * 75.0).clamp(-80.0, 80.0);
+        center.0 = (center.0 + velocity.0).clamp(700.0, 2500.0);
+        center.1 = (center.1 + velocity.1).clamp(600.0, 1700.0);
+        result.push(Camera { center, zoom: SCALE });
+    }
+    let mut zoom = SCALE;
+    let mut direction = 1.0;
+    for i in 0..60 {
+        if i % 8 == 0 {
+            direction = -direction;
+        }
+        zoom = (zoom + direction * (0.012 + random() * 0.026)).clamp(SCALE, DETAIL);
+        result.push(Camera { center, zoom });
+    }
+    result
+}
+
 struct State {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -302,7 +453,7 @@ struct State {
     worker: Option<thread::JoinHandle<()>>,
     warm_start_signal: Option<Sender<()>>,
     cancel_worker: Arc<AtomicBool>,
-    inflight: Option<Key>,
+    inflight: HashSet<Key>,
     gpu_gate: Arc<Mutex<()>>,
     blit: wgpu::RenderPipeline,
     bind: wgpu::BindGroup,
@@ -317,6 +468,10 @@ struct State {
     gpu_done: Arc<Mutex<Vec<Option<f64>>>>,
     base_missing_frames: usize,
     detail_stale_frames: usize,
+    base_missing_streak: usize,
+    detail_stale_streak: usize,
+    max_base_missing_streak: usize,
+    max_detail_stale_streak: usize,
     missing_base_tiles: usize,
     missing_detail_tiles: usize,
     completed_jobs: usize,
@@ -325,6 +480,7 @@ struct State {
     warm_ms: f64,
     warm_in_background: bool,
     interact_during_warm: bool,
+    interact_at_preview: bool,
     interactive_started: bool,
     warm_remaining: HashSet<Key>,
     base_warm_remaining: HashSet<Key>,
@@ -368,7 +524,7 @@ impl State {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
-        let (doc, warnings) = figcraft_format::load_file(Path::new("examples/ultrawide-workbook.figcraft"))?;
+        let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
         if !warnings.is_empty() {
             return Err(format!("fixture warnings: {warnings:?}").into());
         }
@@ -382,17 +538,42 @@ impl State {
             .find_map(|arg| arg.strip_prefix("--trace-repeats=").and_then(|value| value.parse::<usize>().ok()))
             .unwrap_or(1)
             .clamp(1, 100);
-        let base_trace = trace();
+        let trace_kind = std::env::args().find_map(|arg| arg.strip_prefix("--trace=").map(str::to_owned)).unwrap_or_else(|| "sine".to_owned());
+        let base_trace = match trace_kind.as_str() {
+            "sine" => trace(),
+            "random" => random_trace(),
+            _ => return Err(format!("unknown trace: {trace_kind}").into()),
+        };
         let cameras: Vec<Camera> = (0..trace_repeats).flat_map(|_| base_trace.iter().copied()).collect();
         let capacity = std::env::args().find_map(|arg| arg.strip_prefix("--slots=").and_then(|value| value.parse::<usize>().ok())).unwrap_or(160);
+        let detail_slots = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--detail-slots=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(DETAIL_SLOTS);
         let stress = std::env::args().any(|arg| arg == "--stress");
         let warm_in_background = std::env::args().any(|arg| arg == "--background-warm");
         let interact_during_warm = std::env::args().any(|arg| arg == "--interact-during-warm");
+        let interact_at_preview = std::env::args().any(|arg| arg == "--interact-at-preview");
+        if interact_at_preview && !interact_during_warm {
+            return Err("--interact-at-preview requires --interact-during-warm".into());
+        }
         if interact_during_warm && (!warm_in_background || std::env::args().any(|arg| arg == "--verify")) {
             return Err("--interact-during-warm requires --background-warm and cannot run with --verify".into());
         }
         let stress_gap_ms =
             std::env::args().find_map(|arg| arg.strip_prefix("--stress-gap=").and_then(|value| value.parse::<u64>().ok())).unwrap_or(0);
+        let cpu_workers = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--cpu-workers=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(1)
+            .clamp(1, 8);
+        let cpu_async = std::env::args().any(|arg| arg == "--cpu-scheduler=async") && cpu_workers > 1;
+        let cpu_region_size =
+            std::env::args().find_map(|arg| arg.strip_prefix("--cpu-regions=").and_then(|value| value.parse::<i32>().ok())).unwrap_or(0).clamp(0, 4);
+        let cpu_regions = cpu_region_size >= 2 && cpu_async && warm_in_background;
+        let region_inflight = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--region-inflight=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(cpu_workers)
+            .clamp(1, cpu_workers);
+        let cpu_pool = if cpu_workers > 1 { Some(rayon::ThreadPoolBuilder::new().num_threads(cpu_workers).build()?) } else { None };
         let verify = std::env::args().any(|arg| arg == "--verify");
         let predict_steps =
             std::env::args().find_map(|arg| arg.strip_prefix("--predict=").and_then(|value| value.parse::<usize>().ok())).unwrap_or(0);
@@ -401,15 +582,22 @@ impl State {
         let mut gpu = GpuCanvas::from_device(device.clone(), queue.clone(), adapter.get_info().name, side, side);
         let image_count = gpu.register_images(&doc)?;
         println!("gpu_image_textures={image_count}");
-        let mut cache = Cache::new(capacity, 1)?;
+        let mut cache = Cache::new(capacity, detail_slots, 1)?;
         // Slot zero is a temporary low-resolution overview; full-resolution tiles cover it.
         let compositor = Compositor::empty_slots(WIDTH, HEIGHT, TILE, bleed, capacity as u32 + 1, device.clone(), queue.clone())?;
         let backdrop = BackdropIndex::new(&doc, page);
         let clear32 = [clear.0 as f32, clear.1 as f32, clear.2 as f32];
         let warm_start = Instant::now();
-        let warm_keys = warm_plan(cameras[0], cache.base_slots);
+        let pan_before_detail =
+            std::env::args().find_map(|arg| arg.strip_prefix("--pan-before-detail=").and_then(|value| value.parse::<usize>().ok())).unwrap_or(0);
+        let warm_keys = warm_plan(cameras[0], cache.base_slots, pan_before_detail);
         let detail_warm = visible(cameras[0], 1);
         let base_warm = warm_keys.len().saturating_sub(detail_warm.len());
+        if std::env::args().any(|arg| arg == "--diagnose-routes") {
+            let cpu_base = warm_keys.iter().filter(|key| key.tier == 0 && has_unhandled_effects_in_view(&doc, &key.view(bleed))).count();
+            let cpu_detail = warm_keys.iter().filter(|key| key.tier == 1 && has_unhandled_effects_in_view(&doc, &key.view(bleed))).count();
+            println!("planned_routes cpu_base={cpu_base}/{base_warm} cpu_detail={cpu_detail}/{}", detail_warm.len());
+        }
         if !warm_in_background {
             for key in &warm_keys {
                 let texture = render_key(&mut gpu, &doc, page, &backdrop, *key, bleed, clear32)?;
@@ -424,7 +612,7 @@ impl State {
             verify_composition(&doc, page, &compositor, max_zoom, clear, "detail")?;
         }
         println!(
-            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} base_slots={} detail_slots={DETAIL_SLOTS} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps} trace_repeats={trace_repeats}",
+            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} base_slots={} detail_slots={detail_slots} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps} trace={trace_kind} trace_repeats={trace_repeats} cpu_workers={cpu_workers} cpu_async={cpu_async} cpu_regions={cpu_region_size} region_inflight={region_inflight} pan_before_detail={pan_before_detail} interact_at_preview={interact_at_preview}",
             size.width,
             size.height,
             window.scale_factor(),
@@ -445,6 +633,7 @@ impl State {
         let worker_warm = if warm_in_background { warm_keys.clone() } else { Vec::new() };
         let worker_warm_set: HashSet<Key> = worker_warm.iter().copied().collect();
         let worker_window = Arc::clone(&window);
+        let (cpu_done_tx, cpu_done_rx) = mpsc::channel::<CpuDone>();
         let first_camera = cameras[0];
         // The quality reference needs the initial camera's full tile set resident.
         // An early interactive trace can evict those tiles before warm-up ends.
@@ -465,28 +654,60 @@ impl State {
                 }
                 worker_window.request_redraw();
             }
-            let mut warm_iter = worker_warm.into_iter();
+            let mut warm_iter = worker_warm.clone().into_iter().peekable();
             let mut rendered = HashSet::new();
+            let mut cpu_pending = HashSet::new();
+            let mut deferred_live = VecDeque::new();
+            let mut warm_regions = HashMap::<(u8, i32, i32), Vec<Key>>::new();
+            if cpu_regions {
+                for &key in &worker_warm {
+                    let group = (key.tier, key.x.div_euclid(cpu_region_size), key.y.div_euclid(cpu_region_size));
+                    warm_regions.entry(group).or_default().push(key);
+                }
+            }
             let mut warm_sent = 0usize;
             let stress_key = Key { tier: 0, x: 5, y: 3 };
             loop {
                 if worker_cancel.load(Ordering::Relaxed) {
                     break;
                 }
+                if cpu_async && let Ok((key, pixels, started)) = cpu_done_rx.try_recv() {
+                    cpu_pending.remove(&key);
+                    let result = pixels.and_then(|bytes| {
+                        let _guard = worker_gate.lock().map_err(|_| "GPU presentation gate poisoned".to_string())?;
+                        gpu.upload_premul(&bytes).map_err(|error| error.to_string())?;
+                        Ok(gpu.snapshot_submit())
+                    });
+                    if !publish_tile(
+                        key,
+                        result,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        &ready_tx,
+                        &worker_window,
+                        &worker_warm_set,
+                        &mut rendered,
+                        &mut warm_sent,
+                    ) {
+                        break;
+                    }
+                    continue;
+                }
                 let live = match request_rx.try_recv() {
                     Ok(key) => Some(key),
                     Err(mpsc::TryRecvError::Disconnected) => break,
-                    Err(mpsc::TryRecvError::Empty) => None,
+                    Err(mpsc::TryRecvError::Empty) => deferred_live.pop_front(),
                 };
-                let planned = if live.is_none() { warm_iter.find(|key| !rendered.contains(key)) } else { None };
+                let planned = if live.is_none() && (!cpu_async || cpu_pending.len() < cpu_workers * 2) {
+                    warm_iter.find(|key| !rendered.contains(key) && !cpu_pending.contains(key))
+                } else {
+                    None
+                };
+                let is_live = live.is_some();
                 let key = match live.or(planned).map(Ok).unwrap_or_else(|| request_rx.recv_timeout(Duration::from_millis(2))) {
                     Ok(key) => key,
                     Err(mpsc::RecvTimeoutError::Timeout) if stress => {
-                        {
-                            let Ok(_guard) = worker_gate.lock() else { break };
-                            if render_key(&mut gpu, &doc, page, &backdrop, stress_key, bleed, clear32).is_ok() {
-                                stress_jobs_worker.fetch_add(1, Ordering::Relaxed);
-                            }
+                        if render_key_with_gate(&mut gpu, &worker_gate, &doc, page, &backdrop, stress_key, bleed, clear32).is_ok() {
+                            stress_jobs_worker.fetch_add(1, Ordering::Relaxed);
                         }
                         if stress_gap_ms > 0 {
                             thread::sleep(Duration::from_millis(stress_gap_ms));
@@ -496,24 +717,123 @@ impl State {
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 };
+                if !needs_render(key, is_live, &rendered, &cpu_pending) {
+                    continue;
+                }
+                if cpu_regions && let Some(pool) = cpu_pool.as_ref() {
+                    let group = (key.tier, key.x.div_euclid(cpu_region_size), key.y.div_euclid(cpu_region_size));
+                    let group_side = cpu_region_size as usize;
+                    let estimated = warm_regions.get(&group).map_or(group_side * group_side, Vec::len);
+                    let pending_limit = region_inflight * group_side * group_side;
+                    if cpu_pending.len() + estimated > pending_limit {
+                        deferred_live.push_back(key);
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    let keys = warm_regions.remove(&group).unwrap_or_else(|| {
+                        let x0 = group.1 * cpu_region_size;
+                        let y0 = group.2 * cpu_region_size;
+                        (0..cpu_region_size).flat_map(|y| (0..cpu_region_size).map(move |x| Key { tier: key.tier, x: x0 + x, y: y0 + y })).collect()
+                    });
+                    let keys: Vec<Key> =
+                        keys.into_iter().filter(|tile| needs_render(*tile, is_live && *tile == key, &rendered, &cpu_pending)).collect();
+                    cpu_pending.extend(keys.iter().copied());
+                    spawn_region(pool, &doc, page, keys, bleed, &cpu_done_tx);
+                    continue;
+                }
+                if cpu_async
+                    && let Some(pool) = cpu_pool.as_ref()
+                    && has_unhandled_effects_in_view(&doc, &key.view(bleed))
+                {
+                    if cpu_pending.len() >= cpu_workers * 2 {
+                        deferred_live.push_back(key);
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    cpu_pending.insert(key);
+                    let job_doc = Arc::clone(&doc);
+                    let job_tx = cpu_done_tx.clone();
+                    let view = key.view(bleed);
+                    let started = Instant::now();
+                    pool.spawn(move || {
+                        let pixels = render_view(&job_doc, page, &view, &Options { lod: true, ..Default::default() })
+                            .map(|image| image.data().to_vec())
+                            .ok_or_else(|| "CPU effect fallback failed".to_string());
+                        let _ = job_tx.send((key, pixels, started));
+                    });
+                    continue;
+                }
+                if let Some(pool) = cpu_pool.as_ref()
+                    && !cpu_async
+                    && has_unhandled_effects_in_view(&doc, &key.view(bleed))
+                {
+                    let mut batch = vec![key];
+                    while batch.len() < cpu_workers {
+                        let Some(&next) = warm_iter.peek() else { break };
+                        if rendered.contains(&next) {
+                            warm_iter.next();
+                            continue;
+                        }
+                        if !has_unhandled_effects_in_view(&doc, &next.view(bleed)) {
+                            break;
+                        }
+                        batch.push(next);
+                        warm_iter.next();
+                    }
+                    let outputs: Vec<_> = pool.install(|| {
+                        batch
+                            .par_iter()
+                            .map(|&key| {
+                                let started = Instant::now();
+                                let view = key.view(bleed);
+                                let pixels = render_view(&doc, page, &view, &Options { lod: true, ..Default::default() })
+                                    .map(|image| image.data().to_vec())
+                                    .ok_or_else(|| "CPU effect fallback failed".to_string());
+                                (key, pixels, started.elapsed().as_secs_f64() * 1000.0)
+                            })
+                            .collect()
+                    });
+                    let mut published = true;
+                    for (key, pixels, cpu_ms) in outputs {
+                        let upload_started = Instant::now();
+                        let result = pixels.and_then(|bytes| {
+                            let _guard = worker_gate.lock().map_err(|_| "GPU presentation gate poisoned".to_string())?;
+                            gpu.upload_premul(&bytes).map_err(|error| error.to_string())?;
+                            Ok(gpu.snapshot_submit())
+                        });
+                        if !publish_tile(
+                            key,
+                            result,
+                            cpu_ms + upload_started.elapsed().as_secs_f64() * 1000.0,
+                            &ready_tx,
+                            &worker_window,
+                            &worker_warm_set,
+                            &mut rendered,
+                            &mut warm_sent,
+                        ) {
+                            published = false;
+                            break;
+                        }
+                    }
+                    if !published {
+                        break;
+                    }
+                    continue;
+                }
                 let started = Instant::now();
-                let Ok(_guard) = worker_gate.lock() else { break };
-                let result = render_key(&mut gpu, &doc, page, &backdrop, key, bleed, clear32)
-                    .map(|texture| Ready::Tile(TileReady { key, texture, ms: started.elapsed().as_secs_f64() * 1000.0 }))
-                    .map_err(|error| error.to_string());
-                let new_warm_tile = result.is_ok() && worker_warm_set.contains(&key) && !rendered.contains(&key);
-                if result.is_ok() {
-                    rendered.insert(key);
-                }
-                let failed = result.is_err();
-                if ready_tx.send(result).is_err() {
+                let result =
+                    render_key_with_gate(&mut gpu, &worker_gate, &doc, page, &backdrop, key, bleed, clear32).map_err(|error| error.to_string());
+                if !publish_tile(
+                    key,
+                    result,
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    &ready_tx,
+                    &worker_window,
+                    &worker_warm_set,
+                    &mut rendered,
+                    &mut warm_sent,
+                ) {
                     break;
-                }
-                if new_warm_tile {
-                    warm_sent += 1;
-                }
-                if failed || !new_warm_tile || warm_sent.is_multiple_of(4) || warm_sent == worker_warm_set.len() {
-                    worker_window.request_redraw();
                 }
             }
         });
@@ -592,7 +912,7 @@ impl State {
             worker: Some(worker),
             warm_start_signal: if warm_in_background { Some(start_tx) } else { None },
             cancel_worker,
-            inflight: None,
+            inflight: HashSet::new(),
             gpu_gate,
             blit,
             bind,
@@ -607,6 +927,10 @@ impl State {
             gpu_done,
             base_missing_frames: 0,
             detail_stale_frames: 0,
+            base_missing_streak: 0,
+            detail_stale_streak: 0,
+            max_base_missing_streak: 0,
+            max_detail_stale_streak: 0,
             missing_base_tiles: 0,
             missing_detail_tiles: 0,
             completed_jobs: 0,
@@ -615,6 +939,7 @@ impl State {
             warm_ms,
             warm_in_background,
             interact_during_warm,
+            interact_at_preview,
             interactive_started: false,
             warm_remaining: if warm_in_background { warm_keys.into_iter().collect() } else { HashSet::new() },
             base_warm_remaining,
@@ -675,30 +1000,37 @@ impl State {
                     first_visual_pending = true;
                 }
                 Ready::Tile(tile) => {
-                    if self.inflight == Some(tile.key) {
-                        self.inflight = None;
-                    }
+                    self.inflight.remove(&tile.key);
                     self.job_times.push(tile.ms);
                     self.completed_jobs += 1;
                     self.warm_remaining.remove(&tile.key);
                     self.base_warm_remaining.remove(&tile.key);
                     self.initial_visible_remaining.remove(&tile.key);
-                    if tile.key.tier == 0 && !pan_candidates(camera).contains(&tile.key) {
-                        self.discarded_jobs += 1;
-                    } else {
-                        self.cache.insert(tile.key, &tile.texture, &self.compositor, camera, self.frame)?;
-                        first_visual_pending = true;
-                    }
+                    // Keep a completed tile even when the camera moved away while it was
+                    // rendering. The trace may return to it, and no duplicate will be sent.
+                    self.cache.insert(tile.key, &tile.texture, &self.compositor, camera, self.frame)?;
+                    first_visual_pending = true;
                 }
             }
         }
-        if warming && self.interactive_ready_ms.is_none() && self.base_warm_remaining.is_empty() {
+        let initial_detail_ready = !self.warm_remaining.iter().any(|key| key.tier == 1);
+        let initial_view_ready = self.initial_visible_remaining.is_empty() && initial_detail_ready;
+        if warming && self.interactive_ready_ms.is_none() && initial_view_ready {
             self.interactive_ready_ms = Some(self.boot_started.elapsed().as_secs_f64() * 1000.0);
         }
-        if warming && self.interact_during_warm && !self.interactive_started && self.base_warm_remaining.is_empty() {
-            self.compositor.hide_gpu_layer(0)?;
+        if warming
+            && self.interact_during_warm
+            && !self.interactive_started
+            && (initial_view_ready || (self.interact_at_preview && self.first_visual_ms.is_some()))
+        {
+            if initial_view_ready {
+                self.compositor.hide_gpu_layer(0)?;
+            }
             self.started = Instant::now();
             self.interactive_started = true;
+        }
+        if self.interactive_started && initial_view_ready {
+            self.compositor.hide_gpu_layer(0)?;
         }
         if warming && self.warm_remaining.is_empty() {
             self.warm_ms = self.warm_started.map_or(0.0, |started| started.elapsed().as_secs_f64() * 1000.0);
@@ -722,9 +1054,15 @@ impl State {
             self.missing_detail_tiles += missing_detail;
             self.base_missing_frames += usize::from(missing_base > 0);
             self.detail_stale_frames += usize::from(missing_detail > 0);
+            self.base_missing_streak = if missing_base > 0 { self.base_missing_streak + 1 } else { 0 };
+            self.detail_stale_streak = if missing_detail > 0 { self.detail_stale_streak + 1 } else { 0 };
+            self.max_base_missing_streak = self.max_base_missing_streak.max(self.base_missing_streak);
+            self.max_detail_stale_streak = self.max_detail_stale_streak.max(self.detail_stale_streak);
         }
-        if tracing && self.inflight.is_none() {
-            let required = base.iter().chain(detail.iter()).copied().find(|key| !self.cache.contains(key));
+        if tracing {
+            // Queue all visible gaps up to a small bound. A single outstanding request
+            // serializes independent CPU effect tiles and leaves zoom detail stale.
+            let required = base.iter().chain(detail.iter()).copied().filter(|key| !self.cache.contains(key) && !self.inflight.contains(key));
             let predicted = self.last_camera.and_then(|(previous, previous_frame)| {
                 let elapsed_frames = self.frame.saturating_sub(previous_frame);
                 if self.predict_steps == 0 || elapsed_frames == 0 || self.frame >= 60 {
@@ -739,13 +1077,37 @@ impl State {
                     zoom: camera.zoom,
                 })
             });
-            let next = required
-                .or_else(|| predicted.and_then(|future| visible(future, 0).into_iter().find(|key| !self.cache.contains(key) && !base.contains(key))));
-            if let Some(key) = next
-                && let Some(request) = &self.request
-            {
-                request.send(key)?;
-                self.inflight = Some(key);
+            if let Some(request) = &self.request {
+                let mut candidates: Vec<Key> = required.collect();
+                if candidates.is_empty() {
+                    candidates.extend(
+                        predicted
+                            .into_iter()
+                            .flat_map(|future| visible(future, 0))
+                            .filter(|key| !self.cache.contains(key) && !base.contains(key) && !self.inflight.contains(key)),
+                    );
+                }
+                // The user can start scrolling immediately after a pan. Prepare the
+                // zoom tier for the *current* camera while there is spare bandwidth,
+                // rather than retaining only detail from the document's opening view.
+                if candidates.is_empty() && self.frame % 120 < 60 {
+                    let mut nearby: Vec<Key> =
+                        visible(camera, 1).into_iter().filter(|key| !self.cache.contains(key) && !self.inflight.contains(key)).collect();
+                    nearby.sort_by(|a, b| {
+                        let distance = |key: &Key| {
+                            let scale = key.scale();
+                            let x = (f64::from(key.x) + 0.5) * f64::from(TILE) / scale - camera.center.0;
+                            let y = (f64::from(key.y) + 0.5) * f64::from(TILE) / scale - camera.center.1;
+                            x * x + y * y
+                        };
+                        distance(a).total_cmp(&distance(b))
+                    });
+                    candidates.extend(nearby);
+                }
+                for key in candidates.into_iter().take(8usize.saturating_sub(self.inflight.len())) {
+                    request.send(key)?;
+                    self.inflight.insert(key);
+                }
             }
         }
         if tracing {
@@ -889,7 +1251,7 @@ impl State {
         jobs.sort_by(f64::total_cmp);
         let p95 = |values: &[f64]| -> f64 { if values.is_empty() { 0.0 } else { values[((values.len() - 1) as f64 * 0.95).ceil() as usize] } };
         println!(
-            "cache slots={} atlas_mib={:.1} warm_ms={:.1} stress={} stress_gap_ms={} stress_jobs={} predict_steps={} resident={} evictions={} forced_evictions={} completed_jobs={} discarded_jobs={} job_p95_ms={:.2} missing_base_frames={} stale_detail_frames={} missing_base_tile_frames={} missing_detail_tile_frames={} queue_done_samples={} queue_done_p95_ms={:.2} queue_done_over_50ms={}",
+            "cache slots={} atlas_mib={:.1} warm_ms={:.1} stress={} stress_gap_ms={} stress_jobs={} predict_steps={} resident={} evictions={} forced_evictions={} completed_jobs={} discarded_jobs={} job_p95_ms={:.2} missing_base_frames={} stale_detail_frames={} max_missing_base_streak_ms={:.1} max_stale_detail_streak_ms={:.1} missing_base_tile_frames={} missing_detail_tile_frames={} queue_done_samples={} queue_done_p95_ms={:.2} queue_done_over_50ms={}",
             self.cache.slots.len(),
             self.atlas_mib,
             self.warm_ms,
@@ -905,6 +1267,8 @@ impl State {
             p95(&jobs),
             self.base_missing_frames,
             self.detail_stale_frames,
+            self.max_base_missing_streak as f64 * 1000.0 / HZ,
+            self.max_detail_stale_streak as f64 * 1000.0 / HZ,
             self.missing_base_tiles,
             self.missing_detail_tiles,
             queue_done.len(),
@@ -993,7 +1357,7 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(state) = self.state.as_ref() else { return };
-        if state.first_present && (!state.warm_in_background || state.warm_remaining.is_empty()) {
+        if state.frame >= state.cameras.len() {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }
@@ -1022,14 +1386,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_live_request_rebuilds_an_evicted_tile() {
+        let key = Key { tier: 1, x: 4, y: 2 };
+        let rendered = HashSet::from([key]);
+        assert!(!needs_render(key, false, &rendered, &HashSet::new()));
+        assert!(needs_render(key, true, &rendered, &HashSet::new()));
+        assert!(!needs_render(key, true, &rendered, &HashSet::from([key])));
+    }
+
+    #[test]
     fn warm_plan_prioritizes_visible_tiles_and_keeps_zoom_tier_unique() {
         let camera = Camera { center: (1600.0, 1150.0), zoom: SCALE };
-        let plan = warm_plan(camera, 160);
+        let plan = warm_plan(camera, 160, 0);
         let visible_base = visible(camera, 0);
         assert!(plan.len() > visible_base.len());
         assert!(plan.iter().take(visible_base.len()).all(|key| visible_base.contains(key)));
         assert_eq!(plan.iter().copied().collect::<HashSet<_>>().len(), plan.len());
         assert!(visible(camera, 1).iter().all(|key| plan.contains(key)));
+        assert!(plan.iter().skip(visible_base.len()).take(visible(camera, 1).len()).all(|key| key.tier == 1));
     }
 
     #[test]
