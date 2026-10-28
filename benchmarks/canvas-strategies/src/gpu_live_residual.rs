@@ -43,6 +43,9 @@ pub struct GpuLiveResidual {
     pipeline: wgpu::RenderPipeline,
     surface_pipeline: Option<wgpu::RenderPipeline>,
     bind: wgpu::BindGroup,
+    alt_bind: Option<wgpu::BindGroup>,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     mapping: wgpu::Buffer,
     width: u32,
     height: u32,
@@ -183,11 +186,47 @@ impl GpuLiveResidual {
         };
         let pipeline = make_pipeline(wgpu::TextureFormat::Rgba8Unorm, "live residual offscreen");
         let surface_pipeline = surface_format.map(|format| make_pipeline(format, "live residual surface"));
-        Self { device, queue, low_full, low_base, output, output_view, pipeline, surface_pipeline, bind, mapping, width, height, low }
+        Self {
+            device,
+            queue,
+            low_full,
+            low_base,
+            output,
+            output_view,
+            pipeline,
+            surface_pipeline,
+            bind,
+            alt_bind: None,
+            layout,
+            sampler,
+            mapping,
+            width,
+            height,
+            low,
+        }
+    }
+
+    /// Reuse the uploaded correction while switching between live and atlas geometry.
+    pub fn set_alt_sharp(&mut self, sharp: &wgpu::TextureView) {
+        self.alt_bind = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("atlas geometry residual bind group"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(sharp) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.low_full.create_view(&Default::default())) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.low_base.create_view(&Default::default())) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: self.mapping.as_entire_binding() },
+            ],
+        }));
     }
 
     pub fn output_view(&self) -> &wgpu::TextureView {
         &self.output_view
+    }
+
+    pub fn low_views(&self) -> (wgpu::TextureView, wgpu::TextureView) {
+        (self.low_full.create_view(&Default::default()), self.low_base.create_view(&Default::default()))
     }
 
     pub fn upload(&self, full: &Pixmap, base: &Pixmap) -> Result<(), Box<dyn Error>> {
@@ -205,7 +244,7 @@ impl GpuLiveResidual {
         Ok(())
     }
 
-    fn render_target(&self, camera: &View, target: &wgpu::TextureView, pipeline: &wgpu::RenderPipeline) {
+    fn render_target(&self, camera: &View, target: &wgpu::TextureView, pipeline: &wgpu::RenderPipeline, bind: &wgpu::BindGroup) {
         let mut data = Vec::with_capacity(48);
         for value in [
             camera.origin.0 as f32,
@@ -240,19 +279,32 @@ impl GpuLiveResidual {
                 multiview_mask: None,
             });
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_bind_group(0, bind, &[]);
             pass.draw(0..6, 0..1);
         }
         self.queue.submit([encoder.finish()]);
     }
 
     pub fn render_submit(&self, camera: &View) {
-        self.render_target(camera, &self.output_view, &self.pipeline);
+        self.render_target(camera, &self.output_view, &self.pipeline, &self.bind);
+    }
+
+    pub fn render_submit_alt(&self, camera: &View) -> Result<(), Box<dyn Error>> {
+        let bind = self.alt_bind.as_ref().ok_or("alternate sharp geometry not configured")?;
+        self.render_target(camera, &self.output_view, &self.pipeline, bind);
+        Ok(())
     }
 
     pub fn render_submit_to_surface(&self, camera: &View, target: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
         let pipeline = self.surface_pipeline.as_ref().ok_or("surface pipeline unavailable")?;
-        self.render_target(camera, target, pipeline);
+        self.render_target(camera, target, pipeline, &self.bind);
+        Ok(())
+    }
+
+    pub fn render_submit_alt_to_surface(&self, camera: &View, target: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+        let pipeline = self.surface_pipeline.as_ref().ok_or("surface pipeline unavailable")?;
+        let bind = self.alt_bind.as_ref().ok_or("alternate sharp geometry not configured")?;
+        self.render_target(camera, target, pipeline, bind);
         Ok(())
     }
 

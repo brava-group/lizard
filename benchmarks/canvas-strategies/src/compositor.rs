@@ -4,7 +4,7 @@ use std::error::Error;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use figcraft_render::Pixmap;
+use figcraft_render::{Pixmap, View};
 
 const SHADER: &str = r#"
 struct Camera { origin: vec2<f32>, zoom: f32, width: f32, height: f32,
@@ -36,6 +36,48 @@ struct Out { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32>,
 }
 "#;
 
+const RESIDUAL_SHADER: &str = r#"
+struct Camera { origin: vec2<f32>, zoom: f32, width: f32, height: f32,
+                side: f32, bleed: f32, tile_size: f32 };
+struct Tile { origin: vec2<f32>, span: f32, layer: u32, min_zoom: f32, _pad: f32 };
+struct Low { origin: vec2<f32>, scale: f32, _pad: f32, size: vec2<f32>, _pad2: vec2<f32> };
+@group(0) @binding(0) var atlas: texture_2d_array<f32>;
+@group(0) @binding(1) var<storage, read> tiles: array<Tile>;
+@group(0) @binding(2) var<uniform> camera: Camera;
+@group(0) @binding(3) var linear_sampler: sampler;
+@group(0) @binding(4) var low_full: texture_2d<f32>;
+@group(0) @binding(5) var low_base: texture_2d<f32>;
+@group(0) @binding(6) var<uniform> low: Low;
+struct Out { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32>,
+             @location(1) @interpolate(flat) layer: u32, @location(2) world: vec2<f32>,
+             @location(3) @interpolate(flat) min_zoom: f32 };
+@vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Out {
+    let quad = array<vec2<f32>, 6>(vec2<f32>(0.0,0.0),vec2<f32>(1.0,0.0),vec2<f32>(0.0,1.0),
+                                    vec2<f32>(0.0,1.0),vec2<f32>(1.0,0.0),vec2<f32>(1.0,1.0));
+    let local = quad[vi];
+    let tile = tiles[ii];
+    let world = tile.origin + local * tile.span;
+    let px = (world - camera.origin) * camera.zoom;
+    var out: Out;
+    out.position = vec4<f32>(px.x / camera.width * 2.0 - 1.0, 1.0 - px.y / camera.height * 2.0, 0.0, 1.0);
+    out.uv = (local * camera.tile_size + vec2<f32>(camera.bleed)) / camera.side;
+    out.layer = tile.layer;
+    out.world = world;
+    out.min_zoom = tile.min_zoom;
+    return out;
+}
+@fragment fn fs(input: Out) -> @location(0) vec4<f32> {
+    if (camera.zoom < input.min_zoom) { discard; }
+    let base = textureSample(atlas, linear_sampler, input.uv, i32(input.layer));
+    let low_uv = (input.world - low.origin) * low.scale / low.size;
+    if (any(low_uv < vec2<f32>(0.0)) || any(low_uv >= vec2<f32>(1.0))) {
+        return base;
+    }
+    let effect = textureSample(low_full, linear_sampler, low_uv) - textureSample(low_base, linear_sampler, low_uv);
+    return clamp(base + effect, vec4<f32>(0.0), vec4<f32>(1.0));
+}
+"#;
+
 pub struct Tile<'a> {
     pub x: i32,
     pub y: i32,
@@ -62,6 +104,9 @@ pub struct Compositor {
     atlas: wgpu::Texture,
     pipeline: wgpu::RenderPipeline,
     surface_pipeline: Option<wgpu::RenderPipeline>,
+    residual_surface_pipeline: Option<wgpu::RenderPipeline>,
+    residual_offscreen_pipeline: Option<wgpu::RenderPipeline>,
+    residual_bind: Option<wgpu::BindGroup>,
     layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
     bind: wgpu::BindGroup,
@@ -373,6 +418,9 @@ impl Compositor {
             atlas,
             pipeline,
             surface_pipeline: None,
+            residual_surface_pipeline: None,
+            residual_offscreen_pipeline: None,
+            residual_bind: None,
             layout,
             shader,
             bind,
@@ -444,6 +492,31 @@ impl Compositor {
         self.enqueue_gpu_tile(layer, source)
     }
 
+    /// Install an opaque CPU-rendered geometry tile in a reusable GPU atlas slot.
+    pub fn update_cpu_layer(&self, layer: u32, origin: (f32, f32), span: f32, image: &Pixmap) -> Result<(), Box<dyn Error>> {
+        if layer >= self.count || image.width() != self.tile_size + self.bleed * 2 || image.height() != self.tile_size + self.bleed * 2 {
+            return Err("invalid CPU tile dimensions or atlas slot".into());
+        }
+        let mut bytes = [0u8; 24];
+        bytes[0..4].copy_from_slice(&origin.0.to_le_bytes());
+        bytes[4..8].copy_from_slice(&origin.1.to_le_bytes());
+        bytes[8..12].copy_from_slice(&span.to_le_bytes());
+        bytes[12..16].copy_from_slice(&layer.to_le_bytes());
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.atlas,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
+                aspect: wgpu::TextureAspect::All,
+            },
+            image.data(),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(image.width() * 4), rows_per_image: Some(image.height()) },
+            wgpu::Extent3d { width: image.width(), height: image.height(), depth_or_array_layers: 1 },
+        );
+        self.queue.write_buffer(&self.instances, u64::from(layer) * 24, &bytes);
+        Ok(())
+    }
+
     /// Hide a filled atlas slot without copying or destroying its texture.
     pub fn hide_gpu_layer(&self, layer: u32) -> Result<(), Box<dyn Error>> {
         if layer >= self.count {
@@ -502,13 +575,159 @@ impl Compositor {
         }));
     }
 
+    /// Fuse atlas sampling and the low-resolution effect correction into one pass.
+    pub fn enable_residual_surface(&mut self, format: wgpu::TextureFormat, full: &wgpu::TextureView, base: &wgpu::TextureView, low: &View) {
+        let layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("atlas residual inputs"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+            ],
+        });
+        let mut low_data = Vec::with_capacity(32);
+        for value in [low.origin.0 as f32, low.origin.1 as f32, low.scale as f32, 0.0, low.width as f32, low.height as f32, 0.0, 0.0] {
+            low_data.extend_from_slice(&value.to_le_bytes());
+        }
+        let low_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("atlas residual low mapping"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&low_buffer, 0, &low_data);
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let atlas_view =
+            self.atlas.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("atlas residual bind group"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: self.instances.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: self.camera.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(full) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(base) },
+                wgpu::BindGroupEntry { binding: 6, resource: low_buffer.as_entire_binding() },
+            ],
+        });
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("atlas residual shader"),
+            source: wgpu::ShaderSource::Wgsl(RESIDUAL_SHADER.into()),
+        });
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("atlas residual pipeline layout"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let make_pipeline = |format, label| {
+            self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        self.residual_surface_pipeline = Some(make_pipeline(format, "atlas residual direct surface"));
+        self.residual_offscreen_pipeline = Some(make_pipeline(wgpu::TextureFormat::Rgba8Unorm, "atlas residual offscreen"));
+        self.residual_bind = Some(bind);
+    }
+
+    pub fn render_residual_submit_to_surface(
+        &self,
+        origin: (f64, f64),
+        zoom: f64,
+        clear: (f64, f64, f64),
+        target: &wgpu::TextureView,
+    ) -> Result<f64, Box<dyn Error>> {
+        let pipeline = self.residual_surface_pipeline.as_ref().ok_or("atlas residual surface pipeline unavailable")?;
+        let bind = self.residual_bind.as_ref().ok_or("atlas residual bind unavailable")?;
+        self.render_submit_target(origin, zoom, clear, false, target, pipeline, bind)
+    }
+
+    pub fn render_residual_submit(&self, origin: (f64, f64), zoom: f64, clear: (f64, f64, f64)) -> Result<f64, Box<dyn Error>> {
+        let pipeline = self.residual_offscreen_pipeline.as_ref().ok_or("atlas residual offscreen pipeline unavailable")?;
+        let bind = self.residual_bind.as_ref().ok_or("atlas residual bind unavailable")?;
+        self.render_submit_target(origin, zoom, clear, false, &self.target_view, pipeline, bind)
+    }
+
     pub fn render_submit_over_to_surface(&self, origin: (f64, f64), zoom: f64, target: &wgpu::TextureView) -> Result<f64, Box<dyn Error>> {
         let pipeline = self.surface_pipeline.as_ref().ok_or("surface compositor pipeline unavailable")?;
-        self.render_submit_target(origin, zoom, (0.0, 0.0, 0.0), true, target, pipeline)
+        self.render_submit_target(origin, zoom, (0.0, 0.0, 0.0), true, target, pipeline, &self.bind)
     }
 
     fn render_submit_with_background(&self, origin: (f64, f64), zoom: f64, clear: (f64, f64, f64), preserve: bool) -> Result<f64, Box<dyn Error>> {
-        self.render_submit_target(origin, zoom, clear, preserve, &self.target_view, &self.pipeline)
+        self.render_submit_target(origin, zoom, clear, preserve, &self.target_view, &self.pipeline, &self.bind)
     }
 
     fn render_submit_target(
@@ -519,6 +738,7 @@ impl Compositor {
         preserve: bool,
         target: &wgpu::TextureView,
         pipeline: &wgpu::RenderPipeline,
+        bind: &wgpu::BindGroup,
     ) -> Result<f64, Box<dyn Error>> {
         let mut data = Vec::with_capacity(32);
         for value in [
@@ -558,7 +778,7 @@ impl Compositor {
                 multiview_mask: None,
             });
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_bind_group(0, bind, &[]);
             pass.draw(0..6, 0..self.count);
         }
         self.queue.submit([encoder.finish()]);

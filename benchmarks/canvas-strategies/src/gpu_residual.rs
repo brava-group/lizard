@@ -10,6 +10,7 @@ const SHADER: &str = r#"
 @group(0) @binding(1) var low_full: texture_2d<f32>;
 @group(0) @binding(2) var low_delta: texture_2d<f32>;
 @group(0) @binding(3) var linear_sampler: sampler;
+@group(0) @binding(5) var sharp_sampler: sampler;
 struct Mapping { camera: vec4<f32>, source: vec4<f32>, dimensions: vec4<f32> };
 @group(0) @binding(4) var<uniform> mapping: Mapping;
 struct Out { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
@@ -32,7 +33,7 @@ struct Out { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> 
     let layer = select(0, 1, source_pixel.x >= split);
     let tile_width = split + 2.0;
     let tile_x = select(source_pixel.x, source_pixel.x - split + 2.0, layer == 1);
-    let base = textureSample(sharp, linear_sampler, vec2<f32>(tile_x / tile_width, uv.y), layer);
+    let base = textureSample(sharp, sharp_sampler, vec2<f32>(tile_x / tile_width, uv.y), layer);
     if (mapping.source.w > 0.5) {
         return base;
     }
@@ -166,6 +167,12 @@ impl GpuResidual {
                         ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ])
                 .collect::<Vec<_>>(),
         });
@@ -174,6 +181,9 @@ impl GpuResidual {
             mag_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let sharp_filter = if std::env::args().any(|arg| arg == "--sharp-nearest") { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        let sharp_sampler =
+            device.create_sampler(&wgpu::SamplerDescriptor { min_filter: sharp_filter, mag_filter: sharp_filter, ..Default::default() });
         let mapping = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("effect residual camera mapping"),
             size: 48,
@@ -194,6 +204,7 @@ impl GpuResidual {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&views[2]) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
                 wgpu::BindGroupEntry { binding: 4, resource: mapping.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&sharp_sampler) },
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

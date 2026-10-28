@@ -6,12 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use canvas_strategies_bench::geometry_atlas::{self, GeometryAtlas};
 use canvas_strategies_bench::gpu_live_residual::GpuLiveResidual;
 use canvas_strategies_bench::gpu_residual::GpuResidual;
 use canvas_strategies_bench::gpu_scene::{GpuCanvas, make_scene_with_images};
 use figcraft_doc::{EffectKind, NodeKind};
 use figcraft_render::{Options, Pixmap, View, render_view};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowId};
@@ -83,6 +85,17 @@ fn trace() -> Vec<Camera> {
     result
 }
 
+fn excursion_trace() -> Vec<Camera> {
+    let mut cameras = trace();
+    for (index, camera) in cameras.iter_mut().enumerate() {
+        let phase = index % 60;
+        let progress = if phase < 30 { f64::from(phase as u32) / 30.0 } else { f64::from((60 - phase) as u32) / 30.0 };
+        camera.center.0 += 1700.0 * progress;
+        camera.center.1 += 500.0 * progress;
+    }
+    cameras
+}
+
 fn source_contains(source: &View, camera: &View) -> bool {
     let source_right = source.origin.0 + f64::from(source.width) / source.scale;
     let source_bottom = source.origin.1 + f64::from(source.height) / source.scale;
@@ -112,6 +125,8 @@ struct State {
     clear: [f32; 3],
     gpu: GpuCanvas,
     residual: GpuLiveResidual,
+    geometry_atlas: Option<GeometryAtlas>,
+    atlas_one_pass: bool,
     cached: Option<GpuResidual>,
     cached_source: Option<View>,
     cached_two_pass: bool,
@@ -119,11 +134,32 @@ struct State {
     blit_bind: Option<wgpu::BindGroup>,
     cached_frames: usize,
     live_frames: usize,
+    atlas_frames: usize,
+    atlas_first_ms: Option<f64>,
+    atlas_by_repeat: Vec<usize>,
+    presented_by_repeat: Vec<usize>,
     cameras: Vec<Camera>,
     started: Instant,
+    setup_total_ms: f64,
+    start_atlas_ready: bool,
+    initial_margin: i32,
+    atlas_upload_limit: usize,
+    motion_delay_ms: f64,
+    warm_frame_interval_ms: u64,
+    first_static_submitted: bool,
+    initial_visual_ms: Option<f64>,
+    initial_atlas_ready_ms: Option<f64>,
+    warm_frames: usize,
     frame: usize,
     skipped: usize,
     submit: Vec<f64>,
+    submit_atlas: Vec<f64>,
+    submit_live: Vec<f64>,
+    tile_phase: Vec<f64>,
+    acquire_phase: Vec<f64>,
+    draw_phase: Vec<f64>,
+    present_phase: Vec<f64>,
+    slow_frames: Vec<String>,
     scene: Vec<f64>,
     late: Vec<f64>,
     done: Arc<Mutex<Vec<Option<f64>>>>,
@@ -136,9 +172,13 @@ impl State {
         if std::env::var_os("LIZARD_GPU_NO_EFFECTS").is_none() {
             return Err("set LIZARD_GPU_NO_EFFECTS=1".into());
         }
-        let window = Arc::new(event_loop.create_window(
-            Window::default_attributes().with_title("Lizard live vector GPU benchmark").with_fullscreen(Some(Fullscreen::Borderless(None))),
-        )?);
+        let attributes = Window::default_attributes().with_title("Lizard live vector GPU benchmark");
+        let attributes = if std::env::args().any(|arg| arg == "--borderless-window") {
+            attributes.with_inner_size(PhysicalSize::new(WIDTH, HEIGHT - 60)).with_decorations(false)
+        } else {
+            attributes.with_fullscreen(Some(Fullscreen::Borderless(None)))
+        };
+        let window = Arc::new(event_loop.create_window(attributes)?);
         window.set_visible(true);
         window.focus_window();
         let size = window.inner_size();
@@ -148,8 +188,27 @@ impl State {
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() }))?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).ok_or("no surface configuration")?;
-        config.present_mode = wgpu::PresentMode::Fifo;
+        let requested_mode = if std::env::args().any(|arg| arg == "--present=mailbox") {
+            wgpu::PresentMode::Mailbox
+        } else if std::env::args().any(|arg| arg == "--present=immediate") {
+            wgpu::PresentMode::Immediate
+        } else {
+            wgpu::PresentMode::Fifo
+        };
+        let capabilities = surface.get_capabilities(&adapter);
+        if !capabilities.present_modes.contains(&requested_mode) {
+            return Err(format!("present mode {requested_mode:?} unavailable; supported: {:?}", capabilities.present_modes).into());
+        }
+        config.present_mode = requested_mode;
+        config.desired_maximum_frame_latency = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--frame-latency=").and_then(|value| value.parse::<u32>().ok()))
+            .unwrap_or(config.desired_maximum_frame_latency)
+            .clamp(1, 4);
         surface.configure(&device, &config);
+        println!(
+            "present_mode={:?} frame_latency={} supported_modes={:?}",
+            config.present_mode, config.desired_maximum_frame_latency, capabilities.present_modes
+        );
         let (doc, warnings) =
             figcraft_format::load_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
         if !warnings.is_empty() {
@@ -196,9 +255,15 @@ impl State {
             low_base.data_mut().copy_from_slice(&low_pixels);
             low_base
         };
-        let residual = GpuLiveResidual::new(device.clone(), queue.clone(), gpu.output_view(), low.clone(), WIDTH, HEIGHT, Some(config.format));
+        let mut residual = GpuLiveResidual::new(device.clone(), queue.clone(), gpu.output_view(), low.clone(), WIDTH, HEIGHT, Some(config.format));
         residual.upload(&low_full, &low_base)?;
-        let cameras = trace().repeat(
+        let trace_kind = std::env::args().find_map(|arg| arg.strip_prefix("--trace=").map(str::to_owned)).unwrap_or_else(|| "random".to_owned());
+        let trace = match trace_kind.as_str() {
+            "random" => trace(),
+            "excursion" => excursion_trace(),
+            _ => return Err(format!("unknown trace: {trace_kind}").into()),
+        };
+        let cameras = trace.repeat(
             std::env::args()
                 .find_map(|arg| arg.strip_prefix("--trace-repeats=").and_then(|value| value.parse::<usize>().ok()))
                 .unwrap_or(1)
@@ -360,6 +425,51 @@ impl State {
         } else {
             (None, None)
         };
+        let atlas_one_pass = std::env::args().any(|arg| arg == "--atlas-one-pass");
+        let initial_margin = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--initial-margin=").and_then(|value| value.parse::<i32>().ok()))
+            .unwrap_or(1)
+            .clamp(0, 3);
+        let motion_delay_ms = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--motion-delay-ms=").and_then(|value| value.parse::<f64>().ok()))
+            .unwrap_or(0.0)
+            .clamp(0.0, 10_000.0);
+        let warm_frame_interval_ms = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--warm-frame-interval-ms=").and_then(|value| value.parse::<u64>().ok()))
+            .unwrap_or(13)
+            .clamp(13, 4_000);
+        let atlas_slots = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--atlas-slots=").and_then(|value| value.parse::<u32>().ok()))
+            .unwrap_or(geometry_atlas::DEFAULT_CAPACITY);
+        let atlas_upload_limit = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--atlas-upload-limit=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(2)
+            .min(8);
+        let geometry_atlas = if std::env::args().any(|arg| arg == "--geometry-atlas") {
+            if cached.is_some() {
+                return Err("--geometry-atlas cannot be combined with --cache-guard".into());
+            }
+            let initial_camera = cameras.first().ok_or("empty camera trace")?.view();
+            let required = geometry_atlas::required_slots(&initial_camera, initial_margin);
+            if usize::try_from(atlas_slots)? < required {
+                return Err(
+                    format!("--atlas-slots={atlas_slots} cannot retain the {required} tiles required by --initial-margin={initial_margin}").into()
+                );
+            }
+            let mut atlas = GeometryAtlas::new(Arc::new(doc.clone()), page, device.clone(), queue.clone(), WIDTH, HEIGHT, atlas_slots)?;
+            atlas.request_margin(&cameras.first().ok_or("empty camera trace")?.view(), initial_margin);
+            if atlas_one_pass {
+                let (full, base) = residual.low_views();
+                atlas.enable_one_pass(config.format, &full, &base, &low)?;
+            }
+            residual.set_alt_sharp(atlas.output_view());
+            Some(atlas)
+        } else {
+            if atlas_one_pass {
+                return Err("--atlas-one-pass requires --geometry-atlas".into());
+            }
+            None
+        };
         if std::env::args().any(|arg| arg == "--compare-routes")
             && let (Some(cache), Some(source)) = (&cached, &cached_source)
         {
@@ -406,6 +516,11 @@ impl State {
                 }
             }
         }
+        let start_atlas_ready = std::env::args().any(|arg| arg == "--start-atlas-ready");
+        if start_atlas_ready && geometry_atlas.is_none() {
+            return Err("--start-atlas-ready requires --geometry-atlas".into());
+        }
+        let setup_total_ms = setup.elapsed().as_secs_f64() * 1000.0;
         println!(
             "window={}x{} display_scale={} adapter={} low={}x{} setup_ms={:.1}",
             size.width,
@@ -414,7 +529,7 @@ impl State {
             adapter.get_info().name,
             low.width,
             low.height,
-            setup.elapsed().as_secs_f64() * 1000.0
+            setup_total_ms
         );
         let count = cameras.len();
         let (poll_running, poll_thread) = if std::env::args().any(|arg| arg == "--poll-background") {
@@ -442,6 +557,8 @@ impl State {
             clear,
             gpu,
             residual,
+            geometry_atlas,
+            atlas_one_pass,
             cached,
             cached_source,
             cached_two_pass,
@@ -449,11 +566,32 @@ impl State {
             blit_bind,
             cached_frames: 0,
             live_frames: 0,
+            atlas_frames: 0,
+            atlas_first_ms: None,
+            atlas_by_repeat: vec![0; count.div_ceil(120)],
+            presented_by_repeat: vec![0; count.div_ceil(120)],
             cameras,
             started: Instant::now(),
+            setup_total_ms,
+            start_atlas_ready,
+            initial_margin,
+            atlas_upload_limit,
+            motion_delay_ms,
+            warm_frame_interval_ms,
+            first_static_submitted: false,
+            initial_visual_ms: None,
+            initial_atlas_ready_ms: None,
+            warm_frames: 0,
             frame: 0,
             skipped: 0,
             submit: Vec::new(),
+            submit_atlas: Vec::new(),
+            submit_live: Vec::new(),
+            tile_phase: Vec::new(),
+            acquire_phase: Vec::new(),
+            draw_phase: Vec::new(),
+            present_phase: Vec::new(),
+            slow_frames: Vec::new(),
             scene: Vec::new(),
             late: Vec::new(),
             done: Arc::new(Mutex::new(vec![None; count])),
@@ -463,6 +601,76 @@ impl State {
     }
 
     fn draw(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.start_atlas_ready {
+            if self.started.elapsed() > Duration::from_secs(30) {
+                return Err("geometry atlas did not become ready within 30 seconds".into());
+            }
+            let camera = self.cameras.first().ok_or("empty camera trace")?.view();
+            let atlas = self.geometry_atlas.as_mut().ok_or("geometry atlas unavailable")?;
+            atlas.install(&camera, 2)?;
+            atlas.request_margin(&camera, self.initial_margin);
+            if !self.first_static_submitted {
+                let scene = make_scene_with_images(&self.doc, self.page, &camera, Some(self.gpu.image_info()));
+                self.gpu.render_submit_with_clear(&scene, self.clear)?;
+                let frame = match self.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+                    wgpu::CurrentSurfaceTexture::Occluded => {
+                        self.window.focus_window();
+                        return Ok(());
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout => return Ok(()),
+                    _ => {
+                        self.surface.configure(&self.device, &self.config);
+                        return Ok(());
+                    }
+                };
+                let view = frame.texture.create_view(&Default::default());
+                self.residual.render_submit_to_surface(&camera, &view)?;
+                self.queue.present(frame);
+                self.first_static_submitted = true;
+                self.initial_visual_ms = Some(self.setup_total_ms + self.started.elapsed().as_secs_f64() * 1000.0);
+            }
+            if atlas.covers_margin(&camera, self.initial_margin) {
+                if self.initial_atlas_ready_ms.is_none() {
+                    self.initial_atlas_ready_ms = Some(self.setup_total_ms + self.started.elapsed().as_secs_f64() * 1000.0);
+                    println!(
+                        "initial_static_visual_ms={:?} initial_atlas_ready_ms={:?} initial_atlas_stats={:?}",
+                        self.initial_visual_ms,
+                        self.initial_atlas_ready_ms,
+                        atlas.stats()
+                    );
+                }
+                if self.setup_total_ms + self.started.elapsed().as_secs_f64() * 1000.0 >= self.motion_delay_ms {
+                    println!("warm_static_frames={}", self.warm_frames);
+                    self.started = Instant::now();
+                    self.start_atlas_ready = false;
+                } else {
+                    let frame = match self.surface.get_current_texture() {
+                        wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
+                        wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => None,
+                        _ => {
+                            self.surface.configure(&self.device, &self.config);
+                            None
+                        }
+                    };
+                    if let Some(frame) = frame {
+                        let view = frame.texture.create_view(&Default::default());
+                        if self.atlas_one_pass {
+                            atlas.render_one_pass_to_surface(&camera, self.clear, &view)?;
+                        } else {
+                            atlas.render_submit(&camera, self.clear)?;
+                            self.residual.render_submit_alt_to_surface(&camera, &view)?;
+                        }
+                        self.queue.present(frame);
+                        self.warm_frames += 1;
+                    }
+                    std::thread::sleep(Duration::from_millis(self.warm_frame_interval_ms));
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            return Ok(());
+        }
         let latest = (self.started.elapsed().as_secs_f64() * HZ).floor() as usize;
         if latest > self.frame {
             self.skipped += latest - self.frame;
@@ -474,12 +682,21 @@ impl State {
         }
         let camera = self.cameras[self.frame].view();
         let started = Instant::now();
+        let (atlas_hit, tile_uploads) = if let Some(atlas) = self.geometry_atlas.as_mut() {
+            let installed = atlas.install(&camera, self.atlas_upload_limit)?;
+            atlas.request(&camera);
+            (atlas.covers(&camera), installed)
+        } else {
+            (false, 0)
+        };
+        let after_tiles = Instant::now();
         let cache_hit = self.cached_source.as_ref().is_some_and(|source| source_contains(source, &camera));
-        if !cache_hit {
+        if !cache_hit && !atlas_hit {
             let scene = make_scene_with_images(&self.doc, self.page, &camera, Some(self.gpu.image_info()));
             self.scene.push(started.elapsed().as_secs_f64() * 1000.0);
             self.gpu.render_submit_with_clear(&scene, self.clear)?;
         }
+        let after_scene = Instant::now();
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Occluded => {
@@ -490,7 +707,19 @@ impl State {
             _ => return Err("surface lost".into()),
         };
         let view = frame.texture.create_view(&Default::default());
-        if cache_hit {
+        let after_acquire = Instant::now();
+        if atlas_hit {
+            let atlas = self.geometry_atlas.as_ref().ok_or("geometry atlas unavailable")?;
+            if self.atlas_one_pass {
+                atlas.render_one_pass_to_surface(&camera, self.clear, &view)?;
+            } else {
+                atlas.render_submit(&camera, self.clear)?;
+                self.residual.render_submit_alt_to_surface(&camera, &view)?;
+            }
+            self.atlas_frames += 1;
+            self.atlas_first_ms.get_or_insert_with(|| self.started.elapsed().as_secs_f64() * 1000.0);
+            self.atlas_by_repeat[self.frame / 120] += 1;
+        } else if cache_hit {
             if let (Some(cache), Some(source)) = (&self.cached, &self.cached_source) {
                 if self.cached_two_pass {
                     cache.render_submit(source, &camera);
@@ -525,6 +754,7 @@ impl State {
             self.residual.render_submit_to_surface(&camera, &view)?;
             self.live_frames += 1;
         }
+        let after_draw = Instant::now();
         let samples = Arc::clone(&self.done);
         let index = self.frame;
         self.queue.on_submitted_work_done(move || {
@@ -533,10 +763,37 @@ impl State {
             }
         });
         self.queue.present(frame);
+        let after_present = Instant::now();
         if self.poll_running.is_none() {
             self.device.poll(wgpu::PollType::Poll)?;
         }
-        self.submit.push(started.elapsed().as_secs_f64() * 1000.0);
+        let after_poll = Instant::now();
+        let submit_ms = after_poll.duration_since(started).as_secs_f64() * 1000.0;
+        self.submit.push(submit_ms);
+        self.tile_phase.push(after_tiles.duration_since(started).as_secs_f64() * 1000.0);
+        self.acquire_phase.push(after_acquire.duration_since(after_scene).as_secs_f64() * 1000.0);
+        self.draw_phase.push(after_draw.duration_since(after_acquire).as_secs_f64() * 1000.0);
+        self.present_phase.push(after_present.duration_since(after_draw).as_secs_f64() * 1000.0);
+        if atlas_hit {
+            self.submit_atlas.push(submit_ms);
+        } else if self.geometry_atlas.is_some() {
+            self.submit_live.push(submit_ms);
+        }
+        if submit_ms > 50.0 && self.slow_frames.len() < 12 {
+            self.slow_frames.push(format!(
+                "frame={} atlas={} scheduled={} total={submit_ms:.2} tile={:.2} scene={:.2} acquire={:.2} draw={:.2} present={:.2} poll={:.2}",
+                self.frame,
+                atlas_hit,
+                tile_uploads,
+                after_tiles.duration_since(started).as_secs_f64() * 1000.0,
+                after_scene.duration_since(after_tiles).as_secs_f64() * 1000.0,
+                after_acquire.duration_since(after_scene).as_secs_f64() * 1000.0,
+                after_draw.duration_since(after_acquire).as_secs_f64() * 1000.0,
+                after_present.duration_since(after_draw).as_secs_f64() * 1000.0,
+                after_poll.duration_since(after_present).as_secs_f64() * 1000.0,
+            ));
+        }
+        self.presented_by_repeat[self.frame / 120] += 1;
         self.late.push(started.saturating_duration_since(due).as_secs_f64() * 1000.0);
         self.frame += 1;
         Ok(())
@@ -553,11 +810,12 @@ impl State {
         done.sort_by(f64::total_cmp);
         let p95 = |v: &[f64]| v.get((v.len() * 95 / 100).min(v.len().saturating_sub(1))).copied().unwrap_or(0.0);
         println!(
-            "trace presented={}/{} skipped={} cached_frames={} live_frames={} scene_p95_ms={:.2} submit_p95_ms={:.2} submit_max_ms={:.2} submit_over_50={} queue_done_p95_ms={:.2} queue_done_over_50={} max_late_ms={:.2}",
+            "trace presented={}/{} skipped={} cached_frames={} atlas_frames={} live_frames={} scene_p95_ms={:.2} submit_p95_ms={:.2} submit_max_ms={:.2} submit_over_50={} queue_done_p95_ms={:.2} queue_done_over_50={} max_late_ms={:.2} atlas_first_ms={:?} atlas_stats={:?}",
             submit.len(),
             self.cameras.len(),
             self.skipped,
             self.cached_frames,
+            self.atlas_frames,
             self.live_frames,
             p95(&scene),
             p95(&submit),
@@ -565,8 +823,66 @@ impl State {
             submit.iter().filter(|&&x| x > 50.0).count(),
             p95(&done),
             done.iter().filter(|&&x| x > 50.0).count(),
-            self.late.iter().copied().fold(0.0_f64, f64::max)
+            self.late.iter().copied().fold(0.0_f64, f64::max),
+            self.atlas_first_ms,
+            self.geometry_atlas.as_ref().map(GeometryAtlas::stats)
         );
+        if self.geometry_atlas.is_some() {
+            for (name, times) in
+                [("tile", &self.tile_phase), ("acquire", &self.acquire_phase), ("draw", &self.draw_phase), ("present", &self.present_phase)]
+            {
+                let mut sorted = times.clone();
+                sorted.sort_by(f64::total_cmp);
+                println!("phase={name} p95_ms={:.2} max_ms={:.2}", p95(&sorted), sorted.last().copied().unwrap_or(0.0));
+            }
+            let mut atlas_times = self.submit_atlas.clone();
+            let mut live_times = self.submit_live.clone();
+            atlas_times.sort_by(f64::total_cmp);
+            live_times.sort_by(f64::total_cmp);
+            println!(
+                "atlas_per_repeat={:?} presented_per_repeat={:?} atlas_submit_p95_ms={:.2} live_submit_p95_ms={:.2} slow_frames_first={:?}",
+                self.atlas_by_repeat,
+                self.presented_by_repeat,
+                p95(&atlas_times),
+                p95(&live_times),
+                self.slow_frames
+            );
+        }
+        if std::env::args().any(|arg| arg == "--verify-atlas")
+            && let Some(atlas) = &self.geometry_atlas
+        {
+            for &index in &[0usize, 20, 40, 60, 80, 100, 119] {
+                let Some(camera) = self.cameras.get(index).copied().map(Camera::view) else { continue };
+                if !atlas.covers(&camera) {
+                    println!("atlas_parity camera={index} missing_tiles");
+                    continue;
+                }
+                let actual = if self.atlas_one_pass {
+                    atlas.render_one_pass(&camera, self.clear)?
+                } else {
+                    atlas.render_submit(&camera, self.clear)?;
+                    self.residual.render_submit_alt(&camera)?;
+                    self.residual.pixels()?
+                };
+                let reference = render_view(&self.doc, self.page, &camera, &Options { lod: true, ..Default::default() })
+                    .ok_or("atlas reference render failed")?;
+                for threshold in [4, 16] {
+                    println!(
+                        "atlas_parity camera={index} threshold={threshold} changed={:.3}%",
+                        changed_percent(&actual, reference.data(), threshold)
+                    );
+                }
+                if index == 0 && std::env::args().any(|arg| arg == "--save-atlas") {
+                    for (name, pixels) in [("actual", actual.as_slice()), ("reference", reference.data())] {
+                        let file = std::fs::File::create(format!("target/canvas-strategies/atlas-{name}.png"))?;
+                        let mut encoder = png::Encoder::new(file, WIDTH, HEIGHT);
+                        encoder.set_color(png::ColorType::Rgba);
+                        encoder.set_depth(png::BitDepth::Eight);
+                        encoder.write_header()?.write_image_data(pixels)?;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
