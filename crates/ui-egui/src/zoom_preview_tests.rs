@@ -193,7 +193,14 @@ fn a_retained_wide_view_covers_zoom_out_without_synchronous_rasterization() {
     let settle = |ui: &mut crate::layers_drag_tests::Ui| {
         for _ in 0..150 {
             ui.frame(vec![]);
-            if ui.app.worker.as_ref().is_some_and(|w| !w.in_flight()) && !ui.app.canvas.tex_coarse {
+            let requested_is_refined = ui
+                .app
+                .canvas
+                .tex_view
+                .as_ref()
+                .zip(ui.app.canvas.want_view.as_ref())
+                .is_some_and(|(have, want)| have.scale.to_bits() == want.scale.to_bits() && covers(have, want));
+            if requested_is_refined && ui.app.worker.as_ref().is_some_and(|w| !w.in_flight()) && !ui.app.canvas.tex_coarse {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
