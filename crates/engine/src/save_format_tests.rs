@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use figcraft_format::Version;
 use serde_json::{Value, json};
@@ -13,10 +14,13 @@ struct SaveFiles {
     files: Vec<PathBuf>,
 }
 
+static NEXT_SAVE_FILES_DIR: AtomicU64 = AtomicU64::new(0);
+
 impl SaveFiles {
     fn new() -> Self {
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("figcraft-save-formats-{}-{stamp}", std::process::id()));
+        let sequence = NEXT_SAVE_FILES_DIR.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("figcraft-save-formats-{}-{stamp}-{sequence}", std::process::id()));
         std::fs::create_dir(&dir).unwrap();
         Self { dir, files: Vec::new() }
     }

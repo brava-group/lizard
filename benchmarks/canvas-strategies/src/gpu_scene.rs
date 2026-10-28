@@ -644,6 +644,18 @@ pub struct GpuCanvas {
 }
 
 impl GpuCanvas {
+    pub fn device(&self) -> wgpu::Device {
+        self.device.clone()
+    }
+
+    pub fn queue(&self) -> wgpu::Queue {
+        self.queue.clone()
+    }
+
+    pub fn output_view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+
     pub fn new(width: u32, height: u32) -> Result<Self, Box<dyn Error>> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -668,7 +680,10 @@ impl GpuCanvas {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

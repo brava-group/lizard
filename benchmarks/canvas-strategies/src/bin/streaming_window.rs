@@ -10,14 +10,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use canvas_strategies_bench::compositor::Compositor;
+use canvas_strategies_bench::gpu_residual::GpuResidual;
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view};
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_render::{Options, View, render_view};
+use canvas_strategies_bench::residual::Residual;
+use figcraft_doc::{Document, EffectKind, NodeId, NodeKind};
+use figcraft_render::{Options, Pixmap, View, render_view};
 use rayon::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::{Fullscreen, Window, WindowId};
 
 const WIDTH: u32 = 5120;
@@ -120,7 +122,25 @@ fn warm_plan(camera: Camera, base_slots: usize, pan_before_detail: usize) -> Vec
     keys
 }
 
-fn preview_view(camera: Camera, bleed: u32) -> View {
+fn preview_origin(camera: Camera) -> (f64, f64) {
+    let origin = camera.origin();
+    let span = f64::from(WIDTH) / SCALE;
+    // Two overview tiles cover the initial view plus the pan guard band on both sides.
+    (origin.0 - span / 2.0, origin.1 - span / 4.0)
+}
+
+fn preview_view(camera: Camera, bleed: u32, column: u32) -> View {
+    let scale = f64::from(TILE) * SCALE / f64::from(WIDTH);
+    let origin = preview_origin(camera);
+    View {
+        origin: (origin.0 + f64::from(column * TILE) / scale - f64::from(bleed) / scale, origin.1 - f64::from(bleed) / scale),
+        scale,
+        width: TILE + bleed * 2,
+        height: TILE + bleed * 2,
+    }
+}
+
+fn single_preview_view(camera: Camera, bleed: u32) -> View {
     let scale = f64::from(TILE) * SCALE / f64::from(WIDTH);
     let origin = camera.origin();
     View {
@@ -131,6 +151,119 @@ fn preview_view(camera: Camera, bleed: u32) -> View {
     }
 }
 
+fn sharp_source_view(cameras: &[Camera], factor: u32, oracle: bool, guard: f64) -> Result<View, Box<dyn Error>> {
+    let first = cameras.first().ok_or("empty camera trace")?;
+    let mut left = f64::INFINITY;
+    let mut top = f64::INFINITY;
+    let mut right = f64::NEG_INFINITY;
+    let mut bottom = f64::NEG_INFINITY;
+    let mut scale = if oracle { first.zoom } else { first.zoom * 1.2 };
+    for camera in cameras.iter().take(if oracle { cameras.len() } else { 1 }) {
+        let origin = camera.origin();
+        left = left.min(origin.0);
+        top = top.min(origin.1);
+        right = right.max(origin.0 + f64::from(WIDTH) / camera.zoom);
+        bottom = bottom.max(origin.1 + f64::from(HEIGHT) / camera.zoom);
+        scale = scale.max(camera.zoom);
+    }
+    scale += 0.02;
+    let origin = (left - guard, top - guard);
+    let width = (((right + guard - origin.0) * scale).ceil() as u32).next_multiple_of(factor);
+    let height = (((bottom + guard - origin.1) * scale).ceil() as u32).next_multiple_of(factor);
+    Ok(View { origin, scale, width, height })
+}
+
+fn sharp_covers(source: &View, camera: Camera) -> bool {
+    let origin = camera.origin();
+    let right = source.origin.0 + f64::from(source.width) / source.scale;
+    let bottom = source.origin.1 + f64::from(source.height) / source.scale;
+    origin.0 >= source.origin.0
+        && origin.1 >= source.origin.1
+        && origin.0 + f64::from(WIDTH) / camera.zoom <= right
+        && origin.1 + f64::from(HEIGHT) / camera.zoom <= bottom
+}
+
+struct SharpReady {
+    compositor: GpuResidual,
+    source: View,
+    prepare_ms: f64,
+}
+
+fn render_sharp_parallel(doc: &Document, page: NodeId, view: &View, opts: &Options, bands: u32) -> Option<Pixmap> {
+    if bands <= 1 {
+        return render_view(doc, page, view, opts);
+    }
+    let rendered: Vec<_> = (0..bands)
+        .into_par_iter()
+        .map(|index| {
+            let start = view.height * index / bands;
+            let end = view.height * (index + 1) / bands;
+            let sub = View {
+                origin: (view.origin.0, view.origin.1 + f64::from(start) / view.scale),
+                scale: view.scale,
+                width: view.width,
+                height: end - start,
+            };
+            render_view(doc, page, &sub, opts)
+        })
+        .collect();
+    let rendered: Vec<Pixmap> = rendered.into_iter().collect::<Option<_>>()?;
+    let mut combined = Pixmap::new(view.width, view.height)?;
+    let mut at = 0;
+    for band in rendered {
+        let end = at + band.data().len();
+        combined.data_mut()[at..end].copy_from_slice(band.data());
+        at = end;
+    }
+    Some(combined)
+}
+
+fn prepare_sharp_underlay(
+    doc: &Document,
+    page: NodeId,
+    source: View,
+    factor: u32,
+    bands: u32,
+    baked: bool,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    surface_format: Option<wgpu::TextureFormat>,
+) -> Result<SharpReady, Box<dyn Error>> {
+    let start = Instant::now();
+    let low = View { origin: source.origin, scale: source.scale / f64::from(factor), width: source.width / factor, height: source.height / factor };
+    let suppressed: Vec<_> = doc
+        .nodes()
+        .filter(|node| node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))))
+        .map(|node| node.id)
+        .collect();
+    let base_opts = Options { lod: true, skip_effects: true, skip: suppressed, ..Default::default() };
+    let stage = Instant::now();
+    let low_full = render_view(doc, page, &low, &Options { lod: true, ..Default::default() }).ok_or("sharp underlay low full render failed")?;
+    let low_full_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    let stage = Instant::now();
+    let low_base = render_view(doc, page, &low, &base_opts).ok_or("sharp underlay low geometry render failed")?;
+    let low_base_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    let stage = Instant::now();
+    let mut high_base = render_sharp_parallel(doc, page, &source, &base_opts, bands).ok_or("sharp underlay high geometry render failed")?;
+    let high_base_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    let stage = Instant::now();
+    if baked {
+        let residual = Residual::new(low_full.clone(), low_base.clone(), low.clone()).ok_or("sharp underlay low views differ")?;
+        residual.apply(&mut high_base, &source);
+    }
+    let bake_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    let stage = Instant::now();
+    let compositor = GpuResidual::new(device, queue, source.width, source.height, low.width, low.height, WIDTH, HEIGHT, baked, surface_format);
+    let setup_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    let stage = Instant::now();
+    compositor.upload_images(&high_base, &low_full, &low_base)?;
+    let upload_ms = stage.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "sharp_prepare bands={bands} baked={baked} low_full_ms={low_full_ms:.1} low_base_ms={low_base_ms:.1} high_base_ms={high_base_ms:.1} bake_ms={bake_ms:.1} setup_ms={setup_ms:.1} upload_ms={upload_ms:.1}"
+    );
+    Ok(SharpReady { compositor, source, prepare_ms: start.elapsed().as_secs_f64() * 1000.0 })
+}
+
 fn render_preview(
     gpu: &mut GpuCanvas,
     doc: &Document,
@@ -139,19 +272,49 @@ fn render_preview(
     camera: Camera,
     bleed: u32,
     clear: [f32; 3],
-) -> Result<wgpu::Texture, Box<dyn Error>> {
-    let view = preview_view(camera, bleed);
-    let fallback = has_unhandled_effects_in_view(doc, &view);
-    let started = Instant::now();
-    if fallback {
-        let preview = render_view(doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect preview failed")?;
-        gpu.upload_premul(preview.data())?;
-    } else {
-        gpu.render_with_backdrop_blurs_indexed(doc, page, &view, clear, backdrop)?;
+    paired: bool,
+) -> Result<Vec<wgpu::Texture>, Box<dyn Error>> {
+    if !paired {
+        let view = single_preview_view(camera, bleed);
+        let fallback = has_unhandled_effects_in_view(doc, &view);
+        let started = Instant::now();
+        if fallback {
+            let preview = render_view(doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect preview failed")?;
+            gpu.upload_premul(preview.data())?;
+        } else {
+            gpu.render_with_backdrop_blurs_indexed(doc, page, &view, clear, backdrop)?;
+        }
+        let snapshot = gpu.snapshot_submit();
+        println!("preview path={} render_submit_ms={:.2}", if fallback { "cpu_fidelity" } else { "gpu" }, started.elapsed().as_secs_f64() * 1000.0);
+        return Ok(vec![snapshot]);
     }
-    let snapshot = gpu.snapshot_submit();
+    let view = preview_view(camera, bleed, 0);
+    let combined = View { width: TILE * 2 + bleed * 2, ..view };
+    let fallback = has_unhandled_effects_in_view(doc, &combined);
+    let started = Instant::now();
+    let snapshots = if fallback {
+        let (left, right) = rayon::join(
+            || render_view(doc, page, &preview_view(camera, bleed, 0), &Options { lod: true, ..Default::default() }),
+            || render_view(doc, page, &preview_view(camera, bleed, 1), &Options { lod: true, ..Default::default() }),
+        );
+        let mut tiles = Vec::with_capacity(2);
+        for preview in [left, right] {
+            let preview = preview.ok_or("CPU effect preview failed")?;
+            gpu.upload_premul(preview.data())?;
+            tiles.push(gpu.snapshot_submit());
+        }
+        tiles
+    } else {
+        let mut tiles = Vec::with_capacity(2);
+        for column in 0..2 {
+            let view = preview_view(camera, bleed, column);
+            gpu.render_with_backdrop_blurs_indexed(doc, page, &view, clear, backdrop)?;
+            tiles.push(gpu.snapshot_submit());
+        }
+        tiles
+    };
     println!("preview path={} render_submit_ms={:.2}", if fallback { "cpu_fidelity" } else { "gpu" }, started.elapsed().as_secs_f64() * 1000.0);
-    Ok(snapshot)
+    Ok(snapshots)
 }
 
 fn render_key(
@@ -268,6 +431,17 @@ fn verify_composition(
         .count();
     let share = changed as f64 * 100.0 / f64::from(WIDTH * HEIGHT);
     println!("quality_view={label} zoom={:.3} pixels_over_4={share:.3}%", camera.zoom);
+    if std::env::args().any(|arg| arg == "--quality-map") {
+        let mut row_buckets = vec![0usize; HEIGHT.div_ceil(TILE) as usize];
+        let mut column_buckets = vec![0usize; WIDTH.div_ceil(TILE) as usize];
+        for (pixel, (a, b)) in actual.chunks_exact(4).zip(reference.data().chunks_exact(4)).enumerate() {
+            if a.iter().zip(b.iter()).any(|(left, right)| left.abs_diff(*right) > 4) {
+                row_buckets[pixel / WIDTH as usize / TILE as usize] += 1;
+                column_buckets[pixel % WIDTH as usize / TILE as usize] += 1;
+            }
+        }
+        println!("quality_map={label} rows={row_buckets:?} columns={column_buckets:?}");
+    }
     if share > 5.0 {
         return Err("streaming atlas failed the gross quality gate".into());
     }
@@ -285,7 +459,7 @@ fn publish_tile(
     result: Result<wgpu::Texture, String>,
     ms: f64,
     ready_tx: &Sender<Result<Ready, String>>,
-    window: &Window,
+    proxy: &EventLoopProxy<()>,
     warm_set: &HashSet<Key>,
     rendered: &mut HashSet<Key>,
     warm_sent: &mut usize,
@@ -303,7 +477,7 @@ fn publish_tile(
         *warm_sent += 1;
     }
     if failed || !new_warm_tile || warm_sent.is_multiple_of(4) || *warm_sent == warm_set.len() {
-        window.request_redraw();
+        let _ = proxy.send_event(());
     }
     true
 }
@@ -315,7 +489,7 @@ fn needs_render(key: Key, live: bool, rendered: &HashSet<Key>, pending: &HashSet
 }
 
 enum Ready {
-    Preview(wgpu::Texture),
+    Preview(Vec<wgpu::Texture>),
     Tile(TileReady),
 }
 
@@ -450,6 +624,16 @@ struct State {
     cache: Cache,
     request: Option<Sender<Key>>,
     ready: Receiver<Result<Ready, String>>,
+    sharp_ready: Receiver<Result<SharpReady, String>>,
+    sharp: Option<SharpReady>,
+    sharp_ready_ms: Option<f64>,
+    sharp_underlay_frames: usize,
+    sharp_requested: bool,
+    direct_underlay: bool,
+    sharp_only: bool,
+    present_sequence: Arc<AtomicUsize>,
+    interaction_active: Arc<AtomicBool>,
+    interaction_finished: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     warm_start_signal: Option<Sender<()>>,
     cancel_worker: Arc<AtomicBool>,
@@ -496,6 +680,7 @@ struct State {
     verify_doc: Option<Arc<Document>>,
     verify_page: NodeId,
     atlas_mib: f64,
+    preview_slots: u32,
     stress: bool,
     stress_gap_ms: u64,
     stress_jobs: Arc<AtomicUsize>,
@@ -507,7 +692,7 @@ struct State {
 }
 
 impl State {
-    fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn Error>> {
+    fn new(event_loop: &ActiveEventLoop, proxy: EventLoopProxy<()>) -> Result<Self, Box<dyn Error>> {
         let boot_started = Instant::now();
         let window = Arc::new(event_loop.create_window(
             Window::default_attributes().with_title("Lizard GPU canvas presentation benchmark").with_fullscreen(Some(Fullscreen::Borderless(None))),
@@ -524,7 +709,7 @@ impl State {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
-        let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+        let (doc, warnings) = figcraft_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
         if !warnings.is_empty() {
             return Err(format!("fixture warnings: {warnings:?}").into());
         }
@@ -542,6 +727,7 @@ impl State {
         let base_trace = match trace_kind.as_str() {
             "sine" => trace(),
             "random" => random_trace(),
+            "static" => vec![Camera { center: (1600.0, 1150.0), zoom: SCALE }; 120],
             _ => return Err(format!("unknown trace: {trace_kind}").into()),
         };
         let cameras: Vec<Camera> = (0..trace_repeats).flat_map(|_| base_trace.iter().copied()).collect();
@@ -569,6 +755,31 @@ impl State {
         let cpu_region_size =
             std::env::args().find_map(|arg| arg.strip_prefix("--cpu-regions=").and_then(|value| value.parse::<i32>().ok())).unwrap_or(0).clamp(0, 4);
         let cpu_regions = cpu_region_size >= 2 && cpu_async && warm_in_background;
+        let paired_overview = std::env::args().any(|arg| arg == "--paired-overview");
+        let sharp_underlay = std::env::args().any(|arg| arg == "--sharp-underlay");
+        let direct_underlay = std::env::args().any(|arg| arg == "--direct-underlay");
+        let sharp_only = std::env::args().any(|arg| arg == "--sharp-only");
+        let sharp_baked = std::env::args().any(|arg| arg == "--sharp-baked");
+        let tile_uploads_per_frame = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--tile-uploads-per-frame=").and_then(|value| value.parse::<usize>().ok()))
+            .unwrap_or(usize::MAX);
+        if tile_uploads_per_frame == 0 {
+            return Err("--tile-uploads-per-frame must be positive".into());
+        }
+        let sharp_factor =
+            std::env::args().find_map(|arg| arg.strip_prefix("--sharp-factor=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(2);
+        let sharp_bands =
+            std::env::args().find_map(|arg| arg.strip_prefix("--sharp-bands=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(1);
+        if sharp_underlay && (!warm_in_background || !(2..=5).contains(&sharp_factor)) {
+            return Err("--sharp-underlay requires --background-warm and --sharp-factor=2..=5".into());
+        }
+        if (direct_underlay || sharp_baked || sharp_only) && !sharp_underlay {
+            return Err("--direct-underlay, --sharp-baked and --sharp-only require --sharp-underlay".into());
+        }
+        if !matches!(sharp_bands, 1 | 2 | 4) {
+            return Err("--sharp-bands must be 1, 2 or 4".into());
+        }
+        let preview_slots = if paired_overview { 2 } else { 1 };
         let region_inflight = std::env::args()
             .find_map(|arg| arg.strip_prefix("--region-inflight=").and_then(|value| value.parse::<usize>().ok()))
             .unwrap_or(cpu_workers)
@@ -577,14 +788,21 @@ impl State {
         let verify = std::env::args().any(|arg| arg == "--verify");
         let predict_steps =
             std::env::args().find_map(|arg| arg.strip_prefix("--predict=").and_then(|value| value.parse::<usize>().ok())).unwrap_or(0);
-        let bleed = (doc.max_backdrop_radius() * DETAIL * 1.5 + 3.0).ceil().clamp(3.0, 256.0) as u32;
+        let bleed = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--bleed=").and_then(|value| value.parse::<u32>().ok()))
+            .unwrap_or_else(|| (doc.max_backdrop_radius() * DETAIL * 1.5 + 3.0).ceil().clamp(3.0, 256.0) as u32);
+        if !(3..=512).contains(&bleed) {
+            return Err("--bleed must be 3..=512".into());
+        }
         let side = TILE + 2 * bleed;
         let mut gpu = GpuCanvas::from_device(device.clone(), queue.clone(), adapter.get_info().name, side, side);
         let image_count = gpu.register_images(&doc)?;
         println!("gpu_image_textures={image_count}");
-        let mut cache = Cache::new(capacity, detail_slots, 1)?;
-        // Slot zero is a temporary low-resolution overview; full-resolution tiles cover it.
-        let compositor = Compositor::empty_slots(WIDTH, HEIGHT, TILE, bleed, capacity as u32 + 1, device.clone(), queue.clone())?;
+        let mut cache = Cache::new(capacity, detail_slots, preview_slots)?;
+        let mut compositor = Compositor::empty_slots(WIDTH, HEIGHT, TILE, bleed, capacity as u32 + preview_slots, device.clone(), queue.clone())?;
+        if direct_underlay {
+            compositor.enable_surface(config.format);
+        }
         let backdrop = BackdropIndex::new(&doc, page);
         let clear32 = [clear.0 as f32, clear.1 as f32, clear.2 as f32];
         let warm_start = Instant::now();
@@ -605,14 +823,14 @@ impl State {
             }
         }
         let warm_ms = if warm_in_background { 0.0 } else { warm_start.elapsed().as_secs_f64() * 1000.0 };
-        let atlas_mib = (capacity + 1) as f64 * f64::from(side * side * 4) / 1_048_576.0;
+        let atlas_mib = (capacity as u32 + preview_slots) as f64 * f64::from(side * side * 4) / 1_048_576.0;
         if verify && !warm_in_background {
             verify_composition(&doc, page, &compositor, cameras[0], clear, "base")?;
             let max_zoom = cameras.iter().skip(60).copied().max_by(|a, b| a.zoom.total_cmp(&b.zoom)).ok_or("zoom trace missing")?;
             verify_composition(&doc, page, &compositor, max_zoom, clear, "detail")?;
         }
         println!(
-            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} base_slots={} detail_slots={detail_slots} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps} trace={trace_kind} trace_repeats={trace_repeats} cpu_workers={cpu_workers} cpu_async={cpu_async} cpu_regions={cpu_region_size} region_inflight={region_inflight} pan_before_detail={pan_before_detail} interact_at_preview={interact_at_preview}",
+            "window_size={}x{} display_scale={} present_mode={:?} slots={capacity} bleed={bleed} base_slots={} detail_slots={detail_slots} planned_base={} planned_detail={} atlas_mib={atlas_mib:.1} initial_sync_warm_ms={warm_ms:.1} background_warm={warm_in_background} stress={stress} stress_gap_ms={stress_gap_ms} predict_steps={predict_steps} trace={trace_kind} trace_repeats={trace_repeats} cpu_workers={cpu_workers} cpu_async={cpu_async} cpu_regions={cpu_region_size} region_inflight={region_inflight} pan_before_detail={pan_before_detail} interact_at_preview={interact_at_preview} paired_overview={paired_overview} sharp_underlay={sharp_underlay} direct_underlay={direct_underlay} sharp_baked={sharp_baked} sharp_factor={sharp_factor} sharp_bands={sharp_bands} tile_uploads_per_frame={tile_uploads_per_frame}",
             size.width,
             size.height,
             window.scale_factor(),
@@ -628,11 +846,23 @@ impl State {
         let worker_gate = Arc::clone(&gpu_gate);
         let cancel_worker = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel_worker);
+        let present_sequence = Arc::new(AtomicUsize::new(0));
+        let worker_present_sequence = Arc::clone(&present_sequence);
+        let interaction_active = Arc::new(AtomicBool::new(false));
+        let worker_interaction_active = Arc::clone(&interaction_active);
+        let interaction_finished = Arc::new(AtomicBool::new(false));
+        let worker_interaction_finished = Arc::clone(&interaction_finished);
+        let defer_tiles_until_idle = std::env::args().any(|arg| arg == "--defer-tiles-until-idle");
+        if defer_tiles_until_idle && !sharp_underlay {
+            return Err("--defer-tiles-until-idle requires --sharp-underlay".into());
+        }
         let stress_jobs = Arc::new(AtomicUsize::new(0));
         let stress_jobs_worker = Arc::clone(&stress_jobs);
         let worker_warm = if warm_in_background { warm_keys.clone() } else { Vec::new() };
         let worker_warm_set: HashSet<Key> = worker_warm.iter().copied().collect();
-        let worker_window = Arc::clone(&window);
+        let sharp_proxy = proxy.clone();
+        let sharp_doc = Arc::clone(&doc);
+        let worker_proxy = proxy;
         let (cpu_done_tx, cpu_done_rx) = mpsc::channel::<CpuDone>();
         let first_camera = cameras[0];
         // The quality reference needs the initial camera's full tile set resident.
@@ -643,16 +873,26 @@ impl State {
                 if start_rx.recv().is_err() || worker_cancel.load(Ordering::Relaxed) {
                     return;
                 }
-                let preview = {
-                    let Ok(_guard) = worker_gate.lock() else { return };
-                    render_preview(&mut gpu, &doc, page, &backdrop, first_camera, bleed, clear32)
-                        .map(Ready::Preview)
-                        .map_err(|error| error.to_string())
-                };
-                if ready_tx.send(preview).is_err() {
-                    return;
+                if defer_tiles_until_idle {
+                    while !worker_interaction_finished.load(Ordering::Relaxed) {
+                        if worker_cancel.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(2));
+                    }
                 }
-                worker_window.request_redraw();
+                if !sharp_underlay {
+                    let preview = {
+                        let Ok(_guard) = worker_gate.lock() else { return };
+                        render_preview(&mut gpu, &doc, page, &backdrop, first_camera, bleed, clear32, paired_overview)
+                            .map(Ready::Preview)
+                            .map_err(|error| error.to_string())
+                    };
+                    if ready_tx.send(preview).is_err() {
+                        return;
+                    }
+                    let _ = worker_proxy.send_event(());
+                }
             }
             let mut warm_iter = worker_warm.clone().into_iter().peekable();
             let mut rendered = HashSet::new();
@@ -666,24 +906,38 @@ impl State {
                 }
             }
             let mut warm_sent = 0usize;
+            let mut pending_upload = None;
+            let mut upload_frame = usize::MAX;
+            let mut uploaded_this_frame = 0usize;
             let stress_key = Key { tier: 0, x: 5, y: 3 };
             loop {
                 if worker_cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                if cpu_async && let Ok((key, pixels, started)) = cpu_done_rx.try_recv() {
+                let current_frame = worker_present_sequence.load(Ordering::Relaxed);
+                if current_frame != upload_frame {
+                    upload_frame = current_frame;
+                    uploaded_this_frame = 0;
+                }
+                if cpu_async && let Some((key, pixels, started)) = pending_upload.take().or_else(|| cpu_done_rx.try_recv().ok()) {
+                    if worker_interaction_active.load(Ordering::Relaxed) && uploaded_this_frame >= tile_uploads_per_frame {
+                        pending_upload = Some((key, pixels, started));
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
                     cpu_pending.remove(&key);
                     let result = pixels.and_then(|bytes| {
                         let _guard = worker_gate.lock().map_err(|_| "GPU presentation gate poisoned".to_string())?;
                         gpu.upload_premul(&bytes).map_err(|error| error.to_string())?;
                         Ok(gpu.snapshot_submit())
                     });
+                    uploaded_this_frame += 1;
                     if !publish_tile(
                         key,
                         result,
                         started.elapsed().as_secs_f64() * 1000.0,
                         &ready_tx,
-                        &worker_window,
+                        &worker_proxy,
                         &worker_warm_set,
                         &mut rendered,
                         &mut warm_sent,
@@ -806,7 +1060,7 @@ impl State {
                             result,
                             cpu_ms + upload_started.elapsed().as_secs_f64() * 1000.0,
                             &ready_tx,
-                            &worker_window,
+                            &worker_proxy,
                             &worker_warm_set,
                             &mut rendered,
                             &mut warm_sent,
@@ -828,7 +1082,7 @@ impl State {
                     result,
                     started.elapsed().as_secs_f64() * 1000.0,
                     &ready_tx,
-                    &worker_window,
+                    &worker_proxy,
                     &worker_warm_set,
                     &mut rendered,
                     &mut warm_sent,
@@ -837,6 +1091,46 @@ impl State {
                 }
             }
         });
+
+        let (sharp_tx, sharp_ready) = mpsc::channel();
+        if sharp_underlay {
+            let oracle_source = std::env::args().any(|arg| arg == "--oracle-source");
+            let source_guard =
+                std::env::args().find_map(|arg| arg.strip_prefix("--source-guard=").and_then(|value| value.parse::<f64>().ok())).unwrap_or(512.0);
+            if !source_guard.is_finite() || !(0.0..=2048.0).contains(&source_guard) {
+                return Err("--source-guard must be finite and within 0..=2048 world units".into());
+            }
+            let source = sharp_source_view(&cameras, sharp_factor, oracle_source, source_guard)?;
+            let covered = cameras.iter().filter(|&&camera| sharp_covers(&source, camera)).count();
+            println!(
+                "sharp_source oracle={oracle_source} guard={source_guard:.0} covered_cameras={covered}/{} source={}x{}",
+                cameras.len(),
+                source.width,
+                source.height
+            );
+            if source.width.div_ceil(2) + 2 > device.limits().max_texture_dimension_2d || source.height > device.limits().max_texture_dimension_2d {
+                return Err("sharp underlay exceeds GPU texture dimensions".into());
+            }
+            let sharp_device = device.clone();
+            let sharp_queue = queue.clone();
+            let surface_format = direct_underlay.then_some(config.format);
+            thread::spawn(move || {
+                let prepared = prepare_sharp_underlay(
+                    &sharp_doc,
+                    page,
+                    source,
+                    sharp_factor,
+                    sharp_bands,
+                    sharp_baked,
+                    sharp_device,
+                    sharp_queue,
+                    surface_format,
+                )
+                .map_err(|error| error.to_string());
+                let _ = sharp_tx.send(prepared);
+                let _ = sharp_proxy.send_event(());
+            });
+        }
 
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("present blit"), source: wgpu::ShaderSource::Wgsl(BLIT.into()) });
@@ -909,6 +1203,16 @@ impl State {
             cache,
             request: Some(request_tx),
             ready: ready_rx,
+            sharp_ready,
+            sharp: None,
+            sharp_ready_ms: None,
+            sharp_underlay_frames: 0,
+            sharp_requested: sharp_underlay,
+            direct_underlay,
+            sharp_only,
+            present_sequence,
+            interaction_active,
+            interaction_finished,
             worker: Some(worker),
             warm_start_signal: if warm_in_background { Some(start_tx) } else { None },
             cancel_worker,
@@ -955,6 +1259,7 @@ impl State {
             verify_doc,
             verify_page: page,
             atlas_mib,
+            preview_slots,
             stress,
             stress_gap_ms,
             stress_jobs,
@@ -969,6 +1274,7 @@ impl State {
     fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         let warming = self.warm_in_background && !self.warm_remaining.is_empty();
         let tracing = (!warming || self.interactive_started) && self.frame < self.cameras.len();
+        self.interaction_active.store(tracing, Ordering::Relaxed);
         if tracing {
             let latest = (self.started.elapsed().as_secs_f64() * HZ).floor() as usize;
             let latest = latest.min(self.cameras.len().saturating_sub(1));
@@ -992,11 +1298,42 @@ impl State {
         let late_ms = start.saturating_duration_since(due).as_secs_f64() * 1000.0;
         self.cache.touch(camera, self.frame);
         let mut first_visual_pending = false;
+        if let Ok(result) = self.sharp_ready.try_recv() {
+            let ready = result.map_err(|message| -> Box<dyn Error> { message.into() })?;
+            self.sharp_ready_ms = Some(self.boot_started.elapsed().as_secs_f64() * 1000.0);
+            println!(
+                "sharp_underlay_ready_ms={:.1} prepare_ms={:.1} source={}x{}",
+                self.sharp_ready_ms.unwrap_or(0.0),
+                ready.prepare_ms,
+                ready.source.width,
+                ready.source.height
+            );
+            self.sharp = Some(ready);
+            if let Some(signal) = self.warm_start_signal.take() {
+                self.warm_started = Some(Instant::now());
+                signal.send(())?;
+            }
+            for slot in 0..self.preview_slots {
+                self.compositor.hide_gpu_layer(slot)?;
+            }
+            first_visual_pending = true;
+        }
         while let Ok(result) = self.ready.try_recv() {
             match result.map_err(|message| -> Box<dyn Error> { message.into() })? {
-                Ready::Preview(texture) => {
-                    let origin = self.cameras[0].origin();
-                    self.compositor.update_gpu_layer(0, (origin.0 as f32, origin.1 as f32), f64::from(WIDTH) as f32 / SCALE as f32, 0.0, &texture)?;
+                Ready::Preview(textures) => {
+                    if self.sharp.is_none() {
+                        let origin = if self.preview_slots == 2 { preview_origin(self.cameras[0]) } else { self.cameras[0].origin() };
+                        let span = f64::from(WIDTH) / SCALE;
+                        for (column, texture) in textures.iter().enumerate() {
+                            self.compositor.update_gpu_layer(
+                                column as u32,
+                                ((origin.0 + column as f64 * span) as f32, origin.1 as f32),
+                                span as f32,
+                                0.0,
+                                texture,
+                            )?;
+                        }
+                    }
                     first_visual_pending = true;
                 }
                 Ready::Tile(tile) => {
@@ -1024,18 +1361,24 @@ impl State {
             && (initial_view_ready || (self.interact_at_preview && self.first_visual_ms.is_some()))
         {
             if initial_view_ready {
-                self.compositor.hide_gpu_layer(0)?;
+                for slot in 0..self.preview_slots {
+                    self.compositor.hide_gpu_layer(slot)?;
+                }
             }
             self.started = Instant::now();
             self.interactive_started = true;
         }
         if self.interactive_started && initial_view_ready {
-            self.compositor.hide_gpu_layer(0)?;
+            for slot in 0..self.preview_slots {
+                self.compositor.hide_gpu_layer(slot)?;
+            }
         }
         if warming && self.warm_remaining.is_empty() {
             self.warm_ms = self.warm_started.map_or(0.0, |started| started.elapsed().as_secs_f64() * 1000.0);
             self.full_ready_ms = Some(self.boot_started.elapsed().as_secs_f64() * 1000.0);
-            self.compositor.hide_gpu_layer(0)?;
+            for slot in 0..self.preview_slots {
+                self.compositor.hide_gpu_layer(slot)?;
+            }
             if let Some(doc) = self.verify_doc.take() {
                 verify_composition(&doc, self.verify_page, &self.compositor, self.cameras[0], self.clear, "base")?;
                 let max_zoom = self.cameras.iter().skip(60).copied().max_by(|a, b| a.zoom.total_cmp(&b.zoom)).ok_or("zoom trace missing")?;
@@ -1113,7 +1456,6 @@ impl State {
         if tracing {
             self.last_camera = Some((camera, self.frame));
         }
-        self.compositor.render_submit(camera.origin(), camera.zoom, self.clear)?;
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Occluded => {
@@ -1129,26 +1471,48 @@ impl State {
             _ => return Err("surface was lost or invalid".into()),
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("present frame") });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("present blit"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.blit);
-            pass.set_bind_group(0, &self.bind, &[]);
-            pass.draw(0..6, 0..1);
+        if let Some(sharp) = &self.sharp {
+            let camera_view = View { origin: camera.origin(), scale: camera.zoom, width: WIDTH, height: HEIGHT };
+            let complete_view = missing_base == 0 && missing_detail == 0;
+            if self.direct_underlay {
+                sharp.compositor.render_submit_to_surface(&sharp.source, &camera_view, &view)?;
+                if !self.sharp_only && complete_view {
+                    self.compositor.render_submit_over_to_surface(camera.origin(), camera.zoom, &view)?;
+                }
+            } else {
+                sharp.compositor.render_submit_into(&sharp.source, &camera_view, self.compositor.output_view());
+                if !self.sharp_only && complete_view {
+                    self.compositor.render_submit_over(camera.origin(), camera.zoom)?;
+                }
+            }
+            if tracing && (missing_base > 0 || missing_detail > 0) {
+                self.sharp_underlay_frames += 1;
+            }
+        } else {
+            self.compositor.render_submit(camera.origin(), camera.zoom, self.clear)?;
         }
-        self.queue.submit([encoder.finish()]);
+        if !self.direct_underlay || self.sharp.is_none() {
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("present frame") });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("present blit"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.blit);
+                pass.set_bind_group(0, &self.bind, &[]);
+                pass.draw(0..6, 0..1);
+            }
+            self.queue.submit([encoder.finish()]);
+        }
         if tracing {
             let completed = Arc::clone(&self.gpu_done);
             let index = self.frame;
@@ -1159,15 +1523,22 @@ impl State {
             });
         }
         self.queue.present(frame);
+        if tracing {
+            self.present_sequence.fetch_add(1, Ordering::Relaxed);
+        }
         // Presentation is asynchronous; a per-frame GPU fence would serialize the swapchain
         // and turn ordinary FIFO backpressure into accumulated input latency.
         self.device.poll(wgpu::PollType::Poll)?;
         self.occluded_since = None;
         if !self.first_present {
             self.first_present_ms = Some(self.boot_started.elapsed().as_secs_f64() * 1000.0);
-            if let Some(signal) = self.warm_start_signal.take() {
-                self.warm_started = Some(Instant::now());
-                signal.send(())?;
+            if self.warm_in_background {
+                if !self.sharp_requested
+                    && let Some(signal) = self.warm_start_signal.take()
+                {
+                    self.warm_started = Some(Instant::now());
+                    signal.send(())?;
+                }
             } else {
                 self.started = Instant::now();
                 self.first_visual_ms = self.first_present_ms;
@@ -1191,6 +1562,9 @@ impl State {
         self.late.push(late_ms);
         self.zoom_phase.push(self.frame % 120 >= 60);
         self.frame += 1;
+        if self.frame == self.cameras.len() {
+            self.interaction_finished.store(true, Ordering::Relaxed);
+        }
         Ok(())
     }
 
@@ -1220,6 +1594,7 @@ impl State {
             self.warm_total,
             self.warm_frames,
         );
+        println!("sharp_underlay_ready_ms={:.1} sharp_underlay_gap_frames={}", self.sharp_ready_ms.unwrap_or(0.0), self.sharp_underlay_frames,);
         for (name, zoom) in [("pan", false), ("zoom", true)] {
             let mut times: Vec<f64> = self.latencies.iter().zip(&self.zoom_phase).filter(|(_, phase)| **phase == zoom).map(|(ms, _)| *ms).collect();
             if times.is_empty() {
@@ -1278,11 +1653,11 @@ impl State {
     }
 }
 
-#[derive(Default)]
 struct App {
     state: Option<State>,
     failed: bool,
     next_watchdog: Option<Instant>,
+    proxy: EventLoopProxy<()>,
 }
 
 impl ApplicationHandler for App {
@@ -1290,7 +1665,7 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        match State::new(event_loop) {
+        match State::new(event_loop, self.proxy.clone()) {
             Ok(state) => {
                 state.window.request_redraw();
                 self.state = Some(state);
@@ -1301,6 +1676,12 @@ impl ApplicationHandler for App {
                 self.failed = true;
                 event_loop.exit();
             }
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, (): ()) {
+        if let Some(state) = &self.state {
+            state.window.request_redraw();
         }
     }
 
@@ -1373,7 +1754,7 @@ impl ApplicationHandler for App {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new()?;
-    let mut app = App::default();
+    let mut app = App { state: None, failed: false, next_watchdog: None, proxy: event_loop.create_proxy() };
     event_loop.run_app(&mut app)?;
     if app.failed {
         return Err("window benchmark did not complete".into());
@@ -1384,6 +1765,38 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finite_underlay_reports_when_pan_leaves_its_prepared_area() -> Result<(), Box<dyn Error>> {
+        let first = Camera { center: (1600.0, 1150.0), zoom: SCALE };
+        let later = Camera { center: (3200.0, 1150.0), zoom: SCALE };
+        let source = sharp_source_view(&[first, later], 5, false, 512.0)?;
+        assert!(sharp_covers(&source, first));
+        assert!(!sharp_covers(&source, later));
+        let oracle = sharp_source_view(&[first, later], 5, true, 96.0)?;
+        assert!(sharp_covers(&oracle, later));
+        Ok(())
+    }
+
+    #[test]
+    fn parallel_sharp_bands_match_one_render() -> Result<(), Box<dyn Error>> {
+        let (doc, warnings) = figcraft_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
+        assert!(warnings.is_empty());
+        let page = doc.current_page.ok_or("fixture page missing")?;
+        let view = View { origin: (320.0, 610.0), scale: 2.0, width: 511, height: 257 };
+        let options = Options { lod: true, skip_effects: true, ..Default::default() };
+        let full = render_view(&doc, page, &view, &options).ok_or("full render failed")?;
+        for bands in [2, 4] {
+            let parallel = render_sharp_parallel(&doc, page, &view, &options, bands).ok_or("band render failed")?;
+            let mismatched = parallel.data().iter().zip(full.data()).filter(|(a, b)| a != b).count();
+            let maximum = parallel.data().iter().zip(full.data()).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            assert!(
+                mismatched * 1_000 <= full.data().len() && maximum <= 2,
+                "bands={bands} mismatched_channels={mismatched} max_channel_error={maximum}"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn a_live_request_rebuilds_an_evicted_tile() {
@@ -1410,11 +1823,21 @@ mod tests {
     fn overview_covers_the_initial_viewport_from_its_central_pixels() {
         let camera = Camera { center: (1600.0, 1150.0), zoom: SCALE };
         let bleed = 102;
-        let view = preview_view(camera, bleed);
-        let origin = camera.origin();
-        assert!((view.origin.0 + f64::from(bleed) / view.scale - origin.0).abs() < 1e-6);
-        assert!((view.origin.1 + f64::from(bleed) / view.scale - origin.1).abs() < 1e-6);
-        assert!((f64::from(TILE) / view.scale - f64::from(WIDTH) / SCALE).abs() < 1e-6);
-        assert!(f64::from(TILE) / view.scale >= f64::from(HEIGHT) / SCALE);
+        let single = single_preview_view(camera, bleed);
+        assert!((single.origin.0 + f64::from(bleed) / single.scale - camera.origin().0).abs() < 1e-6);
+        assert!((single.origin.1 + f64::from(bleed) / single.scale - camera.origin().1).abs() < 1e-6);
+        let first = preview_view(camera, bleed, 0);
+        let second = preview_view(camera, bleed, 1);
+        let origin = preview_origin(camera);
+        let span = f64::from(WIDTH) / SCALE;
+        assert!((first.origin.0 + f64::from(bleed) / first.scale - origin.0).abs() < 1e-6);
+        assert!((second.origin.0 + f64::from(bleed) / second.scale - origin.0 - span).abs() < 1e-6);
+        assert!((first.origin.1 + f64::from(bleed) / first.scale - origin.1).abs() < 1e-6);
+        assert!((f64::from(TILE) / first.scale - span).abs() < 1e-6);
+        for camera in trace().into_iter().chain(random_trace()) {
+            let (x, y) = camera.origin();
+            assert!(x >= origin.0 && x + f64::from(WIDTH) / camera.zoom <= origin.0 + 2.0 * span);
+            assert!(y >= origin.1 && y + f64::from(HEIGHT) / camera.zoom <= origin.1 + span);
+        }
     }
 }

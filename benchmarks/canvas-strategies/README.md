@@ -57,6 +57,23 @@ Use `--trace=random --trace-repeats=3` for the deterministic pointer-like pan an
 
 `cargo run --release --manifest-path benchmarks/canvas-strategies/Cargo.toml --bin geometry_overlay_parity` measures a sharp geometry pass over a soft effect preview. Add `-- --icon` to test the saved Lizard icon. The workbook improves, but the icon loses inner-effect fidelity, so this remains a diagnostic experiment.
 
+The newer signed-residual experiments keep geometry sharp while approximating soft effects. Compare their output against the document renderer with:
+
+```sh
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
+  --bin gpu_residual_probe -- --factor=2
+CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
+  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
+  --bin gpu_residual_probe -- --icon --factor=2 --save
+```
+
+For an actual Metal window and a pointer-like 75 Hz trace, run `gpu_residual_window --factor=2 --focus-delay-ms=2000`. Add `--trace-repeats=10` for 1,200 camera states, `--baked` to apply the correction once on the CPU, or `--direct` to draw to the swapchain without the intermediate texture. Run from the repository root and leave the benchmark window frontmost. The residual window is a separate prototype with a source image prepared for its known camera trace; it cannot represent arbitrary navigation or edits in Lizard yet. The [measurement report](RESULTS-2026-10-28.md) records fidelity, frame timing, memory and the remaining integration gates.
+
+The finite-source experiment removes that advance knowledge. Use `streaming_window --sharp-underlay --direct-underlay --source-guard=512 --trace=random --trace-repeats=10 --background-warm --interact-during-warm --interact-at-preview` to measure sharp initial coverage and whole-viewport tile handoff. It prints `covered_cameras`; `--oracle-source` is for reproducing the older known-trace result only. `--defer-tiles-until-idle` isolates interaction timing by postponing faithful tile preparation until the trace ends. That mode cannot claim full visual coverage when `covered_cameras` is below the trace length.
+
+`gpu_live_residual_window` tests full-viewport Vello vectors with a document-wide low-resolution effect correction. Run it with `LIZARD_GPU_NO_EFFECTS=1` and `--trace-repeats=10`. Add `--cache-guard=512` or `--cache-guard=1024` to use a finite sharp source around the initial camera and fall back to live vectors outside it. `--cached-two-pass` tests the cached source through an intermediate texture. `--low-cpu-base` computes the effect correction against the document renderer's low-resolution geometry; `--poll-background` keeps GPU callback polling off the presentation thread. `--compare-routes` compares cache, live vectors, and the faithful renderer at several covered pan and zoom positions; `--save-routes` writes the first cache/live image pair. These are benchmark-only paths, and neither has passed the editor integration gates.
+
 Run the focused regression tests with:
 
 ```sh

@@ -61,6 +61,9 @@ pub struct Compositor {
     queue: wgpu::Queue,
     atlas: wgpu::Texture,
     pipeline: wgpu::RenderPipeline,
+    surface_pipeline: Option<wgpu::RenderPipeline>,
+    layout: wgpu::BindGroupLayout,
+    shader: wgpu::ShaderModule,
     bind: wgpu::BindGroup,
     instances: wgpu::Buffer,
     camera: wgpu::Buffer,
@@ -369,6 +372,9 @@ impl Compositor {
             queue,
             atlas,
             pipeline,
+            surface_pipeline: None,
+            layout,
+            shader,
             bind,
             camera,
             instances,
@@ -460,6 +466,60 @@ impl Compositor {
 
     /// Submit composition without waiting for the GPU. The caller can track queue completion.
     pub fn render_submit(&self, origin: (f64, f64), zoom: f64, clear: (f64, f64, f64)) -> Result<f64, Box<dyn Error>> {
+        self.render_submit_with_background(origin, zoom, clear, false)
+    }
+
+    /// Draw cached tiles over an already rendered full-window preview.
+    pub fn render_submit_over(&self, origin: (f64, f64), zoom: f64) -> Result<f64, Box<dyn Error>> {
+        self.render_submit_with_background(origin, zoom, (0.0, 0.0, 0.0), true)
+    }
+
+    pub fn enable_surface(&mut self, format: wgpu::TextureFormat) {
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Lizard benchmark surface compositor layout"),
+            bind_group_layouts: &[Some(&self.layout)],
+            immediate_size: 0,
+        });
+        self.surface_pipeline = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Lizard benchmark surface tile compositor"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState { module: &self.shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        }));
+    }
+
+    pub fn render_submit_over_to_surface(&self, origin: (f64, f64), zoom: f64, target: &wgpu::TextureView) -> Result<f64, Box<dyn Error>> {
+        let pipeline = self.surface_pipeline.as_ref().ok_or("surface compositor pipeline unavailable")?;
+        self.render_submit_target(origin, zoom, (0.0, 0.0, 0.0), true, target, pipeline)
+    }
+
+    fn render_submit_with_background(&self, origin: (f64, f64), zoom: f64, clear: (f64, f64, f64), preserve: bool) -> Result<f64, Box<dyn Error>> {
+        self.render_submit_target(origin, zoom, clear, preserve, &self.target_view, &self.pipeline)
+    }
+
+    fn render_submit_target(
+        &self,
+        origin: (f64, f64),
+        zoom: f64,
+        clear: (f64, f64, f64),
+        preserve: bool,
+        target: &wgpu::TextureView,
+        pipeline: &wgpu::RenderPipeline,
+    ) -> Result<f64, Box<dyn Error>> {
         let mut data = Vec::with_capacity(32);
         for value in [
             origin.0 as f32,
@@ -480,10 +540,14 @@ impl Compositor {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Lizard benchmark tile composition"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.target_view,
+                    view: target,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: clear.0, g: clear.1, b: clear.2, a: 1.0 }),
+                        load: if preserve {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color { r: clear.0, g: clear.1, b: clear.2, a: 1.0 })
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -493,7 +557,7 @@ impl Compositor {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.draw(0..6, 0..self.count);
         }
