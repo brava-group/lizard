@@ -1,4 +1,4 @@
-//! Bounded retained tiles and GPU composition for Lizard's canvas.
+//! GPU rasterization and effect composition for Lizard's canvas.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -6,7 +6,7 @@
 pub mod compositor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod export;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub mod geometry_atlas;
 pub mod gpu_blur;
 pub mod gpu_color_profile;

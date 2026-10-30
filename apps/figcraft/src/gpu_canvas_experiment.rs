@@ -1,12 +1,10 @@
-//! Native GPU canvas. Unsupported content falls back to the ordinary CPU canvas; the legacy
-//! geometry atlas remains available for measurements through `LIZARD_GPU_CANVAS_ATLAS=1`.
+//! Native GPU canvas. Unsupported content falls back to the ordinary CPU canvas.
 
 use std::error::Error;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
-use figcraft_canvas_gpu::geometry_atlas::{GeometryAtlas, required_slots};
 use figcraft_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene, make_scene_with_images,
 };
@@ -18,7 +16,6 @@ use figcraft_ui_egui::canvas::{CanvasGpuBackend, GpuSample};
 
 pub struct GpuCanvasExperiment {
     state: RenderState,
-    atlas: Option<GeometryAtlas>,
     direct: Option<GpuCanvas>,
     direct_texture_id: Option<egui::TextureId>,
     direct_profile: Option<ColorProfile>,
@@ -31,29 +28,16 @@ pub struct GpuCanvasExperiment {
     direct_current: bool,
     eyedrop_pending: Option<(Point, GpuPixelSample)>,
     direct_provisional_effects: bool,
-    direct_mode: bool,
     direct_force: bool,
     direct_cached_blur: bool,
     direct_fallback_logged: bool,
-    texture_id: Option<egui::TextureId>,
-    document: Option<Arc<Document>>,
-    page: Option<NodeId>,
-    size: (u32, u32),
-    pending_resize: Option<((u32, u32), Instant)>,
-    started: Instant,
-    first_ready: bool,
     disabled: bool,
-    last_camera: Option<(f64, f64, f64)>,
-    last_camera_changed: Instant,
-    camera_states: u64,
-    covered_states: u64,
 }
 
 impl GpuCanvasExperiment {
     pub fn new(state: RenderState) -> Self {
         Self {
             state,
-            atlas: None,
             direct: None,
             direct_texture_id: None,
             direct_profile: None,
@@ -66,22 +50,10 @@ impl GpuCanvasExperiment {
             direct_current: false,
             eyedrop_pending: None,
             direct_provisional_effects: false,
-            direct_mode: std::env::var_os("LIZARD_GPU_CANVAS_ATLAS").is_none(),
             direct_force: std::env::var_os("LIZARD_GPU_CANVAS_DIRECT_FORCE").is_some(),
             direct_cached_blur: std::env::var_os("LIZARD_GPU_CANVAS_NO_EFFECT_CACHE").is_none(),
             direct_fallback_logged: false,
-            texture_id: None,
-            document: None,
-            page: None,
-            size: (0, 0),
-            pending_resize: None,
-            started: Instant::now(),
-            first_ready: false,
             disabled: false,
-            last_camera: None,
-            last_camera_changed: Instant::now(),
-            camera_states: 0,
-            covered_states: 0,
         }
     }
 
@@ -105,146 +77,15 @@ impl GpuCanvasExperiment {
         clear: [f32; 3],
         gesture_active: bool,
         proof_srgb: bool,
-        ctx: &egui::Context,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
-        if self.direct_mode {
-            let cached_effects = self.direct_cached_blur;
-            if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, cached_effects) {
-                return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb);
-            }
+        if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur) {
+            return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb);
         }
-        if self.direct_mode {
-            if !self.direct_fallback_logged {
-                eprintln!("Lizard direct Vello GPU: view contains unsupported effects; using the CPU canvas");
-                self.direct_fallback_logged = true;
-            }
-            return Ok(None);
+        if !self.direct_fallback_logged {
+            eprintln!("Lizard direct Vello GPU: view contains unsupported effects; using the CPU canvas");
+            self.direct_fallback_logged = true;
         }
-        if view.width == 0
-            || view.height == 0
-            || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
-            || !view.scale.is_finite()
-            || !(0.0..=614.4).contains(&view.scale)
-        {
-            return Ok(None);
-        }
-        let size = (view.width, view.height);
-        if self.atlas.is_some() && self.size != size {
-            let started = match self.pending_resize {
-                Some((pending, started)) if pending == size => started,
-                _ => {
-                    let started = Instant::now();
-                    self.pending_resize = Some((size, started));
-                    started
-                }
-            };
-            let remaining = Duration::from_millis(150).saturating_sub(started.elapsed());
-            if !remaining.is_zero() {
-                ctx.request_repaint_after(remaining);
-                return Ok(None);
-            }
-        } else {
-            self.pending_resize = None;
-        }
-        if self.atlas.is_none() || self.size != size {
-            if let Some(id) = self.texture_id.take() {
-                self.state.renderer.write().free_texture(&id);
-            }
-            let desired = if view.width >= 4000 { 240 } else { required_slots(view, 2).saturating_mul(2).clamp(64, 240) };
-            let capacity = self.state.device.limits().max_texture_array_layers.min(desired as u32);
-            eprintln!("Lizard GPU atlas allocation: viewport={}x{}, slots={capacity}", size.0, size.1);
-            let mut atlas = GeometryAtlas::new(
-                Arc::clone(&doc),
-                page,
-                self.state.device.clone(),
-                self.state.queue.clone(),
-                size.0,
-                size.1,
-                capacity,
-                128,
-                false,
-            )?;
-            atlas.upload_on_owner_thread();
-            let texture_id = self.state.renderer.write().register_native_texture(&self.state.device, atlas.output_view(), wgpu::FilterMode::Linear);
-            self.atlas = Some(atlas);
-            self.texture_id = Some(texture_id);
-            self.document = Some(Arc::clone(&doc));
-            self.page = Some(page);
-            self.size = size;
-            self.pending_resize = None;
-            self.started = Instant::now();
-            self.first_ready = false;
-            self.last_camera = None;
-            self.last_camera_changed = Instant::now();
-            self.camera_states = 0;
-            self.covered_states = 0;
-        }
-        let atlas = self.atlas.as_mut().ok_or("GPU atlas missing after creation")?;
-        if self.page != Some(page) || !self.document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc)) {
-            atlas.invalidate_document_auto(Arc::clone(&doc), page)?;
-            self.document = Some(doc);
-            self.page = Some(page);
-            self.started = Instant::now();
-            self.first_ready = false;
-            self.last_camera = None;
-            self.last_camera_changed = Instant::now();
-            self.camera_states = 0;
-            self.covered_states = 0;
-        }
-        atlas.request_margin(view, 1)?;
-        atlas.install(view, 4)?;
-        let covered = atlas.covers(view);
-        let presentable = atlas.covers_presentable(view);
-        let camera = (view.origin.0, view.origin.1, view.scale);
-        if self.last_camera != Some(camera) {
-            self.last_camera = Some(camera);
-            self.last_camera_changed = Instant::now();
-            self.camera_states += 1;
-            self.covered_states += u64::from(covered);
-            if self.camera_states.is_multiple_of(40) {
-                eprintln!(
-                    "Lizard GPU atlas camera coverage: {}/{} complete, resident={}, pending={}",
-                    self.covered_states,
-                    self.camera_states,
-                    atlas.stats().1,
-                    atlas.stats().2
-                );
-            }
-        }
-        let idle = self.last_camera_changed.elapsed();
-        if view.scale <= 2.4 && idle >= Duration::from_millis(300) && idle < Duration::from_secs(4) && atlas.covers_margin(view, 1) {
-            let center = (view.origin.0 + f64::from(view.width) / (2.0 * view.scale), view.origin.1 + f64::from(view.height) / (2.0 * view.scale));
-            for scale in [0.81, 1.61, 3.21] {
-                let projected = View {
-                    origin: (center.0 - f64::from(view.width) / (2.0 * scale), center.1 - f64::from(view.height) / (2.0 * scale)),
-                    scale,
-                    width: view.width,
-                    height: view.height,
-                };
-                atlas.prefetch_view_guarded(&projected);
-            }
-        }
-        if !presentable {
-            ctx.request_repaint_after(Duration::from_millis(16));
-            return Ok(None);
-        }
-        atlas.render_submit(view, clear)?;
-        if !self.first_ready {
-            eprintln!(
-                "Lizard GPU atlas first drawable view: {:.1} ms, desired_covered={covered}, {:?}",
-                self.started.elapsed().as_secs_f64() * 1000.0,
-                atlas.stats()
-            );
-            self.first_ready = true;
-        }
-        if atlas.stats().2 > 0 {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        } else if !covered {
-            ctx.request_repaint_after(Duration::from_millis(100));
-        } else if view.scale <= 2.4 && idle < Duration::from_millis(300) {
-            ctx.request_repaint_after(Duration::from_millis(300).saturating_sub(idle));
-        }
-        Ok(self.texture_id)
+        Ok(None)
     }
 
     fn update_direct(
@@ -503,18 +344,18 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         clear: [f32; 3],
         gesture_active: bool,
         proof_srgb: bool,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, gesture_active, proof_srgb, ctx) {
+        match self.update(doc, page, view, clear, gesture_active, proof_srgb) {
             Ok(texture) => {
                 self.direct_current = texture.is_some() && texture == self.direct_texture_id;
                 texture
             }
             Err(error) => {
-                eprintln!("Lizard GPU atlas disabled after an error: {error}");
+                eprintln!("Lizard GPU canvas disabled after an error: {error}");
                 self.disabled = true;
                 self.direct_current = false;
                 None
@@ -569,9 +410,6 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
 impl Drop for GpuCanvasExperiment {
     fn drop(&mut self) {
         if let Some(id) = self.direct_texture_id.take() {
-            self.state.renderer.write().free_texture(&id);
-        }
-        if let Some(id) = self.texture_id.take() {
             self.state.renderer.write().free_texture(&id);
         }
     }

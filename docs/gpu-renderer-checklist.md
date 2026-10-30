@@ -12,7 +12,6 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 | --- | --- | --- |
 | `crates/ui-egui/src/render_worker.rs` | Canvas fallback for selected outlines, pixel preview, focus view, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
 | `crates/ui-egui/src/canvas.rs` | Cropped creation preview and eyedropper when GPU cannot present | Current GPU scene covers supported interactions; no CPU scene raster on a working GPU |
-| `crates/canvas-gpu/src/geometry_atlas.rs` | Legacy atlas raster tiles with `render_view` | Retire atlas after direct mode covers its cases |
 | `crates/canvas-gpu/src/vello_scene.rs` | CPU effect tile fallback in the GPU compositor | GPU passes support every effect stack and region, including large surfaces |
 | `crates/engine/src/cmd/file.rs` | WASM export and unsupported native export fallback | Browser asynchronous WebGPU readback and complete GPU export coverage |
 | `crates/svg/src/import/paint.rs` and `crates/svg/src/lib.rs` | SVG paint sources and effect/mask PNG embedding | GPU raster service supplies required embedded pixels |
@@ -44,7 +43,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Suppress the CPU creation preview when the current GPU texture already contains the new
     shape, avoiding a stale second raster over the scene.
   - [ ] Remove CPU rendering from unsupported drag scenes and measure latency on mixed effects.
-- [ ] Remove the CPU atlas path after direct GPU covers its use cases.
+- [x] Remove the CPU atlas path from production after direct GPU covers its use cases. The
+  reference implementation remains compiled only in native tests.
 
 ## Paints, effects, and composition
 
@@ -125,6 +125,9 @@ the migration concerns rasterization and pixel effects.
 
 ## Evidence log
 
+- 2026-10-30: removed the `LIZARD_GPU_CANVAS_ATLAS` production switch and its CPU-rendered tile
+  path. The direct Vello canvas is now the only native GPU backend; the atlas module is test-only.
+  Native `cargo check` and `CARGO_INCREMENTAL=0 cargo xtask ci` passed.
 - 2026-10-30: full-page Outline mode now builds Vello GPU strokes rather than using the CPU
   canvas. A pixel fixture checked visible and hidden rectangles, group bounds, and light strokes
   on a dark canvas; its output was visually inspected. The UI dispatch test confirmed that Outline
