@@ -322,6 +322,33 @@ impl CanvasGpuBackend for WebGpuCanvas {
         }
     }
 
+    fn focused_pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update(doc, page, view, clear, false, proof_srgb, true, Some(focus), None) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU focused pixel preview failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
     fn pixel_texture(
         &mut self,
         doc: Arc<Document>,

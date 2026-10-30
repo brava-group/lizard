@@ -408,6 +408,33 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         }
     }
 
+    fn focused_pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled || doc.page_of(focus) != Some(page) || has_unhandled_effects_in_focused_subtree(&doc, view, self.direct_cached_blur, focus) {
+            return None;
+        }
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, true, Some(focus), None) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU focused pixel preview failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
     fn pixel_texture(
         &mut self,
         doc: Arc<Document>,

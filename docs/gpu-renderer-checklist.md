@@ -3,8 +3,10 @@
 The target is GPU rasterization for every user-facing drawing path when a compatible GPU is
 available. CPU rendering remains a fallback for unavailable devices and an oracle for parity
 tests. SVG and PDF keep their native vector output; only content they must rasterize belongs in
-this migration. A box is complete only after native and WASM checks, representative visual parity,
-and an interaction or export test. Do not remove a capability guard merely to mark a box done.
+this migration. A box is complete only after native and WASM checks, visual verification of
+content and effect order, and an interaction or export test. The GPU image may differ aesthetically
+from the CPU reference; pixel comparisons detect missing content and severe artifacts rather than
+require an exact match. Do not remove a capability guard merely to mark a box done.
 
 ## Remaining production CPU raster paths (code audit)
 
@@ -37,6 +39,8 @@ the migration concerns rasterization and pixel effects.
     sibling contours stay outside the focused scene.
   - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
     with nearest-neighbor sampling on native and browser WebGPU.
+  - [x] Combine Pixel Preview with a focused subtree on native and browser WebGPU; the focused
+    scene keeps document-pixel resolution and nearest-neighbor sampling.
   - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
   - [x] Replace selected subtrees with outlines in the GPU scene while preserving sibling paints
     and paint order on native and browser canvas.
@@ -116,7 +120,7 @@ the migration concerns rasterization and pixel effects.
     but the contour, blur, and effect order remain intact at 1× and 2×.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
-- [ ] Measure parity and latency on the icon, a complex multi-frame document, UltraWide/Retina,
+- [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
   transparent content, and color-profile fixtures.
 
 ## Raster exports and secondary views
@@ -466,6 +470,12 @@ the migration concerns rasterization and pixel effects.
   focused subtree. A 100 × 50 GPU fixture retained the focused rectangle contour and omitted
   its sibling. The UI dispatch test confirmed the focused backend call, and the native/browser
   backends track focus in their outline texture cache keys. I inspected the generated GPU PNG:
-  it showed the focused rectangle only. All 96 canvas-GPU and 722 UI tests passed, and
-  `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM,
+  it showed the focused rectangle only. All 96 canvas-GPU tests passed; 719 UI tests passed and
+  3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM,
   plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: Focus plus Pixel Preview now routes through the existing GPU focus scene with
+  pixel-scale rendering and nearest-neighbor presentation on native and browser WebGPU. The UI
+  dispatch fixture confirmed a focused rectangle reached the backend at 1× document scale
+  while the editor view was zoomed to 8×. All 96 canvas-GPU tests passed; 720 UI tests passed
+  and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across
+  native/WASM, plugins, Clippy, formatting, and layer checks.

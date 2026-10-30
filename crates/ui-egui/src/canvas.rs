@@ -70,6 +70,20 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Present a focused subtree at document pixel scale with nearest-neighbor sampling.
+    fn focused_pixel_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _focus: NodeId,
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Render only the focused subtree at its document-space position.
     fn focus_texture(
         &mut self,
@@ -1168,7 +1182,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
-        && !(ds.focused().is_some() && (ds.view.outlines_selection || ds.view.pixel_preview_scale().is_some()))
+        && !(ds.focused().is_some() && ds.view.outlines_selection)
         && !(ds.view.outlines_selection && ds.view.pixel_preview_scale().is_some())
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
@@ -1187,6 +1201,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                     ),
                 };
                 backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, &ctx)
+            } else if ds.view.pixel_preview_scale().is_some() {
+                backend.focused_pixel_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
             } else {
                 backend.focus_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
             }
@@ -3168,6 +3184,56 @@ mod stale_render_tests {
         ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "focused outline capture lock poisoned")?;
         assert!(captured.contains(&focus), "focused Outline should use the GPU backend");
+        Ok(())
+    }
+
+    #[test]
+    fn focused_pixel_preview_uses_the_gpu_pixel_scale() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<(NodeId, f64)>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn focused_pixel_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                focus: NodeId,
+                view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push((focus, view.scale));
+                None
+            }
+        }
+
+        let mut ui = Ui::new(Session::new());
+        let result = ui.app.session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 30, "height": 20}))?;
+        let focus = NodeId(result["id"].as_u64().ok_or("created shape id missing")?);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        let ds = ui.app.session.ds_mut()?;
+        ds.focus = Some(focus);
+        ds.view.zoom = 8.0;
+        ds.view.pixel_preview = true;
+        ds.view.pixel_scale = 1;
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "focused pixel capture lock poisoned")?;
+        assert!(captured.contains(&(focus, 1.0)), "focused Pixel Preview should use the GPU at document pixel scale");
         Ok(())
     }
 
