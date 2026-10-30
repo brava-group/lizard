@@ -81,8 +81,8 @@ the migration concerns rasterization and pixel effects.
     Vello-supported modes match CPU samples at the fill, shadow, and background.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
-- [x] Keep composited inner shadows on rotated groups in the GPU cache for tested spreads up to
-  eight document units; retain a guard for larger rotated spreads and unsupported descendants.
+- [x] Keep composited inner and drop shadows on rotated groups in the GPU cache for tested spreads
+  through ±32 document units; unsupported descendants and larger effects remain guarded.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
   and glass on rotated/skewed shapes and groups, including multiple shadows.
   - [x] Support `Noise → Layer Blur` on rotated shapes at 1× and 2× zoom with GPU-only passes.
@@ -141,8 +141,9 @@ the migration concerns rasterization and pixel effects.
 
 - 2026-10-30: aligning GPU shadow cache bounds to document pixels reduced the rotated group
   inner-shadow difference below 1% of pixels at 1× and 2×. The fixture includes nested content,
-  gradient paint, a dashed stroke, and two masks. Spreads of −8, 0, and +8 matched within the
-  existing 8/255 threshold; +16 remains guarded on rotated groups.
+  gradient paint, a dashed stroke, and two masks. Spreads from −32 through +32 passed the
+  existing 8/255 threshold. The corresponding drop-shadow fixture passed both show-behind modes,
+  the same spread range, and both zoom levels after removing the rotation guard.
 
 - 2026-10-30: the texture scatter cache now expands rotated effect bounds to integral document
   pixels before GPU rasterization and presentation. Two rotation angles, clipped and unclipped

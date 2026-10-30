@@ -1777,7 +1777,7 @@ mod effect_capability_tests {
             }
         }
         doc.node_mut(group).ok_or("group missing")?.transform = Affine::translate((65.0, 45.0)) * Affine::rotate(0.35);
-        for spread in [-8.0, 0.0, 8.0] {
+        for spread in [-32.0, -16.0, -8.0, 0.0, 8.0, 16.0, 32.0] {
             if let Some(EffectKind::InnerShadow(shadow)) =
                 doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind)
             {
@@ -1802,11 +1802,6 @@ mod effect_capability_tests {
                 );
             }
         }
-        if let Some(EffectKind::InnerShadow(shadow)) = doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind) {
-            shadow.spread = 16.0;
-        }
-        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 };
-        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         Ok(())
     }
 
@@ -1868,8 +1863,7 @@ mod effect_capability_tests {
             }
             for spread in [0.0_f64, 2.0, -2.0, 8.0, -8.0, 16.0, -16.0, 32.0, -32.0] {
                 doc.node_mut(group).ok_or("group missing")?.transform =
-                    Affine::translate((if spread == 0.0 { 65.0 } else { 30.0 }, if spread == 0.0 { 45.0 } else { 25.0 }))
-                        * Affine::rotate(if spread == 0.0 { 0.35 } else { 0.0 });
+                    Affine::translate((if spread == 0.0 { 65.0 } else { 30.0 }, if spread == 0.0 { 45.0 } else { 25.0 })) * Affine::rotate(0.35);
                 if let Some(EffectKind::DropShadow(shadow)) =
                     doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind)
                 {
@@ -1908,7 +1902,7 @@ mod effect_capability_tests {
         if let Some(EffectKind::DropShadow(shadow)) = doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind) {
             shadow.spread = 32.0;
         }
-        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         Ok(())
     }
 
@@ -3608,7 +3602,6 @@ fn shadow_cache_offset_aligned(doc: &Document, node: &Node, shadow: &Shadow) -> 
 
 fn gpu_simple_group_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
     matches!(node.kind, NodeKind::Group)
-        && (gpu_axis_aligned(doc, node) || shadow.spread.abs() <= 8.0)
         && !node.is_mask
         && !node.clip
         && !node.children.is_empty()
