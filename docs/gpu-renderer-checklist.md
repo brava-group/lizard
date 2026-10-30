@@ -56,6 +56,8 @@ the migration concerns rasterization and pixel effects.
 - [ ] Support image filters, diamond gradients, pattern fills, shader fills, per-paint blend modes,
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
+  - [x] Render isolated noise on skewed shapes through the GPU local-coordinate pass; a skewed
+    rectangle matched the CPU reference within the existing pixel tolerance.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
@@ -129,6 +131,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: removed the orthogonal-axis restriction for isolated noise. The existing GPU
+  compute pass already maps surface pixels back to local coordinates, and a skewed rectangle at
+  2× zoom matched the CPU reference with fewer than 1% of pixels differing by more than 8/255.
+  Other noise stacks and large surfaces remain subject to their separate capability guards.
 
 - 2026-10-30: selected-only outlines now replace the selected subtree inside the Vello scene in
   paint order on native and browser WebGPU. A fixture matched CPU pixels at an outline edge,

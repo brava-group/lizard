@@ -611,6 +611,32 @@ mod effect_capability_tests {
     use super::*;
 
     #[test]
+    fn skewed_noise_matches_cpu_reference() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(320, 320) else { return Ok(()) };
+        let mut doc = Document::new("GPU skewed noise");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Grain", 20.0, 20.0, 100.0, 80.0)?;
+        let node = doc.node_mut(id).ok_or("grain missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.4, 0.7, 1.0))];
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        node.transform = Affine::new([1.0, 0.0, 0.4, 1.0, 30.0, 20.0]);
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 320, height: 320 };
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        gpu.prepare_static_effects(&doc)?;
+        assert_eq!(gpu.noise_effects.len(), 1);
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let actual = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+            .count();
+        assert!(changed * 100 < view.width as usize * view.height as usize, "skewed grain changed {changed} pixels");
+        Ok(())
+    }
+
+    #[test]
     fn rotated_noise_uses_gpu_with_reference_parity() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU noise capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3297,7 +3323,6 @@ fn gpu_noise_supported(doc: &Document, node: &Node, noise: &Noise) -> bool {
         && noise.density.is_finite()
         && noise.opacity.is_finite()
         && node.effects.iter().filter(|effect| effect.visible).count() == 1
-        && gpu_orthogonal_axes(doc, node)
         && gpu_isolated_grain_supported(doc, node)
 }
 
@@ -3378,13 +3403,6 @@ fn gpu_texture_cache_supported(doc: &Document, node: &Node, texture: &Texture) -
 fn gpu_axis_aligned(doc: &Document, node: &Node) -> bool {
     let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
     a.abs() > 1e-6 && d.abs() > 1e-6 && b.abs() < 1e-6 && c.abs() < 1e-6
-}
-
-fn gpu_orthogonal_axes(doc: &Document, node: &Node) -> bool {
-    let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
-    let first = a.hypot(b);
-    let second = c.hypot(d);
-    first > 1e-6 && second > 1e-6 && (a * c + b * d).abs() <= first * second * 1e-5
 }
 
 fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture: &Texture) -> bool {
