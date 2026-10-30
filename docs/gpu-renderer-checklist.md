@@ -94,6 +94,10 @@ the migration concerns rasterization and pixel effects.
     Vello-supported modes match CPU samples at the fill, shadow, and background.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
+  - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
+    sampled reveal levels remain within 16/255 of the reference.
+  - [x] Compose a single solid or gradient luminance stroke as the mask source on GPU;
+    sampled edges and empty interior remain within 16/255 of the reference.
 - [x] Keep composited inner and drop shadows on rotated groups in the GPU cache for tested spreads
   through ±32 document units; unsupported descendants and larger effects remain guarded.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
@@ -421,3 +425,10 @@ the migration concerns rasterization and pixel effects.
   rotated stacks remain guarded. All 91 GPU tests passed, and `RUST_TEST_THREADS=1
   CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting,
   and layer checks.
+- 2026-10-30: luminance masks with translucent linear-gradient stops now use the GPU mask
+  composition. Five samples across the transition matched the CPU reference within 16/255;
+  the existing opaque-gradient and alpha/vector-mask cases remained covered. A second fixture
+  with a stroke-only luminance mask passed for both a translucent solid stroke and a translucent
+  gradient stroke, preserving its empty interior and border pixels. All 92 canvas-GPU tests
+  passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across
+  native/WASM, plugins, Clippy, formatting, and layer checks.

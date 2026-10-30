@@ -804,6 +804,65 @@ mod effect_capability_tests {
             let actual = pixels[offset];
             assert!(actual.abs_diff(expected) <= 12, "luminance x={x}: GPU={actual}, reference={expected}");
         }
+        if let Some(Paint { kind: PaintKind::Gradient(gradient), .. }) = doc.node_mut(mask).and_then(|node| node.fills.first_mut()) {
+            gradient.stops[0].color.a = 0.7;
+            gradient.stops[1].color = Color::new(0.3, 0.3, 0.3, 0.4);
+        }
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("translucent reference rendering failed")?;
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let pixels = gpu.pixels()?;
+        for x in [10, 30, 50, 70, 90] {
+            let offset = (50 * 100 + x) * 4;
+            let expected = reference.data()[offset];
+            let actual = pixels[offset];
+            assert!(actual.abs_diff(expected) <= 16, "translucent luminance x={x}: GPU={actual}, reference={expected}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn single_stroke_luminance_mask_uses_gpu() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 100) else { return Ok(()) };
+        let mut doc = Document::new("GPU stroke luminance mask");
+        let page = doc.current_page.ok_or("page missing")?;
+        let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 100.0, 100.0)?;
+        let mask = doc.create(group, NodeKind::Rectangle, "Stroke mask", 20.0, 20.0, 60.0, 60.0)?;
+        let node = doc.node_mut(mask).ok_or("mask missing")?;
+        node.is_mask = true;
+        node.mask_type = MaskType::Luminance;
+        node.fills.clear();
+        node.strokes = vec![Paint::solid(Color::new(1.0, 1.0, 1.0, 0.6))];
+        node.stroke.weight = 10.0;
+        let content = doc.create(group, NodeKind::Rectangle, "Black content", 0.0, 0.0, 100.0, 100.0)?;
+        doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("stroke mask reference unavailable")?;
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let pixels = gpu.pixels()?;
+        for (x, y) in [(50, 20), (20, 50), (50, 50), (5, 5), (85, 50)] {
+            let offset = ((y * view.width + x) * 4) as usize;
+            for channel in 0..3 {
+                assert!(pixels[offset + channel].abs_diff(reference.data()[offset + channel]) <= 16, "stroke mask at ({x},{y})");
+            }
+        }
+        let mut gradient = figcraft_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
+        gradient.stops = vec![
+            figcraft_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
+            figcraft_color::ColorStop { position: 1.0, color: Color::new(0.2, 0.2, 0.2, 0.5) },
+        ];
+        doc.node_mut(mask).ok_or("mask missing")?.strokes = vec![Paint::gradient(gradient)];
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("gradient stroke mask reference unavailable")?;
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let pixels = gpu.pixels()?;
+        for (x, y) in [(50, 20), (20, 50), (50, 50), (5, 5), (85, 50)] {
+            let offset = ((y * view.width + x) * 4) as usize;
+            for channel in 0..3 {
+                assert!(pixels[offset + channel].abs_diff(reference.data()[offset + channel]) <= 16, "gradient stroke mask at ({x},{y})");
+            }
+        }
         Ok(())
     }
 
@@ -3176,7 +3235,7 @@ fn draw_paint_runs(
                     }
                     if first.mask_type == MaskType::Luminance {
                         let mut luminance_mask = first.clone();
-                        for paint in &mut luminance_mask.fills {
+                        for paint in luminance_mask.fills.iter_mut().chain(&mut luminance_mask.strokes) {
                             match &mut paint.kind {
                                 PaintKind::Solid { color } => *color = luminance_alpha(*color),
                                 PaintKind::Gradient(gradient) => {
@@ -3228,18 +3287,17 @@ fn luminance_alpha(source: Color) -> Color {
 }
 
 fn gpu_luminance_mask_supported(node: &Node) -> bool {
-    node.strokes.is_empty()
-        && node.effects.iter().all(|effect| !effect.visible)
+    node.effects.iter().all(|effect| !effect.visible)
         && node.children.is_empty()
         && !matches!(node.kind, NodeKind::Text(_))
         && !matches!(node.kind, NodeKind::Vector { ref network } if network.regions.iter().any(|region| region.fills.is_some()))
-        && node.fills.iter().filter(|paint| paint.visible && paint.opacity > 0.0).count() == 1
-        && node.fills.iter().all(|paint| {
+        && node.fills.iter().chain(&node.strokes).filter(|paint| paint.visible && paint.opacity > 0.0).count() == 1
+        && node.fills.iter().chain(&node.strokes).all(|paint| {
             !paint.visible
                 || paint.blend == BlendMode::Normal
                     && match &paint.kind {
                         PaintKind::Solid { .. } => true,
-                        PaintKind::Gradient(gradient) => gradient.stops.iter().all(|stop| stop.color.a >= 0.999),
+                        PaintKind::Gradient(gradient) => gradient.stops.iter().all(|stop| (0.0..=1.0).contains(&stop.color.a)),
                         _ => false,
                     }
         })
