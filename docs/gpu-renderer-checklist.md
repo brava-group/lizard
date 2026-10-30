@@ -33,7 +33,9 @@ the migration concerns rasterization and pixel effects.
     caret and composition underline remain lightweight egui overlays.
   - [x] Draw full-page Outline mode with Vello strokes on native and browser WebGPU, including
     hidden-layer contours, group bounds, and light strokes over a dark background.
-  - [ ] Move selected-only outlines, pixel preview, and focus/solo rendering to the GPU path.
+  - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
+    with nearest-neighbor sampling on native and browser WebGPU.
+  - [ ] Move selected-only outlines and focus/solo rendering to the GPU path.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -125,6 +127,12 @@ the migration concerns rasterization and pixel effects.
 
 ## Evidence log
 
+- 2026-10-30: Pixel Preview now asks the GPU backend for a low-resolution view and presents it
+  with nearest-neighbor sampling; the mode switch re-registers the texture with the appropriate
+  sampler. An egui interaction test confirmed the 1× view; native and WASM `cargo check` passed.
+  The full `CARGO_INCREMENTAL=0 cargo xtask ci` gate passed on retry, including 716 UI tests.
+  An unrelated local control-channel test failed once under workspace load and passed alone and
+  in the full retry.
 - 2026-10-30: removed the `LIZARD_GPU_CANVAS_ATLAS` production switch and its CPU-rendered tile
   path. The direct Vello canvas is now the only native GPU backend; the atlas module is test-only.
   Native `cargo check` and `CARGO_INCREMENTAL=0 cargo xtask ci` passed.

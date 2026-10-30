@@ -19,6 +19,7 @@ pub struct GpuCanvasExperiment {
     direct: Option<GpuCanvas>,
     direct_texture_id: Option<egui::TextureId>,
     direct_profile: Option<ColorProfile>,
+    direct_pixel_preview: bool,
     direct_proof: bool,
     direct_outline: Option<figcraft_render::Outline>,
     direct_size: (u32, u32),
@@ -41,6 +42,7 @@ impl GpuCanvasExperiment {
             direct: None,
             direct_texture_id: None,
             direct_profile: None,
+            direct_pixel_preview: false,
             direct_proof: false,
             direct_outline: None,
             direct_size: (0, 0),
@@ -57,15 +59,17 @@ impl GpuCanvasExperiment {
         }
     }
 
-    fn register_direct_view(&mut self, profile: ColorProfile) -> Result<(), Box<dyn Error>> {
+    fn register_direct_view(&mut self, profile: ColorProfile, pixel_preview: bool) -> Result<(), Box<dyn Error>> {
         if let Some(id) = self.direct_texture_id.take() {
             self.state.renderer.write().free_texture(&id);
         }
         let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing for texture registration")?;
         let view = if profile == ColorProfile::DisplayP3 { canvas.srgb_output_view() } else { canvas.output_view() };
-        let id = self.state.renderer.write().register_native_texture(&self.state.device, view, wgpu::FilterMode::Linear);
+        let filter = if pixel_preview { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        let id = self.state.renderer.write().register_native_texture(&self.state.device, view, filter);
         self.direct_texture_id = Some(id);
         self.direct_profile = Some(profile);
+        self.direct_pixel_preview = pixel_preview;
         Ok(())
     }
 
@@ -79,7 +83,7 @@ impl GpuCanvasExperiment {
         proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur) {
-            return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb);
+            return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb, false);
         }
         if !self.direct_fallback_logged {
             eprintln!("Lizard direct Vello GPU: view contains unsupported effects; using the CPU canvas");
@@ -96,6 +100,7 @@ impl GpuCanvasExperiment {
         clear: [f32; 3],
         gesture_active: bool,
         proof_srgb: bool,
+        pixel_preview: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.direct_outline.take().is_some() {
             self.direct_document = None;
@@ -122,7 +127,7 @@ impl GpuCanvasExperiment {
             let canvas =
                 GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "eframe shared device".to_owned(), size.0, size.1);
             self.direct = Some(canvas);
-            self.register_direct_view(profile)?;
+            self.register_direct_view(profile, pixel_preview)?;
             self.direct_size = size;
             self.direct_document = None;
             self.direct_camera = None;
@@ -131,13 +136,13 @@ impl GpuCanvasExperiment {
         } else if self.direct_size != size {
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during resize")?;
             canvas.resize(size.0, size.1);
-            self.register_direct_view(profile)?;
+            self.register_direct_view(profile, pixel_preview)?;
             self.direct_size = size;
             self.direct_camera = None;
             eprintln!("Lizard direct Vello GPU canvas: resized viewport={}x{}; retained effect textures", size.0, size.1);
         }
-        if self.direct_profile != Some(profile) {
-            self.register_direct_view(profile)?;
+        if self.direct_profile != Some(profile) || self.direct_pixel_preview != pixel_preview {
+            self.register_direct_view(profile, pixel_preview)?;
         }
         let changed_doc = !self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
@@ -277,17 +282,17 @@ impl GpuCanvasExperiment {
         if self.direct.is_none() {
             self.direct =
                 Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "eframe shared device".to_owned(), size.0, size.1));
-            self.register_direct_view(profile)?;
+            self.register_direct_view(profile, false)?;
             self.direct_size = size;
             self.direct_document = None;
         } else if self.direct_size != size {
             self.direct.as_mut().ok_or("GPU outline canvas missing on resize")?.resize(size.0, size.1);
-            self.register_direct_view(profile)?;
+            self.register_direct_view(profile, false)?;
             self.direct_size = size;
             self.direct_document = None;
         }
-        if self.direct_profile != Some(profile) {
-            self.register_direct_view(profile)?;
+        if self.direct_profile != Some(profile) || self.direct_pixel_preview {
+            self.register_direct_view(profile, false)?;
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.direct_outline == Some(options)
@@ -310,6 +315,32 @@ impl GpuCanvasExperiment {
 }
 
 impl CanvasGpuBackend for GpuCanvasExperiment {
+    fn pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled || (!self.direct_force && has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur)) {
+            return None;
+        }
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, true) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU pixel preview failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
     fn outline_texture(
         &mut self,
         doc: Arc<Document>,

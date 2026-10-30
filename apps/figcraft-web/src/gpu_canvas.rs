@@ -19,6 +19,7 @@ pub struct WebGpuCanvas {
     texture: Option<egui::TextureId>,
     size: (u32, u32),
     profile: Option<ColorProfile>,
+    pixel_preview: bool,
     proof_srgb: bool,
     outline: Option<figcraft_render::Outline>,
     document: Option<Arc<Document>>,
@@ -37,6 +38,7 @@ impl WebGpuCanvas {
             texture: None,
             size: (0, 0),
             profile: None,
+            pixel_preview: false,
             proof_srgb: false,
             outline: None,
             document: None,
@@ -48,14 +50,16 @@ impl WebGpuCanvas {
         }
     }
 
-    fn register_view(&mut self, profile: ColorProfile) -> Result<(), Box<dyn Error>> {
+    fn register_view(&mut self, profile: ColorProfile, pixel_preview: bool) -> Result<(), Box<dyn Error>> {
         if let Some(id) = self.texture.take() {
             self.state.renderer.write().free_texture(&id);
         }
         let canvas = self.canvas.as_mut().ok_or("WebGPU canvas missing")?;
         let view = if profile == ColorProfile::DisplayP3 { canvas.srgb_output_view() } else { canvas.output_view() };
-        self.texture = Some(self.state.renderer.write().register_native_texture(&self.state.device, view, wgpu::FilterMode::Linear));
+        let filter = if pixel_preview { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        self.texture = Some(self.state.renderer.write().register_native_texture(&self.state.device, view, filter));
         self.profile = Some(profile);
+        self.pixel_preview = pixel_preview;
         Ok(())
     }
 
@@ -67,6 +71,7 @@ impl WebGpuCanvas {
         clear: [f32; 3],
         gesture_active: bool,
         proof_srgb: bool,
+        pixel_preview: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.outline.take().is_some() {
             self.document = None;
@@ -94,15 +99,15 @@ impl WebGpuCanvas {
             self.canvas =
                 Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "browser WebGPU".to_owned(), size.0, size.1));
             self.size = size;
-            self.register_view(profile)?;
+            self.register_view(profile, pixel_preview)?;
         } else if self.size != size {
             self.canvas.as_mut().ok_or("WebGPU canvas missing during resize")?.resize(size.0, size.1);
             self.size = size;
             self.camera = None;
-            self.register_view(profile)?;
+            self.register_view(profile, pixel_preview)?;
         }
-        if self.profile != Some(profile) {
-            self.register_view(profile)?;
+        if self.profile != Some(profile) || self.pixel_preview != pixel_preview {
+            self.register_view(profile, pixel_preview)?;
         }
         let changed_doc = !self.document.as_ref().is_some_and(|old| Arc::ptr_eq(old, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
@@ -181,15 +186,15 @@ impl WebGpuCanvas {
             self.canvas =
                 Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "browser WebGPU".to_owned(), size.0, size.1));
             self.size = size;
-            self.register_view(profile)?;
+            self.register_view(profile, false)?;
         } else if self.size != size {
             self.canvas.as_mut().ok_or("WebGPU outline canvas missing during resize")?.resize(size.0, size.1);
             self.size = size;
             self.document = None;
-            self.register_view(profile)?;
+            self.register_view(profile, false)?;
         }
-        if self.profile != Some(profile) {
-            self.register_view(profile)?;
+        if self.profile != Some(profile) || self.pixel_preview {
+            self.register_view(profile, false)?;
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.outline == Some(options)
@@ -212,6 +217,32 @@ impl WebGpuCanvas {
 }
 
 impl CanvasGpuBackend for WebGpuCanvas {
+    fn pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update(doc, page, view, clear, false, proof_srgb, true) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU pixel preview failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
     fn outline_texture(
         &mut self,
         doc: Arc<Document>,
@@ -251,7 +282,7 @@ impl CanvasGpuBackend for WebGpuCanvas {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, gesture_active, proof_srgb) {
+        match self.update(doc, page, view, clear, gesture_active, proof_srgb, false) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture

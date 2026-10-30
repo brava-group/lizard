@@ -43,6 +43,19 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Present a lower-resolution GPU scene with nearest-neighbor sampling.
+    fn pixel_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1113,7 +1126,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
         && !ds.view.outlines_selection
-        && ds.view.pixel_preview_scale().is_none()
         && ds.focused().is_none()
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
@@ -1132,6 +1144,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                     .is_some_and(|node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark())),
             };
             backend.outline_texture(gpu_doc, ds.page, &view, clear, options, &ctx)
+        } else if ds.view.pixel_preview_scale().is_some() {
+            backend.pixel_texture(gpu_doc, ds.page, &view, clear, ds.view.proof_srgb, &ctx)
         } else {
             backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx)
         };
@@ -2858,6 +2872,52 @@ mod stale_render_tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn pixel_preview_offers_a_low_resolution_view_to_the_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::Mutex;
+
+        struct Capture(Arc<Mutex<Vec<figcraft_render::View>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn pixel_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push(view.clone());
+                None
+            }
+        }
+
+        let mut ui = Ui::new(Session::new());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        let ds = ui.app.session.ds_mut()?;
+        ds.view.zoom = 8.0;
+        ds.view.pixel_preview = true;
+        ds.view.pixel_scale = 1;
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "pixel preview capture lock poisoned")?;
+        assert!(captured.iter().any(|view| view.scale == 1.0 && view.width < 1440), "GPU must receive the pixel-scale view");
+        Ok(())
+    }
 
     #[test]
     fn outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
