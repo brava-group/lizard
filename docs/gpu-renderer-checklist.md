@@ -131,6 +131,9 @@ the migration concerns rasterization and pixel effects.
     Blur`, `Noise → Blur → Noise`, and `Blur → Noise → Blur → Noise` retain the contour and order
     at 1× and 2×; the first matched the CPU fixture exactly and the others had only a few
     severe pixel differences.
+  - [x] Keep rotated `Blur → Noise → Drop Shadow` and `Noise → Blur → Drop Shadow` on GPU when
+    the shadow is the final effect. A rotated group with masked children also retains
+    `Noise → Blur → Drop Shadow` at 1× and 2×. Other shadow orders remain guarded.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
@@ -538,3 +541,10 @@ the migration concerns rasterization and pixel effects.
   `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` gate passed with 99 canvas-GPU tests
   and 722 UI tests passing (3 ignored). This removes a possible main-thread wait; end-to-end
   drag latency still needs a mixed-effects measurement.
+- 2026-10-30: rotated `Blur → Noise → Shadow` differed from the CPU reference above 8/255 at
+  4,474/78,000 pixels at 1× and 15,388/312,000 at 2×; 66 and 87 pixels differed above
+  48/255. `Noise → Blur → Shadow` matched all RGB samples at both scales. A rotated group with
+  two painted children and a vector mask also matched all RGB samples for the latter order. I
+  inspected the 2× GPU and CPU images of the first order; both retain the same contour, grain,
+  and shadow. The GPU compositor currently applies a stack's drop shadow last, so earlier-shadow
+  orders remain guarded on rotated noisy content.

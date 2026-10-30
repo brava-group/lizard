@@ -1200,6 +1200,107 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn rotated_blur_noise_shadow_stacks_keep_shadow_and_grain() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU rotated shadow and grain");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Effects", 0.0, 0.0, 120.0, 96.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((100.0, 80.0)) * Affine::rotate(0.4);
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let shadow = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(shadow) = &mut effect.kind {
+                shadow.radius = 8.0;
+                shadow.offset = (4.0, 6.0);
+                shadow.color = Color::new(0.2, 0.1, 0.3, 0.4);
+            }
+            effect
+        };
+        for (name, effects) in [("blur-noise-shadow", vec![blur(), noise(), shadow()]), ("noise-blur-shadow", vec![noise(), blur(), shadow()])] {
+            doc.node_mut(id).ok_or("shape missing")?.effects = effects;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} GPU capability");
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                if let Ok(prefix) = std::env::var("LIZARD_GPU_ROTATED_STACK_SCREENSHOT") {
+                    image::save_buffer(format!("{prefix}-{name}-{scale}-gpu.png"), &actual, view.width, view.height, image::ColorType::Rgba8)?;
+                    image::save_buffer(
+                        format!("{prefix}-{name}-{scale}-cpu.png"),
+                        reference.data(),
+                        view.width,
+                        view.height,
+                        image::ColorType::Rgba8,
+                    )?;
+                }
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("{name} {scale}x: changed={changed} severe={severe} pixels={}", view.width * view.height);
+                assert!(changed * 100 < view.width as usize * view.height as usize * 8, "{name} at {scale}x changed {changed} pixels");
+                assert!(severe * 100 < view.width as usize * view.height as usize, "{name} at {scale}x severe {severe} pixels");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rotated_group_noise_blur_shadow_keeps_children_and_mask() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU rotated group shadow and grain");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let group = doc.create(page, NodeKind::Group, "Effects", 0.0, 0.0, 140.0, 110.0)?;
+        doc.node_mut(group).ok_or("group missing")?.transform = Affine::translate((95.0, 75.0)) * Affine::rotate(0.35);
+        let back = doc.create(group, NodeKind::Rectangle, "Back", 0.0, 0.0, 115.0, 88.0)?;
+        doc.node_mut(back).ok_or("back missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.6, 0.9, 0.85))];
+        let front = doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Front", 65.0, 12.0, 72.0, 72.0)?;
+        doc.node_mut(front).ok_or("front missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.3, 0.2, 0.75))];
+        let mask = doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Mask", 88.0, 60.0, 28.0, 28.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let masked = doc.create(group, NodeKind::Rectangle, "Masked", 82.0, 54.0, 40.0, 40.0)?;
+        doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
+        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        if let EffectKind::DropShadow(value) = &mut shadow.kind {
+            value.radius = 8.0;
+            value.offset = (4.0, 6.0);
+            value.color = Color::new(0.2, 0.1, 0.3, 0.4);
+        }
+        doc.node_mut(group).ok_or("group missing")?.effects = vec![
+            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
+            shadow,
+        ];
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                .count();
+            println!("group noise-blur-shadow {scale}x: changed={changed} pixels={}", view.width * view.height);
+            assert!(changed * 100 < view.width as usize * view.height as usize * 8, "group at {scale}x changed {changed} pixels");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn group_blur_noise_stack_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU group effect graph");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3969,7 +4070,9 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
         )
         && (gpu_axis_aligned(doc, node)
             || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_)))
-            || visible.iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_))))
+            || visible.iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+            || (matches!(visible.last().map(|effect| &effect.kind), Some(EffectKind::DropShadow(_)))
+                && visible[..visible.len() - 1].iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))))
         && gpu_isolated_grain_supported(doc, node)
 }
 
