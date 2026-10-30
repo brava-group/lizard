@@ -293,6 +293,7 @@ impl GpuCanvasExperiment {
         clear: [f32; 3],
         options: figcraft_render::Outline,
         focus: Option<NodeId>,
+        pixel_preview: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -315,17 +316,17 @@ impl GpuCanvasExperiment {
         if self.direct.is_none() {
             self.direct =
                 Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "eframe shared device".to_owned(), size.0, size.1));
-            self.register_direct_view(profile, false)?;
+            self.register_direct_view(profile, pixel_preview)?;
             self.direct_size = size;
             self.direct_document = None;
         } else if self.direct_size != size {
             self.direct.as_mut().ok_or("GPU outline canvas missing on resize")?.resize(size.0, size.1);
-            self.register_direct_view(profile, false)?;
+            self.register_direct_view(profile, pixel_preview)?;
             self.direct_size = size;
             self.direct_document = None;
         }
-        if self.direct_profile != Some(profile) || self.direct_pixel_preview {
-            self.register_direct_view(profile, false)?;
+        if self.direct_profile != Some(profile) || self.direct_pixel_preview != pixel_preview {
+            self.register_direct_view(profile, pixel_preview)?;
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.direct_outline == Some(options)
@@ -530,12 +531,13 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options, None) {
+        match self.update_outline(doc, page, view, clear, options, None, pixel_preview) {
             Ok(texture) => {
                 self.direct_current = texture.is_some();
                 texture
@@ -557,12 +559,13 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options, Some(focus)) {
+        match self.update_outline(doc, page, view, clear, options, Some(focus), pixel_preview) {
             Ok(texture) => {
                 self.direct_current = texture.is_some();
                 texture

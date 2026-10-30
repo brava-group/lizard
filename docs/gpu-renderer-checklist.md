@@ -38,6 +38,8 @@ the migration concerns rasterization and pixel effects.
     hidden-layer contours, group bounds, and light strokes over a dark background.
   - [x] Draw Outline mode while focused on one subtree through native and browser WebGPU;
     sibling contours stay outside the focused scene.
+  - [x] Combine full-page and focused Outline mode with Pixel Preview; native and browser WebGPU
+    register nearest-neighbor presentation at the document-pixel scale.
   - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
     with nearest-neighbor sampling on native and browser WebGPU.
   - [x] Combine Pixel Preview with a focused subtree on native and browser WebGPU; the focused
@@ -498,3 +500,9 @@ the migration concerns rasterization and pixel effects.
   All 98 canvas-GPU tests passed; 722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1
   CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting,
   and layer checks.
+- 2026-10-30: full-page and focused Outline mode now register nearest-neighbor presentation
+  when Pixel Preview is active in native and browser WebGPU. Switching that flag re-registers
+  the texture even when the vector scene itself is unchanged. UI tests covered both modes at
+  normal scale and 1× document pixel scale under 8× editor zoom. All 98 canvas-GPU tests passed;
+  722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
+  passed across native/WASM, plugins, Clippy, formatting, and layer checks.

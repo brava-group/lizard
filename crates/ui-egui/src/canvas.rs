@@ -38,6 +38,7 @@ pub trait CanvasGpuBackend {
         _view: &figcraft_render::View,
         _clear: [f32; 3],
         _options: figcraft_render::Outline,
+        _pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         None
@@ -52,6 +53,7 @@ pub trait CanvasGpuBackend {
         _view: &figcraft_render::View,
         _clear: [f32; 3],
         _options: figcraft_render::Outline,
+        _pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         None
@@ -1229,7 +1231,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                         |node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark()),
                     ),
                 };
-                backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, &ctx)
+                backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, ds.view.pixel_preview_scale().is_some(), &ctx)
             } else if ds.view.outlines_selection {
                 let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
                 backend.focused_selected_outline_texture(
@@ -1257,7 +1259,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                     .node(ds.page)
                     .is_some_and(|node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark())),
             };
-            backend.outline_texture(gpu_doc, ds.page, &view, clear, options, &ctx)
+            backend.outline_texture(gpu_doc, ds.page, &view, clear, options, ds.view.pixel_preview_scale().is_some(), &ctx)
         } else if ds.view.outlines_selection {
             let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
             if ds.view.pixel_preview_scale().is_some() {
@@ -3211,7 +3213,7 @@ mod stale_render_tests {
     fn outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::{Arc, Mutex};
 
-        struct Capture(Arc<Mutex<Vec<figcraft_render::Outline>>>);
+        struct Capture(Arc<Mutex<Vec<(figcraft_render::Outline, bool, f64)>>>);
         impl super::CanvasGpuBackend for Capture {
             fn texture(
                 &mut self,
@@ -3230,12 +3232,13 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                view: &figcraft_render::View,
                 _clear: [f32; 3],
                 options: figcraft_render::Outline,
+                pixel_preview: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
-                self.0.lock().ok()?.push(options);
+                self.0.lock().ok()?.push((options, pixel_preview, view.scale));
                 None
             }
         }
@@ -3248,8 +3251,16 @@ mod stale_render_tests {
         ds.view.outline_hidden = true;
         ds.view.outline_bounds = true;
         ui.frame(vec![]);
+        {
+            let ds = ui.app.session.ds_mut()?;
+            ds.view.zoom = 8.0;
+            ds.view.pixel_preview = true;
+            ds.view.pixel_scale = 1;
+        }
+        ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "outline capture lock poisoned")?;
-        assert!(captured.iter().any(|options| options.hidden && options.bounds));
+        assert!(captured.iter().any(|(options, pixel, _)| options.hidden && options.bounds && !pixel));
+        assert!(captured.iter().any(|(options, pixel, scale)| options.hidden && options.bounds && *pixel && *scale == 1.0));
         Ok(())
     }
 
@@ -3257,7 +3268,7 @@ mod stale_render_tests {
     fn focused_outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::{Arc, Mutex};
 
-        struct Capture(Arc<Mutex<Vec<NodeId>>>);
+        struct Capture(Arc<Mutex<Vec<(NodeId, bool, f64)>>>);
         impl super::CanvasGpuBackend for Capture {
             fn texture(
                 &mut self,
@@ -3277,12 +3288,13 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 focus: NodeId,
-                _view: &figcraft_render::View,
+                view: &figcraft_render::View,
                 _clear: [f32; 3],
                 _options: figcraft_render::Outline,
+                pixel_preview: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
-                self.0.lock().ok()?.push(focus);
+                self.0.lock().ok()?.push((focus, pixel_preview, view.scale));
                 None
             }
         }
@@ -3296,8 +3308,16 @@ mod stale_render_tests {
         ds.focus = Some(focus);
         ds.view.outlines = true;
         ui.frame(vec![]);
+        {
+            let ds = ui.app.session.ds_mut()?;
+            ds.view.zoom = 8.0;
+            ds.view.pixel_preview = true;
+            ds.view.pixel_scale = 1;
+        }
+        ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "focused outline capture lock poisoned")?;
-        assert!(captured.contains(&focus), "focused Outline should use the GPU backend");
+        assert!(captured.iter().any(|call| call.0 == focus && !call.1), "focused Outline should use the GPU backend");
+        assert!(captured.iter().any(|call| call.0 == focus && call.1 && call.2 == 1.0));
         Ok(())
     }
 

@@ -211,6 +211,7 @@ impl WebGpuCanvas {
         clear: [f32; 3],
         options: figcraft_render::Outline,
         focus: Option<NodeId>,
+        pixel_preview: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -234,15 +235,15 @@ impl WebGpuCanvas {
             self.canvas =
                 Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "browser WebGPU".to_owned(), size.0, size.1));
             self.size = size;
-            self.register_view(profile, false)?;
+            self.register_view(profile, pixel_preview)?;
         } else if self.size != size {
             self.canvas.as_mut().ok_or("WebGPU outline canvas missing during resize")?.resize(size.0, size.1);
             self.size = size;
             self.document = None;
-            self.register_view(profile, false)?;
+            self.register_view(profile, pixel_preview)?;
         }
-        if self.profile != Some(profile) || self.pixel_preview {
-            self.register_view(profile, false)?;
+        if self.profile != Some(profile) || self.pixel_preview != pixel_preview {
+            self.register_view(profile, pixel_preview)?;
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.outline == Some(options)
@@ -447,12 +448,13 @@ impl CanvasGpuBackend for WebGpuCanvas {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options, None) {
+        match self.update_outline(doc, page, view, clear, options, None, pixel_preview) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture
@@ -474,12 +476,13 @@ impl CanvasGpuBackend for WebGpuCanvas {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options, Some(focus)) {
+        match self.update_outline(doc, page, view, clear, options, Some(focus), pixel_preview) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture
