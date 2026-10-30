@@ -30,7 +30,7 @@ impl Face {
 
     /// The fill region for this face.
     pub fn region(&self) -> Region {
-        Region { loops: self.loops.clone(), winding: if self.loops.len() > 1 { WindingRule::EvenOdd } else { WindingRule::NonZero } }
+        Region { loops: self.loops.clone(), winding: if self.loops.len() > 1 { WindingRule::EvenOdd } else { WindingRule::NonZero }, fills: None }
     }
 
     /// Some point strictly inside the face (not in a hole).
@@ -44,6 +44,19 @@ struct Cycle {
     half_edges: Vec<(usize, bool)>,
     area: f64,
     component: usize,
+}
+
+fn face_key(loops: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut key: Vec<Vec<usize>> = loops
+        .iter()
+        .map(|loop_segments| {
+            let mut segments = loop_segments.clone();
+            segments.sort_unstable();
+            segments
+        })
+        .collect();
+    key.sort();
+    key
 }
 
 impl VectorNetwork {
@@ -103,6 +116,29 @@ impl VectorNetwork {
         self.faces().into_iter().filter(|f| f.contains(p)).min_by(|a, b| a.area.total_cmp(&b.area))
     }
 
+    /// Give each visibly filled, unrepresented face a persistent region so it can be selected
+    /// independently. Existing paint stacks and intentionally empty regions stay as they are.
+    pub fn materialize_faces(&mut self) {
+        let unassigned = self.unassigned_paint_path();
+        for face in self.faces() {
+            if let Some(point) = face.interior_point()
+                && unassigned.winding(point) != 0
+                && !self.regions.iter().enumerate().any(|(index, _)| self.region_contains(index, point))
+            {
+                self.regions.push(face.region());
+            }
+        }
+    }
+
+    /// Whether a visible face drawn by unassigned paths still lacks a selectable region.
+    pub fn faces_need_materialization(&self) -> bool {
+        let unassigned = self.unassigned_paint_path();
+        self.faces()
+            .iter()
+            .filter_map(Face::interior_point)
+            .any(|point| unassigned.winding(point) != 0 && !self.regions.iter().enumerate().any(|(index, _)| self.region_contains(index, point)))
+    }
+
     /// The paint bucket: fill the face under `p`, or unfill it when it's filled. Returns the new
     /// state (`Some(true)` = filled), or `None` when `p` isn't inside a closed area.
     ///
@@ -116,31 +152,45 @@ impl VectorNetwork {
     /// (`Some(false)`) whatever it was: a paint bucket drag keeps doing what its first click did.
     pub fn paint_to(&mut self, p: Point, want: Option<bool>) -> Option<bool> {
         let face = self.face_at(p)?;
-        let key = |loops: &[Vec<usize>]| -> Vec<Vec<usize>> {
-            let mut k: Vec<Vec<usize>> = loops
+        let faces = self.faces();
+        let face_keys: Vec<Vec<Vec<usize>>> = faces.iter().map(|f| face_key(&f.loops)).collect();
+        if !self.regions.iter().all(|r| face_keys.contains(&face_key(&r.loops))) {
+            let regions: Vec<Region> = faces
                 .iter()
-                .map(|l| {
-                    let mut l = l.clone();
-                    l.sort_unstable();
-                    l
+                .filter_map(|face| {
+                    let point = face.interior_point()?;
+                    let mut region = face.region();
+                    if self.fill_contains(point) {
+                        region.fills = self.region_at(point).and_then(|index| self.regions.get(index)?.fills.clone());
+                    } else {
+                        region.fills = Some(Vec::new());
+                    }
+                    Some(region)
                 })
                 .collect();
-            k.sort();
-            k
-        };
-        let faces = self.faces();
-        let face_keys: Vec<Vec<Vec<usize>>> = faces.iter().map(|f| key(&f.loops)).collect();
-        if !self.regions.iter().all(|r| face_keys.contains(&key(&r.loops))) {
-            let filled: Vec<Region> = faces.iter().filter(|f| f.interior_point().is_some_and(|q| self.fill_contains(q))).map(Face::region).collect();
-            self.regions = filled;
+            self.regions = regions;
         }
-        let k = key(&face.loops);
-        match (self.regions.iter().position(|r| key(&r.loops) == k), want) {
-            (Some(_), None | Some(false)) => {
-                self.regions.retain(|r| key(&r.loops) != k);
-                Some(false)
+        let key = face_key(&face.loops);
+        let matches: Vec<&Region> = self.regions.iter().filter(|region| face_key(&region.loops) == key).collect();
+        match (matches.last(), want) {
+            (Some(_), wanted) => {
+                let was_filled = matches.iter().any(|region| !region.fills.as_ref().is_some_and(Vec::is_empty));
+                let filled = wanted.unwrap_or(!was_filled);
+                if filled == was_filled && matches.len() == 1 {
+                    return Some(filled);
+                }
+                let region =
+                    matches.iter().rev().find(|region| filled && !region.fills.as_ref().is_some_and(Vec::is_empty)).or_else(|| matches.last())?;
+                let mut region = (**region).clone();
+                self.regions.retain(|region| face_key(&region.loops) != key);
+                if !filled {
+                    region.fills = Some(Vec::new());
+                } else if !was_filled {
+                    region.fills = None;
+                }
+                self.regions.push(region);
+                Some(filled)
             }
-            (Some(_), Some(true)) => Some(true),
             (None, Some(false)) => Some(false),
             (None, _) => {
                 self.regions.push(face.region());
@@ -410,7 +460,9 @@ mod tests {
         assert_eq!(n.paint(Point::new(50.0, 50.0)), Some(true));
         assert!(n.fill_contains(Point::new(50.0, 50.0)));
         assert_eq!(n.paint(Point::new(50.0, 50.0)), Some(false));
-        assert!(n.regions.is_empty());
+        assert!(n.regions.first().is_some_and(|region| region.fills.as_ref().is_some_and(Vec::is_empty)));
+        assert!(!n.fill_contains(Point::new(50.0, 50.0)));
+        assert_eq!(n.paint(Point::new(50.0, 50.0)), Some(true));
         assert_eq!(n.paint(Point::new(150.0, 50.0)), None, "outside every face");
     }
 
@@ -425,6 +477,43 @@ mod tests {
         assert_eq!(n.paint(Point::new(75.0, 25.0)), Some(true));
         assert!(n.fill_contains(Point::new(75.0, 25.0)));
         assert!(!n.fill_contains(Point::new(25.0, 75.0)));
+    }
+
+    #[test]
+    fn connected_triangles_and_rectangle_have_three_paintable_faces() {
+        // Reproduces a network drawn with Pen: a top triangle, a lower-left face,
+        // and a lower-right face. The diagonal and horizontal edges meet at vertices.
+        let points = [
+            (264.43535702309975, 102.54619315734607),
+            (264.43535702309975, 183.9741802735134),
+            (0.0, 183.9741802735134),
+            (0.0, 0.0),
+            (102.54619315734612, 102.54619315734605),
+            (183.97418027351347, 183.9741802735134),
+            (0.0, 102.54619315734608),
+        ];
+        let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
+        let mut n = VectorNetwork {
+            vertices: points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect(),
+            segments: edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect(),
+            ..Default::default()
+        };
+        let upper_middle = Point::new(100.0, 120.0);
+        let lower_middle = Point::new(40.0, 150.0);
+        assert_eq!(n.face_at(upper_middle).map(|face| face.loops), n.face_at(lower_middle).map(|face| face.loops));
+        let mut just_middle = n.clone();
+        assert_eq!(just_middle.paint(lower_middle), Some(true));
+        assert!(just_middle.fill_contains(upper_middle), "painting the middle face must cover its entire polygon");
+        assert!(just_middle.region_contains(0, upper_middle), "the renderer's region path must cover the upper half too");
+        let samples = [Point::new(20.0, 60.0), Point::new(40.0, 150.0), Point::new(220.0, 150.0)];
+        assert_eq!(n.faces().len(), 3);
+        for sample in samples {
+            assert!(n.face_at(sample).is_some(), "missing face at {sample:?}");
+            assert_eq!(n.paint(sample), Some(true));
+            assert!(n.fill_contains(sample));
+        }
+        assert!(n.fill_contains(Point::new(100.0, 120.0)), "middle face must include its triangular upper half");
+        assert_eq!(n.regions.len(), 3);
     }
 
     #[test]

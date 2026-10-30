@@ -1,6 +1,6 @@
 use super::*;
 use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, NodeKind};
+use figcraft_doc::{Document, Effect, NodeKind, Region, Segment, Vertex, WindingRule};
 
 #[test]
 fn export_basic_shapes() {
@@ -21,6 +21,48 @@ fn export_basic_shapes() {
     let frame = import_svg(&mut d2, svg.as_bytes(), p2, 0.0, 0.0, "Imported").unwrap();
     assert!(!d2.subtree(frame).is_empty());
     assert!(d2.validate().is_empty());
+}
+
+#[test]
+fn svg_exports_vector_region_colors_separately() -> Result<(), &'static str> {
+    let mut network = figcraft_doc::VectorNetwork::default();
+    for x in [0.0, 40.0] {
+        let start = network.vertices.len();
+        for (vx, vy) in [(x, 0.0), (x + 30.0, 0.0), (x + 30.0, 30.0), (x, 30.0)] {
+            network.vertices.push(Vertex::new(vx, vy));
+        }
+        let first = network.segments.len();
+        for index in 0..4 {
+            network.segments.push(Segment::line(start + index, start + (index + 1) % 4));
+        }
+        network.regions.push(Region { loops: vec![(first..first + 4).collect()], winding: WindingRule::NonZero, fills: None });
+    }
+    network.regions[1].fills = Some(vec![Paint::solid(Color::from_hex("FF2200").ok_or("bad color")?)]);
+    let mut doc = Document::new("Region colors");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Vector", 0.0, 0.0, 70.0, 30.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(Color::from_hex("0066FF").ok_or("bad blue")?)];
+    let svg = export_svg(&doc, &[id], &SvgOptions::default()).ok_or("export failed")?;
+    assert!(svg.contains("#0066FF"));
+    assert!(svg.contains("#FF2200"));
+    Ok(())
+}
+
+#[test]
+fn svg_unions_a_painted_face_with_unassigned_edges() -> Result<(), &'static str> {
+    let mut network = figcraft_doc::VectorNetwork::default();
+    let points = [(260.0, 100.0), (260.0, 180.0), (0.0, 180.0), (0.0, 0.0), (100.0, 100.0), (180.0, 180.0), (0.0, 100.0)];
+    let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
+    network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
+    network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
+    assert_eq!(network.paint(figcraft_geom::Point::new(40.0, 150.0)), Some(true));
+    let mut doc = Document::new("Face and open edges");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Vector", 0.0, 0.0, 260.0, 180.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("bad color")?)];
+    let svg = export_svg(&doc, &[id], &SvgOptions::default()).ok_or("export failed")?;
+    assert_eq!(svg.matches("<path ").count(), 1, "the inherited fill needs one union outline: {svg}");
+    Ok(())
 }
 
 #[test]

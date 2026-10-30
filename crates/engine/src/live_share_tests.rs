@@ -161,10 +161,13 @@ fn on_the_server_unshared(s: &mut Session, script: &Arc<Mutex<Script>>) {
 }
 
 #[test]
-fn the_built_in_server_is_the_default_and_can_be_changed_or_turned_off() {
+fn online_sharing_needs_a_configured_server_and_can_be_reset() {
     let (mut s, _) = session();
     assert_eq!(s.prefs.publish_server, DEFAULT_SERVER);
-    // A build may ship without one (`FIGCRAFT_DEFAULT_SERVER=`); any it ships is TLS.
+    if option_env!("LIZARD_DEFAULT_SERVER").is_none() {
+        assert!(DEFAULT_SERVER.is_empty(), "Lizard must not connect to an inherited server by default");
+    }
+    // A distributor may set a TLS server at build time.
     assert!(
         DEFAULT_SERVER.is_empty() || (DEFAULT_SERVER.starts_with("wss://") && DEFAULT_SERVER.ends_with('/')),
         "TLS, and an address the preference itself accepts"

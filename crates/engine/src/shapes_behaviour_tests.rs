@@ -438,9 +438,13 @@ fn flatten_keeps_open_paths() {
 #[test]
 fn flatten_bakes_vector_corner_radius_into_editable_curves() {
     let mut s = Session::new();
-    let source = create(&mut s, "vector.create", json!({
-        "path": "M0 0 L100 0 L100 100 L0 100 Z",
-    }));
+    let source = create(
+        &mut s,
+        "vector.create",
+        json!({
+            "path": "M0 0 L100 0 L100 100 L0 100 Z",
+        }),
+    );
     ex(&mut s, "node.set", json!({"ids": [source], "props": {"cornerRadius": 20}}));
     let NodeKind::Vector { network: original } = node(&s, source).kind else { panic!("source is a vector") };
     let visible_path = original.fill_path();
@@ -455,6 +459,146 @@ fn flatten_bakes_vector_corner_radius_into_editable_curves() {
     let baked_path = network.fill_path();
     for p in [Point::new(2.0, 2.0), Point::new(50.0, 2.0), Point::new(50.0, 50.0), Point::new(98.0, 98.0)] {
         assert_eq!(baked_path.winding(p), visible_path.winding(p), "the fill stays where it was before flattening at {p:?}");
+    }
+}
+
+#[test]
+fn flatten_group_preserves_child_face_paints_and_holes() {
+    use figcraft_color::{Color, Paint};
+    use figcraft_doc::WindingRule;
+
+    for inner_visible in [true, false] {
+        let mut s = Session::new();
+        let inner = create(
+            &mut s,
+            "vector.create",
+            json!({
+                "path": "M20 20 L60 20 L60 60 L20 60 Z",
+            }),
+        );
+        let ring = create(
+            &mut s,
+            "vector.create",
+            json!({
+                "path": "M0 0 L80 0 L80 80 L0 80 Z M20 20 L60 20 L60 60 L20 60 Z",
+            }),
+        );
+        {
+            let doc = s.doc_mut().unwrap();
+            let inner_node = doc.get_mut(inner).unwrap();
+            inner_node.fills = vec![Paint::solid(Color::BLACK)];
+            inner_node.visible = inner_visible;
+            let ring_node = doc.get_mut(ring).unwrap();
+            ring_node.fills = vec![Paint::solid(Color::WHITE)];
+            let NodeKind::Vector { network } = &mut ring_node.kind else { panic!("ring is a vector") };
+            network.regions[0].winding = WindingRule::EvenOdd;
+        }
+        let group = create(&mut s, "object.group", json!({"ids": [inner, ring]}));
+        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        assert_ne!(before.pixel(10, 40), before.pixel(90, 40), "the white ring is visible");
+        if inner_visible {
+            assert_ne!(before.pixel(40, 40), before.pixel(90, 40), "the inner face is painted");
+        } else {
+            assert_eq!(before.pixel(40, 40), before.pixel(90, 40), "the ring has a real hole");
+        }
+        let flattened = create(&mut s, "vector.flatten", json!({"ids": [group]}));
+        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        for (x, y) in [(10, 40), (40, 40), (90, 40)] {
+            assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; inner visible: {inner_visible}");
+        }
+        let NodeKind::Vector { network } = node(&s, flattened).kind else { panic!("flatten makes a vector") };
+        assert_eq!(network.regions.len(), if inner_visible { 2 } else { 1 });
+        assert!(network.regions.iter().all(|region| region.fills.is_some()), "each child face keeps its own paint");
+    }
+}
+
+#[test]
+fn flatten_group_and_selected_children_keep_the_same_compound_holes() {
+    use figcraft_color::{Color, Paint};
+    use figcraft_doc::{Region, WindingRule};
+
+    let mut results = Vec::new();
+    for grouped in [true, false] {
+        let mut s = Session::new();
+        let white = create(&mut s, "vector.create", json!({"path": "M0 0 L80 0 L80 80 L0 80 Z"}));
+        let black = create(
+            &mut s,
+            "vector.create",
+            json!({
+                "path": "M0 0 L80 0 L80 80 L0 80 Z M20 20 L60 20 L60 60 L20 60 Z",
+            }),
+        );
+        {
+            let doc = s.doc_mut().unwrap();
+            doc.get_mut(white).unwrap().fills = vec![Paint::solid(Color::WHITE)];
+            let black_node = doc.get_mut(black).unwrap();
+            black_node.fills = vec![Paint::solid(Color::BLACK)];
+            let NodeKind::Vector { network } = &mut black_node.kind else { panic!("black source is a vector") };
+            let loops = std::mem::take(&mut network.regions[0].loops);
+            network.regions = loops.into_iter().map(|lp| Region { loops: vec![lp], winding: WindingRule::EvenOdd, fills: None }).collect();
+        }
+        let group = create(&mut s, "object.group", json!({"ids": [white, black]}));
+        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        assert_ne!(before.pixel(10, 40), before.pixel(40, 40), "the compound black vector leaves its centre white");
+        let ids = if grouped { vec![group] } else { vec![white, black] };
+        let flattened = create(&mut s, "vector.flatten", json!({"ids": ids}));
+        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        for (x, y) in [(10, 40), (40, 40), (90, 40)] {
+            assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; grouped: {grouped}");
+        }
+        let NodeKind::Vector { network } = node(&s, flattened).kind else { panic!("flatten makes a vector") };
+        assert_eq!(network.regions.len(), 2, "the source's two parity loops stay one face");
+        results.push([(10, 40), (40, 40), (90, 40)].map(|(x, y)| after.pixel(x, y)));
+    }
+    assert_eq!(results[0], results[1], "flattening a group and its two children must paint alike");
+}
+
+#[test]
+fn flatten_keeps_filled_open_subpaths_from_each_source_vector() {
+    use figcraft_color::{Color, Paint};
+    use figcraft_doc::WindingRule;
+
+    for grouped in [true, false] {
+        let mut s = Session::new();
+        let white = create(
+            &mut s,
+            "vector.create",
+            json!({
+                "path": "M0 0 L80 0 L80 80 L0 80 M35 35 L45 35 L45 45 L35 45 Z",
+            }),
+        );
+        let black = create(
+            &mut s,
+            "vector.create",
+            json!({
+                "path": "M0 0 L80 0 L80 80 L0 80 Z M10 10 L70 10 L70 70 L10 70 Z",
+            }),
+        );
+        {
+            let doc = s.doc_mut().unwrap();
+            let white_node = doc.get_mut(white).unwrap();
+            white_node.fills = vec![Paint::solid(Color::WHITE)];
+            let NodeKind::Vector { network } = &mut white_node.kind else { panic!("white source is a vector") };
+            network.regions[0].fills = Some(white_node.fills.clone());
+            let black_node = doc.get_mut(black).unwrap();
+            black_node.fills = vec![Paint::solid(Color::BLACK)];
+            let NodeKind::Vector { network } = &mut black_node.kind else { panic!("black source is a vector") };
+            network.regions[0].winding = WindingRule::EvenOdd;
+        }
+        let group = create(&mut s, "object.group", json!({"ids": [white, black]}));
+        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        assert_ne!(before.pixel(30, 30), before.pixel(90, 30), "the open white subpath has a visible fill");
+        let ids = if grouped { vec![group] } else { vec![white, black] };
+        let flattened = create(&mut s, "vector.flatten", json!({"ids": ids}));
+        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        for (x, y) in [(5, 30), (30, 30), (40, 40), (90, 30)] {
+            assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; grouped: {grouped}");
+        }
+        let NodeKind::Vector { network } = node(&s, flattened).kind else { panic!("flatten makes a vector") };
+        assert!(network.regions.len() >= 3, "the implicitly closed fill remains an editable face");
     }
 }
 
@@ -519,5 +663,54 @@ fn outline_stroke_outlines_every_selected_layer() {
         }
         assert!(s.doc().unwrap().node(line).is_none(), "the line was replaced by its outline");
         assert_eq!(s.selection(), ids, "the results are selected");
+    }
+}
+
+#[test]
+fn outline_stroke_keeps_the_painted_faces_of_a_flattened_vector() {
+    use figcraft_color::{Color, Paint};
+    use figcraft_doc::{StrokeAlign, WindingRule};
+
+    let mut s = Session::new();
+    let white = create(&mut s, "vector.create", json!({"path": "M10 10 L70 10 L70 70 L10 70 Z"}));
+    let black = create(
+        &mut s,
+        "vector.create",
+        json!({
+            "path": "M10 10 L70 10 L70 70 L10 70 Z M20 20 L60 20 L60 60 L20 60 Z",
+        }),
+    );
+    {
+        let doc = s.doc_mut().unwrap();
+        doc.get_mut(white).unwrap().fills = vec![Paint::solid(Color::WHITE)];
+        let black_node = doc.get_mut(black).unwrap();
+        black_node.fills = vec![Paint::solid(Color::BLACK)];
+        let NodeKind::Vector { network } = &mut black_node.kind else { panic!("black source is a vector") };
+        network.regions[0].winding = WindingRule::EvenOdd;
+    }
+    let group = create(&mut s, "object.group", json!({"ids": [white, black]}));
+    let flat = create(&mut s, "vector.flatten", json!({"ids": [group]}));
+    {
+        let flat_node = s.doc_mut().unwrap().get_mut(flat).unwrap();
+        assert!(flat_node.fills.is_empty(), "the flattened vector paints through its faces");
+        flat_node.strokes = vec![Paint::solid(Color::WHITE)];
+        flat_node.stroke.weight = 4.0;
+        flat_node.stroke.align = StrokeAlign::Outside;
+    }
+    let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 90, height: 90 };
+    let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+    assert_ne!(before.pixel(40, 40), before.pixel(80, 40), "the white centre is visible");
+    assert_ne!(before.pixel(15, 40), before.pixel(40, 40), "the black face is visible");
+    assert_ne!(before.pixel(8, 40), before.pixel(80, 40), "the outside stroke is visible");
+    let result = ex(&mut s, "vector.outlineStroke", json!({"ids": [flat]}));
+    let outlined = id_of(&result["ids"][0]).unwrap();
+    assert!(matches!(node(&s, outlined).kind, NodeKind::Group), "the fill and outlined stroke stay together");
+    let preserved = node(&s, flat);
+    assert!(preserved.strokes.is_empty(), "the editable stroke is removed after outlining");
+    let NodeKind::Vector { network } = preserved.kind else { panic!("the painted vector remains") };
+    assert!(network.regions.iter().any(|region| region.fills.is_some()), "face paints are preserved");
+    let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+    for (x, y) in [(8, 40), (15, 40), (40, 40), (80, 40)] {
+        assert_eq!(after.pixel(x, y), before.pixel(x, y), "outlining changed the image at {x},{y}");
     }
 }

@@ -767,6 +767,9 @@ impl<'a> Mapper<'a> {
         if let Some(c) = v.get("backgroundColor") {
             o.insert("backgroundColor".into(), color(c));
         }
+        if let Some(enabled) = v.get("backgroundEnabled").and_then(Kv::bool) {
+            o.insert("backgroundVisible".into(), json!(enabled));
+        }
         if let Some(c) = v.get("prototypeBackgroundColor") {
             o.insert("prototypeBackgrounds".into(), json!([color(c)]));
         }
@@ -1761,9 +1764,6 @@ impl<'a> Mapper<'a> {
         let unresolved_style = net.vertices.iter().any(|p| p.style != 0 && style(p.style).is_none());
         let unknown_join = net.vertices.iter().any(|p| point_join(p).is_some_and(|j| !j.str().is_some_and(known)));
         let unsupported_join = net.vertices.iter().any(|p| point_join(p).and_then(Kv::str).is_some_and(|j| known(j) && j != layer_join));
-        if net.regions.iter().any(|r| style(r.style).is_some_and(|s| s.get("fillPaints").is_some())) {
-            self.warn("filled areas of a vector with their own fill use the layer's fill");
-        }
         if unresolved_style {
             self.warn("some vector points refer to point settings missing from the file; they use the layer's joins and plain corners");
         }
@@ -1822,8 +1822,33 @@ impl<'a> Mapper<'a> {
                     .iter()
                     .map(|s| json!({"a": s.a, "b": s.b, "ta": [s.ta.0 * sx, s.ta.1 * sy], "tb": [s.tb.0 * sx, s.tb.1 * sy]}))
                     .collect();
-                let regions: Vec<Value> =
-                    net.regions.iter().map(|r| json!({"loops": r.loops, "winding": if r.non_zero { "nonZero" } else { "evenOdd" }})).collect();
+                let regions: Vec<Value> = net
+                    .regions
+                    .iter()
+                    .map(|r| {
+                        let mut region = json!({"loops": r.loops, "winding": if r.non_zero { "nonZero" } else { "evenOdd" }});
+                        if let Some(fills) = style(r.style).and_then(|s| s.get("fillPaints")) {
+                            let paints: Vec<Value> = fills
+                                .list()
+                                .iter()
+                                .filter_map(|fill| {
+                                    let raw = paint(fill, &mut |warning| self.warn(warning))?;
+                                    match crate::rest::props::region_paint(&raw) {
+                                        Some(paint) => serde_json::to_value(paint).ok(),
+                                        None => {
+                                            self.warn("an image or unsupported paint on a vector face uses the layer's fill");
+                                            None
+                                        }
+                                    }
+                                })
+                                .collect();
+                            if !paints.is_empty() || fills.list().is_empty() {
+                                region["fills"] = Value::Array(paints);
+                            }
+                        }
+                        region
+                    })
+                    .collect();
                 let mut entry = json!({});
                 entry["vertices"] = Value::Array(vertices);
                 entry["segments"] = Value::Array(segments);

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use figcraft_doc::*;
 use figcraft_geom::{Affine, Point, Rect, Vec2};
+use serde_json::json;
 
 use super::point_snap;
 use super::regions::region_hit;
@@ -29,6 +30,8 @@ pub(crate) enum VGesture {
         split: Option<(usize, f64)>,
         moved: bool,
         click_clears: bool,
+        /// A Shift-click on an already selected point removes it only if no drag occurs.
+        toggle_on_click: Option<usize>,
         snap: Arc<PointSnap>,
     },
     /// Drag a handle (`from`: where it was, relative to its point); the other selected handles
@@ -127,6 +130,8 @@ pub(crate) enum PenPlan {
     Connect { from: usize, to: usize },
     /// Add a point on a segment, connected from the open end if any (ends the path).
     Split { seg: usize, t: f64, from: Option<usize> },
+    /// Split both crossing segments into one shared point, then connect the open end if any.
+    Intersection { segments: [(usize, f64); 2], from: Option<usize> },
 }
 
 /// Apply a pen plan; `out` is the open end's outgoing handle, `drag` the handle being dragged out
@@ -168,6 +173,15 @@ fn apply_pen(net: &mut VectorNetwork, plan: PenPlan, out: Option<(f64, f64)>, dr
             }
             Some(v)
         }
+        PenPlan::Intersection { segments, from } => {
+            let first = ops::split_segment(net, segments[0].0, segments[0].1)?;
+            let second = ops::split_segment(net, segments[1].0, segments[1].1)?;
+            if let Some(f) = from {
+                ops::connect(net, f, first, out, (0.0, 0.0));
+            }
+            ops::merge_vertices(net, first, second);
+            Some(first)
+        }
     }
 }
 
@@ -195,6 +209,16 @@ impl Session {
             PointerKind::DoubleClick => {
                 let tol = 6.0 / ev.zoom.max(1e-6);
                 let doc = self.doc()?.clone();
+                if ve.tool == VTool::Move
+                    && ve.anchor.is_none()
+                    && let Some((id, VHit::Segment { seg, .. })) = hit_any(&doc, &ve, ev.p(), tol)
+                {
+                    if !ev.alt || network(&doc, id).is_some_and(|net| net.closed_loop_at(seg).is_some()) {
+                        let command = if ev.alt { "vector.edit.selectLoop" } else { "vector.edit.selectSubpath" };
+                        self.execute(command, &json!({"id": id, "segment": seg, "add": ev.alt && ev.shift}))?;
+                    }
+                    return Ok(true);
+                }
                 let on_edited_layer = hit_any(&doc, &ve, ev.p(), tol).is_some()
                     || ve.parts().iter().any(|part| doc.world_render_bounds(part.id).is_some_and(|bounds| bounds.inflate(tol, tol).contains(ev.p())));
                 if ve.anchor.is_some() {
@@ -229,6 +253,7 @@ impl Session {
         others: Vec<(NodeId, Vec<usize>)>,
         split: Option<(usize, f64)>,
         click_clears: bool,
+        toggle_on_click: Option<usize>,
     ) -> Result<VGesture> {
         let ds = self.ds()?;
         let page_points = |id: NodeId, verts: &[usize]| -> Vec<Point> {
@@ -248,6 +273,7 @@ impl Session {
             split,
             moved: false,
             click_clears,
+            toggle_on_click,
             snap: Arc::new(PointSnap { from, grab, targets }),
         })
     }
@@ -313,7 +339,7 @@ impl Session {
         let Some(b) = transform::shown_box(&doc, ve) else { return Ok(()) };
         match bh {
             BoxHit::Inside => {
-                let g = self.points_gesture(ve.id, ev.p(), b.points, vec![], None, true)?;
+                let g = self.points_gesture(ve.id, ev.p(), b.points, vec![], None, true, None)?;
                 self.begin_interaction("Move points")?;
                 self.vgesture(g);
             }
@@ -333,19 +359,35 @@ impl Session {
 
     fn vector_hover(&mut self, ve: &VectorEdit, ev: &PointerEvent) -> Result<()> {
         let doc = self.doc()?.clone();
+        let w = doc.world_transform(ve.id);
         let tol = 6.0 / ev.zoom.max(1e-6);
         let width_tool = ve.tool == VTool::Width;
         let h = if width_tool { None } else { hit(&doc, ve, ev.p(), tol) };
+        let crossing = (ve.tool == VTool::Pen && !ev.shift && matches!(h, Some(VHit::Segment { .. })) && point_snap::modes(self, ev).0)
+            .then(|| point_snap::intersection_near(&doc, ve.id, ev.p(), crate::tools::SNAP_PX / ev.zoom.max(1e-6)))
+            .flatten();
         // Other edited layers' parts light up too (a press there makes that layer active).
         let shown = if width_tool { None } else { h.map(|h| (ve.id, h)).or_else(|| hit_any(&doc, ve, ev.p(), tol)) };
         // A pen click on empty canvas lands where it snaps.
-        let pen_at = if ve.tool == VTool::Pen && h.is_none() && !ev.shift { Some(self.snap_pen(ev, Some(ve.id), &[])?) } else { None };
+        let pen_anchor = ve.anchor.and_then(|a| network(&doc, ve.id)?.vertices.get(a)).map(|a| w * a.point());
+        let pen_at = if let Some(crossing) = crossing {
+            Some((crossing.at, vec![crate::snap::Guide::new(crossing.at, crossing.at)]))
+        } else if ve.tool == VTool::Pen && h.is_none() {
+            if ev.shift {
+                Some((pen_anchor.map_or(ev.p(), |a| point_snap::constrain_45(a, ev.p())), Vec::new()))
+            } else {
+                Some(self.snap_pen(ev, Some(ve.id), &[])?)
+            }
+        } else {
+            None
+        };
         let ov = &mut self.tool.overlay;
         ov.vector_hover = shown.map(|x| x.1);
         ov.vector_hover_on = shown.map(|x| x.0);
         ov.width_hover = None;
         ov.face.clear();
         ov.rubber = None;
+        ov.angle_guide = None;
         ov.guides.clear();
         ov.brush = (ve.tool == VTool::Eraser).then(|| [ev.x, ev.y, ERASER_PX / ev.zoom.max(1e-6)]);
         // What a press here would do (see `vector_down`).
@@ -366,7 +408,6 @@ impl Session {
             (VTool::Eraser, _) => Cursor::Eraser,
             (VTool::Width, _) => Cursor::Crosshair,
         };
-        let w = doc.world_transform(ve.id);
         // The Move tool hatches the region under the pointer, clear of anything a press would take
         // first (another layer's parts, Bezier handles, the transform box's handles). Close to a
         // point or segment but outside the region clearances, the region wins (a press takes it).
@@ -389,9 +430,11 @@ impl Session {
             }
             VTool::Pen => {
                 let (to, guides) = pen_at.unwrap_or((ev.p(), Vec::new()));
-                if let Some(a) = ve.anchor.and_then(|a| network(&doc, ve.id)?.vertices.get(a).copied()) {
-                    let ap = w * a.point();
+                if let Some(ap) = pen_anchor {
                     self.tool.overlay.rubber = Some([ap.x, ap.y, to.x, to.y]);
+                    if ev.shift && h.is_none() {
+                        self.tool.overlay.angle_guide = Some([ap.x, ap.y, to.x, to.y]);
+                    }
                 }
                 self.tool.overlay.guides = guides;
             }
@@ -491,7 +534,7 @@ impl Session {
         let now = editing(self)?;
         let moving = selected_points(net, &now);
         let others = if shift || selected { Self::others_moving(doc, &now) } else { vec![] };
-        let g = self.points_gesture(id, ev.p(), moving, others, None, false)?;
+        let g = self.points_gesture(id, ev.p(), moving, others, None, false, None)?;
         self.begin_interaction("Move points")?;
         self.vgesture(g);
         Ok(())
@@ -523,9 +566,13 @@ impl Session {
             _ => ve,
         };
         let h = hit(&doc, ve, ev.p(), tol);
+        let crossing = (ve.tool == VTool::Pen && !ev.shift && matches!(h, Some(VHit::Segment { .. })) && point_snap::modes(self, ev).0)
+            .then(|| point_snap::intersection_near(&doc, ve.id, ev.p(), crate::tools::SNAP_PX / ev.zoom.max(1e-6)))
+            .flatten();
         self.tool.overlay.vector_hover = None;
         self.tool.overlay.face.clear();
         self.tool.overlay.guides.clear();
+        self.tool.overlay.angle_guide = None;
         let tool = if ev.cmd && ve.tool == VTool::Move { VTool::Bend } else { ve.tool };
         let id = ve.id;
         let w = doc.world_transform(id);
@@ -597,13 +644,12 @@ impl Session {
                     // Shift on a point drawn unselected (selected only through a region) selects it
                     // in its own right rather than taking it out.
                     let own = ev.shift && ve.region_vertices.contains(&index);
+                    let toggle_on_click = (ev.shift && ve.vertices.contains(&index) && !own).then_some(index);
                     let verts = if own {
                         ve.vertices.clone()
                     } else if ev.shift {
                         let mut v = ve.vertices.clone();
-                        if let Some(i) = v.iter().position(|x| *x == index) {
-                            v.remove(i);
-                        } else {
+                        if !v.contains(&index) {
                             v.push(index);
                         }
                         v
@@ -635,7 +681,7 @@ impl Session {
                         })
                         .unwrap_or_default();
                     let others = if keep_others { Self::others_moving(&doc, ve) } else { vec![] };
-                    let g = self.points_gesture(id, ev.p(), moving, others, None, false)?;
+                    let g = self.points_gesture(id, ev.p(), moving, others, None, false, toggle_on_click)?;
                     self.begin_interaction("Move points")?;
                     self.vgesture(g);
                 }
@@ -653,7 +699,7 @@ impl Session {
                             e.clear_selection();
                             e.vertices = vec![v];
                         })?;
-                        let g = self.points_gesture(id, ev.p(), vec![v], vec![], Some((seg, t)), false)?;
+                        let g = self.points_gesture(id, ev.p(), vec![v], vec![], Some((seg, t)), false, None)?;
                         self.vgesture(g);
                     } else if ev.shift {
                         set_state(self, |e| {
@@ -669,7 +715,7 @@ impl Session {
                             e.clear_selection();
                             e.segments = vec![seg];
                         })?;
-                        let g = self.points_gesture(id, ev.p(), ends, vec![], None, false)?;
+                        let g = self.points_gesture(id, ev.p(), ends, vec![], None, false, None)?;
                         self.begin_interaction("Move segment")?;
                         self.vgesture(g);
                     }
@@ -707,8 +753,19 @@ impl Session {
                 None => self.vgesture(VGesture::Marquee { start: ev.p(), base: Self::select_base(ve, ev.shift) }),
             },
             VTool::Pen => {
-                let at = if h.is_none() && !ev.shift { self.snap_pen(ev, Some(id), &[])?.0 } else { ev.p() };
-                let Some(plan) = self.pen_plan(ve, h, w.inverse() * at, ev.shift) else { return Ok(true) };
+                let at = if let Some(crossing) = crossing {
+                    crossing.at
+                } else if h.is_none() {
+                    if ev.shift {
+                        ve.anchor.and_then(|a| network(&doc, id)?.vertices.get(a)).map_or(ev.p(), |a| point_snap::constrain_45(w * a.point(), ev.p()))
+                    } else {
+                        self.snap_pen(ev, Some(id), &[])?.0
+                    }
+                } else {
+                    ev.p()
+                };
+                let plan = crossing.map(|crossing| PenPlan::Intersection { segments: crossing.segments, from: ve.anchor });
+                let Some(plan) = plan.or_else(|| self.pen_plan(ve, h, w.inverse() * at)) else { return Ok(true) };
                 self.begin_interaction("Pen")?;
                 let out = ve.pen_out;
                 let mut v = None;
@@ -755,9 +812,7 @@ impl Session {
     }
 
     /// What a pen click at local point `lp` does.
-    fn pen_plan(&mut self, ve: &VectorEdit, h: Option<VHit>, lp: Point, shift: bool) -> Option<PenPlan> {
-        let doc = self.doc().ok()?;
-        let net = network(doc, ve.id)?;
+    fn pen_plan(&mut self, ve: &VectorEdit, h: Option<VHit>, lp: Point) -> Option<PenPlan> {
         match h {
             Some(VHit::Vertex { index }) => match ve.anchor {
                 Some(a) if a != index => Some(PenPlan::Connect { from: a, to: index }),
@@ -777,17 +832,7 @@ impl Session {
                 }
             },
             Some(VHit::Segment { seg, t }) => Some(PenPlan::Split { seg, t, from: ve.anchor }),
-            _ => {
-                let mut at = lp;
-                // Shift: 45° steps from the open end.
-                if shift && let Some(a) = ve.anchor.and_then(|a| net.vertices.get(a)) {
-                    let v = lp - a.point();
-                    let step = std::f64::consts::FRAC_PI_4;
-                    let ang = (v.atan2() / step).round() * step;
-                    at = a.point() + Vec2::from_angle(ang) * v.hypot();
-                }
-                Some(PenPlan::New { at, from: ve.anchor })
-            }
+            _ => Some(PenPlan::New { at: lp, from: ve.anchor }),
         }
     }
 
@@ -801,7 +846,7 @@ impl Session {
                     e.anchor = v;
                     e.pen_out = out;
                 }
-                PenPlan::Connect { .. } | PenPlan::Split { .. } => {
+                PenPlan::Connect { .. } | PenPlan::Split { .. } | PenPlan::Intersection { .. } => {
                     e.anchor = None;
                     e.pen_out = None;
                 }
@@ -814,7 +859,7 @@ impl Session {
         let doc = self.doc()?.clone();
         let tol = 6.0 / zoom.max(1e-6);
         let w = doc.world_transform(ve.id);
-        let Some(plan) = self.pen_plan(ve, hit(&doc, ve, p, tol), w.inverse() * p, false) else {
+        let Some(plan) = self.pen_plan(ve, hit(&doc, ve, p, tol), w.inverse() * p) else {
             return Ok(self.ds()?.vector_edit.as_ref().and_then(|e| e.anchor));
         };
         let inv = w.inverse();
@@ -834,21 +879,23 @@ impl Session {
         let lp = inv * ev.p();
         let to_local = |d: Vec2| inv * (Point::ZERO + d) - inv * Point::ZERO;
         match g {
-            VGesture::Points { start, verts, others, split, click_clears, snap, .. } => {
-                let mut d = ev.p() - start;
-                if d.hypot() * ev.zoom < 1.0 {
+            VGesture::Points { start, verts, others, split, click_clears, toggle_on_click, snap, .. } => {
+                if (ev.p() - start).hypot() * ev.zoom < 1.0 {
                     return Ok(());
                 }
-                // Shift: along the axis moved most.
-                let lock = ev.shift.then_some(d.x.abs() > d.y.abs());
-                match lock {
-                    Some(true) => d.y = 0.0,
-                    Some(false) => d.x = 0.0,
-                    None => {}
-                }
-                let moved: Vec<Point> = snap.from.iter().map(|p| *p + d).collect();
-                let (c, guides) = point_snap::snap(&snap.targets, &moved, snap.grab.map(|g| g + d), ev.zoom, modes, lock);
-                d += c;
+                let mut d = if ev.shift { point_snap::constrain_45(start, ev.p()) - start } else { ev.p() - start };
+                let guides = if ev.shift {
+                    let from = snap.grab.unwrap_or(start);
+                    let to = from + d;
+                    self.tool.overlay.angle_guide = Some([from.x, from.y, to.x, to.y]);
+                    Vec::new()
+                } else {
+                    self.tool.overlay.angle_guide = None;
+                    let moved: Vec<Point> = snap.from.iter().map(|p| *p + d).collect();
+                    let (c, guides) = point_snap::snap(&snap.targets, &moved, snap.grab.map(|g| g + d), ev.zoom, modes, None);
+                    d += c;
+                    guides
+                };
                 self.tool.overlay.guides = guides;
                 let ld = to_local(d);
                 self.preview(|doc, _| {
@@ -864,13 +911,20 @@ impl Session {
                     }
                     Ok(())
                 })?;
-                self.vgesture(VGesture::Points { start, verts, others, split, moved: true, click_clears, snap });
+                self.vgesture(VGesture::Points { start, verts, others, split, moved: true, click_clears, toggle_on_click, snap });
             }
             VGesture::Handle { seg, start, independent, from, group, targets } => {
                 let alt = independent || ev.alt;
-                let (c, guides) = point_snap::snap(&targets, &[ev.p()], Some(ev.p()), ev.zoom, modes, None);
+                let gesture_doc = self.gesture_doc()?;
+                let anchor = network(&gesture_doc, id)
+                    .and_then(|net| net.segments.get(seg).and_then(|s| net.vertices.get(if start { s.a } else { s.b })))
+                    .map(|v| w * v.point());
+                let target = if ev.shift { anchor.map_or(ev.p(), |a| point_snap::constrain_45(a, ev.p())) } else { ev.p() };
+                let (c, guides) =
+                    if ev.shift { (Vec2::ZERO, Vec::new()) } else { point_snap::snap(&targets, &[target], Some(target), ev.zoom, modes, None) };
+                self.tool.overlay.angle_guide = anchor.filter(|_| ev.shift).map(|a| [a.x, a.y, target.x, target.y]);
                 self.tool.overlay.guides = guides;
-                let lp = inv * (ev.p() + c);
+                let lp = inv * (target + c);
                 self.preview(|doc, _| {
                     edit(doc, id, |net| {
                         let Some(s) = net.segments.get(seg).copied() else { return };
@@ -909,8 +963,11 @@ impl Session {
                 self.preview(|doc, _| edit(doc, id, |net| ops::bend(net, seg, t, lp)))?;
             }
             VGesture::BendVertex { v, origin, moved, smooth } => {
-                let d = lp - origin;
-                let page_d = (w * lp - w * origin).hypot() * ev.zoom;
+                let anchor = w * origin;
+                let target = if ev.shift { point_snap::constrain_45(anchor, ev.p()) } else { ev.p() };
+                self.tool.overlay.angle_guide = ev.shift.then_some([anchor.x, anchor.y, target.x, target.y]);
+                let d = inv * target - origin;
+                let page_d = (target - anchor).hypot() * ev.zoom;
                 if !moved && page_d < 2.0 {
                     return Ok(());
                 }
@@ -956,8 +1013,10 @@ impl Session {
                 self.vgesture(VGesture::Paint { stamps });
             }
             VGesture::Pen { plan, origin, out, .. } => {
-                let d = to_local(ev.p() - origin);
-                if (ev.p() - origin).hypot() * ev.zoom < 2.0 {
+                let target = if ev.shift { point_snap::constrain_45(origin, ev.p()) } else { ev.p() };
+                self.tool.overlay.angle_guide = ev.shift.then_some([origin.x, origin.y, target.x, target.y]);
+                let d = to_local(target - origin);
+                if (target - origin).hypot() * ev.zoom < 2.0 {
                     return Ok(());
                 }
                 let mut v = None;
@@ -1003,9 +1062,10 @@ impl Session {
         self.tool.overlay.marquee = None;
         self.tool.overlay.lasso.clear();
         self.tool.overlay.guides.clear();
+        self.tool.overlay.angle_guide = None;
         let Gesture::Vector(g) = g else { return Ok(()) };
         match g {
-            VGesture::Points { verts, others, moved, split, click_clears, .. } => {
+            VGesture::Points { verts, others, moved, split, click_clears, toggle_on_click, .. } => {
                 if moved || split.is_some() {
                     if let ([v], None) = (verts.as_slice(), split)
                         && others.iter().all(|(_, o)| o.is_empty())
@@ -1020,6 +1080,8 @@ impl Session {
                             e.vertices.clear();
                             e.segments.clear();
                         })?;
+                    } else if let Some(index) = toggle_on_click {
+                        set_state(self, |e| e.vertices.retain(|v| *v != index))?;
                     }
                 }
             }
@@ -1045,7 +1107,11 @@ impl Session {
                     e.activate(id);
                 }
             })?,
-            VGesture::Erase { .. } | VGesture::Paint { .. } => self.commit_interaction()?,
+            VGesture::Erase { .. } => self.commit_interaction()?,
+            VGesture::Paint { stamps } => {
+                self.commit_interaction()?;
+                super::select_painted_region(self, ve.id, stamps.last().copied())?;
+            }
             VGesture::BoxScale { pick, .. } => {
                 let ds = self.ds()?;
                 let clicked = ds.interaction.as_ref().is_some_and(|it| Arc::ptr_eq(&it.doc, &ds.doc));

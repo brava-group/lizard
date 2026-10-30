@@ -485,6 +485,7 @@ fn paint_row(p: &figcraft_color::Paint, fmt: ColorFormat) -> Prop {
         }
         PaintKind::Image(_) => prop("Image", format!("{}%", (p.opacity * 100.0).round())),
         PaintKind::Pattern(_) => prop("Pattern", format!("{}%", (p.opacity * 100.0).round())),
+        PaintKind::Shader(fill) => prop("Shader", fill.shader_id.clone()),
     }
 }
 

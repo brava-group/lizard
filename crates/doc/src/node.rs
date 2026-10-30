@@ -69,6 +69,8 @@ pub enum NodeKind {
     Page {
         #[serde(default = "page_bg")]
         background: Color,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        background_visible: bool,
         #[serde(default)]
         flows: Vec<crate::proto::Flow>,
         #[serde(default)]
@@ -522,6 +524,9 @@ pub struct Node {
 
 pub(crate) fn yes() -> bool {
     true
+}
+fn is_true(value: &bool) -> bool {
+    *value
 }
 fn one() -> f32 {
     1.0

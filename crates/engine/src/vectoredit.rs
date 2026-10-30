@@ -10,6 +10,7 @@
 pub mod ops;
 pub(crate) mod point_snap;
 mod pointer;
+mod region_fill;
 pub mod regions;
 #[cfg(test)]
 mod regions_tests;
@@ -512,9 +513,21 @@ pub fn begin_many(s: &mut Session, ids: &[NodeId]) -> Result<()> {
         if edited.contains(id) {
             continue;
         }
-        // Vectors are left untouched, so editing only them records no undo step.
+        // Existing painted vectors may predate per-face regions. Split their visible faces on
+        // entry so each area can be selected without asking the user to repaint it.
         let is_vector = before.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Vector { .. }));
-        match if is_vector { Ok(()) } else { ensure_vector(s.doc_mut()?, *id) } {
+        let prepare = if is_vector {
+            let needs_faces = before.node(*id).is_some_and(|node| match &node.kind {
+                NodeKind::Vector { network } => {
+                    !network.regions.is_empty() && node.fills.iter().any(|paint| paint.visible) && network.faces_need_materialization()
+                }
+                _ => false,
+            });
+            if needs_faces { edit(s.doc_mut()?, *id, |net| net.materialize_faces()) } else { Ok(()) }
+        } else {
+            ensure_vector(s.doc_mut()?, *id)
+        };
+        match prepare {
             Ok(()) => edited.push(*id),
             Err(e) => first_err = first_err.or(Some(e)),
         }
@@ -578,6 +591,7 @@ pub fn escape(s: &mut Session) -> Result<()> {
     let ve = editing(s)?;
     if ve.anchor.is_some() {
         s.tool.overlay.rubber = None;
+        s.tool.overlay.angle_guide = None;
         return set_state(s, |ve| {
             ve.anchor = None;
             ve.pen_out = None;
@@ -600,6 +614,43 @@ fn index(cmd: &str, p: &Value, key: &str) -> Result<usize> {
         return Err(bad(cmd, format!("`{key}` out of range")));
     }
     Ok(v as usize)
+}
+
+/// Select topology from the edited network. This changes edit selection only, not the document.
+fn select_contour(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
+    let ve = editing(s)?;
+    let layer = id(p, "id").unwrap_or(ve.id);
+    if !ve.edits(layer) {
+        return Err(bad(kind, "that layer isn't being edited"));
+    }
+    let net = network(s.doc()?, layer).ok_or_else(|| bad(kind, "select a vector"))?;
+    let mut segments: Vec<usize> = match kind {
+        "vector.edit.selectSubpath" => net.connected_subpath(index(kind, p, "segment")?),
+        "vector.edit.selectLoop" => net.closed_loop_at(index(kind, p, "segment")?).unwrap_or_default(),
+        "vector.edit.selectOuterContour" => net.outer_contours().into_iter().flatten().collect(),
+        "vector.edit.selectInnerContours" => net.inner_contours().into_iter().flatten().collect(),
+        _ => Vec::new(),
+    };
+    segments.sort_unstable();
+    segments.dedup();
+    if segments.is_empty() {
+        return Err(bad(kind, "no matching contour"));
+    }
+    let add = boolean(p, "add").unwrap_or(false);
+    set_tool(s, VTool::Move)?;
+    set_state(s, |edit| {
+        if !add {
+            edit.clear_selection();
+        }
+        edit.activate(layer);
+        for &segment in &segments {
+            if !edit.segments.contains(&segment) {
+                edit.segments.push(segment);
+            }
+        }
+        edit.segments.sort_unstable();
+    })?;
+    Ok(json!({"id": layer, "segments": segments}))
 }
 
 /// Delete the points and segments of `parts` (`heal` keeps paths through deleted points closed).
@@ -679,6 +730,57 @@ pub fn selection_position(doc: &Document, ve: &VectorEdit) -> Option<Point> {
     let x = pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
     let y = pts.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
     (x.is_finite() && y.is_finite()).then(|| Point::new(x, y))
+}
+
+/// The normal Arrange shortcuts act on selected vertices while a vector is being edited.
+/// Explicit layer ids keep the layer-level arrange behavior.
+pub fn distribute_in_edit_mode(s: &mut Session, p: &Value, horizontal: bool) -> Option<Result<Value>> {
+    if get(p, "ids").is_some() || s.ds().ok()?.vector_edit.is_none() {
+        return None;
+    }
+    Some((|| {
+        let sets = point_sets(s, p, true)?;
+        let doc = s.doc()?;
+        let mut items: Vec<(NodeId, usize, f64)> = sets
+            .iter()
+            .flat_map(|(id, points)| {
+                let world = doc.world_transform(*id);
+                points.iter().filter_map(move |index| {
+                    let point = world * network(doc, *id)?.vertices.get(*index)?.point();
+                    Some((*id, *index, if horizontal { point.x } else { point.y }))
+                })
+            })
+            .collect();
+        if items.len() < 3 && num(p, "spacing").is_none() {
+            return Ok(json!({"ok": true, "moved": 0}));
+        }
+        items.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.0.0.cmp(&b.0.0)).then_with(|| a.1.cmp(&b.1)));
+        let (Some(first), Some(last)) = (items.first(), items.last()) else { return Ok(json!({"ok": true, "moved": 0})) };
+        let step = num(p, "spacing").unwrap_or((last.2 - first.2) / items.len().saturating_sub(1).max(1) as f64);
+        let targets: std::collections::HashMap<(NodeId, usize), f64> =
+            items.iter().enumerate().map(|(rank, (id, index, _))| ((*id, *index), first.2 + step * rank as f64)).collect();
+        let doc = s.doc_mut()?;
+        for (id, points) in sets {
+            let world = doc.world_transform(id);
+            let local = world.inverse();
+            edit(doc, id, |net| {
+                for index in &points {
+                    if let (Some(vertex), Some(target)) = (net.vertices.get_mut(*index), targets.get(&(id, *index))) {
+                        let mut page = world * vertex.point();
+                        if horizontal {
+                            page.x = *target;
+                        } else {
+                            page.y = *target;
+                        }
+                        let point = local * page;
+                        vertex.x = point.x;
+                        vertex.y = point.y;
+                    }
+                }
+            })?;
+        }
+        Ok(json!({"ok": true, "moved": items.len()}))
+    })())
 }
 
 fn default_points(s: &Session, ve: &VectorEdit) -> Vec<usize> {
@@ -781,6 +883,10 @@ fn local(s: &Session, id: NodeId, p: &Value, cmd: &str) -> Result<Point> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        spec!("vector.region.fill.add", "Add region fill", "{id?, regions?, paint?}", true, |s, p| region_fill::run(s, p, "add")),
+        spec!("vector.region.fill.set", "Set region fill", "{id?, regions?, index?, paint | color, opacity?, visible?, blend?}", true, |s, p| region_fill::run(s, p, "set")),
+        spec!("vector.region.fill.remove", "Remove region fill", "{id?, regions?, index?}", true, |s, p| region_fill::run(s, p, "remove")),
+        spec!("vector.region.fill.move", "Move region fill", "{id?, regions?, from, to}", true, |s, p| region_fill::run(s, p, "move")),
         spec!(
             "vector.edit.begin",
             "Edit vector",
@@ -815,6 +921,10 @@ pub fn specs() -> Vec<CommandSpec> {
             set_tool(s, t)?;
             Ok(json!({"tool": t.id()}))
         }),
+        spec!("vector.edit.selectSubpath", "Select connected subpath", "{segment, id?, add?}", false, |s, p| select_contour(s, p, "vector.edit.selectSubpath")),
+        spec!("vector.edit.selectLoop", "Select closed loop", "{segment, id?, add?}", false, |s, p| select_contour(s, p, "vector.edit.selectLoop")),
+        spec!("vector.edit.selectOuterContour", "Select outer contour", "{id?, add?}", false, |s, p| select_contour(s, p, "vector.edit.selectOuterContour")),
+        spec!("vector.edit.selectInnerContours", "Select inner contours", "{id?, add?}", false, |s, p| select_contour(s, p, "vector.edit.selectInnerContours")),
         spec!(
             "vector.edit.select",
             "Select points",
@@ -915,6 +1025,55 @@ pub fn specs() -> Vec<CommandSpec> {
             edit(s.doc_mut()?, ve.id, |net| ops::move_vertices(net, &v, d))?;
             Ok(json!({"ok": true}))
         }),
+        spec!("vector.edit.align", "Align selected points", "{mode: left|hcenter|right|top|vcenter|bottom}", true, |s, p| {
+            let cmd = "vector.edit.align";
+            let mode = string(p, "mode").ok_or_else(|| bad(cmd, "mode is required"))?;
+            if !["left", "hcenter", "right", "top", "vcenter", "bottom"].contains(&mode.as_str()) {
+                return Err(bad(cmd, "unknown alignment mode"));
+            }
+            let sets = point_sets(s, p, true)?;
+            let doc = s.doc()?;
+            let selected: Vec<Point> = sets.iter().flat_map(|(id, points)| {
+                let w = doc.world_transform(*id);
+                points.iter().filter_map(move |index| network(doc, *id)?.vertices.get(*index).map(|v| w * v.point()))
+            }).collect();
+            if selected.is_empty() {
+                return Err(bad(cmd, "select points"));
+            }
+            // A lone point aligns to its vector; multiple points align to their shared bounds.
+            let reference = if selected.len() == 1 {
+                sets.first().and_then(|(id, _)| network(doc, *id).map(|net| {
+                    let w = doc.world_transform(*id);
+                    net.vertices.iter().map(|v| w * v.point()).collect::<Vec<_>>()
+                })).unwrap_or_default()
+            } else {
+                selected
+            };
+            let axis_x = matches!(mode.as_str(), "left" | "hcenter" | "right");
+            let (min, max) = reference.iter().map(|point| if axis_x { point.x } else { point.y })
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| (min.min(value), max.max(value)));
+            if !min.is_finite() || !max.is_finite() {
+                return Err(bad(cmd, "no finite points"));
+            }
+            let target = match mode.as_str() {
+                "left" | "top" => min,
+                "right" | "bottom" => max,
+                _ => (min + max) * 0.5,
+            };
+            edit_sets(s, sets, |net, points, world| {
+                let inv = world.inverse();
+                for index in points {
+                    if let Some(vertex) = net.vertices.get_mut(*index) {
+                        let mut page = world * vertex.point();
+                        if axis_x { page.x = target; } else { page.y = target; }
+                        let local = inv * page;
+                        vertex.x = local.x;
+                        vertex.y = local.y;
+                    }
+                }
+            })?;
+            Ok(json!({"ok": true}))
+        }),
         spec!("vector.edit.setHandle", "Set handle", "{segment, start (bool), x, y (local), independent?}", true, |s, p| {
             let ve = editing(s)?;
             let seg = index("vector.edit.setHandle", p, "segment")?;
@@ -993,9 +1152,24 @@ pub fn specs() -> Vec<CommandSpec> {
             delete_selection(s, parts, true)?;
             Ok(json!({"ok": true}))
         }),
-        spec!("vector.edit.delete", "Delete points", "{vertices?, segments?} (default the selection in every edited layer)", true, |s, p| {
+        spec!("vector.edit.delete", "Delete points or region fills", "{vertices?, segments?} (default the selection in every edited layer; a region-only selection clears its fill)", true, |s, p| {
             let ve = editing(s)?;
-            let parts = match (indices(p, "vertices"), indices(p, "segments")) {
+            let vertices = indices(p, "vertices");
+            let segments = indices(p, "segments");
+            if vertices.is_none() && segments.is_none() && !ve.regions.is_empty() && ve.shown_vertices().is_empty()
+                && ve.segments.is_empty() && ve.handles.is_empty() && !ve.others_selected()
+            {
+                edit(s.doc_mut()?, ve.id, |net| {
+                    for index in &ve.regions {
+                        if let Some(region) = net.regions.get_mut(*index) {
+                            region.fills = Some(Vec::new());
+                        }
+                    }
+                })?;
+                set_state(s, |edit| edit.clear_selection())?;
+                return Ok(json!({"ok": true}));
+            }
+            let parts = match (vertices, segments) {
                 (None, None) => ve.parts(),
                 (v, sg) => vec![EditPart { id: ve.id, vertices: v.unwrap_or_default(), segments: sg.unwrap_or_default() }],
             };
@@ -1067,6 +1241,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 let inv = s.doc()?.world_transform(ve.id).inverse();
                 let local: Vec<Point> = pts.iter().map(|q| inv * *q).collect();
                 let filled = paint_all(s.doc_mut()?, ve.id, &local)?;
+                select_painted_region(s, ve.id, local.last().copied())?;
                 Ok(json!({"filled": filled}))
             }
         ),
@@ -1221,10 +1396,19 @@ pub(crate) fn cut_across(s: &mut Session, a: Point, b: Point) -> Result<Vec<Node
 /// under it, the others get the same (points outside closed areas are skipped). A vector without
 /// fills gets the default fill so the painted area shows.
 pub fn paint_all(doc: &mut Document, id: NodeId, pts: &[Point]) -> Result<bool> {
+    // A previously filled path without regions needs every visible face represented, so the
+    // editor can select each face. Once the bucket has created a region on a blank vector, later
+    // clicks must leave the other faces empty even though the layer now has a default fill.
+    let materialize_existing = doc.node(id).is_some_and(|node| {
+        node.fills.iter().any(|paint| paint.visible) && matches!(&node.kind, NodeKind::Vector { network } if network.regions.is_empty())
+    });
     let filled = edit(doc, id, |net| {
         let mut want = None;
         for p in pts {
             want = net.paint_to(*p, want).or(want);
+        }
+        if want.is_some() && materialize_existing {
+            net.materialize_faces();
         }
         want
     })?
@@ -1234,6 +1418,21 @@ pub fn paint_all(doc: &mut Document, id: NodeId, pts: &[Point]) -> Result<bool> 
         n.fills = vec![figcraft_color::Paint::solid(figcraft_color::Color::DEFAULT_SHAPE)];
     }
     Ok(filled)
+}
+
+/// Keep the face just painted selected so its Fill controls edit that face immediately.
+pub(crate) fn select_painted_region(session: &mut Session, id: NodeId, point: Option<Point>) -> Result<()> {
+    let Some(net) = network(session.doc()?, id).cloned() else { return Ok(()) };
+    let selected = point.and_then(|point| net.region_at(point));
+    set_state(session, |edit| {
+        edit.clear_selection();
+        if let Some(region) = selected {
+            edit.regions.push(region);
+            edit.region_vertices = net.region_points(region);
+            edit.vertices = edit.region_vertices.clone();
+        }
+        edit.track_regions(&net);
+    })
 }
 
 /// Add points `vs` of edited layer `id` to its selection.

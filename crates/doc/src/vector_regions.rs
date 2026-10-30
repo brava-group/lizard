@@ -100,7 +100,9 @@ impl VectorNetwork {
         if !(p.x.is_finite() && p.y.is_finite()) {
             return None;
         }
-        (0..self.regions.len()).rev().find(|r| self.region_contains(*r, p))
+        (0..self.regions.len())
+            .rev()
+            .find(|r| self.regions.get(*r).is_some_and(|region| !region.fills.as_ref().is_some_and(Vec::is_empty)) && self.region_contains(*r, p))
     }
 
     /// Every point on region `r`'s loops (holes' too), each once, sorted (segments or points that

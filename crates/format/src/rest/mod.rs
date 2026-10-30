@@ -459,6 +459,11 @@ impl<'a> Ctx<'a> {
         {
             *background = bg;
         }
+        if let Some(visible) = c.get("backgroundVisible").and_then(Value::as_bool)
+            && let Some(NodeKind::Page { background_visible, .. }) = self.doc.node_mut(page).map(|n| &mut n.kind)
+        {
+            *background_visible = visible;
+        }
         if let Some(s) = proto::page_settings(c)
             && let Some(NodeKind::Page { prototype, .. }) = self.doc.node_mut(page).map(|n| &mut n.kind)
         {

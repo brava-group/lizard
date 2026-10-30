@@ -30,7 +30,7 @@ fn nested() -> VectorNetwork {
 }
 
 fn region(loops: Vec<Vec<usize>>, winding: WindingRule) -> Region {
-    Region { loops, winding }
+    Region { loops, winding, fills: None }
 }
 
 fn p(x: f64, y: f64) -> Point {

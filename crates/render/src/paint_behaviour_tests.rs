@@ -60,6 +60,39 @@ pub(super) fn solid_at(c: &str, opacity: f32) -> Paint {
     Paint { opacity, ..Paint::solid(hex(c)) }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shader_fill_uses_rectangle_mask_and_live_uniforms() {
+    use std::collections::BTreeMap;
+
+    let definition = figcraft_shader::demo();
+    if figcraft_shader::render_rgba(&definition, &BTreeMap::new(), 2, 2).is_err() {
+        // Headless test runners may have no WebGPU adapter.
+        return;
+    }
+    let (mut doc, page) = page();
+    doc.shaders.insert(definition.id.clone(), definition);
+    let id = rect(
+        &mut doc,
+        page,
+        (20.0, 20.0, 100.0, 60.0),
+        vec![Paint {
+            kind: PaintKind::Shader(figcraft_color::ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: BTreeMap::new() }),
+            opacity: 1.0,
+            visible: true,
+            blend: BlendMode::Normal,
+        }],
+    );
+    let first = render(&doc);
+    assert_eq!(px(&first, 10, 10), [255, 255, 255], "outside stays the page colour");
+    assert_ne!(px(&first, 30, 50), px(&first, 110, 50), "the fill varies across local UV");
+    if let PaintKind::Shader(fill) = &mut doc.get_mut(id).unwrap().fills[0].kind {
+        fill.values.insert("frequency".into(), 8.0);
+    }
+    let changed = render(&doc);
+    assert_ne!(px(&first, 65, 50), px(&changed, 65, 50), "uniform change updates the canvas");
+}
+
 // ---- fills: stacking and opacity ----
 
 #[test]

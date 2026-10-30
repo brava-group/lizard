@@ -259,8 +259,9 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
             o.insert("vertices".into(), json!(network.vertices.len()));
             o.insert("segments".into(), json!(network.segments.len()));
         }
-        NodeKind::Page { background, flows, .. } => {
+        NodeKind::Page { background, background_visible, flows, .. } => {
             o.insert("background".into(), json!(background.to_css_hex()));
+            o.insert("backgroundVisible".into(), json!(background_visible));
             if !flows.is_empty() {
                 o.insert("flows".into(), serde_json::to_value(flows).unwrap_or(Value::Null));
             }

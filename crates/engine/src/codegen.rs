@@ -248,7 +248,7 @@ fn first_fill(n: &Node) -> Option<Color> {
     n.fills.iter().filter(|p| p.visible).find_map(|p| match &p.kind {
         PaintKind::Solid { color } => Some(color.with_alpha(color.a * p.opacity)),
         PaintKind::Gradient(g) => g.sorted_stops().first().map(|s| s.color),
-        PaintKind::Image(_) | PaintKind::Pattern(_) => None,
+        PaintKind::Image(_) | PaintKind::Pattern(_) | PaintKind::Shader(_) => None,
     })
 }
 
@@ -469,6 +469,7 @@ pub(crate) fn css_decls(doc: &Document, n: &Node, t: &mut Tokens, hug: (bool, bo
             PaintKind::Gradient(g) => put("background", css_gradient(g, n.width, n.height)),
             PaintKind::Image(_) => put("background", "url(image.png) center / cover".into()),
             PaintKind::Pattern(_) => put("background", "url(pattern.png) repeat".into()),
+            PaintKind::Shader(_) => put("background", "/* Lizard WGSL shader fill */".into()),
         }
     }
     for (key, value) in css_borders(doc, n, t) {

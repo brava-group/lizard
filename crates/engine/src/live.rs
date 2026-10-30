@@ -17,7 +17,7 @@
 //! history. After a dropped connection the client resumes with its id and catches up; what it
 //! made meanwhile goes out then.
 //!
-//! A file can also live on a `figcraft-server`: `collab.publish` uploads the open document and
+//! A file can also live on a `lizard-server`: `collab.publish` uploads the open document and
 //! syncs that tab through the server, whose share links let others edit or only view. A view link
 //! makes the synced document read-only here (every edit is refused before it is sent; the server
 //! refuses it too).
@@ -59,15 +59,11 @@ use crate::params::{get, num, req_string, string};
 use crate::tools::ToolId;
 use crate::{DocState, EngineError, Result, Session, TextEdit, ViewState, bad, spec};
 
-/// The server files are shared through online unless Preferences name another: the only place
-/// its address is written.
-///
-/// A build can ship another one, or none: set `FIGCRAFT_DEFAULT_SERVER` when compiling to a
-/// server's address (`wss://host/`), or to nothing (`FIGCRAFT_DEFAULT_SERVER=`) for a build whose
-/// online sharing stays off until the user enters a server in Preferences.
-pub const DEFAULT_SERVER: &str = match option_env!("FIGCRAFT_DEFAULT_SERVER") {
+/// Online sharing has no hosted server until the user enters one in Preferences. Distributors
+/// can supply their own TLS endpoint with `LIZARD_DEFAULT_SERVER` at build time.
+pub const DEFAULT_SERVER: &str = match option_env!("LIZARD_DEFAULT_SERVER") {
     Some(server) => server,
-    None => "wss://collab.craftapps.dev/",
+    None => "",
 };
 
 /// Most selected ids one presence update carries (the rest aren't shown to others).
@@ -2033,7 +2029,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "collab.publish",
             "Publish to server",
-            "{server: ws://host:port/?key=… or wss://host/path/?key=… (the server's address with its key; `figcraft-server key` prints it; without a key on a server open to the public), key? (when the address has none), name? (default: the file's name)} → status \"connecting\": the open file is uploaded as a new file and this tab syncs through the server; `collab.peers` then has `published: {server, file, name, edit, view, owner (published without a key: the owner token, shown once), expires (seconds since 1970, or null)}` and `hosting` (the server's operator, terms and idle expiry)",
+            "{server: ws://host:port/?key=… or wss://host/path/?key=… (the server's address with its key; `lizard-server key` prints it; without a key on a server open to the public), key? (when the address has none), name? (default: the file's name)} → status \"connecting\": the open file is uploaded as a new file and this tab syncs through the server; `collab.peers` then has `published: {server, file, name, edit, view, owner (published without a key: the owner token, shown once), expires (seconds since 1970, or null)}` and `hosting` (the server's operator, terms and idle expiry)",
             false,
             publish
         ),

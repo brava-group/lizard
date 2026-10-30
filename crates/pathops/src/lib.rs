@@ -67,13 +67,17 @@ fn sweep<T>(f: impl FnOnce() -> Result<T, PathOpsError>) -> Result<T, PathOpsErr
 }
 
 fn binary(a: &BezPath, b: &BezPath, op: linesweeper::BinaryOp) -> Result<BezPath, PathOpsError> {
+    binary_with_rule(a, b, linesweeper::FillRule::NonZero, op)
+}
+
+fn binary_with_rule(a: &BezPath, b: &BezPath, rule: linesweeper::FillRule, op: linesweeper::BinaryOp) -> Result<BezPath, PathOpsError> {
     if a.elements().is_empty() && b.elements().is_empty() {
         return Ok(BezPath::new());
     }
     if !finite(a) || !finite(b) {
         return Err(PathOpsError::BadInput);
     }
-    let contours = sweep(|| linesweeper::binary_op(&closed(a), &closed(b), linesweeper::FillRule::NonZero, op).map_err(|_| PathOpsError::BadInput))?;
+    let contours = sweep(|| linesweeper::binary_op(&closed(a), &closed(b), rule, op).map_err(|_| PathOpsError::BadInput))?;
     let mut out = BezPath::new();
     for c in contours.contours() {
         out.extend(c.path.elements().iter().copied());
@@ -84,6 +88,11 @@ fn binary(a: &BezPath, b: &BezPath, op: linesweeper::BinaryOp) -> Result<BezPath
 /// Normalise a single path's winding (non-zero) into simple even-odd contours.
 pub fn simplify(path: &BezPath) -> Result<BezPath, PathOpsError> {
     binary(path, &BezPath::new(), linesweeper::BinaryOp::Union)
+}
+
+/// Normalise a path whose contours use even-odd winding into explicit filled contours.
+pub fn simplify_even_odd(path: &BezPath) -> Result<BezPath, PathOpsError> {
+    binary_with_rule(path, &BezPath::new(), linesweeper::FillRule::EvenOdd, linesweeper::BinaryOp::Union)
 }
 
 /// Combine `acc` (the operands so far) with the next operand `p` by `op`.

@@ -586,7 +586,7 @@ pub fn part(net: &VectorNetwork, verts: &[usize]) -> VectorNetwork {
         let loops: Vec<Vec<usize>> =
             r.loops.iter().map(|l| l.iter().filter_map(|i| smap.get(*i).copied().flatten()).collect::<Vec<_>>()).filter(|l| !l.is_empty()).collect();
         if !loops.is_empty() {
-            out.regions.push(Region { loops, winding: r.winding });
+            out.regions.push(Region { loops, winding: r.winding, fills: r.fills.clone() });
         }
     }
     reopen_loops(&mut out);
@@ -648,7 +648,7 @@ pub fn connect(net: &mut VectorNetwork, a: usize, b: usize, ta: (f64, f64), tb: 
         let unfilled = !net.regions.iter().any(|r| r.loops.iter().flatten().any(|s| lp.contains(s)));
         if unfilled {
             lp.insert(0, si);
-            net.regions.push(Region { loops: vec![lp], winding: WindingRule::NonZero });
+            net.regions.push(Region { loops: vec![lp], winding: WindingRule::NonZero, fills: None });
         }
     }
     Some(si)
@@ -899,7 +899,7 @@ mod tests {
         // Triangle closed 0→2: its loop [2, 1, 0] walks segment 1 backwards.
         let mut n = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(100.0, 0.0), Point::new(100.0, 100.0)], false);
         n.segments.push(Segment::line(0, 2));
-        n.regions.push(Region { loops: vec![vec![2, 1, 0]], winding: WindingRule::NonZero });
+        n.regions.push(Region { loops: vec![vec![2, 1, 0]], winding: WindingRule::NonZero, fills: None });
         let p = Point::new(25.0, 10.0);
         assert!(n.fill_contains(p));
         for (seg, lp) in [(1, vec![2, 1, 0]), (2, vec![2, 1, 0]), (1, vec![0, 1, 2])] {

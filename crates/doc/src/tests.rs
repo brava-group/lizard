@@ -225,7 +225,7 @@ fn vector_network_paths() {
     let mut bad = VectorNetwork {
         vertices: vec![Vertex::new(0.0, 0.0)],
         segments: vec![Segment::line(0, 5)],
-        regions: vec![Region { loops: vec![vec![0, 9]], winding: WindingRule::EvenOdd }],
+        regions: vec![Region { loops: vec![vec![0, 9]], winding: WindingRule::EvenOdd, fills: None }],
     };
     bad.sanitize();
     assert!(bad.segments.is_empty());
@@ -266,10 +266,7 @@ fn isolated_vector_corner_can_use_the_full_edge() -> Result<(), &'static str> {
     assert!((arc.p3 - Point::new(10.0, 0.0)).hypot() < 1e-9);
     assert!((rounded.stroke_path().bounding_box().width() - 10.0).abs() < 1e-9);
 
-    let mut square = VectorNetwork::from_points(
-        &[Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0), Point::new(0.0, 10.0)],
-        true,
-    );
+    let mut square = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0), Point::new(0.0, 10.0)], true);
     for vertex in &mut square.vertices {
         vertex.radius = 10.0;
     }

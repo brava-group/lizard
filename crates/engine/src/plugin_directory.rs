@@ -1,4 +1,4 @@
-//! Plugins from a server's plugin directory (`figcraft-server`): listing it, installing and updating
+//! Plugins from a server's plugin directory (`lizard-server`): listing it, installing and updating
 //! plugins from it, and publishing and unpublishing them with the server's key. See
 //! `docs/plugins.md` and `docs/server.md`.
 //!
@@ -247,7 +247,7 @@ fn bundle_from_disk(cmd: &str, _path: &str) -> Result<Bundle> {
 /// Publish a plugin folder (or an installed plugin) as a new version (needs the server's key).
 fn publish(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "plugin.directory.publish";
-    let server = string(p, "server").ok_or_else(|| bad(cmd, "`server` required: ws://host:port/?key=… (`figcraft-server key` prints it)"))?;
+    let server = string(p, "server").ok_or_else(|| bad(cmd, "`server` required: ws://host:port/?key=… (`lizard-server key` prints it)"))?;
     let bundle = match (string(p, "path"), string(p, "plugin")) {
         (Some(path), _) => bundle_from_disk(cmd, &path)?,
         (None, Some(id)) => {

@@ -16,6 +16,7 @@ pub mod props;
 pub mod proto;
 pub mod proto_actions;
 pub mod section;
+pub mod shader;
 pub mod structure;
 pub mod styles;
 pub mod text;
@@ -85,6 +86,7 @@ fn registry() -> &'static Registry {
         list.extend(crate::fonts::specs());
         list.extend(styles::specs());
         list.extend(image::specs());
+        list.extend(shader::specs());
         list.extend(variables::specs());
         list.extend(variables_io::specs());
         list.extend(component::specs());

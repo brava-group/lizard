@@ -29,15 +29,134 @@ fn solid_rect_and_page_background() {
 }
 
 #[test]
+fn vector_faces_render_their_own_fill_without_recoloring_the_layer() -> Result<(), &'static str> {
+    use figcraft_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
+    let mut network = VectorNetwork::default();
+    for (x0, y0, size) in [(0.0, 0.0, 60.0), (20.0, 20.0, 20.0)] {
+        let start = network.vertices.len();
+        for (x, y) in [(x0, y0), (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size)] {
+            network.vertices.push(Vertex::new(x, y));
+        }
+        for i in 0..4 {
+            network.segments.push(Segment::line(start + i, start + (i + 1) % 4));
+        }
+    }
+    let blue = Color::from_hex("0066FF").ok_or("bad blue")?;
+    let red = Color::from_hex("FF2200").ok_or("bad red")?;
+    network.regions = vec![
+        Region { loops: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]], winding: WindingRule::EvenOdd, fills: None },
+        Region { loops: vec![vec![4, 5, 6, 7]], winding: WindingRule::NonZero, fills: Some(vec![Paint::solid(red)]) },
+    ];
+    let mut doc = figcraft_doc::Document::new("region colors");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Vector", 10.0, 10.0, 60.0, 60.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(blue)];
+    let pix = render_view(&doc, page, &view(80, 80), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 20, 20), [0, 102, 255, 255]);
+    assert_eq!(px(&pix, 40, 40), [255, 34, 0, 255]);
+    Ok(())
+}
+
+#[test]
+fn painted_face_with_unassigned_edges_renders_the_whole_face() -> Result<(), &'static str> {
+    use figcraft_doc::{Segment, VectorNetwork, Vertex};
+    let mut network = VectorNetwork::default();
+    let points = [(260.0, 100.0), (260.0, 180.0), (0.0, 180.0), (0.0, 0.0), (100.0, 100.0), (180.0, 180.0), (0.0, 100.0)];
+    let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
+    network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
+    network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
+    assert_eq!(network.paint(figcraft_geom::Point::new(40.0, 150.0)), Some(true));
+    let mut doc = figcraft_doc::Document::new("face plus open edges");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Vector", 0.0, 0.0, 260.0, 180.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
+    let pix = render_view(&doc, page, &view(280, 200), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 40, 150), [0xF6, 0x34, 0x34, 255], "lower part of the face");
+    assert_eq!(px(&pix, 100, 120), [0xF6, 0x34, 0x34, 255], "upper triangle of the same face");
+    let node = doc.get_mut(id).map_err(|_| "missing node")?;
+    node.fills[0].opacity = 0.5;
+    let translucent = render_view(&doc, page, &view(280, 200), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&translucent, 40, 150), px(&translucent, 100, 120), "one face must have even opacity");
+    let preview =
+        render_view(&doc, page, &View { scale: 0.5, ..view(140, 100) }, &Options { lod: true, ..Options::default() }).ok_or("preview failed")?;
+    assert_eq!(px(&preview, 20, 75), px(&preview, 50, 60), "zoomed-out preview keeps the whole face painted");
+    let node = doc.get_mut(id).map_err(|_| "missing node")?;
+    node.fills[0].opacity = 1.0;
+    let NodeKind::Vector { network } = &mut node.kind else { return Err("missing vector") };
+    network.materialize_faces();
+    let top = network.region_at(figcraft_geom::Point::new(20.0, 60.0)).ok_or("missing top face")?;
+    network.regions[top].fills = Some(Vec::new());
+    let without_top = render_view(&doc, page, &view(280, 200), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&without_top, 20, 60), [0xF5, 0xF5, 0xF5, 255], "Delete removes only the selected fill");
+    assert_eq!(px(&without_top, 40, 150), [0xF6, 0x34, 0x34, 255], "middle face remains filled");
+    assert_eq!(px(&without_top, 220, 150), [0xF6, 0x34, 0x34, 255], "right face remains filled");
+    Ok(())
+}
+
+#[test]
+fn curve_handle_y_changes_the_cached_outline_key() {
+    use std::hash::Hasher;
+    let mut first = figcraft_geom::BezPath::new();
+    first.move_to((0.0, 0.0));
+    first.curve_to((10.0, 20.0), (30.0, 40.0), (50.0, 60.0));
+    let mut second = figcraft_geom::BezPath::new();
+    second.move_to((0.0, 0.0));
+    second.curve_to((10.0, 20.0), (30.0, 41.0), (50.0, 60.0));
+    let mut a = std::collections::hash_map::DefaultHasher::new();
+    let mut b = std::collections::hash_map::DefaultHasher::new();
+    crate::draw::hash_path(&first, &mut a);
+    crate::draw::hash_path(&second, &mut b);
+    assert_ne!(a.finish(), b.finish());
+}
+
+#[test]
+fn outside_stroke_of_nested_painted_faces_does_not_cross_the_inner_face() -> Result<(), &'static str> {
+    use figcraft_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
+    let mut network = VectorNetwork::default();
+    for (x0, y0, size) in [(0.0, 0.0, 60.0), (20.0, 20.0, 20.0)] {
+        let first_vertex = network.vertices.len();
+        for (x, y) in [(x0, y0), (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size)] {
+            network.vertices.push(Vertex::new(x, y));
+        }
+        for index in 0..4 {
+            network.segments.push(Segment::line(first_vertex + index, first_vertex + (index + 1) % 4));
+        }
+    }
+    let black = Color::BLACK;
+    let red = Color::from_hex("FF0000").ok_or("bad red")?;
+    network.regions = vec![
+        Region { loops: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]], winding: WindingRule::EvenOdd, fills: None },
+        Region { loops: vec![vec![4, 5, 6, 7]], winding: WindingRule::NonZero, fills: Some(vec![Paint::solid(black)]) },
+    ];
+    let mut doc = figcraft_doc::Document::new("outside stroke");
+    let page = doc.first_page().ok_or("missing page")?;
+    let id = doc.create(page, NodeKind::Vector { network }, "Vector", 10.0, 10.0, 60.0, 60.0).map_err(|_| "missing vector")?;
+    let node = doc.get_mut(id).map_err(|_| "missing node")?;
+    node.fills = vec![Paint::solid(Color::WHITE)];
+    node.strokes = vec![Paint::solid(red)];
+    node.stroke.weight = 4.0;
+    node.stroke.align = StrokeAlign::Outside;
+    let pix = render_view(&doc, page, &view(80, 80), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 8, 40), [255, 0, 0, 255], "outside edge");
+    assert_eq!(px(&pix, 27, 40), [255, 255, 255, 255], "inner partition must not get the layer stroke");
+    assert_eq!(px(&pix, 32, 40), [0, 0, 0, 255], "outside stroke must not cover the inner painted face");
+    assert_eq!(px(&pix, 40, 40), [0, 0, 0, 255], "inner face keeps its own fill");
+    let mut with_hole = doc.clone();
+    if let NodeKind::Vector { network } = &mut with_hole.get_mut(id).map_err(|_| "missing vector")?.kind {
+        network.regions.pop();
+    }
+    let hole_pix = render_view(&with_hole, page, &view(80, 80), &Options::default()).ok_or("hole render failed")?;
+    assert_eq!(px(&hole_pix, 32, 40), [255, 0, 0, 255], "an actual hole still has an outside edge");
+    Ok(())
+}
+
+#[test]
 fn open_vector_with_fill_paints_area_without_closing_stroke() -> Result<(), &'static str> {
     use figcraft_doc::VectorNetwork;
     use figcraft_geom::Point;
     let mut doc = figcraft_doc::Document::new("open vector fill");
     let page = doc.first_page().ok_or("missing page")?;
-    let network = VectorNetwork::from_points(
-        &[Point::new(0.0, 0.0), Point::new(30.0, 0.0), Point::new(30.0, 30.0), Point::new(0.0, 30.0)],
-        false,
-    );
+    let network = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(30.0, 0.0), Point::new(30.0, 30.0), Point::new(0.0, 30.0)], false);
     let id = doc.create(page, NodeKind::Vector { network }, "Open", 10.0, 10.0, 30.0, 30.0).map_err(|_| "missing vector")?;
     let node = doc.get_mut(id).map_err(|_| "missing vector node")?;
     node.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
@@ -72,6 +191,35 @@ fn mixed_closed_and_open_vector_subpaths_both_paint() -> Result<(), &'static str
     assert_eq!(px(&pix, 35, 15), [0xF6, 0x34, 0x34, 255]);
     assert_eq!(px(&pix, 25, 15), [0xF5, 0xF5, 0xF5, 255]);
     Ok(())
+}
+
+#[test]
+fn animated_shader_fill_changes_canvas_at_explicit_time() {
+    use figcraft_color::{PaintKind, ShaderFill};
+    let (mut doc, page, rectangle) = doc_with_rect(Color::BLACK);
+    let Some(aurora) = figcraft_shader::presets().into_iter().find(|shader| shader.id == "lizard.aurora") else { panic!("Aurora preset missing") };
+    let shader_id = aurora.id.clone();
+    doc.shaders.insert(shader_id.clone(), aurora);
+    doc.get_mut(rectangle).unwrap().fills =
+        vec![Paint { kind: PaintKind::Shader(ShaderFill { shader_id, values: Default::default() }), ..Paint::solid(Color::WHITE) }];
+    let view = view(100, 100);
+    let first = render_view(&doc, page, &view, &Options { time: 0.0, ..Default::default() }).unwrap();
+    let second = render_view(&doc, page, &view, &Options { time: 1.0, ..Default::default() }).unwrap();
+    assert_ne!(px(&first, 30, 20), px(&second, 30, 20));
+    assert_eq!(px(&first, 5, 5), px(&second, 5, 5));
+}
+
+#[test]
+fn hidden_page_background_renders_transparent_without_losing_its_color() {
+    let (mut d, p, _) = doc_with_rect(Color::from_hex("FF0000").unwrap());
+    if let NodeKind::Page { background_visible, .. } = &mut d.get_mut(p).unwrap().kind {
+        *background_visible = false;
+    }
+    let pix = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
+    assert_eq!(px(&pix, 5, 5), [0, 0, 0, 0]);
+    assert_eq!(px(&pix, 30, 20), [255, 0, 0, 255]);
+    let with_override = render_view(&d, p, &view(100, 100), &Options { background: Some(Color::WHITE), ..Default::default() }).unwrap();
+    assert_eq!(px(&with_override, 5, 5), [255, 255, 255, 255]);
 }
 
 #[test]
@@ -188,6 +336,20 @@ fn mask_clips_siblings() {
     assert_eq!(px(&pix, 25, 25), [0, 0, 0, 255]);
     assert_eq!(px(&pix, 2, 2)[0], 0xF5);
     assert_eq!(px(&pix, 80, 80)[0], 0xF5);
+}
+
+#[test]
+fn page_level_mask_clips_only_the_following_run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut doc = figcraft_doc::Document::new("page mask");
+    let page = doc.first_page().ok_or("new document has no page")?;
+    let mask = doc.create(page, NodeKind::Rectangle, "Mask", 0.0, 0.0, 50.0, 100.0)?;
+    doc.get_mut(mask)?.is_mask = true;
+    let content = doc.create(page, NodeKind::Rectangle, "Content", 0.0, 0.0, 100.0, 100.0)?;
+    doc.get_mut(content)?.fills = vec![Paint::solid(Color::BLACK)];
+    let pix = render_view(&doc, page, &view(100, 100), &Options::default()).ok_or("render failed")?;
+    assert_eq!(px(&pix, 25, 50), [0, 0, 0, 255]);
+    assert_eq!(px(&pix, 75, 50)[0], 0xF5);
+    Ok(())
 }
 
 #[test]

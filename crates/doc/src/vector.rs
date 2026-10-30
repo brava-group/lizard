@@ -6,6 +6,7 @@ use figcraft_geom::{BezPath, Point, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::{StrokeCap, StrokeJoin};
+use figcraft_color::Paint;
 
 /// How a vertex's two bezier handles follow each other when one is dragged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -94,6 +95,9 @@ pub struct Region {
     pub loops: Vec<Vec<usize>>,
     #[serde(default)]
     pub winding: WindingRule,
+    /// `None` inherits the vector layer's fills; `Some` is this face's own paint stack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fills: Option<Vec<Paint>>,
 }
 
 /// A rounded point as drawn: point `v` moves to `a` (on segment `s1`), segment `s2` starts again
@@ -144,7 +148,7 @@ impl VectorNetwork {
         let mut regions = Vec::new();
         if closed && n > 2 {
             segments.push(Segment::line(n - 1, 0));
-            regions.push(Region { loops: vec![(0..segments.len()).collect()], winding: WindingRule::NonZero });
+            regions.push(Region { loops: vec![(0..segments.len()).collect()], winding: WindingRule::NonZero, fills: None });
         }
         Self { vertices, segments, regions }
     }
@@ -241,7 +245,7 @@ impl VectorNetwork {
         }
         close_open(&mut net, &mut loop_segs, &mut all_loops, first_v, cur_v);
         if !all_loops.is_empty() {
-            net.regions.push(Region { loops: all_loops, winding: WindingRule::NonZero });
+            net.regions.push(Region { loops: all_loops, winding: WindingRule::NonZero, fills: None });
         }
         net
     }
@@ -504,6 +508,9 @@ impl VectorNetwork {
         }
         let mut path = BezPath::new();
         for region in &self.regions {
+            if region.fills.as_ref().is_some_and(Vec::is_empty) {
+                continue;
+            }
             for lp in &region.loops {
                 self.append_loop(&mut path, lp);
             }
@@ -514,8 +521,15 @@ impl VectorNetwork {
     /// The area painted by a fill. SVG fills implicitly close open subpaths, while their strokes
     /// remain open. Imported paths may contain both stored regions and open subpaths.
     pub fn paint_path(&self) -> BezPath {
-        use figcraft_geom::kurbo::PathEl;
         let mut path = self.fill_path();
+        path.extend(self.unassigned_paint_path().elements().iter().copied());
+        path
+    }
+
+    /// Open subpaths which have not been assigned to a filled region, closed as SVG fills them.
+    pub fn unassigned_paint_path(&self) -> BezPath {
+        use figcraft_geom::kurbo::PathEl;
+        let mut path = BezPath::new();
         let mut assigned = vec![false; self.segments.len()];
         for region in &self.regions {
             for loop_segments in &region.loops {

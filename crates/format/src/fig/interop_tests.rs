@@ -9,6 +9,39 @@ use figcraft_doc::*;
 use super::kiwi::{Kind, Kv, Schema, Type};
 use super::*;
 
+#[test]
+fn vector_region_fills_survive_fig_roundtrip() -> Result<(), &'static str> {
+    let mut doc = Document::new("Region colors");
+    let page = doc.first_page().ok_or("missing page")?;
+    let mut network = VectorNetwork::default();
+    for x in [0.0, 40.0] {
+        let start = network.vertices.len();
+        for (vx, vy) in [(x, 0.0), (x + 30.0, 0.0), (x + 30.0, 30.0), (x, 30.0)] {
+            network.vertices.push(Vertex::new(vx, vy));
+        }
+        let first = network.segments.len();
+        for index in 0..4 {
+            network.segments.push(Segment::line(start + index, start + (index + 1) % 4));
+        }
+        network.regions.push(Region { loops: vec![(first..first + 4).collect()], winding: WindingRule::NonZero, fills: None });
+    }
+    network.regions[1].fills = Some(vec![Paint::solid(Color::from_hex("FF2200").ok_or("bad color")?)]);
+    let id = doc.create(page, NodeKind::Vector { network }, "Colored faces", 10.0, 10.0, 70.0, 30.0).map_err(|_| "missing vector")?;
+    doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(Color::WHITE)];
+    let (bytes, _) = export(&doc, None).map_err(|_| "export failed")?;
+    let (loaded, _) = import(&bytes, "Regions").map_err(|_| "import failed")?;
+    let region_fills = loaded
+        .nodes()
+        .find(|node| node.name == "Colored faces")
+        .and_then(|node| match &node.kind {
+            NodeKind::Vector { network } => network.regions.get(1)?.fills.as_ref(),
+            _ => None,
+        })
+        .ok_or("region fill missing")?;
+    assert_eq!(region_fills.first().and_then(Paint::solid_color), Color::from_hex("FF2200"));
+    Ok(())
+}
+
 /// One page with a filled frame holding a rectangle, a stroked ellipse, a centred line and text.
 fn sample() -> Document {
     let mut doc = Document::new("Interop");
@@ -83,6 +116,24 @@ fn the_document_and_its_pages_are_visible_and_opaque() {
         assert_eq!(num(&page, "backgroundOpacity"), 1.0);
         assert_eq!(num(page.get("backgroundColor").unwrap(), "a"), 1.0);
     });
+}
+
+#[test]
+fn hidden_page_background_round_trips_without_discarding_its_color() {
+    let mut doc = sample();
+    let page = doc.first_page().unwrap();
+    if let NodeKind::Page { background, background_visible, .. } = &mut doc.node_mut(page).unwrap().kind {
+        *background = Color::new(0.2, 0.4, 0.6, 0.75);
+        *background_visible = false;
+    }
+    with_changes(&doc, |of, _| {
+        assert!(!flag(&of("CANVAS"), "backgroundEnabled"));
+        assert!((num(&of("CANVAS"), "backgroundOpacity") - 0.75).abs() < 1e-6);
+    });
+    let (bytes, _) = export(&doc, None).unwrap();
+    let (back, _) = import(&bytes, "hidden.fig").unwrap();
+    let restored = back.first_page().and_then(|id| back.node(id));
+    assert!(matches!(restored.map(|node| &node.kind), Some(NodeKind::Page { background_visible: false, .. })));
 }
 
 #[test]

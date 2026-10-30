@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::Session;
 use crate::params::id_of;
 use crate::textedit::{begin, key, select_word};
-use figcraft_doc::{LeadingTrim, NodeId, NodeKind};
+use figcraft_doc::{LeadingTrim, NodeId, NodeKind, Sizing, TextAutoResize};
 
 fn id(v: Value) -> NodeId {
     id_of(&v["id"]).unwrap()
@@ -32,6 +32,22 @@ fn size(s: &Session, t: NodeId) -> (f64, f64) {
 }
 
 const FAMILY: &str = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+
+#[test]
+fn text_resize_modes_keep_dimension_controls_in_sync() {
+    let mut session = Session::new();
+    let node = text(&mut session, "Example", json!({"fontSize": 14}));
+    for (mode, expected, sizing) in [
+        ("height", TextAutoResize::Height, (Sizing::Fixed, Sizing::Hug)),
+        ("none", TextAutoResize::None, (Sizing::Fixed, Sizing::Fixed)),
+        ("widthAndHeight", TextAutoResize::WidthAndHeight, (Sizing::Hug, Sizing::Hug)),
+    ] {
+        session.execute("node.set", &json!({"id": node, "props": {"textAutoResize": mode}})).unwrap();
+        let layer = session.doc().unwrap().node(node).unwrap();
+        assert_eq!(layer.kind.text().unwrap().auto_resize, expected, "{mode}");
+        assert_eq!((layer.child_layout.sizing_h, layer.child_layout.sizing_v), sizing, "{mode}");
+    }
+}
 
 #[test]
 fn arrows_and_deletes_step_over_whole_clusters() {

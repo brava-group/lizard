@@ -277,6 +277,8 @@ pub struct Overlay {
     /// Pen tool: the in-progress path's anchor points and the rubber band to the pointer.
     pub pen: Vec<[f64; 2]>,
     pub rubber: Option<[f64; 4]>,
+    /// Active Shift angle constraint, from its anchor to the constrained point (page units).
+    pub angle_guide: Option<[f64; 4]>,
     /// Pen tool: the handles shaping the segments at the pen (anchor x, y, handle x, y): the last
     /// anchor's in and out handles and the one before's out handle.
     pub pen_handles: Vec<[f64; 4]>,
@@ -1099,14 +1101,26 @@ impl Session {
         }
         self.tool.overlay.measure_box = measure_box;
         self.tool.overlay.cursor = cursor;
+        self.tool.overlay.angle_guide = None;
         if tool == ToolId::Pen {
             // Where a click would land (snapped), with its guides.
-            let (to, g) = if ev.shift { (ev.p(), Vec::new()) } else { self.snap_pen_tool(ev)? };
+            let pen_anchor = self.tool.pen.as_ref().and_then(|pen| pen.points.last()).map(|(p, _, _)| *p);
+            let closing = ev.shift && self.pen_cursor(&doc, &sel, ev.p(), ev.zoom) == PenCursor::Close;
+            let (to, g) = if closing {
+                (ev.p(), Vec::new())
+            } else if ev.shift {
+                (pen_anchor.map_or(ev.p(), |p| crate::vectoredit::point_snap::constrain_45(p, ev.p())), Vec::new())
+            } else {
+                self.snap_pen_tool(ev)?
+            };
             guides = g;
             self.tool.overlay.cursor = Cursor::Pen(self.pen_cursor(&doc, &sel, to, ev.zoom));
             if let Some((last, _, out)) = self.tool.pen.as_ref().and_then(|pen| pen.points.last()) {
                 self.tool.overlay.rubber = Some([last.x, last.y, to.x, to.y]);
                 self.tool.overlay.rubber_handle = (out.hypot() > 0.0).then_some([last.x + out.x, last.y + out.y]);
+                if ev.shift && !closing {
+                    self.tool.overlay.angle_guide = Some([last.x, last.y, to.x, to.y]);
+                }
             }
         }
         self.tool.overlay.guides = guides;
@@ -1490,7 +1504,9 @@ impl Session {
             Gesture::Vector(_) | Gesture::ShapeBuild { .. } | Gesture::Origin => Ok(()),
             Gesture::PenDrag { anchor } => {
                 // A click's wobble pulls out no handle.
-                let out = if within_slop(ev, *anchor) { Vec2::ZERO } else { ev.p() - *anchor };
+                let target = if ev.shift { crate::vectoredit::point_snap::constrain_45(*anchor, ev.p()) } else { ev.p() };
+                self.tool.overlay.angle_guide = ev.shift.then_some([anchor.x, anchor.y, target.x, target.y]);
+                let out = if within_slop(ev, *anchor) { Vec2::ZERO } else { target - *anchor };
                 if let Some(pen) = self.tool.pen.as_mut()
                     && let Some(last) = pen.points.last_mut()
                 {
@@ -1760,6 +1776,7 @@ impl Session {
         let g = std::mem::take(&mut self.tool.gesture);
         self.tool.overlay.marquee = None;
         self.tool.overlay.guides.clear();
+        self.tool.overlay.angle_guide = None;
         self.tool.overlay.scale = None;
         self.tool.overlay.arc = None;
         self.tool.overlay.shape = None;
@@ -2084,6 +2101,7 @@ impl Session {
 
     fn pen_down(&mut self, ev: &PointerEvent) -> Result<()> {
         self.tool.overlay.guides.clear();
+        self.tool.overlay.angle_guide = None;
         // The segment being placed shows as itself while the press lasts.
         self.tool.overlay.rubber = None;
         self.tool.overlay.rubber_handle = None;
@@ -2118,14 +2136,7 @@ impl Session {
         if pen.parent.is_none() {
             pen.parent = Some(frame_at(&doc, page, p, &[]).unwrap_or(page));
         }
-        let mut p = p;
-        if ev.shift
-            && let Some((last, _, _)) = pen.points.last()
-        {
-            let v = p - *last;
-            let ang = (v.atan2() / (std::f64::consts::PI / 4.0)).round() * std::f64::consts::PI / 4.0;
-            p = *last + Vec2::from_angle(ang) * v.hypot();
-        }
+        let p = if ev.shift { pen.points.last().map_or(p, |(last, _, _)| crate::vectoredit::point_snap::constrain_45(*last, p)) } else { p };
         pen.points.push((p, Vec2::ZERO, Vec2::ZERO));
         self.tool.gesture = Gesture::PenDrag { anchor: p };
         self.pen_update()
@@ -2244,6 +2255,7 @@ impl Session {
         self.tool.overlay.pen_handles.clear();
         self.tool.overlay.rubber = None;
         self.tool.overlay.rubber_handle = None;
+        self.tool.overlay.angle_guide = None;
         self.tool.gesture = Gesture::None;
         if pen.as_ref().is_some_and(|p| p.id.is_some()) {
             self.commit_interaction()?;

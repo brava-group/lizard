@@ -1,10 +1,11 @@
 //! Paints → tiny-skia shaders, in a node's local space (width × height box).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use figcraft_color::{BlendMode, Color, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
 use figcraft_doc::Document;
-use tiny_skia::{FilterQuality, GradientStop, Pixmap, Point, Shader, SpreadMode, Transform};
+use tiny_skia::{FilterQuality, GradientStop, IntSize, Pixmap, Point, Shader, SpreadMode, Transform};
 
 pub fn ts_color(c: Color) -> tiny_skia::Color {
     tiny_skia::Color::from_rgba(c.r, c.g, c.b, c.a).unwrap_or(tiny_skia::Color::BLACK)
@@ -161,6 +162,50 @@ pub fn prepare_at(paint: &Paint, w: f64, h: f64, scale: f64, doc: &Document, tim
             Some(Prepared::Pattern { pixmap: padded, mode: SpreadMode::Pad, quality: FilterQuality::Bicubic, opacity: op, transform })
         }
         PaintKind::Pattern(pt) => crate::pattern::prepare(doc, pt, w, h, scale, time, op),
+        PaintKind::Shader(fill) => {
+            let definition = doc.shaders.get(&fill.shader_id)?;
+            let width = (w.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u32;
+            let height = (h.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u32;
+            let frame_time = if definition.features.animated { time.max(0.0) as f32 } else { 0.0 };
+            let key = format!("{}:{}x{}:{:?}:{}", definition.source, width, height, fill.values, frame_time.to_bits());
+            static PIXMAPS: OnceLock<Mutex<HashMap<String, Arc<Pixmap>>>> = OnceLock::new();
+            let cache = PIXMAPS.get_or_init(|| Mutex::new(HashMap::new()));
+            let cached = cache.lock().ok().and_then(|entries| entries.get(&key).cloned());
+            let pixmap = match cached {
+                Some(pixmap) => pixmap,
+                None => {
+                    let mut rgba = match figcraft_shader::render_rgba_at(definition, &fill.values, width, height, frame_time) {
+                        Ok(rgba) => rgba,
+                        Err(error) => {
+                            log::warn!("shader fill {}: {error}", fill.shader_id);
+                            return None;
+                        }
+                    };
+                    for pixel in rgba.chunks_exact_mut(4) {
+                        let alpha = u16::from(pixel[3]);
+                        for channel in &mut pixel[..3] {
+                            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+                        }
+                    }
+                    let size = IntSize::from_wh(width, height)?;
+                    let pixmap = Arc::new(Pixmap::from_vec(rgba, size)?);
+                    if let Ok(mut entries) = cache.lock() {
+                        if entries.len() >= 8 {
+                            entries.clear();
+                        }
+                        entries.insert(key, pixmap.clone());
+                    }
+                    pixmap
+                }
+            };
+            Some(Prepared::Pattern {
+                pixmap,
+                mode: SpreadMode::Pad,
+                quality: FilterQuality::Bilinear,
+                opacity: op,
+                transform: Transform::from_scale(w as f32 / width as f32, h as f32 / height as f32),
+            })
+        }
     }
 }
 

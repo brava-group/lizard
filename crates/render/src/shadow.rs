@@ -8,7 +8,7 @@
 //!
 //! The canvas, PNG/JPG/WebP exports and the PDF export's shadow images all come from here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -60,7 +60,7 @@ fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) ->
         out.push(o);
     }
     if n.has_visible_stroke() {
-        let geom = if is_bool { outline.map(|(p, _)| p) } else { figcraft_doc::geometry::stroke_geometry(n) };
+        let geom = if is_bool { outline.map(|(p, _)| p) } else { super::draw::painted_stroke_geometry(n) };
         if let Some(g) = geom {
             out.push(((*stroke_area(n, &g, closed)).clone(), stroke_rule(n, closed)));
         }
@@ -187,6 +187,9 @@ impl<'a> Caster<'a> {
 /// behind the layer) hidden behind the layer: behind what its paints cover, translucent parts
 /// included, or (layers that aren't one outline) behind its pixels.
 pub fn drop_shadow(c: &Caster, s: &Shadow) -> Option<Pixmap> {
+    if crate::render_interrupted() {
+        return None;
+    }
     let (w, h) = (c.layer.width(), c.layer.height());
     let (dx, dy) = (s.offset.0 * c.scale, s.offset.1 * c.scale);
     let spread = if s.spread.is_finite() { s.spread } else { 0.0 };
@@ -211,6 +214,66 @@ pub fn drop_shadow(c: &Caster, s: &Shadow) -> Option<Pixmap> {
 /// An inner shadow in a `w` × `h` layer whose `shape` maps through `xf`: everything outside the
 /// shape (shrunk by the spread) at the offset, blurred, tinted and clipped to the shape.
 pub fn inner_shadow(shape: &Outline, w: u32, h: u32, xf: Affine, scale: f64, s: &Shadow) -> Option<Pixmap> {
+    if crate::render_interrupted() {
+        return None;
+    }
+    // Effect controls often change a parent while this child's geometry and inner shadow remain
+    // identical. Keep a few completed masks so adjusting the parent does not blur the child again.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_path(&shape.0, &mut hasher);
+    (shape.1 == FillRule::EvenOdd, w, h).hash(&mut hasher);
+    for v in xf.as_coeffs() {
+        // Moving an ancestor's effect margin can shift its intermediate pixmap by whole pixels.
+        // The child-local transform then differs only by floating-point cancellation noise.
+        ((v * 1024.0).round() as i64).hash(&mut hasher);
+    }
+    for v in [scale, s.offset.0, s.offset.1, s.radius, s.spread] {
+        v.to_bits().hash(&mut hasher);
+    }
+    for v in color4(s.color) {
+        v.to_bits().hash(&mut hasher);
+    }
+    let key = hasher.finish();
+    if let Some(cached) = inner_cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).items.get(&key) {
+        return Some(cached.as_ref().clone());
+    }
+    let result = inner_shadow_uncached(shape, w, h, xf, scale, s)?;
+    let bytes = result.data().len();
+    if bytes <= INNER_CACHE_BYTES {
+        let mut cache = inner_cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while cache.bytes + bytes > INNER_CACHE_BYTES {
+            if let Some(old) = cache.order.pop_front()
+                && let Some(removed) = cache.items.remove(&old)
+            {
+                cache.bytes = cache.bytes.saturating_sub(removed.data().len());
+            } else {
+                break;
+            }
+        }
+        if !cache.items.contains_key(&key) {
+            cache.bytes += bytes;
+            cache.order.push_back(key);
+            cache.items.insert(key, Arc::new(result.clone()));
+        }
+    }
+    Some(result)
+}
+
+const INNER_CACHE_BYTES: usize = 96 * 1024 * 1024;
+
+#[derive(Default)]
+struct InnerCache {
+    items: HashMap<u64, Arc<Pixmap>>,
+    order: VecDeque<u64>,
+    bytes: usize,
+}
+
+fn inner_cache() -> &'static Mutex<InnerCache> {
+    static CACHE: OnceLock<Mutex<InnerCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(InnerCache::default()))
+}
+
+fn inner_shadow_uncached(shape: &Outline, w: u32, h: u32, xf: Affine, scale: f64, s: &Shadow) -> Option<Pixmap> {
     let (dx, dy) = (s.offset.0 * scale, s.offset.1 * scale);
     let spread = if s.spread.is_finite() { s.spread } else { 0.0 };
     if !(dx.is_finite() && dy.is_finite()) {
@@ -249,17 +312,7 @@ pub fn inner_shadow_of(cover: &Pixmap, scale: f64, s: &Shadow) -> Option<Pixmap>
 /// spread), `pad` pixels larger each way than the layer, whose pixels `cover` the shape.
 fn inner_from(mut big: Pixmap, pad: u32, cover: &Pixmap, scale: f64, s: &Shadow) -> Option<Pixmap> {
     fx::invert_alpha(&mut big);
-    fx::blur(&mut big, s.radius / 2.0 * scale);
-    let mut out = Pixmap::new(cover.width(), cover.height())?;
-    let pad = i32::try_from(pad).ok()?;
-    out.draw_pixmap(
-        -pad,
-        -pad,
-        big.as_ref(),
-        &PixmapPaint { blend_mode: tiny_skia::BlendMode::Source, ..Default::default() },
-        Transform::identity(),
-        None,
-    );
+    let mut out = fx::blur_cropped(big, s.radius / 2.0 * scale, (pad, pad), (cover.width(), cover.height()))?;
     fx::mask_by(&mut out, cover, false);
     fx::tint(&mut out, color4(s.color));
     Some(out)

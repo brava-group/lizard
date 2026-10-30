@@ -86,7 +86,11 @@ fn hits_node_itself(doc: &Document, id: NodeId, n: &Node, pt: Point, tol: f64, o
             let inside = if outline || !has_fill_geometry(n) {
                 false
             } else if let NodeKind::Vector { network } = &n.kind {
-                (is_closed(n) || n.fills.iter().any(|fill| fill.visible)) && network.paint_path().winding(lp) != 0
+                if let Some(index) = network.region_at(lp) {
+                    network.regions.get(index).is_some_and(|region| region.fills.as_ref().unwrap_or(&n.fills).iter().any(|paint| paint.visible))
+                } else {
+                    n.fills.iter().any(|paint| paint.visible) && network.paint_path().winding(lp) != 0
+                }
             } else {
                 path.winding(lp) != 0
             };
@@ -98,7 +102,14 @@ fn hits_node_itself(doc: &Document, id: NodeId, n: &Node, pt: Point, tol: f64, o
 /// Whether local point `lp` hits `n` drawn as `path`: `inside` it (counted when it's filled, or
 /// draws nothing at all), or within reach of its outline (its stroke, else the tolerance).
 fn hits_path(n: &Node, path: &BezPath, lp: Point, tol: f64, inside: bool) -> bool {
-    if inside && (n.fills.iter().any(|f| f.visible) || !n.has_visible_stroke()) {
+    let region_fill = match &n.kind {
+        NodeKind::Vector { network } => network
+            .region_at(lp)
+            .and_then(|index| network.regions.get(index))
+            .is_some_and(|region| region.fills.as_ref().unwrap_or(&n.fills).iter().any(|paint| paint.visible)),
+        _ => false,
+    };
+    if inside && (n.fills.iter().any(|f| f.visible) || region_fill || !n.has_visible_stroke()) {
         return true;
     }
     // Only a stroke with nothing filled gets the wider band: a filled shape's edge keeps the plain one.

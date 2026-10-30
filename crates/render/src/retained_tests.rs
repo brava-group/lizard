@@ -127,6 +127,38 @@ fn unchanged_view_is_reused() {
 }
 
 #[test]
+fn adding_and_removing_topmost_text_keeps_expensive_background_pixels() {
+    let s = scene(false);
+    let v = view(0.0, 0.0, 1.0);
+    let mut r = Retained::default();
+    assert_eq!(check(&mut r, &s.doc, s.page, &v), Work::Full);
+
+    let mut added = (*s.doc).clone();
+    let mut text = TextData::new("WIDE PASTED TEXT");
+    text.style.font_size = 180.0;
+    let id = added.create(s.page, NodeKind::Text(text), "Pasted", 0.0, 0.0, 300.0, 220.0).unwrap();
+    let added = Arc::new(added);
+    assert!(matches!(check(&mut r, &added, s.page, &v), Work::Partial { .. }));
+    assert_eq!(check(&mut r, &added, s.page, &v), Work::Reused);
+
+    let mut removed = (*added).clone();
+    removed.remove(id).unwrap();
+    assert_eq!(check(&mut r, &Arc::new(removed), s.page, &v), Work::Reused);
+}
+
+#[test]
+fn adding_a_topmost_shape_matches_a_full_render() {
+    let s = scene(false);
+    let v = view(0.0, 0.0, 1.0);
+    let mut r = Retained::default();
+    check(&mut r, &s.doc, s.page, &v);
+    let mut added = (*s.doc).clone();
+    let id = added.create(s.page, NodeKind::Rectangle, "New rectangle", 0.0, 0.0, 300.0, 220.0).unwrap();
+    solid(added.get_mut(id).unwrap(), "54AF80");
+    assert!(matches!(check(&mut r, &Arc::new(added), s.page, &v), Work::Partial { .. }));
+}
+
+#[test]
 fn pans_render_only_the_uncovered_strips() {
     let s = scene(false);
     let mut r = Retained::default();

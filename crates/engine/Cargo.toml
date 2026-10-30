@@ -17,6 +17,7 @@ figcraft-layout = { workspace = true }
 figcraft-text = { workspace = true }
 figcraft-pathops = { workspace = true }
 figcraft-render = { workspace = true }
+figcraft-shader = { workspace = true }
 figcraft-format = { workspace = true }
 figcraft-svg = { workspace = true }
 figcraft-pdf = { workspace = true }

@@ -763,7 +763,8 @@ pub fn apply(cmd: &str, doc: &mut Document, id: NodeId, props: &Map<String, Valu
             }
             "textAutoResize" => {
                 text_mut(cmd, doc.get_mut(id)?)?.auto_resize =
-                    enum_of(v).ok_or_else(|| bad(cmd, "textAutoResize: widthAndHeight|height|none|truncate"))?
+                    enum_of(v).ok_or_else(|| bad(cmd, "textAutoResize: widthAndHeight|height|none|truncate"))?;
+                figcraft_layout::coherent_sizing(doc, id);
             }
             "paragraphSpacing" => text_mut(cmd, doc.get_mut(id)?)?.paragraph_spacing = f64_of(v).unwrap_or(0.0).max(0.0),
             "paragraphIndent" => text_mut(cmd, doc.get_mut(id)?)?.paragraph_indent = f64_of(v).unwrap_or(0.0).max(0.0),

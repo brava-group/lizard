@@ -142,6 +142,26 @@ fn paint(cx: &mut Ctx, p: &Value) -> Option<Paint> {
     Some(Paint { kind, opacity, visible: flag(p, "visible").unwrap_or(true), blend: paint_blend(p) })
 }
 
+/// Parse a vector face's paint before assets are resolved. Figma stores its overrides in the
+/// network's style table; solid and gradient paints are self-contained there.
+pub(crate) fn region_paint(p: &Value) -> Option<Paint> {
+    let ty = text(p, "type")?;
+    let mut opacity = num(p, "opacity").unwrap_or(1.0).clamp(0.0, 1.0) as f32;
+    let kind = match ty {
+        "SOLID" => {
+            let color = p.get("color").and_then(color)?;
+            opacity *= color.a;
+            PaintKind::Solid { color: color.with_alpha(1.0) }
+        }
+        "GRADIENT_LINEAR" => PaintKind::Gradient(gradient(GradientKind::Linear, p)),
+        "GRADIENT_RADIAL" => PaintKind::Gradient(gradient(GradientKind::Radial, p)),
+        "GRADIENT_ANGULAR" => PaintKind::Gradient(gradient(GradientKind::Angular, p)),
+        "GRADIENT_DIAMOND" => PaintKind::Gradient(gradient(GradientKind::Diamond, p)),
+        _ => return None,
+    };
+    Some(Paint { kind, opacity, visible: flag(p, "visible").unwrap_or(true), blend: paint_blend(p) })
+}
+
 /// Gradient handles are already in the node's unit box (start, end, width), like ours.
 fn gradient(kind: GradientKind, p: &Value) -> Gradient {
     let mut g = Gradient::default_for(kind, Color::BLACK);

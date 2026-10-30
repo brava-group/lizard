@@ -28,6 +28,54 @@ pub use icon::rasterize_icon;
 pub use retained::{DamageRect, Retained, Work};
 pub use tiny_skia::{FillRule, Pixmap};
 
+use std::cell::RefCell;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
+thread_local! {
+    static INTERRUPT: RefCell<Option<(Arc<AtomicU64>, u64)>> = const { RefCell::new(None) };
+}
+
+struct InterruptGuard(Option<(Arc<AtomicU64>, u64)>);
+
+impl Drop for InterruptGuard {
+    fn drop(&mut self) {
+        INTERRUPT.with(|slot| {
+            slot.replace(self.0.take());
+        });
+    }
+}
+
+/// Run an editor render that becomes obsolete when a newer request is submitted. Exports never
+/// install a token and always complete. The token is local to the rendering thread and window.
+pub fn with_interruption<T>(latest: Arc<AtomicU64>, sequence: u64, render: impl FnOnce() -> T) -> T {
+    let old = INTERRUPT.with(|slot| slot.replace(Some((latest, sequence))));
+    let guard = InterruptGuard(old);
+    let result = render();
+    drop(guard);
+    result
+}
+
+/// A newer editor request superseded the render on this thread.
+pub fn render_interrupted() -> bool {
+    INTERRUPT.with(|slot| slot.borrow().as_ref().is_some_and(|(latest, sequence)| latest.load(Ordering::Relaxed) != *sequence))
+}
+
+#[cfg(test)]
+#[test]
+fn interruption_is_local_to_the_superseded_render() {
+    let latest = Arc::new(AtomicU64::new(7));
+    assert!(!render_interrupted());
+    with_interruption(latest.clone(), 7, || {
+        assert!(!render_interrupted());
+        latest.store(8, Ordering::Release);
+        assert!(render_interrupted());
+    });
+    assert!(!render_interrupted());
+}
+
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, ExportFormat, NodeId, NodeKind};
 use figcraft_geom::{Affine, Rect};
@@ -81,6 +129,11 @@ pub struct Options {
     /// detail, see [`lod`]. Off for everything that must be exact (exports, thumbnails); no
     /// effect in outline mode.
     pub lod: bool,
+    /// Interactive geometry preview: defer expensive layer effects until the refined render.
+    /// Exports and ordinary canvas renders keep all effects.
+    pub skip_effects: bool,
+    /// Deterministic time in seconds for animated shader fills; zero for static exports.
+    pub time: f64,
 }
 
 fn new_pixmap(w: u32, h: u32) -> Option<Pixmap> {
@@ -122,8 +175,13 @@ pub fn render_view(doc: &Document, page: NodeId, view: &View, opts: &Options) ->
     {
         let threads = rayon::current_num_threads().clamp(1, 16) as u32;
         let bands = threads.min(view.height / 96).max(1);
+        // A broad effect would rasterize the same padded layer once per band. Keep it whole when
+        // its reach exceeds a band; the blur itself can still work at an appropriate resolution.
+        let effect_reach =
+            if opts.skip_effects { 0.0 } else { doc.nodes().filter(|n| n.visible).map(draw::effect_margin).fold(0.0, f64::max) * view.scale };
         if bands > 1
             && view.width.saturating_mul(view.height) > 300_000
+            && effect_reach <= f64::from(view.height.div_ceil(bands))
             && let Some(p) = render_bands(doc, page, view, opts, bands)
         {
             return Some(p);
@@ -140,7 +198,7 @@ pub fn render_view(doc: &Document, page: NodeId, view: &View, opts: &Options) ->
 fn render_bands(doc: &Document, page: NodeId, view: &View, opts: &Options, bands: u32) -> Option<Pixmap> {
     use rayon::prelude::*;
     let band_h = view.height.div_ceil(bands.max(1));
-    let overlap = backdrop_reach(max_backdrop_blur(doc), view.scale).ceil();
+    let overlap = if opts.skip_effects { 0.0 } else { backdrop_reach(max_backdrop_blur(doc), view.scale).ceil() };
     if !overlap.is_finite() || overlap > f64::from(band_h) {
         return None;
     }
@@ -186,7 +244,7 @@ pub fn render_view_single(doc: &Document, page: NodeId, view: &View, opts: &Opti
 fn render_one(doc: &Document, page: NodeId, view: &View, opts: &Options) -> Option<Pixmap> {
     let mut pix = new_pixmap(view.width, view.height)?;
     let bg = opts.background.or_else(|| match doc.node(page).map(|p| &p.kind) {
-        Some(NodeKind::Page { background, .. }) => Some(*background),
+        Some(NodeKind::Page { background, background_visible: true, .. }) => Some(*background),
         _ => None,
     });
     if let Some(bg) = bg {
@@ -202,19 +260,16 @@ fn render_one(doc: &Document, page: NodeId, view: &View, opts: &Options) -> Opti
         outlined: &opts.outlined,
         skip: &opts.skip,
         lod,
+        skip_effects: opts.skip_effects,
         under: None,
-        time: 0.0,
+        time: opts.time,
         bounds: &bounds,
     };
     let xf = view.transform();
     let Some(p) = doc.node(page) else { return Some(pix) };
     match opts.solo.filter(|id| *id != page && doc.page_of(*id) == Some(page)) {
         Some(id) => draw::draw_node(&ctx, &mut pix, id, xf * parent_transform(doc, id), 0),
-        None => {
-            for c in &p.children {
-                draw::draw_node(&ctx, &mut pix, *c, xf, 0);
-            }
-        }
+        None => draw::draw_children(&ctx, &mut pix, p, xf, 0),
     }
     Some(pix)
 }
@@ -245,6 +300,7 @@ fn nodes_into_with_lod(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pi
         outlined: &[],
         skip: &[],
         lod: lod && view.scale <= lod::MAX_SCALE,
+        skip_effects: false,
         under: None,
         time,
         bounds: &bounds,

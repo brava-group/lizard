@@ -10,6 +10,22 @@ use figcraft_geom::Affine;
 use crate::retained_tests::assert_same;
 use crate::{Options, Retained, View, Work, render_view};
 
+#[test]
+fn topmost_simple_addition_has_bounded_damage() -> Result<(), Box<dyn std::error::Error>> {
+    let old = Document::new("addition");
+    let page = old.first_page().ok_or("missing page")?;
+    let mut new = old.clone();
+    new.create(page, NodeKind::Rectangle, "marker", 40.0, 40.0, 20.0, 20.0)?;
+    let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+    let damage = crate::retained::damage_between(&old, &new, page, &view).ok_or("topmost addition forced a full redraw")?;
+    assert_eq!(damage.len(), 1);
+    let rect = damage.first().ok_or("missing damage rectangle")?;
+    assert!(rect.x <= 40 && rect.y <= 40);
+    assert!(rect.x + rect.width >= 60 && rect.y + rect.height >= 60);
+    assert!(rect.width < view.width && rect.height < view.height);
+    Ok(())
+}
+
 fn check(r: &mut Retained, doc: &Arc<Document>, page: NodeId, v: &View, what: &str) {
     let (shown, pix, work) = r.render(doc, page, v, &Options::default()).unwrap();
     let pix = pix.clone();

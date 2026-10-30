@@ -258,6 +258,24 @@ impl W<'_> {
                 let op = if p.opacity < 0.999 { format!(" fill-opacity=\"{}\"", num(f64::from(p.opacity))) } else { String::new() };
                 Some(format!("fill=\"url(#{pid})\"{op}{blend}"))
             }
+            PaintKind::Shader(_) => {
+                let figcraft_render::paint::Prepared::Pattern { pixmap, .. } = figcraft_render::paint::prepare(p, w, h, 1.0, self.doc)? else {
+                    return None;
+                };
+                let png = figcraft_render::encode_png(&pixmap).ok()?;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+                let pid = self.id("shader");
+                let _ = write!(
+                    self.defs,
+                    "<pattern id=\"{pid}\" patternUnits=\"userSpaceOnUse\" width=\"{}\" height=\"{}\"><image width=\"{}\" height=\"{}\" href=\"data:image/png;base64,{b64}\"/></pattern>",
+                    num(w),
+                    num(h),
+                    num(w),
+                    num(h)
+                );
+                let op = if p.opacity < 0.999 { format!(" fill-opacity=\"{}\"", num(f64::from(p.opacity))) } else { String::new() };
+                Some(format!("fill=\"url(#{pid})\"{op}{blend}"))
+            }
         }
     }
 
@@ -448,12 +466,31 @@ impl W<'_> {
         } else if let Some((path, rule)) = &outline
             && fillable
         {
-            let fr = if *rule == figcraft_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
-            for p in &n.fills {
-                if let Some(a) = self.paint_attr(p, w, h) {
-                    let el = format!("<path transform=\"{}\" d=\"{}\" {a}{fr}/>", matrix(xf), path_d(path));
-                    self.body.push_str(&clipped(&paint_clip, el));
+            let mut emit = |path: &figcraft_geom::BezPath, even_odd: bool, fills: &[figcraft_color::Paint]| {
+                if path.elements().is_empty() {
+                    return;
                 }
+                let fr = if even_odd { " fill-rule=\"evenodd\"" } else { "" };
+                for paint in fills {
+                    if let Some(attributes) = self.paint_attr(paint, w, h) {
+                        let element = format!("<path transform=\"{}\" d=\"{}\" {attributes}{fr}/>", matrix(xf), path_d(path));
+                        self.body.push_str(&clipped(&paint_clip, element));
+                    }
+                }
+            };
+            if let NodeKind::Vector { network } = &n.kind
+                && network.regions.iter().any(|region| region.fills.is_some())
+            {
+                let rounded = network.rounded();
+                let drawn = rounded.as_ref().unwrap_or(network);
+                emit(&drawn.unassigned_paint_path(), false, &n.fills);
+                for (index, region) in drawn.regions.iter().enumerate() {
+                    if let Some(path) = drawn.region_path(index) {
+                        emit(&path, region.winding == figcraft_doc::WindingRule::EvenOdd, region.fills.as_ref().unwrap_or(&n.fills));
+                    }
+                }
+            } else {
+                emit(path, *rule == figcraft_render::FillRule::EvenOdd, &n.fills);
             }
         }
         // Inner shadows paint over the fills, under the children and strokes.
@@ -528,7 +565,7 @@ impl W<'_> {
         } else if n.has_visible_stroke() {
             let geom = match &n.kind {
                 NodeKind::BooleanOp { .. } | NodeKind::Text(_) => outline.as_ref().map(|(p, _)| p.clone()),
-                _ => figcraft_doc::geometry::stroke_geometry(n),
+                _ => figcraft_render::draw::painted_stroke_geometry(n),
             };
             if let Some(g) = geom {
                 let area = figcraft_render::draw::stroke_area(n, &g, closed);

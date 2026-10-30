@@ -368,12 +368,19 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     let parent = doc.get(top)?.parent.ok_or_else(|| bad("vector.flatten", "can't flatten a page"))?;
     let index = doc.index_in_parent(top).map(|i| i + 1);
     let pw = doc.world_transform(parent);
+    let has_group = ids.iter().any(|id| doc.node(*id).is_some_and(|node| matches!(node.kind, NodeKind::Group)));
+    let composing = has_group || ids.len() > 1;
     let mut net = VectorNetwork::default();
     for i in &ids {
         let Some(n) = doc.node(*i) else { continue };
+        if matches!(n.kind, NodeKind::Group) {
+            append_group_flatten_parts(doc, n, pw.inverse(), &mut net, 0);
+            continue;
+        }
         // Keep open paths and unfilled loops, but bake rounded vector points into real curves.
         // Booleans flatten to their result; strokes don't get outlined.
         let mut part = match &n.kind {
+            NodeKind::Vector { network } if composing => flattened_painted_vector(network, &n.fills),
             NodeKind::Vector { network } => network.rounded().unwrap_or_else(|| network.clone()),
             _ => {
                 let Some((op, rule)) = (match &n.kind {
@@ -393,15 +400,10 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
                 part
             }
         };
-        // Into the common parent's space.
-        let all: Vec<usize> = (0..part.vertices.len()).collect();
-        crate::vectoredit::ops::transform_vertices(&mut part, &all, pw.inverse() * doc.world_transform(*i));
-        let (nv, ns) = (net.vertices.len(), net.segments.len());
-        net.vertices.extend(part.vertices);
-        net.segments.extend(part.segments.into_iter().map(|s| Segment { a: s.a + nv, b: s.b + nv, ..s }));
-        net.regions.extend(
-            part.regions.into_iter().map(|r| Region { loops: r.loops.into_iter().map(|l| l.into_iter().map(|s| s + ns).collect()).collect(), ..r }),
-        );
+        if composing {
+            preserve_flatten_paints(&mut part, &n.fills);
+        }
+        append_flatten_part(&mut net, part, pw.inverse() * doc.world_transform(*i));
     }
     let Some(bb) = net.bounds() else {
         return Err(EngineError::Disabled("vector.flatten".into(), "nothing to flatten".into()));
@@ -413,7 +415,10 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     let mut v = Node::new(vid, NodeKind::Vector { network: net }, name, bb.width(), bb.height());
     v.transform = Affine::translate((bb.x0, bb.y0));
     if let Some(f) = first {
-        v.fills = if matches!(f.kind, NodeKind::Group | NodeKind::Line) && f.fills.is_empty() {
+        v.fills = if composing {
+            // Every source face carries its paint. The combined layer has no fallback colour.
+            Vec::new()
+        } else if matches!(f.kind, NodeKind::Line) && f.fills.is_empty() {
             vec![Paint::solid(Color::DEFAULT_SHAPE)]
         } else {
             f.fills.clone()
@@ -432,6 +437,157 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"id": vid}))
 }
 
+fn append_flatten_part(net: &mut VectorNetwork, mut part: VectorNetwork, transform: Affine) {
+    let all: Vec<usize> = (0..part.vertices.len()).collect();
+    crate::vectoredit::ops::transform_vertices(&mut part, &all, transform);
+    let (nv, ns) = (net.vertices.len(), net.segments.len());
+    net.vertices.extend(part.vertices);
+    net.segments.extend(part.segments.into_iter().map(|s| Segment { a: s.a + nv, b: s.b + nv, ..s }));
+    net.regions.extend(
+        part.regions.into_iter().map(|r| Region { loops: r.loops.into_iter().map(|l| l.into_iter().map(|s| s + ns).collect()).collect(), ..r }),
+    );
+}
+
+fn preserve_flatten_paints(part: &mut VectorNetwork, fills: &[Paint]) {
+    if part.regions.iter().all(|region| region.fills.is_none()) && part.regions.len() > 1 {
+        // Without face overrides, the source vector paints all its loops with one winding rule.
+        // Keep that shared parity: painting the loops one region at a time would fill its holes.
+        let winding =
+            if part.regions.iter().any(|region| region.winding == WindingRule::EvenOdd) { WindingRule::EvenOdd } else { WindingRule::NonZero };
+        let loops = part.regions.drain(..).flat_map(|region| region.loops).collect();
+        part.regions.push(Region { loops, winding, fills: Some(fills.to_vec()) });
+    } else {
+        for region in &mut part.regions {
+            if region.fills.is_none() {
+                region.fills = Some(fills.to_vec());
+            }
+        }
+    }
+}
+
+fn flattened_painted_vector(network: &VectorNetwork, fills: &[Paint]) -> VectorNetwork {
+    let mut part = network.rounded().unwrap_or_else(|| network.clone());
+    let unassigned = part.unassigned_paint_path();
+    if !part.regions.is_empty() && fills.iter().any(|paint| paint.visible && paint.opacity > 0.0) && !unassigned.elements().is_empty() {
+        // Open SVG subpaths are implicitly closed for fills. Once multiple layers share one
+        // vector, their fill must become a face with its own paint instead of inheriting the
+        // (possibly empty) paint of the new layer.
+        let mut painted = VectorNetwork::from_path(&unassigned);
+        if !painted.regions.is_empty() {
+            preserve_flatten_paints(&mut painted, fills);
+            retain_assigned_segments(&mut part);
+            preserve_flatten_paints(&mut part, fills);
+            append_flatten_part(&mut painted, part, Affine::IDENTITY);
+            return painted;
+        }
+    }
+    preserve_flatten_paints(&mut part, fills);
+    part
+}
+
+fn retain_assigned_segments(part: &mut VectorNetwork) {
+    let mut used = vec![false; part.segments.len()];
+    for region in &part.regions {
+        for segment in region.loops.iter().flatten() {
+            if let Some(flag) = used.get_mut(*segment) {
+                *flag = true;
+            }
+        }
+    }
+    let mut segment_map = vec![None; part.segments.len()];
+    let mut next_segment = 0;
+    part.segments = std::mem::take(&mut part.segments)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, segment)| {
+            if !used[index] {
+                return None;
+            }
+            segment_map[index] = Some(next_segment);
+            next_segment += 1;
+            Some(segment)
+        })
+        .collect();
+    for region in &mut part.regions {
+        for lp in &mut region.loops {
+            lp.retain_mut(|index| {
+                if let Some(Some(mapped)) = segment_map.get(*index) {
+                    *index = *mapped;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+    }
+    let mut vertex_used = vec![false; part.vertices.len()];
+    for segment in &part.segments {
+        if let Some(flag) = vertex_used.get_mut(segment.a) {
+            *flag = true;
+        }
+        if let Some(flag) = vertex_used.get_mut(segment.b) {
+            *flag = true;
+        }
+    }
+    let mut vertex_map = vec![None; part.vertices.len()];
+    let mut next_vertex = 0;
+    part.vertices = std::mem::take(&mut part.vertices)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, vertex)| {
+            if !vertex_used[index] {
+                return None;
+            }
+            vertex_map[index] = Some(next_vertex);
+            next_vertex += 1;
+            Some(vertex)
+        })
+        .collect();
+    for segment in &mut part.segments {
+        segment.a = vertex_map.get(segment.a).copied().flatten().unwrap_or(segment.a);
+        segment.b = vertex_map.get(segment.b).copied().flatten().unwrap_or(segment.b);
+    }
+}
+
+fn append_group_flatten_parts(doc: &Document, group: &Node, parent_inverse: Affine, net: &mut VectorNetwork, depth: usize) {
+    if depth > 64 {
+        return;
+    }
+    for child_id in &group.children {
+        let Some(child) = doc.node(*child_id).filter(|child| child.visible) else { continue };
+        if matches!(child.kind, NodeKind::Group) {
+            append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1);
+            continue;
+        }
+        if child.kind.is_frame_like() && !child.children.is_empty() {
+            if child.fills.iter().any(|paint| paint.visible)
+                && let Some((path, _)) = figcraft_render::node_outline(doc, child)
+            {
+                let mut frame = VectorNetwork::from_path(&path);
+                preserve_flatten_paints(&mut frame, &child.fills);
+                append_flatten_part(net, frame, parent_inverse * doc.world_transform(*child_id));
+            }
+            append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1);
+            continue;
+        }
+        let mut part = match &child.kind {
+            NodeKind::Vector { network } => flattened_painted_vector(network, &child.fills),
+            _ => {
+                let Some((path, rule)) = figcraft_render::node_outline(doc, child) else { continue };
+                let mut part = VectorNetwork::from_path(&path);
+                if rule == figcraft_render::FillRule::EvenOdd {
+                    for region in &mut part.regions {
+                        region.winding = WindingRule::EvenOdd;
+                    }
+                }
+                part
+            }
+        };
+        preserve_flatten_paints(&mut part, &child.fills);
+        append_flatten_part(net, part, parent_inverse * doc.world_transform(*child_id));
+    }
+}
+
 fn outline_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets("vector.outlineStroke", s, p)?;
     let mut out = Vec::new();
@@ -444,7 +600,7 @@ fn outline_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         let closed = figcraft_doc::geometry::is_closed(&n);
         let Some(geom) = (match &n.kind {
             NodeKind::Text(_) | NodeKind::BooleanOp { .. } => figcraft_render::node_outline(doc, &n).map(|(p, _)| p),
-            _ => figcraft_doc::geometry::stroke_geometry(&n),
+            _ => figcraft_render::draw::painted_stroke_geometry(&n),
         }) else {
             continue;
         };
@@ -469,7 +625,11 @@ fn outline_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         v.fills = n.strokes.clone();
         v.strokes.clear();
         v.styles.fill = n.styles.stroke;
-        if n.fills.iter().any(|f| f.visible) && closed {
+        let has_visible_fill = n.fills.iter().any(|f| f.visible && f.opacity > 0.0)
+            || matches!(&n.kind, NodeKind::Vector { network } if network.regions.iter().any(|region| {
+                region.fills.as_ref().is_some_and(|fills| fills.iter().any(|fill| fill.visible && fill.opacity > 0.0))
+            }));
+        if has_visible_fill && closed {
             // Keep the fill as its own layer under the outline, grouped.
             doc.insert(v, parent, idx.map(|x| x + 1))?;
             let fill_id = i;
@@ -675,7 +835,7 @@ fn join(s: &mut Session, p: &Value) -> Result<Value> {
                 let last = network.vertices.len() - 1;
                 network.segments.push(Segment::line(last, 0));
                 let all: Vec<usize> = (0..network.segments.len()).collect();
-                network.regions.push(Region { loops: vec![all], winding: WindingRule::NonZero });
+                network.regions.push(Region { loops: vec![all], winding: WindingRule::NonZero, fills: None });
             }
         }
         return ok();

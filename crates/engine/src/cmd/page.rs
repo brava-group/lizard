@@ -38,15 +38,16 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("page.add", "Add page", "{name?} (a name starting with a hyphen adds a divider)", true, |s, p| {
             // An added page takes the current page's colour; the theme only decides new files.
             let current = s.page().ok().and_then(|p| match s.doc().ok()?.node(p)?.kind {
-                NodeKind::Page { background, .. } => Some(background),
+                NodeKind::Page { background, background_visible, .. } => Some((background, background_visible)),
                 _ => None,
             });
-            let background = current.unwrap_or_else(|| s.new_page_background());
+            let (background, background_visible) = current.unwrap_or_else(|| (s.new_page_background(), true));
             let doc = s.doc_mut()?;
             let name = string(p, "name").unwrap_or_else(|| format!("Page {}", doc.pages.len() + 1));
             let id = doc.add_page(&name);
-            if let NodeKind::Page { background: b, .. } = &mut doc.get_mut(id)?.kind {
+            if let NodeKind::Page { background: b, background_visible: v, .. } = &mut doc.get_mut(id)?.kind {
                 *b = background;
+                *v = background_visible;
             }
             if doc.is_divider(id) {
                 return Ok(json!({"id": id, "divider": true}));
@@ -105,11 +106,12 @@ pub fn specs() -> Vec<CommandSpec> {
             for (c, copy) in children.iter().zip(&copied) {
                 copies.extend(doc.subtree(*c).into_iter().zip(doc.subtree(*copy)));
             }
-            // The copy keeps the page's colour, flows (pointing at the copied frames), prototype settings and guides.
-            if let NodeKind::Page { background, flows, prototype, guides } = doc.get(src)?.kind.clone()
-                && let NodeKind::Page { background: b, flows: f, prototype: pr, guides: g } = &mut doc.get_mut(np)?.kind
+            // The copy keeps the page's background, flows (pointing at the copied frames), prototype settings and guides.
+            if let NodeKind::Page { background, background_visible, flows, prototype, guides } = doc.get(src)?.kind.clone()
+                && let NodeKind::Page { background: b, background_visible: v, flows: f, prototype: pr, guides: g } = &mut doc.get_mut(np)?.kind
             {
                 *b = background;
+                *v = background_visible;
                 *f = flows
                     .into_iter()
                     .filter_map(|fl| copies.iter().find(|(old, _)| *old == fl.start).map(|(_, new)| Flow { start: *new, ..fl }))
@@ -142,6 +144,14 @@ pub fn specs() -> Vec<CommandSpec> {
             let id = page_target(s, "page.setBackground", p)?;
             if let NodeKind::Page { background, .. } = &mut s.doc_mut()?.get_mut(id)?.kind {
                 *background = c;
+            }
+            ok()
+        }),
+        spec!("page.setBackgroundVisible", "Page background visibility", "{id?, visible}", true, |s, p| {
+            let visible = boolean(p, "visible").ok_or_else(|| bad("page.setBackgroundVisible", "`visible` required"))?;
+            let id = page_target(s, "page.setBackgroundVisible", p)?;
+            if let NodeKind::Page { background_visible, .. } = &mut s.doc_mut()?.get_mut(id)?.kind {
+                *background_visible = visible;
             }
             ok()
         }),

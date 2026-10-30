@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 mod blend;
 mod hsx;
@@ -550,10 +551,23 @@ impl PatternPaint {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PaintKind {
-    Solid { color: Color },
+    Solid {
+        color: Color,
+    },
     Gradient(Gradient),
     Image(ImagePaint),
     Pattern(PatternPaint),
+    /// A document-owned WGSL definition and this fill's individual float values.
+    Shader(ShaderFill),
+}
+
+/// A non-destructive instance of a document shader. Definitions live on the document.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShaderFill {
+    pub shader_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: BTreeMap<String, f32>,
 }
 
 /// One fill or stroke paint.
@@ -623,6 +637,7 @@ impl Paint {
             },
             PaintKind::Image(_) => "Image".into(),
             PaintKind::Pattern(_) => "Pattern".into(),
+            PaintKind::Shader(_) => "Shader".into(),
         }
     }
 
@@ -631,7 +646,7 @@ impl Paint {
         match &mut self.kind {
             PaintKind::Solid { color } => f(color),
             PaintKind::Gradient(g) => g.stops.iter_mut().for_each(|s| f(&mut s.color)),
-            PaintKind::Image(_) | PaintKind::Pattern(_) => {}
+            PaintKind::Image(_) | PaintKind::Pattern(_) | PaintKind::Shader(_) => {}
         }
     }
 
@@ -640,7 +655,7 @@ impl Paint {
         match &self.kind {
             PaintKind::Solid { color } => color.with_alpha(color.a * self.opacity),
             PaintKind::Gradient(g) => g.sample(0.0),
-            PaintKind::Image(_) | PaintKind::Pattern(_) => Color::from_rgb8_const(0xB3, 0xB3, 0xB3),
+            PaintKind::Image(_) | PaintKind::Pattern(_) | PaintKind::Shader(_) => Color::from_rgb8_const(0xB3, 0xB3, 0xB3),
         }
     }
 }

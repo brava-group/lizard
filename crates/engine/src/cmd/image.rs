@@ -11,6 +11,20 @@ use crate::{Result, Session, bad, spec};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         spec!(
+            "image.vectorize",
+            "Vectorize image",
+            "{id, index, expectedImage, svg} replaces one leaf image layer with editable SVG paths at the same page bounds; one undo step",
+            true,
+            vectorize
+        ),
+        spec!(
+            "image.replaceBytes",
+            "Replace image contents",
+            "{id, index, data (base64 PNG), expectedImage?} replaces one image fill's source while preserving its placement; one undo step",
+            true,
+            replace_bytes
+        ),
+        spec!(
             "image.adjust",
             "Adjust image",
             "{ids?, target? (fill|stroke, default fill), index? (default every image paint), preset? (vivid|muted|warm|cool|blackAndWhite|fade|reset, or the name of a preset saved in the file), filters? ({exposure, contrast, saturation, temperature, tint, highlights, shadows}: each -1..1, applied over the preset)}  sets the adjustments of the layers' image paints; returns {changed}",
@@ -39,6 +53,75 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(json!({"builtIn": built_in, "saved": s.doc()?.image_presets}))
         }),
     ]
+}
+
+/// Replace a raster layer with VTracer paths while keeping its place in the layer tree.
+fn vectorize(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "image.vectorize";
+    let id = req_id(CMD, p, "id")?;
+    let index = req_index(CMD, p, "index")?;
+    let expected = req_string(CMD, p, "expectedImage")?;
+    let svg = req_string(CMD, p, "svg")?;
+    let doc = s.doc_mut()?;
+    let source = doc.node(id).ok_or(crate::EngineError::NoNode(id))?.clone();
+    if !source.children.is_empty() {
+        return Err(bad(CMD, "vectorization requires an image layer without children"));
+    }
+    let Some(paint) = source.fills.get(index) else { return Err(bad(CMD, "image fill no longer exists")) };
+    let PaintKind::Image(image) = &paint.kind else { return Err(bad(CMD, "fill is no longer an image")) };
+    if image.image != expected {
+        return Err(bad(CMD, "image changed while vectorization was running"));
+    }
+    let parent = source.parent.ok_or_else(|| bad(CMD, "image layer has no parent"))?;
+    let at = doc.index_in_parent(id).ok_or_else(|| bad(CMD, "image layer is missing from its parent"))?;
+    let bounds = doc.world_bounds(id).ok_or_else(|| bad(CMD, "image layer has no bounds"))?;
+    if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+        return Err(bad(CMD, "image layer has invalid bounds"));
+    }
+    let name = format!("{} vectorized", source.name);
+    let imported = figcraft_svg::import_svg_with_notes(doc, svg.as_bytes(), parent, 0.0, 0.0, &name)
+        .map_err(|error| bad(CMD, format!("cannot import traced paths: {error}")))?;
+    let frame = imported.frame;
+    let traced = doc.node(frame).ok_or_else(|| bad(CMD, "traced layer is missing"))?;
+    if traced.children.is_empty() || traced.width <= 0.0 || traced.height <= 0.0 {
+        doc.remove(frame)?;
+        return Err(bad(CMD, "VTracer produced no editable paths"));
+    }
+    let world = figcraft_geom::Affine::translate((bounds.x0, bounds.y0))
+        * figcraft_geom::Affine::scale_non_uniform(bounds.width() / traced.width, bounds.height() / traced.height);
+    doc.set_world_transform(frame, world)?;
+    doc.remove(id)?;
+    doc.reparent(frame, parent, Some(at))?;
+    let paths = doc.node(frame).map_or(0, |node| node.children.len());
+    s.set_selection(vec![frame]);
+    Ok(json!({"id": frame, "paths": paths, "warnings": imported.notes}))
+}
+
+/// Apply an asynchronously processed image only if the source fill is still the same.
+fn replace_bytes(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "image.replaceBytes";
+    let id = req_id(CMD, p, "id")?;
+    let index = req_index(CMD, p, "index")?;
+    let data = req_string(CMD, p, "data")?;
+    let expected = string(p, "expectedImage");
+    let doc = s.doc_mut()?;
+    let node = doc.node(id).ok_or(crate::EngineError::NoNode(id))?;
+    let Some(paint) = node.fills.get(index) else { return Err(bad(CMD, "image fill no longer exists")) };
+    let PaintKind::Image(source) = &paint.kind else { return Err(bad(CMD, "fill is no longer an image")) };
+    if expected.as_ref().is_some_and(|hash| *hash != source.image) {
+        return Err(bad(CMD, "image changed while background removal was running"));
+    }
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| bad(CMD, format!("invalid image data: {e}")))?;
+    let (hash, _, _) = figcraft_format::add_image(doc, bytes).map_err(|e| bad(CMD, e.to_string()))?;
+    let node = doc.get_mut(id)?;
+    let old = node.fills[index].clone();
+    if let PaintKind::Image(image) = &mut node.fills[index].kind {
+        image.image = hash.clone();
+    }
+    super::lists::rebind_edited_paint(node, true, index, &old);
+    node.styles.fill = None;
+    Ok(json!({"id": id, "image": hash}))
 }
 
 /// The longest name a saved preset may have.
@@ -170,4 +253,46 @@ fn save_preset(s: &mut Session, p: &Value) -> Result<Value> {
         None => doc.image_presets.push(preset),
     }
     Ok(json!({"name": name, "filters": filters}))
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use base64::Engine as _;
+    use figcraft_color::{ImageScaleMode, PaintKind};
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn png(alpha: u8) -> Vec<u8> {
+        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(3, 2, Rgba([220, 20, 40, alpha])));
+        let mut bytes = Vec::new();
+        let result = image.write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png);
+        assert!(result.is_ok());
+        bytes
+    }
+
+    #[test]
+    fn processed_image_keeps_placement_and_undo_restores_original() {
+        let mut session = Session::new();
+        let original = base64::engine::general_purpose::STANDARD.encode(png(255));
+        let placed = session.execute("image.place", &json!({"data": original, "mode": "crop", "width": 40, "height": 30}));
+        assert!(placed.is_ok());
+        let placed = placed.unwrap_or_default();
+        let id = placed["id"].as_u64().unwrap_or_default();
+        let source = placed["image"].as_str().unwrap_or_default().to_string();
+        let replacement = base64::engine::general_purpose::STANDARD.encode(png(0));
+        let params = json!({"id": id, "index": 0, "expectedImage": source, "data": replacement});
+        assert!(session.execute("image.replaceBytes", &params).is_ok());
+        let node = session.doc().ok().and_then(|doc| doc.node(figcraft_doc::NodeId(id)));
+        assert!(node.is_some());
+        if let Some(node) = node {
+            assert_eq!((node.width, node.height), (40.0, 30.0));
+            assert!(matches!(&node.fills[0].kind, PaintKind::Image(image) if image.scale_mode == ImageScaleMode::Crop && image.image != source));
+        }
+        assert!(session.execute("image.replaceBytes", &params).is_err(), "stale asynchronous result must not overwrite a newer fill");
+        assert!(session.execute("edit.undo", &json!({})).is_ok());
+        let node = session.doc().ok().and_then(|doc| doc.node(figcraft_doc::NodeId(id)));
+        assert!(node.is_some_and(|node| matches!(&node.fills[0].kind, PaintKind::Image(image) if image.image == source)));
+    }
 }

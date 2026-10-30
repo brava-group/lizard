@@ -1,8 +1,8 @@
 //! Regions in vector edit mode (`regions.rs`): hover, the hit priority and clearances, selecting
 //! and dragging regions, and the hatch's geometry (spacing by zoom, anchoring, clipping).
 
-use figcraft_doc::{NodeId, Region, Segment, VectorNetwork, Vertex, WindingRule};
-use figcraft_geom::{Affine, Point, Rect, Vec2};
+use figcraft_doc::{NodeId, NodeKind, Region, Segment, VectorNetwork, Vertex, WindingRule};
+use figcraft_geom::{Affine, Point, Rect, Shape, Vec2};
 use serde_json::json;
 
 use super::regions::*;
@@ -31,7 +31,7 @@ fn nested(regions: Vec<Region>) -> VectorNetwork {
 }
 
 fn region(loops: Vec<Vec<usize>>, winding: WindingRule) -> Region {
-    Region { loops, winding }
+    Region { loops, winding, fills: None }
 }
 
 /// The 7.1 region: both squares as one region.
@@ -56,6 +56,85 @@ fn editing_vector(s: &mut Session, n: VectorNetwork) -> NodeId {
     super::refit(doc, id).unwrap();
     ex(s, "vector.edit.begin", json!({"id": id}));
     id
+}
+
+#[test]
+fn selected_region_fill_is_independent_and_undoable() {
+    let mut session = Session::new();
+    let id = editing_vector(&mut session, overlapping());
+    ex(&mut session, "vector.edit.select", json!({"regions": [1]}));
+    ex(&mut session, "vector.region.fill.set", json!({"color": "#FF2200"}));
+    let doc = session.doc().unwrap();
+    let node = doc.node(id).unwrap();
+    let NodeKind::Vector { network } = &node.kind else { panic!("expected vector") };
+    assert!(network.regions[0].fills.is_none());
+    assert_eq!(
+        network.regions[1].fills.as_ref().and_then(|fills| fills.first()).and_then(|paint| paint.solid_color()),
+        figcraft_color::Color::from_hex("FF2200")
+    );
+    assert_ne!(node.fills[0].solid_color(), figcraft_color::Color::from_hex("FF2200"));
+    let roundtrip: VectorNetwork = serde_json::from_value(serde_json::to_value(network).unwrap()).unwrap();
+    assert_eq!(roundtrip.regions[1].fills, network.regions[1].fills);
+    assert!(session.undo().unwrap());
+    assert!(net(&session, id).regions[1].fills.is_none());
+}
+
+#[test]
+fn paint_bucket_selects_the_face_for_individual_color_editing() {
+    let mut session = Session::new();
+    let id = editing_vector(&mut session, holed(WindingRule::EvenOdd));
+    let result = ex(&mut session, "vector.edit.paint", json!({"x": 100, "y": 100}));
+    assert_eq!(result["filled"], true);
+    let selected = ve(&session).regions;
+    assert_eq!(selected.len(), 1);
+    assert_eq!(net(&session, id).region_at(Point::new(100.0, 100.0)), Some(selected[0]));
+    ex(&mut session, "vector.region.fill.set", json!({"color": "#FF2200"}));
+    let network = net(&session, id);
+    assert_eq!(
+        network.regions[selected[0]].fills.as_ref().and_then(|fills| fills.first()).and_then(|paint| paint.solid_color()),
+        figcraft_color::Color::from_hex("FF2200")
+    );
+}
+
+#[test]
+fn painted_pen_network_exposes_all_faces_and_delete_clears_only_one_fill() {
+    let mut network = VectorNetwork::default();
+    let points = [(260.0, 100.0), (260.0, 180.0), (0.0, 180.0), (0.0, 0.0), (100.0, 100.0), (180.0, 180.0), (0.0, 100.0)];
+    let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
+    network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
+    network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
+    let mut previously_painted = network.clone();
+    assert_eq!(previously_painted.paint(Point::new(40.0, 150.0)), Some(true));
+    let mut reopened = Session::new();
+    let reopened_id = editing_vector(&mut reopened, previously_painted);
+    assert_eq!(net(&reopened, reopened_id).regions.len(), 3, "existing painted vectors gain selectable faces on edit entry");
+    let mut session = Session::new();
+    let id = editing_vector(&mut session, network);
+    assert!(net(&session, id).paint_path().winding(Point::new(20.0, 60.0)) != 0);
+    assert!(net(&session, id).paint_path().winding(Point::new(220.0, 150.0)) != 0);
+    ex(&mut session, "vector.edit.paint", json!({"x": 40, "y": 150}));
+    assert_eq!(net(&session, id).regions.len(), 3, "all bounded faces become independent regions");
+    ex(&mut session, "vector.edit.tool", json!({"tool": "move"}));
+    let top = hover(&mut session, 20.0, 60.0, 1.0).unwrap();
+    let middle = hover(&mut session, 40.0, 150.0, 1.0).unwrap();
+    let right = hover(&mut session, 220.0, 150.0, 1.0).unwrap();
+    assert_ne!(top, middle);
+    assert_ne!(middle, right);
+    assert_ne!(top, right);
+    click(&mut session, 20.0, 60.0, false);
+    assert_eq!(ve(&session).regions, vec![top]);
+    let before = net(&session, id);
+    ex(&mut session, "vector.edit.delete", json!({}));
+    let after = net(&session, id);
+    assert_eq!(after.vertices, before.vertices);
+    assert_eq!(after.segments, before.segments);
+    assert_eq!(after.regions.len(), 3);
+    assert!(!after.fill_contains(Point::new(20.0, 60.0)));
+    assert!(after.fill_contains(Point::new(40.0, 150.0)));
+    assert!(after.fill_contains(Point::new(220.0, 150.0)));
+    assert_eq!(hover(&mut session, 20.0, 60.0, 1.0), None);
+    assert!(session.undo().unwrap());
+    assert!(net(&session, id).fill_contains(Point::new(20.0, 60.0)));
 }
 
 fn ev(kind: PointerKind, x: f64, y: f64, zoom: f64, shift: bool) -> PointerEvent {

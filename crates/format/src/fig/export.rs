@@ -858,10 +858,14 @@ impl<'d> Exporter<'d> {
             ("phase", e("CREATED")),
             ("parentIndex", o(vec![("guid", parent_guid), ("position", s(&position(index)))])),
         ];
-        let children = if let NodeKind::Page { background, guides, prototype, .. } = &n.kind {
+        let children = if let NodeKind::Page { background, background_visible, guides, prototype, .. } = &n.kind {
             f.extend([("type", e("CANVAS")), ("name", s(&n.name))]);
             f.extend(root_fields());
-            f.extend([("backgroundColor", color(*background)), ("backgroundOpacity", fl(background.a.into())), ("backgroundEnabled", b(true))]);
+            f.extend([
+                ("backgroundColor", color(*background)),
+                ("backgroundOpacity", fl(background.a.into())),
+                ("backgroundEnabled", b(*background_visible)),
+            ]);
             if !guides.is_empty() {
                 self.warn("ruler guides were left out");
             }
@@ -1199,6 +1203,10 @@ impl<'d> Exporter<'d> {
             }
             PaintKind::Pattern(_) => {
                 self.warn("pattern fills were left out");
+                return None;
+            }
+            PaintKind::Shader(_) => {
+                self.warn("shader fills were left out of the .fig export");
                 return None;
             }
         }
@@ -1694,7 +1702,10 @@ impl<'d> Exporter<'d> {
             let regions = net
                 .regions
                 .iter()
-                .map(|r| network::Region { style: 0, non_zero: r.winding == WindingRule::NonZero, loops: r.loops.clone() })
+                .map(|r| {
+                    let style = r.fills.as_ref().map_or(0, |fills| style_of(vec![("fillPaints", self.paints(fills, true, &Bound::default()))]));
+                    network::Region { style, non_zero: r.winding == WindingRule::NonZero, loops: r.loops.clone() }
+                })
                 .collect();
             let blob = network::encode(&network::Network { vertices, segments, regions });
             let table = styles.into_iter().zip(1u32..).map(|(mut st, id)| {

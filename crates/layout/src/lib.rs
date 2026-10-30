@@ -201,7 +201,7 @@ fn coherent_own_sizing(doc: &mut Document, id: NodeId) -> bool {
         let fixed_if_hug = |s: Sizing| if s == Sizing::Hug { Sizing::Fixed } else { s };
         (h, v) = match t.auto_resize {
             TextAutoResize::WidthAndHeight => (hug_if_fixed(h), hug_if_fixed(v)),
-            TextAutoResize::Height => (h, hug_if_fixed(v)),
+            TextAutoResize::Height => (fixed_if_hug(h), hug_if_fixed(v)),
             TextAutoResize::None | TextAutoResize::Truncate => (fixed_if_hug(h), fixed_if_hug(v)),
         };
     }

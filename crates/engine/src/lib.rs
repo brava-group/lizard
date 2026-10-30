@@ -185,7 +185,7 @@ impl Default for ViewState {
             zoom: 1.0,
             vw: 1200.0,
             vh: 800.0,
-            pixel_grid: true,
+            pixel_grid: false,
             layout_grids: true,
             rulers: false,
             outlines: false,

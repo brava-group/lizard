@@ -47,6 +47,7 @@ const MAX_CHANGED: usize = 4096;
 const MAX_MARGIN_PX: f64 = 1024.0;
 
 /// What a retained image was rendered from.
+#[derive(Clone)]
 struct Frame {
     doc: Arc<Document>,
     page: NodeId,
@@ -54,9 +55,11 @@ struct Frame {
     outline_extras: crate::Outline,
     outlined: Vec<NodeId>,
     lod: bool,
+    skip_effects: bool,
     skip: Vec<NodeId>,
     solo: Option<NodeId>,
     background: Option<figcraft_color::Color>,
+    time: u64,
     scale: u64,
     /// The view's top-left in device pixels (page origin × scale).
     px: (i64, i64),
@@ -135,15 +138,19 @@ impl Px {
 }
 
 /// Keeps the last rendered view; see the module docs.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Retained {
     last: Option<Frame>,
+    /// The frame before a simple topmost layer was added. Removing that layer can restore these
+    /// pixels without rendering all of the effects underneath it again.
+    overlay_base: Option<Frame>,
 }
 
 impl Retained {
     /// Forget the kept image (the next render is full).
     pub fn clear(&mut self) {
         self.last = None;
+        self.overlay_base = None;
     }
 
     /// Render `view` of `page`, reusing the previous render where nothing changed. Returns the
@@ -165,6 +172,7 @@ impl Retained {
         // A view that can't be put on a pixel grid (non-finite or absurd) draws nothing.
         let Some((snapped, px)) = snap(view) else {
             self.last = None;
+            self.overlay_base = None;
             return None;
         };
         let fonts = figcraft_text::layout_generation();
@@ -178,9 +186,11 @@ impl Retained {
             && !opts.outline.hidden
             && last.outlined == opts.outlined
             && last.lod == opts.lod
+            && last.skip_effects == opts.skip_effects
             && last.skip == opts.skip
             && last.solo == opts.solo
             && last.background == opts.background
+            && last.time == opts.time.to_bits()
             && last.scale == snapped.scale.to_bits()
             && last.pix.width() == snapped.width
             && last.pix.height() == snapped.height
@@ -190,6 +200,28 @@ impl Retained {
         {
             let same_doc = Arc::ptr_eq(&last.doc, doc);
             let s = if same_doc { last.sensitive.clone() } else { Arc::new(sensitive(doc)) };
+            if last.px == px {
+                if self.overlay_base.as_ref().is_some_and(|base| base.px == px && base.doc.changed_ids(doc, 1).is_some_and(|ids| ids.is_empty()))
+                    && let Some(base) = self.overlay_base.take()
+                {
+                    let frame = self.keep(doc, page, (&snapped, px, fonts), opts, base.pix, base.sensitive);
+                    return Some((snapped, &frame.pix, Work::Reused, None));
+                }
+                if let Some(id) = topmost_simple_addition(&last.doc, doc, page, opts) {
+                    let mut pix = last.pix.clone();
+                    crate::render_nodes_into_preview(doc, &[id], &snapped, &mut pix, opts.lod);
+                    let pixels = draw::paint_bounds(doc, id)
+                        .and_then(|bounds| to_px(bounds, snapped.scale, px))
+                        .and_then(|bounds| bounds.clamp(i64::from(snapped.width), i64::from(snapped.height)))
+                        .map_or(0, |bounds| bounds.area());
+                    self.overlay_base = Some(last);
+                    let frame = self.keep(doc, page, (&snapped, px, fonts), opts, pix, s);
+                    return Some((snapped, &frame.pix, Work::Partial { pixels }, None));
+                }
+            }
+            if !same_doc {
+                self.overlay_base = None;
+            }
             if let Some((pix, pixels, damage)) = patch(last, doc, page, &snapped, px, opts, &s) {
                 work = if pixels == 0 { Work::Reused } else { Work::Partial { pixels } };
                 let frame = self.keep(doc, page, (&snapped, px, fonts), opts, pix, s);
@@ -197,6 +229,7 @@ impl Retained {
             }
             sens = Some(s);
         }
+        self.overlay_base = None;
         let pix = render_view(doc, page, &snapped, opts)?;
         let s = sens.unwrap_or_else(|| Arc::new(sensitive(doc)));
         let frame = self.keep(doc, page, (&snapped, px, fonts), opts, pix, s);
@@ -222,15 +255,58 @@ impl Retained {
             outline_extras: opts.outline,
             outlined: opts.outlined.clone(),
             lod: opts.lod,
+            skip_effects: opts.skip_effects,
             skip: opts.skip.clone(),
             solo: opts.solo,
             background: opts.background,
+            time: opts.time.to_bits(),
             scale: view.scale.to_bits(),
             px,
             fonts,
             sensitive,
             pix,
         })
+    }
+}
+
+/// Adding a simple layer above everything already drawn cannot change the pixels underneath it.
+/// This is especially useful for pasted text over a large blurred frame: the usual damage area
+/// covers the viewport and would otherwise redraw the frame before showing the text.
+fn topmost_simple_addition(old: &Document, new: &Document, page: NodeId, opts: &Options) -> Option<NodeId> {
+    if opts.outline_mode || !opts.outlined.is_empty() || !opts.skip.is_empty() || opts.solo.is_some() || opts.time != 0.0 {
+        return None;
+    }
+    if new.node_count() != old.node_count().checked_add(1)? {
+        return None;
+    }
+    let before = &old.node(page)?.children;
+    let after = &new.node(page)?.children;
+    let (&id, prefix) = after.split_last()?;
+    if prefix != before || old.node(id).is_some() {
+        return None;
+    }
+    // A mask below this layer could clip it. Pattern sources and document-wide edits also need
+    // the normal dependency-aware path.
+    if new.nodes().any(|n| n.is_mask && new.page_of(n.id) == Some(page)) {
+        return None;
+    }
+    let changes = new.changed_ids(old, 3)?;
+    if changes.len() != 2 || !changes.contains(&page) || !changes.contains(&id) {
+        return None;
+    }
+    let n = new.node(id)?;
+    if n.parent != Some(page) || !n.children.is_empty() || n.is_mask || !n.effects.is_empty() {
+        return None;
+    }
+    match n.kind {
+        NodeKind::Rectangle
+        | NodeKind::Ellipse { .. }
+        | NodeKind::Polygon { .. }
+        | NodeKind::Star { .. }
+        | NodeKind::Line
+        | NodeKind::Vector { .. }
+        | NodeKind::Text(_) => Some(id),
+        _ => None,
     }
 }
 
@@ -301,7 +377,11 @@ pub fn damage_between(old: &Document, new: &Document, page: NodeId, view: &View)
     }
     let reach = reach as i64;
     let mut areas = Vec::new();
+    let topmost_addition = topmost_simple_addition(old, new, page, &Options::default());
     for id in new.changed_ids(old, MAX_CHANGED)? {
+        if id == page && topmost_addition.is_some() {
+            continue;
+        }
         if in_pattern_source(old, &old_sensitive, id) || in_pattern_source(new, &new_sensitive, id) {
             return None;
         }

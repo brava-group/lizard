@@ -292,6 +292,7 @@ fn panning_with_the_hand_tool_and_the_wheel() {
 
 #[test]
 fn pixel_grid_and_pixel_preview_show_from_their_zooms() {
+    assert!(!ViewState::default().pixel_grid, "new vector documents start without a pixel overlay");
     // (pixel grid on, zoom, shown, derivation)
     let grid: Vec<(bool, f64, bool, &str)> = vec![
         (true, 4.0, true, "the pixel grid shows at 400%"),

@@ -17,9 +17,11 @@ pub mod library;
 pub mod node;
 pub mod props;
 pub mod proto;
+pub mod shader;
 pub mod styles;
 pub mod text;
 pub mod vector;
+pub mod vector_contours;
 pub mod vector_faces;
 pub mod vector_regions;
 
@@ -31,6 +33,7 @@ pub use handoff::*;
 pub use library::*;
 pub use node::*;
 pub use props::*;
+pub use shader::*;
 pub use styles::*;
 pub use text::*;
 pub use vector::*;
@@ -166,6 +169,9 @@ pub struct Document {
     next_id: IdAlloc,
     #[serde(default)]
     pub styles: Vec<Style>,
+    /// WGSL definitions embedded in the file; instances refer to these by stable id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shaders: BTreeMap<String, ShaderDefinition>,
     #[serde(default)]
     pub variables: Variables,
     /// Images by content hash; serialized separately by the format crate.
@@ -226,6 +232,7 @@ impl Document {
             dirty: Dirty::default(),
             next_id: IdAlloc { next: 1, client: 0 },
             styles: Vec::new(),
+            shaders: BTreeMap::new(),
             variables: Variables::default(),
             images: BTreeMap::new(),
             current_page: None,
@@ -376,7 +383,13 @@ impl Document {
         let id = self.alloc_id();
         let node = Node::new(
             id,
-            NodeKind::Page { background: Color::DEFAULT_PAGE, flows: Vec::new(), prototype: Default::default(), guides: Vec::new() },
+            NodeKind::Page {
+                background: Color::DEFAULT_PAGE,
+                background_visible: true,
+                flows: Vec::new(),
+                prototype: Default::default(),
+                guides: Vec::new(),
+            },
             name,
             0.0,
             0.0,

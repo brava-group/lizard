@@ -205,6 +205,17 @@ fn tool(s: &mut Session, t: ToolId) -> Result<Value> {
     if let Some(why) = s.active_read_only().filter(|_| !matches!(t, ToolId::Move | ToolId::Hand)) {
         return Err(EngineError::Disabled(format!("tool.{}", t.id()), why.into()));
     }
+    if s.ds().is_ok_and(|ds| ds.vector_edit.is_some()) {
+        let vector_tool = match t {
+            ToolId::Pen => Some(crate::vectoredit::VTool::Pen),
+            ToolId::Move => Some(crate::vectoredit::VTool::Move),
+            _ => None,
+        };
+        if let Some(vector_tool) = vector_tool {
+            crate::vectoredit::set_tool(s, vector_tool)?;
+            return Ok(json!({"tool": t.id()}));
+        }
+    }
     s.set_tool(t);
     Ok(json!({"tool": t.id()}))
 }
@@ -403,7 +414,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "pref.publishServer",
             "Server for online sharing",
-            "{url?: ws://host:port/ or wss://host/path/ (no key; empty: online sharing off; omit: back to the built-in server)} → {url, default (the built-in server)}: where Share ▸ Online keeps files and where join codes are asked",
+            "{url?: ws://host:port/ or wss://host/path/ (no key; empty: online sharing off; omit: reset to the build default)} → {url, default (empty unless the build supplies a server)}: where Share ▸ Online keeps files and where join codes are asked",
             false,
             |s, p| {
                 const CMD: &str = "pref.publishServer";

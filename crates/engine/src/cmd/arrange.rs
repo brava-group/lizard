@@ -197,6 +197,9 @@ fn align(s: &mut Session, p: &Value, a: Al) -> Result<Value> {
 }
 
 fn distribute(s: &mut Session, p: &Value, horizontal: bool) -> Result<Value> {
+    if let Some(result) = crate::vectoredit::distribute_in_edit_mode(s, p, horizontal) {
+        return result;
+    }
     let ids = req_targets("distribute", s, p)?;
     let doc = s.doc_mut()?;
     let ids = roots(doc, &ids);
@@ -224,6 +227,11 @@ fn distribute(s: &mut Session, p: &Value, horizontal: bool) -> Result<Value> {
 
 /// Tidy up: snap the selection into a grid of rows/columns with even spacing.
 fn tidy(s: &mut Session, p: &Value) -> Result<Value> {
+    // Figma's tidy action is unavailable for selected vector points; never rearrange their layer
+    // when its shortcut is pressed in edit mode.
+    if get(p, "ids").is_none() && s.ds()?.vector_edit.is_some() {
+        return ok();
+    }
     let ids = req_targets("arrange.tidy", s, p)?;
     let doc = s.doc_mut()?;
     let ids = roots(doc, &ids);

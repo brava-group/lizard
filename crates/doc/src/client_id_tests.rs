@@ -110,7 +110,13 @@ fn pages_can_be_inserted_onto_a_page_less_base() {
     assert!(d.pages.is_empty() && d.node_count() == 0);
     let p = Node::new(
         NodeId(C3 | 1),
-        NodeKind::Page { background: figcraft_color::Color::DEFAULT_PAGE, flows: vec![], prototype: Default::default(), guides: vec![] },
+        NodeKind::Page {
+            background: figcraft_color::Color::DEFAULT_PAGE,
+            background_visible: true,
+            flows: vec![],
+            prototype: Default::default(),
+            guides: vec![],
+        },
         "P",
         0.0,
         0.0,

@@ -104,8 +104,10 @@ fn target<'a>(doc: &'a Document, sel: &[NodeId], zoom: f64) -> Option<(NodeId, &
     let t = doc.world_transform(*id);
     let s = t.determinant().abs().sqrt();
     let ok = !n.locked && n.visible && zoom.is_finite() && zoom > 0.0 && s.is_finite() && s > 1e-9;
-    (ok && n.width.min(n.height) * s * zoom >= MIN_PX && n.kind.has_corner_radius() && !matches!(n.kind, NodeKind::Vector { .. } | NodeKind::Section { .. }))
-        .then(|| (*id, n, t, INSET_PX / (zoom * s)))
+    (ok && n.width.min(n.height) * s * zoom >= MIN_PX
+        && n.kind.has_corner_radius()
+        && !matches!(n.kind, NodeKind::Vector { .. } | NodeKind::Section { .. }))
+    .then(|| (*id, n, t, INSET_PX / (zoom * s)))
 }
 
 /// A star's ratio handle (local) for `ratio`.

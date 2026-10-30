@@ -28,9 +28,41 @@ fn page_commands_reject_a_rectangle() {
     assert!(s.execute("page.rename", &json!({"id": r, "name": "Not a page"})).is_err(), "rename refuses a layer");
     assert_eq!(name(&s, r), before, "the layer keeps its name");
     assert!(s.execute("page.setBackground", &json!({"id": r, "color": "#123456"})).is_err(), "background refuses a layer");
+    assert!(s.execute("page.setBackgroundVisible", &json!({"id": r, "visible": false})).is_err(), "background visibility refuses a layer");
     assert!(s.execute("page.delete", &json!({"id": r})).is_err(), "delete refuses a layer");
     assert!(s.doc().unwrap().contains(r), "the layer is still there");
     assert!(s.doc().unwrap().contains(page));
+}
+
+#[test]
+fn page_background_visibility_preserves_color_and_copies_with_pages() {
+    let mut s = Session::new();
+    let first = s.page().unwrap();
+    ex(&mut s, "page.setBackground", json!({"color": "#2468AC80"}));
+    let original = match s.doc().unwrap().get(first).unwrap().kind {
+        NodeKind::Page { background, .. } => background,
+        _ => panic!("not a page"),
+    };
+    ex(&mut s, "page.setBackgroundVisible", json!({"visible": false}));
+    let hidden = match s.doc().unwrap().get(first).unwrap().kind {
+        NodeKind::Page { background, background_visible, .. } => {
+            assert!(!background_visible);
+            assert_eq!(background, original);
+            serde_json::to_value(&s.doc().unwrap().get(first).unwrap().kind).unwrap()
+        }
+        _ => panic!("not a page"),
+    };
+    let restored: NodeKind = serde_json::from_value(hidden).unwrap();
+    assert!(matches!(restored, NodeKind::Page { background_visible: false, .. }));
+    let copy = id_of(&ex(&mut s, "page.duplicate", json!({"id": first})));
+    assert!(matches!(s.doc().unwrap().get(copy).unwrap().kind, NodeKind::Page { background_visible: false, .. }));
+    ex(&mut s, "page.setBackgroundVisible", json!({"id": first, "visible": true}));
+    assert!(
+        matches!(s.doc().unwrap().get(first).unwrap().kind, NodeKind::Page { background, background_visible: true, .. } if background == original)
+    );
+    let shown = serde_json::to_value(&s.doc().unwrap().get(first).unwrap().kind).unwrap();
+    assert!(shown.get("backgroundVisible").is_none() && shown.get("background_visible").is_none(), "visible is the backwards-compatible default");
+    assert!(matches!(serde_json::from_value::<NodeKind>(shown).unwrap(), NodeKind::Page { background_visible: true, .. }));
 }
 
 #[test]

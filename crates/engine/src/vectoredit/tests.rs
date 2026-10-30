@@ -51,6 +51,135 @@ pub(super) fn pt(x: f64, y: f64) -> Point {
 }
 
 #[test]
+fn main_pen_button_keeps_the_active_vector_editable() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "tool.set", json!({"tool": "pen"}));
+    assert_eq!(ve(&s).tool, VTool::Pen);
+    assert_eq!(s.tool.tool, crate::tools::ToolId::Move, "the vector editor still owns pointer input");
+    click(&mut s, 0.0, 0.0);
+    click(&mut s, -80.0, -40.0);
+    assert_eq!(net(&s, id).vertices.len(), 5);
+    assert_eq!(s.doc().unwrap().node(s.page().unwrap()).unwrap().children.len(), 1);
+    ex(&mut s, "tool.set", json!({"tool": "move"}));
+    assert_eq!(ve(&s).tool, VTool::Move);
+    ex(&mut s, "tool.set", json!({"tool": "pen"}));
+    assert_eq!(ve(&s).tool, VTool::Pen);
+}
+
+#[test]
+fn pen_snaps_to_a_crossing_and_creates_one_shared_vertex() {
+    let mut s = Session::new();
+    let made = ex(&mut s, "vector.create", json!({"points": [[0, 0], [100, 100], [0, 100], [100, 0]], "closed": false}));
+    let id = crate::params::id_of(&made["id"]).unwrap();
+    ex(&mut s, "vector.edit.begin", json!({"id": id}));
+    ex(&mut s, "tool.set", json!({"tool": "pen"}));
+    let crossing = super::point_snap::intersection_near(s.doc().unwrap(), id, pt(52.0, 49.0), 8.0).unwrap();
+    assert!((crossing.at - pt(50.0, 50.0)).hypot() < 1e-6);
+    assert!(super::point_snap::intersection_near(s.doc().unwrap(), id, pt(65.0, 50.0), 8.0).is_none());
+    s.pointer(&ev(PointerKind::Hover, 52.0, 49.0)).unwrap();
+    assert!(s.tool.overlay.guides.iter().any(|guide| (guide.x0 - 50.0).abs() < 1e-6 && (guide.y0 - 50.0).abs() < 1e-6));
+    click(&mut s, 52.0, 49.0);
+    let n = net(&s, id);
+    let world = s.doc().unwrap().world_transform(id);
+    let junction = n.vertices.iter().position(|v| (world * v.point() - pt(50.0, 50.0)).hypot() < 1e-6).unwrap();
+    assert_eq!(n.vertices.len(), 5);
+    assert_eq!(n.incident(junction).len(), 4, "both crossing lines share the new point");
+    click(&mut s, 50.0, 50.0);
+    click(&mut s, 50.0, 160.0);
+    assert_eq!(net(&s, id).vertices.len(), 6, "the pen extends the same vector from the junction");
+    assert_eq!(s.doc().unwrap().node(s.page().unwrap()).unwrap().children.len(), 1);
+}
+
+#[test]
+fn shift_pen_preview_and_click_share_the_same_45_degree_point() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.tool", json!({"tool": "pen"}));
+    click(&mut s, 100.0, 0.0);
+    let mut event = ev(PointerKind::Hover, 143.0, 37.0);
+    event.shift = true;
+    s.pointer(&event).unwrap();
+    assert_eq!(s.tool.overlay.rubber, Some([100.0, 0.0, 140.0, 40.0]));
+    assert_eq!(s.tool.overlay.angle_guide, s.tool.overlay.rubber);
+    event.kind = PointerKind::Down;
+    s.pointer(&event).unwrap();
+    event.kind = PointerKind::Up;
+    s.pointer(&event).unwrap();
+    let n = net(&s, id);
+    let world = s.doc().unwrap().world_transform(id);
+    assert!(n.vertices.iter().any(|v| (world * v.point() - pt(140.0, 40.0)).hypot() < 1e-6));
+    assert!(s.tool.overlay.angle_guide.is_none());
+}
+
+#[test]
+fn shift_dragging_a_selected_point_snaps_diagonal_and_can_unlock_mid_drag() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0]}));
+    let mut event = ev(PointerKind::Down, 0.0, 0.0);
+    event.shift = true;
+    s.pointer(&event).unwrap();
+    event.kind = PointerKind::Move;
+    event.x = 37.0;
+    event.y = 29.0;
+    s.pointer(&event).unwrap();
+    assert_eq!(s.tool.overlay.angle_guide, Some([0.0, 0.0, 33.0, 33.0]));
+    let world = s.doc().unwrap().world_transform(id);
+    assert!((world * net(&s, id).vertices[0].point() - pt(33.0, 33.0)).hypot() < 1e-6);
+    event.shift = false;
+    event.x = 35.0;
+    event.y = 20.0;
+    s.pointer(&event).unwrap();
+    assert!(s.tool.overlay.angle_guide.is_none());
+    event.shift = true;
+    event.x = 3.0;
+    event.y = 35.0;
+    s.pointer(&event).unwrap();
+    assert_eq!(s.tool.overlay.angle_guide, Some([0.0, 0.0, 0.0, 35.0]));
+    event.kind = PointerKind::Up;
+    s.pointer(&event).unwrap();
+    let world = s.doc().unwrap().world_transform(id);
+    assert!((world * net(&s, id).vertices[0].point() - pt(0.0, 35.0)).hypot() < 1e-6);
+    assert!(s.tool.overlay.angle_guide.is_none());
+    assert!(s.undo().unwrap());
+    let world = s.doc().unwrap().world_transform(id);
+    assert!((world * net(&s, id).vertices[0].point() - pt(0.0, 0.0)).hypot() < 1e-6);
+}
+
+#[test]
+fn shift_click_still_removes_a_selected_point_without_moving_it() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0]}));
+    let mut event = ev(PointerKind::Down, 0.0, 0.0);
+    event.shift = true;
+    s.pointer(&event).unwrap();
+    event.kind = PointerKind::Up;
+    s.pointer(&event).unwrap();
+    assert!(ve(&s).vertices.is_empty());
+    assert_eq!(net(&s, id).vertices.len(), 4);
+}
+
+#[test]
+fn shift_also_constrains_the_initial_pen_tool() {
+    let mut s = Session::new();
+    s.set_tool(crate::tools::ToolId::Pen);
+    click(&mut s, 100.0, 100.0);
+    let mut event = ev(PointerKind::Hover, 134.0, 127.0);
+    event.shift = true;
+    s.pointer(&event).unwrap();
+    assert_eq!(s.tool.overlay.rubber, Some([100.0, 100.0, 130.5, 130.5]));
+    assert_eq!(s.tool.overlay.angle_guide, s.tool.overlay.rubber);
+    event.kind = PointerKind::Down;
+    s.pointer(&event).unwrap();
+    event.kind = PointerKind::Up;
+    s.pointer(&event).unwrap();
+    assert_eq!(s.tool.pen.as_ref().and_then(|pen| pen.points.last()).map(|(p, _, _)| *p), Some(pt(130.5, 130.5)));
+    assert!(s.tool.overlay.angle_guide.is_none());
+}
+
+#[test]
 fn corner_radius_updates_only_selected_points_and_undoes_together() {
     let mut s = Session::new();
     let id = rect(&mut s);
@@ -176,6 +305,37 @@ fn paint_bucket_fills_and_unfills_areas() {
 }
 
 #[test]
+fn paint_bucket_can_fill_each_face_of_a_connected_pen_network() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    let points = [
+        (264.43535702309975, 102.54619315734607),
+        (264.43535702309975, 183.9741802735134),
+        (0.0, 183.9741802735134),
+        (0.0, 0.0),
+        (102.54619315734612, 102.54619315734605),
+        (183.97418027351347, 183.9741802735134),
+        (0.0, 102.54619315734608),
+    ];
+    let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
+    super::edit(s.doc_mut().unwrap(), id, |network| {
+        network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
+        network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
+        network.regions.clear();
+    })
+    .unwrap();
+    // This is an unpainted pen network; each bucket click should fill only its chosen face.
+    s.doc_mut().unwrap().get_mut(id).unwrap().fills.clear();
+    ex(&mut s, "vector.edit.tool", json!({"tool": "paint"}));
+    for sample in [pt(20.0, 60.0), pt(40.0, 150.0), pt(220.0, 150.0)] {
+        s.pointer(&ev(PointerKind::Hover, sample.x, sample.y)).unwrap();
+        assert!(!s.tool.overlay.face.is_empty(), "no hover face at {sample:?}");
+        click(&mut s, sample.x, sample.y);
+        assert!(net(&s, id).fill_contains(sample), "paint did not fill {sample:?}");
+    }
+}
+
+#[test]
 fn lasso_marquee_and_segment_selection() {
     let mut s = Session::new();
     let _id = rect(&mut s);
@@ -223,6 +383,54 @@ fn marquee_can_start_outside_the_vector_and_only_double_click_exits() {
     s.pointer(&ev(PointerKind::DoubleClick, -100.0, -100.0)).unwrap();
     assert!(s.ds().unwrap().vector_edit.is_none(), "a double-click outside ends edit mode");
     assert!(!s.tool.busy(), "leaving edit mode clears the pending marquee gesture");
+}
+
+#[test]
+fn double_click_selects_connected_subpath_and_alt_selects_only_the_closed_loop() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    let mut n = VectorNetwork::from_points(&[pt(0.0, 0.0), pt(200.0, 0.0), pt(200.0, 200.0), pt(0.0, 200.0)], true);
+    let inner = [pt(60.0, 60.0), pt(140.0, 60.0), pt(140.0, 140.0), pt(60.0, 140.0)];
+    for point in inner {
+        n.vertices.push(Vertex::new(point.x, point.y));
+    }
+    for i in 0..4 {
+        n.segments.push(Segment::line(4 + i, 4 + (i + 1) % 4));
+    }
+    n.regions[0].loops.push(vec![4, 5, 6, 7]);
+    n.regions[0].winding = WindingRule::EvenOdd;
+    n.vertices.push(Vertex::new(100.0, 100.0));
+    n.segments.push(Segment::line(4, 8));
+    let doc = s.doc_mut().unwrap();
+    let node = doc.get_mut(id).unwrap();
+    node.kind = NodeKind::Vector { network: n };
+    node.transform = Affine::IDENTITY;
+    super::refit(doc, id).unwrap();
+    ex(&mut s, "vector.edit.begin", json!({"id": id}));
+    let before = net(&s, id);
+    let undo_steps = s.ds().unwrap().history.undo.len();
+
+    s.pointer(&ev(PointerKind::DoubleClick, 100.0, 60.0)).unwrap();
+    assert_eq!(ve(&s).segments, vec![4, 5, 6, 7, 8], "plain double-click follows the connected branch");
+    assert!(ve(&s).vertices.is_empty());
+
+    let mut alt = ev(PointerKind::DoubleClick, 100.0, 60.0);
+    alt.alt = true;
+    s.pointer(&alt).unwrap();
+    assert_eq!(ve(&s).segments, vec![4, 5, 6, 7], "Alt selects just the inner closed contour");
+
+    alt.x = 100.0;
+    alt.y = 0.0;
+    alt.shift = true;
+    s.pointer(&alt).unwrap();
+    assert_eq!(ve(&s).segments, (0..8).collect::<Vec<_>>(), "Shift+Alt adds the outer contour");
+
+    ex(&mut s, "vector.edit.selectOuterContour", json!({}));
+    assert_eq!(ve(&s).segments, vec![0, 1, 2, 3]);
+    ex(&mut s, "vector.edit.selectInnerContours", json!({}));
+    assert_eq!(ve(&s).segments, vec![4, 5, 6, 7]);
+    assert_eq!(net(&s, id), before, "selection never edits the network");
+    assert_eq!(s.ds().unwrap().history.undo.len(), undo_steps, "selection creates no undo step");
 }
 
 #[test]
@@ -320,6 +528,52 @@ fn mirroring_position_and_join_commands() {
     // Outside edit mode, vector.join keeps its layer behaviour.
     ex(&mut s, "vector.edit.end", json!({}));
     assert!(s.execute("vector.join", &json!({"ids": [id]})).is_ok());
+}
+
+#[test]
+fn aligning_points_uses_selection_bounds_and_preserves_undo() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0, 2]}));
+    ex(&mut s, "vector.edit.align", json!({"mode": "hcenter"}));
+    let aligned = net(&s, id);
+    assert!((aligned.vertices[0].x - aligned.vertices[2].x).abs() < 1e-6);
+    assert!(s.undo().unwrap());
+    let restored = net(&s, id);
+    assert!((restored.vertices[0].x - restored.vertices[2].x).abs() > 1.0);
+
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0]}));
+    ex(&mut s, "vector.edit.align", json!({"mode": "right"}));
+    let single = net(&s, id);
+    let right = single.vertices.iter().map(|v| v.x).fold(f64::NEG_INFINITY, f64::max);
+    assert!((single.vertices[0].x - right).abs() < 1e-6);
+    assert!(s.execute("vector.edit.align", &json!({"mode": "diagonal"})).is_err());
+}
+
+#[test]
+fn distribute_shortcuts_space_selected_points_without_moving_the_layer() {
+    let mut s = Session::new();
+    let id = rect(&mut s);
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0, 1, 2]}));
+    let before_tidy = net(&s, id);
+    ex(&mut s, "arrange.tidy", json!({}));
+    assert_eq!(net(&s, id), before_tidy, "Tidy is disabled for vector points");
+    ex(&mut s, "distribute.horizontal", json!({}));
+    let points = net(&s, id).vertices;
+    let mut selected = [points[0].x, points[1].x, points[2].x];
+    selected.sort_by(f64::total_cmp);
+    assert_eq!(selected, [0.0, 50.0, 100.0]);
+    assert_eq!(points[3].x, 0.0);
+    assert!(s.undo().unwrap());
+    assert_eq!(net(&s, id).vertices[1].x, 100.0);
+
+    ex(&mut s, "vector.edit.select", json!({"vertices": [0, 2, 3]}));
+    ex(&mut s, "distribute.vertical", json!({}));
+    let points = net(&s, id).vertices;
+    let mut selected = [points[0].y, points[2].y, points[3].y];
+    selected.sort_by(f64::total_cmp);
+    assert_eq!(selected, [0.0, 50.0, 100.0]);
+    assert_eq!(points[1].y, 0.0);
 }
 
 #[test]
