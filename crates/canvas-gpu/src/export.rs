@@ -133,11 +133,59 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_color::{Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind};
+    use figcraft_color::{
+        Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
+    };
     use figcraft_doc::{ImageData, NodeKind};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
+
+    #[test]
+    fn gpu_pattern_cells_match_cpu_for_grid_and_hex_tiles() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        for tile in [PatternTile::Grid, PatternTile::HorizontalHex, PatternTile::VerticalHex] {
+            let mut doc = Document::new("GPU pattern");
+            let page = doc.current_page.ok_or("page missing")?;
+            let source = doc.create(page, NodeKind::Rectangle, "Tile", 300.0, 300.0, 8.0, 8.0)?;
+            doc.node_mut(source).ok_or("source missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 0.8))];
+            doc.node_mut(source).ok_or("source missing for opacity")?.opacity = 0.85;
+            let target = doc.create(page, NodeKind::Rectangle, "Pattern", 0.0, 0.0, 64.0, 48.0)?;
+            let mut pattern = PatternPaint::new(source.0);
+            pattern.tile = tile;
+            pattern.spacing = (4.0, 4.0);
+            let mut paint = Paint::solid(Color::WHITE);
+            paint.kind = PaintKind::Pattern(pattern);
+            paint.opacity = 0.75;
+            doc.node_mut(target).ok_or("target missing")?.fills = vec![paint];
+            let area = Rect::new(0.0, 0.0, 64.0, 48.0);
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("pattern GPU export unavailable")?;
+                let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("pattern CPU export unavailable")?;
+                for y in [2, 6, 11, 14, 20, 25, 33, 40] {
+                    for x in [2, 7, 11, 15, 23, 34, 45, 55] {
+                        let px = (f64::from(x) * scale) as u32;
+                        let py = (f64::from(y) * scale) as u32;
+                        let actual = gpu.pixel(px, py).ok_or("GPU pattern sample missing")?;
+                        let expected = cpu.pixel(px, py).ok_or("CPU pattern sample missing")?;
+                        for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                            expected.red(),
+                            expected.green(),
+                            expected.blue(),
+                            expected.alpha(),
+                        ]) {
+                            assert!(a.abs_diff(b) <= 12, "tile={tile:?} scale={scale} at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn shader_fill_stays_on_gpu_and_matches_cpu_at_zoom() -> Result<(), Box<dyn std::error::Error>> {

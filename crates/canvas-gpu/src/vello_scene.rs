@@ -5,7 +5,9 @@ use std::error::Error;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use figcraft_color::{BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, ShaderFill};
+use figcraft_color::{
+    BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, PatternPaint, ShaderFill,
+};
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
 use figcraft_geom::{Affine, Point, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
@@ -2321,6 +2323,36 @@ fn shader_key(node: &Node, fill: &ShaderFill) -> String {
     format!("shader:{:?}:{}:{:?}", node.id, fill.shader_id, fill.values)
 }
 
+fn pattern_key(node: &Node, fill: &PatternPaint) -> String {
+    format!("pattern:{:?}:{fill:?}", node.id)
+}
+
+fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a Node> {
+    let source = doc.node(NodeId(fill.source))?;
+    let region_paints = match &source.kind {
+        NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    (source.visible
+        && !source.is_page()
+        && !source.is_mask
+        && !source.clip
+        && !matches!(source.kind, NodeKind::Text(_))
+        && source.children.is_empty()
+        && source.effects.iter().all(|effect| !effect.visible)
+        && matches!(source.blend, BlendMode::Normal | BlendMode::PassThrough)
+        && source.fills.iter().chain(&source.strokes).chain(region_paints).all(|paint| {
+            !paint.visible
+                || ((gpu_blend_mode(paint.blend).is_some() || paint.blend == BlendMode::Normal)
+                    && match &paint.kind {
+                        PaintKind::Pattern(_) => false,
+                        PaintKind::Shader(shader) => doc.shaders.contains_key(&shader.shader_id),
+                        _ => true,
+                    })
+        }))
+    .then_some(source)
+}
+
 fn collect_paint_order(doc: &Document, id: NodeId, output: &mut Vec<NodeId>) {
     let mut pending = vec![id];
     while let Some(id) = pending.pop() {
@@ -2370,7 +2402,7 @@ fn hide_after_subtree(original: &Document, output: &mut Document, id: NodeId, pa
     }
 }
 
-fn set_paint(scene: &mut Scene, paint: &Paint, node: &Node, images: Option<&HashMap<String, ImageInfo>>) -> bool {
+fn set_paint(scene: &mut Scene, doc: &Document, paint: &Paint, node: &Node, images: Option<&HashMap<String, ImageInfo>>) -> bool {
     if !paint.visible || paint.opacity <= 0.0 {
         return false;
     }
@@ -2436,7 +2468,18 @@ fn set_paint(scene: &mut Scene, paint: &Paint, node: &Node, images: Option<&Hash
                 sampler: peniko::ImageSampler::default().with_alpha(paint.opacity.clamp(0.0, 1.0)),
             });
         }
-        _ => return false,
+        PaintKind::Pattern(fill) => {
+            let Some(source) = gpu_pattern_source(doc, fill) else { return false };
+            let Some(cell) = fill.cell(source.width, source.height, node.width, node.height) else { return false };
+            let Some(info) = images.and_then(|entries| entries.get(&pattern_key(node, fill))) else { return false };
+            scene.set_paint_transform(
+                Affine::translate(cell.origin) * Affine::scale_non_uniform(cell.size.0 / f64::from(info.width), cell.size.1 / f64::from(info.height)),
+            );
+            scene.set_paint(Image {
+                image: ImageSource::external_texture(info.id, RectU16::new(0, 0, info.width, info.height), true),
+                sampler: peniko::ImageSampler::default().with_extend(peniko::Extend::Repeat).with_alpha(paint.opacity.clamp(0.0, 1.0)),
+            });
+        }
     }
     true
 }
@@ -2497,7 +2540,7 @@ fn draw_content(
             set_rule(scene, FillRule::Winding);
             for paint in &node.fills {
                 scene.reset_paint_transform();
-                if set_paint(scene, paint, node, images) {
+                if set_paint(scene, doc, paint, node, images) {
                     fill_paint_path(scene, &open, paint);
                 }
             }
@@ -2507,7 +2550,7 @@ fn draw_content(
             set_rule(scene, if region.winding == figcraft_doc::WindingRule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding });
             for paint in region.fills.as_ref().unwrap_or(&node.fills) {
                 scene.reset_paint_transform();
-                if set_paint(scene, paint, node, images) {
+                if set_paint(scene, doc, paint, node, images) {
                     fill_paint_path(scene, &path, paint);
                 }
             }
@@ -2517,7 +2560,7 @@ fn draw_content(
         set_rule(scene, rule);
         for paint in &node.fills {
             scene.reset_paint_transform();
-            if set_paint(scene, paint, node, images) {
+            if set_paint(scene, doc, paint, node, images) {
                 fill_paint_path(scene, &path, paint);
             }
         }
@@ -2532,7 +2575,7 @@ fn draw_content(
         set_rule(scene, rule);
         for paint in &node.strokes {
             scene.reset_paint_transform();
-            if set_paint(scene, paint, node, images) {
+            if set_paint(scene, doc, paint, node, images) {
                 fill_paint_path(scene, &path, paint);
             }
         }
@@ -3003,7 +3046,7 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
                     || match &paint.kind {
                         PaintKind::Gradient(_) => false,
                         PaintKind::Image(_) => false,
-                        PaintKind::Pattern(_) => true,
+                        PaintKind::Pattern(fill) => gpu_pattern_source(doc, fill).is_none(),
                         // Registration validates once; parsing WGSL in this per-frame scan
                         // would repeat for every node during every pan and zoom update.
                         PaintKind::Shader(fill) => !doc.shaders.contains_key(&fill.shader_id),
@@ -3548,6 +3591,8 @@ pub struct GpuCanvas {
     image_textures: Vec<wgpu::Texture>,
     shader_textures: HashMap<String, wgpu::Texture>,
     shader_info: HashMap<String, (u16, u16, String, u32)>,
+    pattern_textures: HashMap<String, wgpu::Texture>,
+    pattern_info: HashMap<String, (u16, u16, String, u64)>,
     temporary_textures: Vec<wgpu::Texture>,
     temporary_ids: Vec<TextureId>,
     cached_textures: Vec<wgpu::Texture>,
@@ -4392,6 +4437,8 @@ impl GpuCanvas {
             image_textures: Vec::new(),
             shader_textures: HashMap::new(),
             shader_info: HashMap::new(),
+            pattern_textures: HashMap::new(),
+            pattern_info: HashMap::new(),
             temporary_textures: Vec::new(),
             temporary_ids: Vec::new(),
             cached_textures: Vec::new(),
@@ -5047,6 +5094,65 @@ impl GpuCanvas {
                 }
                 count += 1;
             }
+        }
+        let mut active_pattern_keys = HashSet::new();
+        for node in doc.nodes() {
+            let region_paints = match &node.kind {
+                NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints) {
+                let PaintKind::Pattern(fill) = &paint.kind else { continue };
+                let Some(source) = gpu_pattern_source(doc, fill) else { continue };
+                let Some(cell) = fill.cell(source.width, source.height, node.width, node.height) else { continue };
+                let key = pattern_key(node, fill);
+                active_pattern_keys.insert(key.clone());
+                let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+                let resolution = scale.min(2048.0 / cell.size.0.max(cell.size.1));
+                let width = (cell.size.0 * resolution).ceil().clamp(1.0, 2048.0) as u16;
+                let height = (cell.size.1 * resolution).ceil().clamp(1.0, 2048.0) as u16;
+                let state = (width, height, format!("{source:?}"), time.to_bits());
+                if self.pattern_info.get(&key) == Some(&state) {
+                    continue;
+                }
+                let kx = f64::from(width) / cell.size.0;
+                let ky = f64::from(height) / cell.size.1;
+                let mut scene = Scene::new(width, height);
+                for tile in &cell.tiles {
+                    let transform = Affine::scale_non_uniform(kx, ky) * Affine::translate(*tile) * Affine::scale(cell.scale);
+                    if source.opacity < 0.999 {
+                        scene.push_opacity_layer(source.opacity);
+                    }
+                    draw_content(&mut scene, doc, source, transform, Some(&self.image_info), None, None, Affine::IDENTITY, (width, height));
+                    if source.opacity < 0.999 {
+                        scene.pop_layer();
+                    }
+                }
+                let mut tile_canvas = Self::shared_with(self, u32::from(width), u32::from(height));
+                tile_canvas.image_bindings = self.image_bindings.clone();
+                tile_canvas.render_submit_with_target(
+                    &scene,
+                    TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }),
+                )?;
+                let texture = tile_canvas.texture.clone();
+                let id = self.image_info.get(&key).map_or_else(|| TextureId(self.next_external_id), |info| info.id);
+                if !self.image_info.contains_key(&key) {
+                    self.next_external_id += 1;
+                }
+                self.image_bindings.insert(id, texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                self.image_info.insert(key.clone(), ImageInfo { id, width, height, region: None });
+                self.pattern_textures.insert(key.clone(), texture);
+                self.pattern_info.insert(key, state);
+                count += 1;
+            }
+        }
+        let stale_patterns: Vec<_> = self.pattern_info.keys().filter(|key| !active_pattern_keys.contains(*key)).cloned().collect();
+        for key in stale_patterns {
+            if let Some(info) = self.image_info.remove(&key) {
+                self.image_bindings.remove(info.id);
+            }
+            self.pattern_info.remove(&key);
+            self.pattern_textures.remove(&key);
         }
         let stale: Vec<_> = self.shader_info.keys().filter(|key| !active_shader_keys.contains(*key)).cloned().collect();
         for key in stale {

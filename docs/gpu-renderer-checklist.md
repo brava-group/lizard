@@ -25,6 +25,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
+  - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf sources;
+    retain a guarded fallback for nested, masked, effected, or text pattern sources.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -127,3 +129,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   raster remains a fallback and the browser GPU path is still open. `CARGO_INCREMENTAL=0 cargo
   xtask ci` passed with 66 GPU tests and 712 UI tests after extending the high-zoom drag test's
   deadline for parallel workspace load; that test passed alone in 0.25 s.
+- 2026-10-30: simple pattern cells now render as Vello textures on the same GPU device and repeat
+  in the destination paint. Grid, horizontal hex, and vertical hex samples matched CPU at 1×
+  and 2× zoom with source and paint opacity. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with
+  67 GPU tests and 712 UI tests. Nested/effected/text sources are still guarded.
