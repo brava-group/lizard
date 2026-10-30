@@ -2329,11 +2329,16 @@ fn pattern_key(node: &Node, fill: &PatternPaint) -> String {
 
 fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a Node> {
     let source = doc.node(NodeId(fill.source))?;
-    (source.visible && !source.is_page() && gpu_pattern_subtree_supported(doc, source, 0)).then_some(source)
+    (source.visible && !source.is_page() && !source.is_mask && gpu_pattern_subtree_supported(doc, source, 0)).then_some(source)
 }
 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
-    if depth > 64 || node.is_mask || node.clip || matches!(node.kind, NodeKind::Text(_)) || node.effects.iter().any(|effect| effect.visible) {
+    if depth > 64
+        || node.clip
+        || matches!(node.kind, NodeKind::Text(_))
+        || node.effects.iter().any(|effect| effect.visible)
+        || node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node)
+    {
         return false;
     }
     let region_paints = match &node.kind {

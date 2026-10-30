@@ -409,6 +409,49 @@ mod tests {
     }
 
     #[test]
+    fn gpu_pattern_masked_group_source_matches_cpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU masked pattern group");
+        let page = doc.current_page.ok_or("page missing")?;
+        let source = doc.create(page, NodeKind::Group, "Tile", 300.0, 300.0, 8.0, 8.0)?;
+        let mask = doc.create(source, NodeKind::Rectangle, "Mask", 0.0, 0.0, 4.0, 8.0)?;
+        let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
+        mask_node.is_mask = true;
+        mask_node.fills = vec![Paint::solid(Color::WHITE)];
+        let colored = doc.create(source, NodeKind::Rectangle, "Colored", 0.0, 0.0, 8.0, 8.0)?;
+        doc.node_mut(colored).ok_or("colored shape missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))];
+        let target = doc.create(page, NodeKind::Rectangle, "Pattern", 0.0, 0.0, 32.0, 16.0)?;
+        let mut paint = Paint::solid(Color::WHITE);
+        paint.kind = PaintKind::Pattern(PatternPaint::new(source.0));
+        doc.node_mut(target).ok_or("target missing")?.fills = vec![paint];
+        let area = Rect::new(0.0, 0.0, 32.0, 16.0);
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 64, height: 32 };
+        for mask_type in [figcraft_doc::MaskType::Alpha, figcraft_doc::MaskType::Vector, figcraft_doc::MaskType::Luminance] {
+            doc.node_mut(mask).ok_or("mask missing for type")?.mask_type = mask_type;
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let gpu = render_area_gpu(&doc, &[target], area, 2.0).ok_or("masked pattern GPU export unavailable")?;
+            let cpu = figcraft_render::render_area(&doc, &[target], area, 2.0).ok_or("masked pattern CPU export unavailable")?;
+            for y in [2, 6, 10, 14] {
+                for x in [2, 6, 10, 14, 18, 22, 26, 30] {
+                    let actual = gpu.pixel(x * 2, y * 2).ok_or("GPU masked pattern pixel missing")?;
+                    let expected = cpu.pixel(x * 2, y * 2).ok_or("CPU masked pattern pixel missing")?;
+                    for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                        expected.red(),
+                        expected.green(),
+                        expected.blue(),
+                        expected.alpha(),
+                    ]) {
+                        assert!(a.abs_diff(b) <= 12, "{mask_type:?} pattern at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn shader_fill_stays_on_gpu_and_matches_cpu_at_zoom() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());

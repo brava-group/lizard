@@ -26,7 +26,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
-    group sources; retain a guarded fallback for nested, masked, effected, or text sources.
+    group sources, including supported alpha, vector, and luminance masks. Retain a guarded
+    fallback for nested patterns, unsupported masks, effects, and complex text sources.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -66,6 +67,10 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 - [ ] Enable the GPU canvas and GPU raster exports in the browser/WASM build, with WebGPU and
   a documented fallback for browsers without it.
+  - [ ] Separate the browser WebGPU scene from native-only geometry atlas workers; `wgpu::Device`
+    is not `Send`/`Sync` on the browser backend, so Rayon upload jobs cannot own it.
+  - [ ] Use async browser device initialization and connect the GPU scene to egui's WebGPU paint
+    callback; preserve the CPU renderer for browsers without WebGPU.
 - [ ] Remove production tiny-skia raster paths once GPU coverage is demonstrated; retain a
   test-only CPU reference and an explicit no-GPU fallback if required for accessibility.
 - [ ] Pass `cargo xtask ci`, run native visual checks, compare export pixels, and benchmark pan,
@@ -153,3 +158,10 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   source subtree into the repeating cell and includes descendants in its cache key. Two-color
   group samples matched the CPU reference; nested patterns, masks, effects, and text remain
   guarded.
+- 2026-10-30: a WASM compile probe confirmed that `vello_gpu` itself builds for
+  `wasm32-unknown-unknown`. Lizard's canvas crate still does not: the native geometry-atlas Rayon
+  worker requires a `Send + Sync` device, while browser WebGPU's device is local to its thread;
+  a native-only shadow module also imports a gated blur module. Those modules need platform
+  separation and an async browser initialization path before the web canvas can use this engine.
+- 2026-10-30: simple group pattern sources now accept alpha and vector masks, plus the supported
+  single-paint luminance mask. Repeating-cell samples matched CPU for all three mask types.
