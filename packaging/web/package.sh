@@ -24,28 +24,26 @@ if grep -Eq '(src|href)="/[^/]' "$SITE/index.html"; then
   exit 1
 fi
 
-# Size gate: Cloudflare Pages/Workers reject any single file over 25 MiB, and other
-# hosts and CDNs have similar caps. Fail well before that so a regression shows up here, not at
-# upload time. Override with FIGCRAFT_WASM_MAX_BYTES only to investigate.
-MAX_WASM_BYTES="${FIGCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
-WASM_COUNT=0
-for wasm in "$SITE"/*.wasm; do
-  [ -f "$wasm" ] || continue
-  WASM_COUNT=$((WASM_COUNT + 1))
-  size=$(wc -c <"$wasm" | tr -d ' ')
-  echo "$(basename "$wasm"): $size bytes ($((size / 1048576)) MiB; limit $MAX_WASM_BYTES)"
-  if [ "$size" -gt "$MAX_WASM_BYTES" ]; then
-    echo "error: $(basename "$wasm") is $size bytes, over the $MAX_WASM_BYTES-byte limit (Cloudflare's per-file cap is 25 MiB)" >&2
-    exit 1
-  fi
-done
-[ "$WASM_COUNT" -gt 0 ] || { echo "error: no .wasm in $SITE" >&2; exit 1; }
-
 NAME="figcraft-web-$VERSION"
 WORK="$CARGO_TARGET_DIR/web-package"
 rm -rf "$WORK"
 mkdir -p "$WORK/$NAME"
 cp -R "$SITE/." "$WORK/$NAME/"
+python3 "$HERE/compress_wasm.py" "$WORK/$NAME"
+# Cloudflare Pages/Workers reject any single asset over 25 MiB. Keep a margin for future growth.
+MAX_WASM_BYTES="${FIGCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
+WASM_COUNT=0
+for wasm in "$WORK/$NAME"/*.wasm.gz; do
+  [ -f "$wasm" ] || continue
+  WASM_COUNT=$((WASM_COUNT + 1))
+  size=$(wc -c <"$wasm" | tr -d ' ')
+  echo "$(basename "$wasm"): $size bytes ($((size / 1048576)) MiB; limit $MAX_WASM_BYTES)"
+  if [ "$size" -gt "$MAX_WASM_BYTES" ]; then
+    echo "error: $(basename "$wasm") is $size bytes, over the $MAX_WASM_BYTES-byte limit" >&2
+    exit 1
+  fi
+done
+[ "$WASM_COUNT" -gt 0 ] || { echo "error: no compressed WASM in $WORK/$NAME" >&2; exit 1; }
 # Sample server configs (MIME type, caching, compression); harmless where unused.
 cp "$HERE/_headers" "$HERE/.htaccess" "$WORK/$NAME/"
 cp "$HERE/README.md" "$WORK/$NAME/HOSTING.md"

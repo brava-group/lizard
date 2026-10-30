@@ -12,6 +12,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Replace the unsupported-scene CPU fallback with GPU implementations for every visible
   paint, effect, mask, blend mode, text run, and color profile. Keep a fallback only for GPU failure.
 - [ ] Render outline mode, soft proof, selection/drag previews, and other canvas overlays on GPU.
+  - [ ] Replace `render_worker`'s CPU `render_view` path for outline, soft proof, and fallback
+    previews with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
   speeds for documents with mixed effects; check error paths and resize behavior.
   - [x] Prepare the composited drag background, moving layer, and zoom detail with GPU-first
@@ -57,20 +59,29 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
   - [x] Route static previews, vectorization backgrounds, static presentation textures,
-    rasterize, eyedropper, and MCP renders through the shared GPU-first renderer.
+    rasterize, and MCP renders through the shared GPU-first renderer.
   - [x] Render the vectorization SVG preview through imported vectors and GPU-first export.
   - [x] Render animated presentation textures through GPU composition after frame decoding.
+  - [ ] Sample the canvas eyedropper magnifier from GPU pixels instead of its direct CPU
+    `render_view` call, without a per-pointer GPU re-render or synchronous stall.
+  - [ ] Move plugin SVG icon thumbnails and other direct `figcraft_render` preview calls to GPU.
 - [ ] Use the same GPU effect path when SVG/PDF must embed rasterized effects or masks; keep
   their ordinary vector drawing as vector output.
+  - [ ] Route SVG import paint rasterization and SVG/PDF effect/mask embedding through a GPU
+    service without introducing a lower-crate dependency on egui or the command engine.
 
 ## Platforms and retirement
 
 - [ ] Enable the GPU canvas and GPU raster exports in the browser/WASM build, with WebGPU and
   a documented fallback for browsers without it.
-  - [ ] Separate the browser WebGPU scene from native-only geometry atlas workers; `wgpu::Device`
+  - [x] Separate the browser WebGPU scene from native-only geometry atlas workers; `wgpu::Device`
     is not `Send`/`Sync` on the browser backend, so Rayon upload jobs cannot own it.
-  - [ ] Use async browser device initialization and connect the GPU scene to egui's WebGPU paint
-    callback; preserve the CPU renderer for browsers without WebGPU.
+  - [x] Reuse eframe's browser WebGPU device for the direct canvas; preserve the CPU renderer for
+    WebGL2, unsupported scenes, and GPU errors.
+  - [x] Package the larger WebGPU WASM below the static host's per-file limit and smoke-test
+    the packaged loader in Chrome.
+  - [ ] Validate browser WebGPU canvas pixels and interaction latency in a browser.
+  - [ ] Route browser PNG/JPEG/WebP and clipboard raster exports through WebGPU readback.
 - [ ] Remove production tiny-skia raster paths once GPU coverage is demonstrated; retain a
   test-only CPU reference and an explicit no-GPU fallback if required for accessibility.
 - [ ] Pass `cargo xtask ci`, run native visual checks, compare export pixels, and benchmark pan,
@@ -165,3 +176,22 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   separation and an async browser initialization path before the web canvas can use this engine.
 - 2026-10-30: simple group pattern sources now accept alpha and vector masks, plus the supported
   single-paint luminance mask. Repeating-cell samples matched CPU for all three mask types.
+- 2026-10-30: the browser's direct Vello canvas now shares eframe's WebGPU device. A browser
+  smoke test caught an existing WASM crash in use of `std::time::Instant` on both WebGPU and
+  WebGL2; browser-compatible clocks fixed it. Chrome headless with BrowserWebGpu now starts
+  without an exception; the WebGL2 fallback also starts without an exception. A newly drawn
+  rectangle appeared in a captured WebGPU screenshot. The
+  packaged loader was also exercised in Chrome. Browser export readback and scene pixel/latency
+  comparisons are still open. The production WASM is 30,760,930 bytes raw; packaging it as
+  14,142,387-byte gzip stays below the host's 25 MiB per-file limit.
+- 2026-10-30: a call-site audit found a direct CPU `render_view` in the interactive eyedropper
+  magnifier, plus plugin icon rasterization and SVG/PDF embedding paths. An earlier evidence
+  note called the eyedropper GPU-first; that described its static color preview, not the live
+  magnifier. These paths remain open above.
+- 2026-10-30: an automated Chrome WebGPU smoke now creates a rectangle and reads the presented
+  screenshot pixel. The center changed from `(30, 30, 30)` to `(217, 217, 217)` on `BrowserWebGpu`.
+  This verifies canvas presentation after an edit, but does not establish pan/zoom latency,
+  browser raster export, or pixel parity with the native renderer.
+- 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` completed with exit code 0 after the browser
+  canvas and compatible clock changes. Browser startup and pixel checks were run separately in
+  Chrome because the workspace gate does not execute a real browser.
