@@ -2329,19 +2329,19 @@ fn pattern_key(node: &Node, fill: &PatternPaint) -> String {
 
 fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a Node> {
     let source = doc.node(NodeId(fill.source))?;
-    let region_paints = match &source.kind {
+    (source.visible && !source.is_page() && gpu_pattern_subtree_supported(doc, source, 0)).then_some(source)
+}
+
+fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
+    if depth > 64 || node.is_mask || node.clip || matches!(node.kind, NodeKind::Text(_)) || node.effects.iter().any(|effect| effect.visible) {
+        return false;
+    }
+    let region_paints = match &node.kind {
         NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
         _ => Vec::new(),
     };
-    (source.visible
-        && !source.is_page()
-        && !source.is_mask
-        && !source.clip
-        && !matches!(source.kind, NodeKind::Text(_))
-        && source.children.is_empty()
-        && source.effects.iter().all(|effect| !effect.visible)
-        && matches!(source.blend, BlendMode::Normal | BlendMode::PassThrough)
-        && source.fills.iter().chain(&source.strokes).chain(region_paints).all(|paint| {
+    matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+        && node.fills.iter().chain(&node.strokes).chain(region_paints).all(|paint| {
             !paint.visible
                 || ((gpu_blend_mode(paint.blend).is_some() || paint.blend == BlendMode::Normal)
                     && match &paint.kind {
@@ -2349,8 +2349,16 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
                         PaintKind::Shader(shader) => doc.shaders.contains_key(&shader.shader_id),
                         _ => true,
                     })
-        }))
-    .then_some(source)
+        })
+        && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_pattern_subtree_supported(doc, child, depth + 1)))
+}
+
+fn pattern_source_state(doc: &Document, id: NodeId, state: &mut String) {
+    let Some(node) = doc.node(id) else { return };
+    state.push_str(&format!("{node:?}"));
+    for child in &node.children {
+        pattern_source_state(doc, *child, state);
+    }
 }
 
 fn collect_paint_order(doc: &Document, id: NodeId, output: &mut Vec<NodeId>) {
@@ -5111,22 +5119,31 @@ impl GpuCanvas {
                 let resolution = scale.min(2048.0 / cell.size.0.max(cell.size.1));
                 let width = (cell.size.0 * resolution).ceil().clamp(1.0, 2048.0) as u16;
                 let height = (cell.size.1 * resolution).ceil().clamp(1.0, 2048.0) as u16;
-                let state = (width, height, format!("{source:?}"), time.to_bits());
+                let mut source_state = String::new();
+                pattern_source_state(doc, source.id, &mut source_state);
+                let state = (width, height, source_state, time.to_bits());
                 if self.pattern_info.get(&key) == Some(&state) {
                     continue;
                 }
                 let kx = f64::from(width) / cell.size.0;
                 let ky = f64::from(height) / cell.size.1;
                 let mut scene = Scene::new(width, height);
+                let Some(source_view) = doc.world_render_bounds(source.id) else { continue };
+                let unrotated = doc.world_transform(source.id).inverse();
                 for tile in &cell.tiles {
-                    let transform = Affine::scale_non_uniform(kx, ky) * Affine::translate(*tile) * Affine::scale(cell.scale);
-                    if source.opacity < 0.999 {
-                        scene.push_opacity_layer(source.opacity);
-                    }
-                    draw_content(&mut scene, doc, source, transform, Some(&self.image_info), None, None, Affine::IDENTITY, (width, height));
-                    if source.opacity < 0.999 {
-                        scene.pop_layer();
-                    }
+                    let camera = Affine::scale_non_uniform(kx, ky) * Affine::translate(*tile) * Affine::scale(cell.scale) * unrotated;
+                    draw_node(
+                        &mut scene,
+                        doc,
+                        source.id,
+                        camera,
+                        source_view,
+                        0,
+                        Some(&self.image_info),
+                        None,
+                        CachedEffects::empty(),
+                        (width, height),
+                    );
                 }
                 let mut tile_canvas = Self::shared_with(self, u32::from(width), u32::from(height));
                 tile_canvas.image_bindings = self.image_bindings.clone();

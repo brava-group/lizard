@@ -25,8 +25,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
-  - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf sources;
-    retain a guarded fallback for nested, masked, effected, or text pattern sources.
+  - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
+    group sources; retain a guarded fallback for nested, masked, effected, or text sources.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -147,3 +147,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   previews, presentation textures, thumbnails, home cards, vectorization backgrounds, and font
   previews use that path. A P3 page and selected-layer fixture matched CPU screen colors within
   4/255, including translucent pixels. Browser presentation remains open.
+- 2026-10-30: Copy as PNG now uses the same screen-ready GPU export, so a P3 selection reaches
+  the native clipboard in sRGB without a CPU profile-conversion pass after readback.
+- 2026-10-30: pattern sources may now contain a simple group of child shapes. The GPU draws the
+  source subtree into the repeating cell and includes descendants in its cache key. Two-color
+  group samples matched the CPU reference; nested patterns, masks, effects, and text remain
+  guarded.
