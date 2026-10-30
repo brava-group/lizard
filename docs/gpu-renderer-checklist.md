@@ -40,6 +40,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
     before readback, retaining CPU conversion only for the fallback.
   - [ ] Check Display P3 conversion in the browser presentation path.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
+  - [x] Isolate the content of an opaque shadowed leaf before applying paint blend modes; all
+    Vello-supported modes match the CPU reference with a Drop Shadow. Partial-opacity shadow
+    stacks remain guarded.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
@@ -208,3 +211,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   BrowserWebGpu and WebGL2 fallback. `CARGO_INCREMENTAL=0 cargo xtask ci` and a production WASM
   build passed. The click-to-pick command
   still performs a separate GPU-first 1 × 1 export; unsupported GPU scenes retain CPU fallback.
+- 2026-10-30: a probe of Multiply fill plus Drop Shadow exposed a composition mismatch:
+  the center was `(46, 38, 31)` on GPU versus `(204, 102, 51)` in the CPU reference. Isolating
+  shadowed leaf content after drawing its shadow made all Vello-supported paint blends match the
+  reference at fill, shadow, and background samples. Partial-opacity shadow stacks still hit a
+  separate effect guard and remain on the CPU fallback. All 75 canvas-GPU tests and
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed.

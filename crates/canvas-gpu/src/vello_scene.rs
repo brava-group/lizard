@@ -2851,7 +2851,20 @@ fn draw_node(
         scene.set_transform(transform);
         scene.push_filter_layer(Filter::from_function(FilterFunction::Blur { radius: (radius / 2.0) as f32 }));
     }
+    // The CPU reference paints a shadowed leaf's fills into an isolated layer. A paint blend
+    // therefore sees earlier paints of that leaf, but not the page behind it. Keep its shadow
+    // below that layer so Multiply (and the other supported modes) do not darken the fill.
+    let region_blended = matches!(&node.kind, NodeKind::Vector { network }
+        if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(|paint| paint.visible && paint.blend != BlendMode::Normal));
+    let isolate_shadowed_paints = gpu_shadowed_paint_blend_supported(node)
+        && (region_blended || node.fills.iter().chain(&node.strokes).any(|paint| paint.visible && paint.blend != BlendMode::Normal));
+    if isolate_shadowed_paints {
+        scene.push_opacity_layer(1.0);
+    }
     draw_content(scene, doc, node, transform, images, backdrops, cached.inner_shadows, camera, size);
+    if isolate_shadowed_paints {
+        scene.pop_layer();
+    }
     let clipped = if node.clip && !node.children.is_empty() {
         if let Some((path, rule)) = draw::node_outline(doc, node) {
             scene.set_transform(transform);
@@ -2912,7 +2925,15 @@ fn gpu_simple_node_blend_supported(node: &Node) -> bool {
 }
 
 fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
-    gpu_blend_mode(paint.blend).is_some() && node.children.is_empty() && node.effects.iter().all(|effect| !effect.visible)
+    gpu_blend_mode(paint.blend).is_some()
+        && node.children.is_empty()
+        && (node.effects.iter().all(|effect| !effect.visible) || gpu_shadowed_paint_blend_supported(node))
+}
+
+fn gpu_shadowed_paint_blend_supported(node: &Node) -> bool {
+    node.children.is_empty()
+        && node.effects.iter().any(|effect| effect.visible)
+        && node.effects.iter().all(|effect| !effect.visible || matches!(effect.kind, EffectKind::DropShadow(_)))
 }
 
 fn draw_paint_runs(
