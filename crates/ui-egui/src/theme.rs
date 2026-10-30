@@ -1,4 +1,8 @@
-//! Design tokens (UI3 light and dark) and fonts.
+//! Lizard semantic light and dark design tokens, product surfaces, and fonts.
+
+mod colors;
+
+pub use colors::{ALL_COLOR_ROLES, ColorRole};
 
 use std::sync::Arc;
 
@@ -49,6 +53,8 @@ pub struct Tokens {
 /// Keep the branch's blue accent across controls and canvas overlays.
 pub const ACCENT: Color32 = Color32::from_rgb(0x0D, 0x99, 0xFF);
 pub const ACCENT_ON: Color32 = Color32::WHITE;
+/// Text selection in every editor and input, including the component catalog.
+pub const TEXT_SELECTION_BG: Color32 = Color32::from_rgb(0x25, 0x56, 0x81);
 /// The blue overlay color used by the branch's canvas.
 pub fn canvas_accent(_ctx: &Context) -> Color32 {
     ACCENT
@@ -67,83 +73,84 @@ pub const DEV_COMPLETED: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x73);
 
 impl Tokens {
     pub fn light() -> Self {
+        let color = |role: ColorRole| role.value(false);
         Self {
             dark: false,
-            bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            bg: color(ColorRole::Bg),
             panel: Color32::from_rgb(0xFF, 0xFF, 0xFF),
             canvas: Color32::from_rgb(0xF5, 0xF5, 0xF5),
-            border: Color32::from_rgb(0xE6, 0xE6, 0xE6),
+            border: color(ColorRole::Border),
             border_strong: Color32::from_rgb(0xD9, 0xD9, 0xD9),
-            text: Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            // 4.7:1 on fields and hovered rows (#F5F5F5), 4.6:1 on selected rows: WCAG AA.
-            text_secondary: Color32::from_rgb(0x6E, 0x6E, 0x6E),
-            text_tertiary: Color32::from_rgb(0xB3, 0xB3, 0xB3),
-            icon: Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            icon_secondary: Color32::from_rgb(0x75, 0x75, 0x75),
-            hover: Color32::from_rgb(0xF5, 0xF5, 0xF5),
-            pressed: Color32::from_rgb(0xE6, 0xE6, 0xE6),
-            field: Color32::from_rgb(0xF5, 0xF5, 0xF5),
+            text: color(ColorRole::Text),
+            text_secondary: color(ColorRole::TextSecondary),
+            text_tertiary: color(ColorRole::TextTertiary),
+            icon: color(ColorRole::Icon),
+            icon_secondary: color(ColorRole::IconSecondary),
+            hover: color(ColorRole::BgHover),
+            pressed: color(ColorRole::BgPressed),
+            field: color(ColorRole::BgSecondary),
             field_hover_border: Color32::from_rgb(0xE6, 0xE6, 0xE6),
-            accent: ACCENT,
-            accent_hover: Color32::from_rgb(0x00, 0x7B, 0xE5),
+            accent: color(ColorRole::BgBrand),
+            accent_hover: color(ColorRole::BgBrandHover),
             accent_on: ACCENT_ON,
-            accent_text: Color32::from_rgb(0x00, 0x6B, 0xD1),
-            selected_row: Color32::from_rgb(0xE5, 0xF4, 0xFF),
-            selected_row_child: Color32::from_rgb(0xF2, 0xF9, 0xFF),
-            component: COMPONENT,
-            component_row: Color32::from_rgb(0xF1, 0xE9, 0xFF),
-            danger: Color32::from_rgb(0xF2, 0x48, 0x22),
-            success: DEV_READY,
-            warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
+            accent_text: color(ColorRole::TextBrand),
+            selected_row: color(ColorRole::BgSelected),
+            selected_row_child: color(ColorRole::BgSelectedSecondary),
+            component: color(ColorRole::BgComponent),
+            component_row: color(ColorRole::BgComponentTertiary),
+            danger: color(ColorRole::BgDanger),
+            success: color(ColorRole::BgSuccess),
+            warning: color(ColorRole::BgWarning),
             guide: Color32::from_rgb(0xF2, 0x48, 0x22),
             tab_bar: Color32::from_rgb(0xE8, 0xE8, 0xE8),
             tab_active: Color32::from_rgb(0xFF, 0xFF, 0xFF),
             shadow: Color32::from_black_alpha(40),
             menu: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             menu_text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-            menu_hover: ACCENT,
-            menu_dim: Color32::from_rgb(0x9A, 0x9A, 0x9A),
-            focus: Color32::from_rgb(0x00, 0x6B, 0xD1),
+            menu_hover: color(ColorRole::BgMenuHover),
+            menu_dim: Color32::from_rgba_unmultiplied(255, 255, 255, 178),
+            focus: color(ColorRole::BorderSelected),
         }
     }
 
     pub fn dark() -> Self {
+        let color = |role: ColorRole| role.value(true);
         Self {
             dark: true,
-            bg: Color32::from_rgb(0x2C, 0x2C, 0x2C),
+            bg: color(ColorRole::Bg),
             panel: Color32::from_rgb(0x2B, 0x2B, 0x2B),
             canvas: Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            border: Color32::from_rgb(0x44, 0x44, 0x44),
+            border: color(ColorRole::Border),
             border_strong: Color32::from_rgb(0x55, 0x55, 0x55),
-            text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-            text_secondary: Color32::from_rgb(0xB3, 0xB3, 0xB3),
-            text_tertiary: Color32::from_rgb(0x75, 0x75, 0x75),
-            icon: Color32::from_rgb(0xF5, 0xF5, 0xF5),
-            icon_secondary: Color32::from_rgb(0xB3, 0xB3, 0xB3),
-            hover: Color32::from_rgb(0x38, 0x38, 0x38),
-            pressed: Color32::from_rgb(0x44, 0x44, 0x44),
-            field: Color32::from_rgb(0x38, 0x38, 0x38),
+            text: color(ColorRole::Text),
+            text_secondary: color(ColorRole::TextSecondary),
+            text_tertiary: color(ColorRole::TextTertiary),
+            icon: color(ColorRole::Icon),
+            icon_secondary: color(ColorRole::IconSecondary),
+            hover: color(ColorRole::BgHover),
+            pressed: color(ColorRole::BgPressed),
+            field: color(ColorRole::BgSecondary),
             field_hover_border: Color32::from_rgb(0x4D, 0x4D, 0x4D),
-            accent: ACCENT,
-            accent_hover: Color32::from_rgb(0x3D, 0xAD, 0xFF),
+            accent: color(ColorRole::BgBrand),
+            accent_hover: color(ColorRole::BgBrandHover),
             accent_on: ACCENT_ON,
-            accent_text: Color32::from_rgb(0x7C, 0xC4, 0xF8),
-            selected_row: Color32::from_rgb(0x2A, 0x45, 0x5C),
-            selected_row_child: Color32::from_rgb(0x2D, 0x37, 0x41),
-            component: Color32::from_rgb(0xD2, 0x7C, 0xFF),
-            component_row: Color32::from_rgb(0x3E, 0x30, 0x52),
-            danger: Color32::from_rgb(0xF2, 0x48, 0x22),
-            success: DEV_READY,
-            warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
+            accent_text: color(ColorRole::TextBrand),
+            selected_row: color(ColorRole::BgSelected),
+            selected_row_child: color(ColorRole::BgSelectedSecondary),
+            component: color(ColorRole::BgComponent),
+            component_row: color(ColorRole::BgComponentTertiary),
+            danger: color(ColorRole::BgDanger),
+            success: color(ColorRole::BgSuccess),
+            warning: color(ColorRole::BgWarning),
             guide: Color32::from_rgb(0xF2, 0x48, 0x22),
             tab_bar: Color32::from_rgb(0x3A, 0x3B, 0x40),
             tab_active: Color32::from_rgb(0x2C, 0x2C, 0x2C),
             shadow: Color32::from_black_alpha(90),
             menu: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             menu_text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-            menu_hover: ACCENT,
-            menu_dim: Color32::from_rgb(0x9A, 0x9A, 0x9A),
-            focus: ACCENT,
+            menu_hover: color(ColorRole::BgMenuHover),
+            menu_dim: Color32::from_rgba_unmultiplied(255, 255, 255, 178),
+            focus: color(ColorRole::BorderSelected),
         }
     }
 
@@ -200,8 +207,8 @@ fn visuals(t: Tokens) -> Visuals {
     v.window_stroke = Stroke::new(1.0, t.border);
     v.window_corner_radius = egui::CornerRadius::same(13);
     v.menu_corner_radius = egui::CornerRadius::same(13);
-    v.selection.bg_fill = t.accent.gamma_multiply(0.3);
-    v.selection.stroke = Stroke::new(1.0, t.accent);
+    v.selection.bg_fill = TEXT_SELECTION_BG;
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
     v.hyperlink_color = t.accent_text;
     for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open, &mut v.widgets.noninteractive] {
         w.corner_radius = egui::CornerRadius::same(5);
@@ -224,21 +231,24 @@ fn visuals(t: Tokens) -> Visuals {
     v
 }
 
-/// Draw `f` with the dark tokens and visuals: controls on the dark popovers (the style browser's
-/// style editor), whichever theme the app shows.
-pub fn on_dark<R>(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
+/// Draw a preview with a specified Lizard theme without changing the surrounding window.
+pub fn with_theme<R>(ui: &mut egui::Ui, theme: Tokens, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let ctx = ui.ctx().clone();
     let saved = Tokens::get(&ctx);
-    let dark = Tokens::dark();
-    ctx.data_mut(|d| d.insert_temp(tokens_id(), dark));
+    ctx.data_mut(|d| d.insert_temp(tokens_id(), theme));
     let r = ui
         .scope(|ui| {
-            *ui.visuals_mut() = visuals(dark);
+            *ui.visuals_mut() = visuals(theme);
             f(ui)
         })
         .inner;
     ctx.data_mut(|d| d.insert_temp(tokens_id(), saved));
     r
+}
+
+/// Draw `f` with the dark tokens and visuals: controls on dark popovers whichever theme the app shows.
+pub fn on_dark<R>(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    with_theme(ui, Tokens::dark(), f)
 }
 
 /// UI fonts: Inter from the optional craft-fonts build input or the system when available. With
@@ -249,6 +259,8 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     let find = |family: &str, style: &str| figcraft_text::CRAFT_FONTS.iter().find(|f| f.family == family && f.style == style).map(|f| f.bytes);
     let regular =
         find("Inter", "Regular").map(FontData::from_static).or_else(|| figcraft_text::find_face("Inter", "Regular").map(|face| font_data(&face)));
+    let medium =
+        find("Inter", "Medium").map(FontData::from_static).or_else(|| figcraft_text::find_face("Inter", "Medium").map(|face| font_data(&face)));
     let semibold = find("Inter", "SemiBold")
         .or_else(|| find("Inter", "Bold"))
         .map(FontData::from_static)
@@ -259,6 +271,13 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
             list.insert(0, "inter".into());
         }
     }
+    let mut medium_family = Vec::new();
+    if let Some(medium) = medium {
+        fonts.font_data.insert("inter-medium".into(), Arc::new(medium));
+        medium_family.push("inter-medium".into());
+    }
+    medium_family.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
+    fonts.families.insert(FontFamily::Name("medium".into()), medium_family);
     let mut semi = Vec::new();
     if let Some(semibold) = semibold {
         fonts.font_data.insert("inter-semibold".into(), Arc::new(semibold));
@@ -297,7 +316,7 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     extra.extend(craft(true));
     for (key, data) in extra {
         fonts.font_data.insert(key.clone(), Arc::new(data));
-        for fam in [FontFamily::Proportional, FontFamily::Name("semibold".into())] {
+        for fam in [FontFamily::Proportional, FontFamily::Name("medium".into()), FontFamily::Name("semibold".into())] {
             if let Some(list) = fonts.families.get_mut(&fam) {
                 list.push(key.clone());
             }
@@ -353,6 +372,10 @@ pub fn font_data(face: &figcraft_text::Face) -> FontData {
 
 pub fn semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("semibold".into()))
+}
+
+pub fn medium(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("medium".into()))
 }
 
 pub fn regular(size: f32) -> FontId {

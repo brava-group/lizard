@@ -19,10 +19,7 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         super::super::Icon::Text => Some(329),
         super::super::Icon::Comment => Some(74),
         super::super::Icon::Actions => Some(1),
-        super::super::Icon::Chevron => Some(61),
-        super::super::Icon::ChevronRight => Some(63),
-        super::super::Icon::ChevronLeft => Some(211),
-        super::super::Icon::ChevronUp => Some(65),
+        super::super::Icon::Chevron | super::super::Icon::ChevronRight | super::super::Icon::ChevronLeft | super::super::Icon::ChevronUp => None,
         super::super::Icon::Plus => Some(255),
         super::super::Icon::Minus => Some(204),
         super::super::Icon::Eye => Some(109),
@@ -140,6 +137,41 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         super::super::Icon::Online => Some(262),
         super::super::Icon::LiveShared => Some(286),
         super::super::Icon::LivePrivate => Some(193),
-        super::super::Icon::Angle | super::super::Icon::Logo => None,
+        super::super::Icon::Angle
+        | super::super::Icon::Logo
+        | super::super::Icon::VariableColor
+        | super::super::Icon::VariableString
+        | super::super::Icon::VariableNumber
+        | super::super::Icon::VariableBoolean
+        | super::super::Icon::TypeLineHeight
+        | super::super::Icon::TypeLetterSpacing
+        | super::super::Icon::TypeAlignLeft
+        | super::super::Icon::TypeAlignCenter
+        | super::super::Icon::TypeAlignRight
+        | super::super::Icon::TypeAlignTop
+        | super::super::Icon::TypeAlignMiddle
+        | super::super::Icon::TypeAlignBottom
+        | super::super::Icon::TypeSettings
+        | super::super::Icon::TypeDialogJustify
+        | super::super::Icon::TypeDialogNone
+        | super::super::Icon::TypeDialogUnderline
+        | super::super::Icon::TypeDialogStrike
+        | super::super::Icon::TypeDialogUpper
+        | super::super::Icon::TypeDialogLower
+        | super::super::Icon::TypeDialogTitle
+        | super::super::Icon::TypeDialogSmallCaps
+        | super::super::Icon::TypeDialogTrimStandard
+        | super::super::Icon::TypeDialogTrimCap
+        | super::super::Icon::TypeDialogListBullets
+        | super::super::Icon::TypeDialogListNumbered
+        | super::super::Icon::TypeDialogTruncate
+        | super::super::Icon::ImageCrop
+        | super::super::Icon::ImageSelectArea
+        | super::super::Icon::ImageRemoveBackground
+        | super::super::Icon::ImageEditPrompt
+        | super::super::Icon::ImageExpand
+        | super::super::Icon::ImageEnhance
+        | super::super::Icon::ImageVectorize
+        | super::super::Icon::Trash => None,
     }
 }

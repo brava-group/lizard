@@ -14,6 +14,7 @@ mod ui3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderIcon {
+    CollapsePanel,
     Present,
     ZoomChevron,
     AvatarRing,
@@ -24,6 +25,9 @@ pub enum HeaderIcon {
     UnionTertiary,
     EditObject,
     SelectMatching,
+    TextLink,
+    TextVariable,
+    More,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +42,14 @@ pub enum PositionIcon {
     RotateRight,
     FlipH,
     FlipV,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VectorPointIcon {
+    MirrorNone,
+    MirrorAngle,
+    MirrorAngleAndLength,
+    More,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +72,10 @@ pub enum LayoutIcon {
     PaddingRight,
     PaddingTop,
     PaddingBottom,
+    TextAutoWidth,
+    TextAutoHeight,
+    TextFixed,
+    TextAspectRatio,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +119,20 @@ pub enum LayerIcon {
     Absolute,
     ChevronDown,
     ChevronRight,
+    Mask,
+    Ellipse,
+    EllipseMask,
+    Component,
+    Instance,
+    Vector,
+    Image,
+    Star,
+    Polygon,
+    Arrow,
+    Line,
+    Rectangle,
+    Group,
+    CollapseAll,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +194,13 @@ icons! {
     Polygon,
     Star,
     Image,
+    ImageCrop,
+    ImageSelectArea,
+    ImageRemoveBackground,
+    ImageEditPrompt,
+    ImageExpand,
+    ImageEnhance,
+    ImageVectorize,
     Pen,
     Pencil,
     Text,
@@ -192,6 +229,7 @@ icons! {
     Page,
     Check,
     Close,
+    Trash,
     /// Window buttons: minimise, maximise, restore.
     WinMinimize,
     WinMaximize,
@@ -237,6 +275,28 @@ icons! {
     TextTop,
     TextMiddle,
     TextBottom,
+    TypeLineHeight,
+    TypeLetterSpacing,
+    TypeAlignLeft,
+    TypeAlignCenter,
+    TypeAlignRight,
+    TypeAlignTop,
+    TypeAlignMiddle,
+    TypeAlignBottom,
+    TypeSettings,
+    TypeDialogJustify,
+    TypeDialogNone,
+    TypeDialogUnderline,
+    TypeDialogStrike,
+    TypeDialogUpper,
+    TypeDialogLower,
+    TypeDialogTitle,
+    TypeDialogSmallCaps,
+    TypeDialogTrimStandard,
+    TypeDialogTrimCap,
+    TypeDialogListBullets,
+    TypeDialogListNumbered,
+    TypeDialogTruncate,
     Eyedropper,
     Code,
     Assets,
@@ -270,6 +330,10 @@ icons! {
     Reset,
     Detach,
     Variable,
+    VariableColor,
+    VariableString,
+    VariableNumber,
+    VariableBoolean,
     Clock,
     Eraser,
     /// Variable width: a stroke swelling in the middle with a width handle above and below.
@@ -313,6 +377,23 @@ icons! {
     LiveShared,
     /// A file of yours on a server that only you get into: a point inside a closed ring.
     LivePrivate,
+}
+
+impl Icon {
+    /// Several legacy call sites use a context-specific name for the same drawing. A single
+    /// canonical glyph is shown in the catalog, while both names remain valid for those callers.
+    pub const fn canonical(self) -> Self {
+        match self {
+            Self::Section2 => Self::Section,
+            Self::WinMaximize => Self::Rectangle,
+            Self::WinMinimize => Self::Minus,
+            Self::ViewGrid => Self::LayoutGrid,
+            Self::Dots => Self::Menu,
+            Self::Library => Self::Assets,
+            Self::ShapeBuilderRemove => Self::Subtract,
+            other => other,
+        }
+    }
 }
 
 /// Points along a circular arc from angle `a0` to `a1` (radians, y down: increasing is clockwise).
@@ -555,6 +636,24 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     draw(&p, icon);
 }
 
+/// A chevron sized by its painted bounds for compact controls.
+pub(crate) fn paint_compact_chevron(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_compact_chevron(painter, rect, color);
+}
+
+/// The unlink mark from the color control's variable-hover state.
+pub(crate) fn paint_color_detach(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_color_detach(painter, rect, color);
+}
+
+pub(crate) fn paint_number_variable(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_number_variable(painter, rect, color);
+}
+
+pub(crate) fn paint_number_detach(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_number_detach(painter, rect, color);
+}
+
 /// Paint an exact icon composition from the owner's bottom toolbar reference.
 pub fn paint_toolbar(painter: &Painter, rect: Rect, index: usize, color: Color32) {
     ui3::paint_toolbar(painter, rect, index, color);
@@ -574,6 +673,10 @@ pub fn paint_position(painter: &Painter, rect: Rect, icon: PositionIcon, color: 
     ui3::paint_position(painter, rect, icon, color, tertiary);
 }
 
+pub fn paint_vector_point(painter: &Painter, rect: Rect, icon: VectorPointIcon, color: Color32) {
+    ui3::paint_vector_point(painter, rect, icon, color);
+}
+
 pub fn paint_layout(painter: &Painter, rect: Rect, icon: LayoutIcon, color: Color32) {
     ui3::paint_layout(painter, rect, icon, color);
 }
@@ -588,6 +691,12 @@ pub fn paint_colorpicker(painter: &Painter, rect: Rect, index: usize, color: Col
 
 pub fn paint_panel_reference(painter: &Painter, rect: Rect, index: usize, color: Color32) {
     ui3::paint_panel_reference(painter, rect, index, color);
+}
+
+/// Unique, named artwork from the properties-panel reference. Existing numeric call sites keep
+/// their indices, including aliases, while the catalog shows each drawing only once.
+pub fn panel_reference_catalog() -> &'static [(usize, String)] {
+    ui3::panel_reference_catalog()
 }
 
 pub fn paint_property(painter: &Painter, rect: Rect, index: usize, color: Color32) {
@@ -733,10 +842,29 @@ fn draw(p: &P, icon: Icon) {
             p.path(&b, true);
         }
         Actions => p.poly(&[(9.0, 2.0), (3.5, 9.0), (7.5, 9.0), (6.5, 14.0), (12.5, 7.0), (8.5, 7.0)], true),
-        Chevron => p.poly(&[(4.5, 6.0), (8.0, 9.5), (11.5, 6.0)], false),
-        ChevronUp => p.poly(&[(4.5, 10.0), (8.0, 6.5), (11.5, 10.0)], false),
-        ChevronRight => p.poly(&[(6.0, 4.5), (9.5, 8.0), (6.0, 11.5)], false),
-        ChevronLeft => p.poly(&[(10.0, 4.5), (6.5, 8.0), (10.0, 11.5)], false),
+        Chevron | ChevronUp | ChevronRight | ChevronLeft => {} // All directions use chevron.svg above.
+        TypeLineHeight
+        | TypeLetterSpacing
+        | TypeAlignLeft
+        | TypeAlignCenter
+        | TypeAlignRight
+        | TypeAlignTop
+        | TypeAlignMiddle
+        | TypeAlignBottom
+        | TypeSettings
+        | TypeDialogJustify
+        | TypeDialogNone
+        | TypeDialogUnderline
+        | TypeDialogStrike
+        | TypeDialogUpper
+        | TypeDialogLower
+        | TypeDialogTitle
+        | TypeDialogSmallCaps
+        | TypeDialogTrimStandard
+        | TypeDialogTrimCap
+        | TypeDialogListBullets
+        | TypeDialogListNumbered
+        | TypeDialogTruncate => {} // Exact typography SVGs are handled by icons_ui3.
         Plus => {
             p.line(7.5, 2.0, 7.5, 13.0);
             p.line(2.0, 7.5, 13.0, 7.5);
@@ -817,6 +945,13 @@ fn draw(p: &P, icon: Icon) {
         Close => {
             p.line(4.0, 4.0, 12.0, 12.0);
             p.line(12.0, 4.0, 4.0, 12.0);
+        }
+        Trash => {
+            p.line(3.0, 4.5, 13.0, 4.5);
+            p.poly(&[(4.5, 5.5), (5.0, 13.5), (11.0, 13.5), (11.5, 5.5)], false);
+            p.line(6.0, 2.5, 10.0, 2.5);
+            p.line(7.0, 7.0, 7.0, 11.5);
+            p.line(9.0, 7.0, 9.0, 11.5);
         }
         WinMinimize => p.line(3.0, 8.5, 13.0, 8.5),
         WinMaximize => p.rect(3.5, 3.5, 12.5, 12.5, 0.0),
@@ -1150,6 +1285,31 @@ fn draw(p: &P, icon: Icon) {
             p.line(7.5, 4.0, 7.5, 8.0);
             p.line(7.5, 7.5, 10.0, 10.0);
         }
+        VariableColor => {
+            p.circle(8.0, 8.0, 6.0);
+            for (x, y) in [(5.0, 5.5), (8.0, 4.0), (11.0, 5.5), (4.5, 9.0)] {
+                p.dot(x, y, 0.7);
+            }
+            p.circle(10.5, 10.5, 1.6);
+        }
+        VariableString => {
+            p.rect(2.5, 2.5, 13.5, 13.5, 1.5);
+            p.line(5.0, 5.5, 11.0, 5.5);
+            p.line(8.0, 5.5, 8.0, 11.0);
+        }
+        VariableNumber => {
+            p.rect(2.5, 2.5, 13.5, 13.5, 1.5);
+            for x in [6.5, 9.5] {
+                p.line(x, 5.0, x, 11.0);
+            }
+            for y in [7.0, 9.5] {
+                p.line(5.0, y, 11.0, y);
+            }
+        }
+        VariableBoolean => {
+            p.rect(1.5, 4.5, 14.5, 11.5, 3.5);
+            p.circle(6.0, 8.0, 2.2);
+        }
         ShapeBuilder | ShapeBuilderRemove => {
             // Two overlapping rings; their shared lens filled (merge) or crossed out (remove).
             let (r, d) = (4.5f32, 2.0f32);
@@ -1274,6 +1434,7 @@ fn draw(p: &P, icon: Icon) {
             p.line(8.0, 6.0, 8.0, 9.5);
             p.dot(8.0, 11.5, 0.9);
         }
+        ImageCrop | ImageSelectArea | ImageRemoveBackground | ImageEditPrompt | ImageExpand | ImageEnhance | ImageVectorize => {}
         Logo => {} // The canonical Lizard SVG is rendered by `paint` above.
     }
 }
@@ -1363,6 +1524,7 @@ mod tests {
                 Shape::LineSegment { points, .. } => out.extend(points),
                 Shape::Path(p) => out.extend(&p.points),
                 Shape::Circle(c) => out.push(c.center),
+                Shape::Mesh(m) => out.extend(m.vertices.iter().map(|v| v.pos)),
                 _ => {}
             }
         }
