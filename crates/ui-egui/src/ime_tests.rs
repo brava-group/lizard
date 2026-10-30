@@ -10,6 +10,43 @@ use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
 
+#[test]
+fn gpu_backend_receives_the_transient_ime_document() -> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::{Arc, Mutex};
+
+    struct Capture(Arc<Mutex<Vec<Arc<figcraft_doc::Document>>>>);
+    impl crate::canvas::CanvasGpuBackend for Capture {
+        fn texture(
+            &mut self,
+            doc: Arc<figcraft_doc::Document>,
+            _page: NodeId,
+            _view: &figcraft_render::View,
+            _clear: [f32; 3],
+            _gesture_active: bool,
+            _proof_srgb: bool,
+            _ctx: &egui::Context,
+        ) -> Option<egui::TextureId> {
+            self.0.lock().ok()?.push(doc);
+            None
+        }
+    }
+
+    let mut session = Session::new();
+    let created = session.execute("text.create", &json!({"text": "Hi", "x": 40, "y": 40}))?;
+    let id = figcraft_engine::params::id_of(&created["id"]).ok_or("text node missing")?;
+    let mut ui = Ui::new(session);
+    figcraft_engine::textedit::begin(&mut ui.app.session, id, Some(2), false)?;
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&captured))));
+    let (enabled, _) = enabled_disabled();
+    let _ = ime(&mut ui, vec![enabled, preedit("ni")]);
+    let _ = ime(&mut ui, vec![]);
+    let shown = ui.app.preedit_view().ok_or("IME composition view missing")?;
+    let rendered = captured.lock().map_err(|_| "GPU capture lock poisoned")?;
+    assert!(rendered.iter().any(|doc| Arc::ptr_eq(doc, &shown.doc)), "GPU backend must receive the composed text document");
+    Ok(())
+}
+
 fn key(key: Key, pressed: bool) -> Event {
     Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE }
 }

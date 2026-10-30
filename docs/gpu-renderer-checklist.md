@@ -14,12 +14,16 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Render outline mode, soft proof, selection/drag previews, and other canvas overlays on GPU.
   - [x] Render Display P3 soft-proof stripes in the GPU profile-conversion pass and update the
     presented texture on a proof toggle without rerasterizing the vector scene.
+  - [x] Send the stable transient IME composition document to the GPU canvas on the next frame;
+    caret and composition underline remain lightweight egui overlays.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
   speeds for documents with mixed effects; check error paths and resize behavior.
   - [x] Prepare the composited drag background, moving layer, and zoom detail with GPU-first
     rendering, retaining the existing GPU texture composition on screen.
+  - [x] Suppress the CPU creation preview when the current GPU texture already contains the new
+    shape, avoiding a stale second raster over the scene.
   - [ ] Remove CPU rendering from unsupported drag scenes and measure latency on mixed effects.
 - [ ] Remove the CPU atlas path after direct GPU covers its use cases.
 
@@ -102,6 +106,10 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 ## Evidence log
 
+- 2026-10-30: the current GPU scene now suppresses the redundant CPU creation preview, and
+  an active IME composition sends its stable transient document to the GPU backend on the next
+  frame. Both interaction tests passed; `CARGO_INCREMENTAL=0 cargo xtask ci` passed, including
+  native tests, WASM, plugins, Clippy, formatting, and crate layers.
 - 2026-10-30: default native GPU canvas and guarded native raster exports landed in
   `48a7977e`; `cargo xtask ci` passed. The saved icon's 1024 px GPU export differed from the CPU
   reference by about 0.8/255 per RGB channel on average. The default GPU canvas was inspected

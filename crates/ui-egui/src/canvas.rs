@@ -941,6 +941,12 @@ fn pending_layer_view(doc: &Document, id: NodeId, visible: &figcraft_render::Vie
 }
 
 fn paint_pending_layer(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Context, ppp: f32) {
+    // A current GPU texture already contains the newly created layer. Rasterizing a second
+    // CPU preview here duplicates work and can briefly paint a stale layer over the GPU scene.
+    if app.canvas.gpu_presented {
+        app.canvas.pending_layer = None;
+        return;
+    }
     let candidate = (|| {
         let ds = app.session.ds().ok()?;
         if app.canvas.texture_current(ds)
@@ -1097,12 +1103,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && !ds.view.outlines_selection
         && ds.view.pixel_preview_scale().is_none()
         && ds.focused().is_none()
-        && app.canvas.preedit.is_none()
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
     {
+        // The IME composition lives in a stable transient document until the next edit. Render
+        // that document on the GPU as well, keeping the visible caret/underline as egui overlays.
+        let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
-        let texture = backend.texture(Arc::clone(&ds.doc), ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx);
+        let texture = backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx);
         app.gpu_canvas = Some(backend);
         texture
     } else {
@@ -2825,6 +2833,28 @@ mod stale_render_tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn current_gpu_scene_clears_the_cpu_creation_preview() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = Session::new();
+        let created = session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 60, "height": 40}))?;
+        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("rectangle command returned no ID")?;
+        session.ds_mut()?.selection = vec![id];
+        let mut app = crate::FigApp::new(session, Box::new(crate::NoServices));
+        let ctx = egui::Context::default();
+        app.canvas.rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0));
+        app.canvas.visible_view = Some(figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 300, height: 200 });
+        let frame =
+            || egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))), ..Default::default() };
+        let mut first = ctx.run_ui(frame(), |ui| super::paint_pending_layer(&mut app, ui.painter(), ui.ctx(), 1.0));
+        first.textures_delta.clear();
+        assert!(app.canvas.pending_layer.is_some(), "stale CPU canvas shows a creation preview");
+        app.canvas.gpu_presented = true;
+        let mut second = ctx.run_ui(frame(), |ui| super::paint_pending_layer(&mut app, ui.painter(), ui.ctx(), 1.0));
+        second.textures_delta.clear();
+        assert!(app.canvas.pending_layer.is_none(), "current GPU scene makes the CPU preview redundant");
+        Ok(())
+    }
 
     #[test]
     fn a_new_simple_layer_has_a_cropped_immediate_preview() -> Result<(), Box<dyn std::error::Error>> {
