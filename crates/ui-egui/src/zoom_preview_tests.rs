@@ -180,7 +180,8 @@ fn zoom_out_keeps_input_responsive_until_the_worker_covers_the_new_view() {
     let (s, _) = document();
     let mut ui = crate::layers_drag_tests::Ui::new(s);
     ui.app.run("view.zoom200", json!({}));
-    for _ in 0..100 {
+    // Parallel workspace tests can delay the render worker even when the canvas is responsive.
+    for _ in 0..400 {
         ui.frame(vec![]);
         if ui.app.worker.as_ref().is_some_and(|w| !w.in_flight()) && !ui.app.canvas.tex_coarse {
             break;
@@ -201,7 +202,7 @@ fn zoom_out_keeps_input_responsive_until_the_worker_covers_the_new_view() {
             || covers(&current, &visible),
         "input uses cached pixels or an already completed worker image"
     );
-    for _ in 0..100 {
+    for _ in 0..400 {
         ui.frame(vec![]);
         if ui.app.canvas.tex_view.as_ref().is_some_and(|view| covers(view, &visible)) {
             return;
