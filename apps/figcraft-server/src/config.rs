@@ -22,7 +22,7 @@ pub struct Config {
     /// The data directory (files, links, the server key).
     pub data: PathBuf,
     /// How share links name this server when it isn't reached at `listen` (a reverse proxy:
-    /// `wss://figcraft.example.com/`).
+    /// `wss://design.example.com/`).
     pub public_url: Option<String>,
     /// Most files kept.
     pub max_files: usize,
@@ -75,7 +75,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             listen: format!("127.0.0.1:{DEFAULT_PORT}"),
-            data: PathBuf::from("figcraft-data"),
+            data: PathBuf::from("lizard-data"),
             public_url: None,
             max_files: 1000,
             max_file_mb: None,

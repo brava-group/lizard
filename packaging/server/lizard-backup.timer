@@ -1,0 +1,14 @@
+# Runs lizard-backup.service every night (see that file).
+#   sudo systemctl enable --now lizard-backup.timer
+#   systemctl list-timers lizard-backup.timer
+
+[Unit]
+Description=Nightly backup of lizard-server's data directory
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

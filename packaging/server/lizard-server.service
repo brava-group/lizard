@@ -1,19 +1,19 @@
-# systemd unit for figcraft-server; setup in docs/server.md ("Deploy on a Linux server").
-# Install: sudo cp figcraft-server.service /etc/systemd/system/ && sudo systemctl daemon-reload
-#          sudo systemctl enable --now figcraft-server
-# Logs:    journalctl -u figcraft-server
+# systemd unit for lizard-server; setup in docs/server.md ("Deploy on a Linux server").
+# Install: sudo cp lizard-server.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now lizard-server
+# Logs:    journalctl -u lizard-server
 
 [Unit]
-Description=FigCraft collaboration server
-Documentation=https://github.com/storytold/figcraft/blob/main/docs/server.md
+Description=Lizard collaboration server
+Documentation=https://github.com/brava-group/lizard/blob/main/docs/server.md
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
-User=figcraft
-Group=figcraft
-ExecStart=/usr/local/bin/figcraft-server --config /etc/figcraft-server/server.toml
+User=lizard
+Group=lizard
+ExecStart=/usr/local/bin/lizard-server --config /etc/lizard-server/server.toml
 # SIGTERM (systemctl stop/restart) stops it gracefully: open files are saved and compacted, and
 # apps are told the server is restarting (they reconnect when it is back).
 KillSignal=SIGTERM
@@ -35,7 +35,7 @@ IPAddressDeny=any
 # Hardening: the only writable place is the data directory.
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/figcraft-server
+ReadWritePaths=/var/lib/lizard-server
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

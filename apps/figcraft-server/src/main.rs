@@ -1,4 +1,4 @@
-//! `figcraft-server`: see `docs/server.md`, or run it with `--help`.
+//! `lizard-server`: see `docs/server.md`, or run it with `--help`.
 
 use std::process::ExitCode;
 
@@ -9,7 +9,7 @@ fn main() -> ExitCode {
     let cli = match cli::parse(&args) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("figcraft-server: {e}\n(figcraft-server --help lists what it takes)");
+            eprintln!("lizard-server: {e}\n(lizard-server --help lists what it takes)");
             return ExitCode::from(2);
         }
     };
@@ -20,7 +20,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("figcraft-server: {e}");
+                eprintln!("lizard-server: {e}");
                 ExitCode::FAILURE
             }
         };

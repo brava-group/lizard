@@ -10,7 +10,7 @@ description = "Lizard's standalone collaboration server: keeps many files with s
 path = "src/lib.rs"
 
 [[bin]]
-name = "figcraft-server"
+name = "lizard-server"
 path = "src/main.rs"
 
 [lints]

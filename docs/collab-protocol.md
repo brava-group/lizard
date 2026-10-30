@@ -11,7 +11,7 @@ session and the transport). **Step 4 is implemented**: the browser build joins s
 app hosts, and `figcraft://` invite links open the app and join. Styles, variables, collections,
 modes and comments created in a session take ids from their creator's id space, and others' text
 carets, cursor chat and spotlights show live (see Presence). **Step 5 is implemented**: the
-standalone `figcraft-server` (`apps/figcraft-server`, running it: [`server.md`](server.md)) keeps
+standalone `lizard-server` (`apps/figcraft-server`, running it: [`server.md`](server.md)) keeps
 many files with persistence and compaction, and share links that let people edit or only view;
 the app publishes to it, and a file's team library lives there for other files to use. Files are
 shared with **join codes** (see *Sharing with a join code*): online through a server that names
@@ -36,7 +36,7 @@ resolve **last-writer-wins in server order**. Clients apply their own edits imme
 (optimistically) and reconcile when the server echoes or overrides them. Cursors, selections and
 viewports are **ephemeral presence** messages that are never stored. The desktop app can **host a
 session itself** (LAN or a forwarded port), so no public server is needed to start; the same
-server code also builds as a standalone `figcraft-server` binary for self-hosting.
+server code also builds as a standalone `lizard-server` binary for self-hosting.
 
 ## Why this shape
 
@@ -452,7 +452,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   `ws://`/`wss://` URL). Others on the same network (or through a forwarded port / VPN such as a
   mesh VPN) join with "File ▸ Join live session" or by opening the link. When the host leaves, the
   session ends; everyone keeps a local copy.
-- **Self-hosted server**: the same server as a `figcraft-server` binary that keeps many files,
+- **Self-hosted server**: the same server as a `lizard-server` binary that keeps many files,
   persists them (a snapshot plus an append-only log of accepted batches, compacted into new
   snapshots), and survives restarts. TLS comes from a reverse proxy (`wss://`). *Built*, below.
 - **Auth**: an unguessable per-session token in the invite link (hosting from the app); per-file
@@ -512,8 +512,8 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   `L`, `O`, `U`); reading one ignores case, spaces and dashes and takes `O` as `0` and `I` or `L`
   as `1`. The join field tells the kinds apart by length (anything with `://` is a link).
 - **Online** (`collab.share {via: "online"}`, the default): the open file is published to the
-  server in Preferences (`pref.publishServer`; built in: `wss://collab.craftapps.dev/`, written
-  once, as `figcraft_engine::live::DEFAULT_SERVER`; empty turns online sharing off) exactly as
+  server in Preferences (`pref.publishServer`; no default server unless supplied at build time through
+  `LIZARD_DEFAULT_SERVER`; empty turns online sharing off) exactly as
   `collab.publish` does on a server open to the public, owner token included; the app then asks
   for a code for the edit link and one for the view link (`Admin code`, as the file's owner) and
   shows the edit code, `K7M-2QX-9TD`: **nine symbols, 45 random bits**, a different code per link.
@@ -670,7 +670,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   page refuses other hosts up front with a message instead of failing obscurely. To join from
   other machines, serve the web build over `http://` on a trusted network (locally:
   `python3 -m http.server 8767` in the built site, then `http://localhost:8767/` or the machine's
-  LAN address), or use `wss://` links of a `figcraft-server` behind a TLS reverse proxy (the
+  LAN address), or use `wss://` links of a `lizard-server` behind a TLS reverse proxy (the
   browser opens them; see *Built (the standalone server)*). Some browsers also ask before a public
   site may reach private network addresses.
 
@@ -700,7 +700,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
 - **Managing files.** A connection that opens with `Manage {key}` instead of `Hello` sends
   `Admin` requests: publish a document (its snapshot) as a new file, which returns an edit link
   and a view link; list files and links; make and revoke links; remove a file. The server key is
-  128 bits in the data directory. The server's command line (`figcraft-server files|links|key`)
+  128 bits in the data directory. The server's command line (`lizard-server files|links|key`)
   uses the same requests when a server is running on the directory, else it changes the directory
   itself (one process holds it at a time: an OS file lock).
 - **Publishing from the app.** `collab.publish {server, name?}` (File ▸ Publish to server…)
@@ -904,7 +904,7 @@ chooses to share on the network; the default is the invite link with a random to
   request (the path is `/`), so proxies don't log it; Lizard never logs it (logs name addresses
   and ports only), and errors about links never echo the link. Traffic is not encrypted (`ws://`):
   on a shared network, others on the path could read presence and the token. Use a trusted LAN
-  or a VPN; TLS (`wss://`) comes from a reverse proxy in front of a `figcraft-server`.
+  or a VPN; TLS (`wss://`) comes from a reverse proxy in front of a `lizard-server`.
 - **Limits.** At most 64 open sockets (joined or not) and the core's 256 people; a connection must
   finish the WebSocket handshake and say hello within 10 s, and one silent for 45 s is dropped
   (clients ping every 15 s); client messages are at most 16 MiB (what the host sends keeps the
@@ -979,7 +979,7 @@ chooses to share on the network; the default is the invite link with a random to
    carets on the canvas.
 4. **Browser client** (WebSocket through `web-sys`). **Done** (the web build joins
    desktop-hosted sessions; `figcraft://` links open the desktop app and join).
-5. **Standalone `figcraft-server`** with persistence, compaction, share links and permissions.
+5. **Standalone `lizard-server`** with persistence, compaction, share links and permissions.
    **Done** (`apps/figcraft-server` on the shared hub; edit and view links, the server key,
    publishing from the app; see [`server.md`](server.md)), followed by open hosting for a public
    server (owner tokens, limits per address, idle expiry, reports and blocks), by sharing with

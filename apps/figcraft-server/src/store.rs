@@ -338,7 +338,7 @@ impl Store {
     /// Use the data directory `root` (made if missing). Fails when another server or command holds
     /// it. Files that can't be read are skipped and listed in [`problems`](Self::problems).
     pub fn open(root: &Path, cfg: StoreConfig) -> Result<Store, String> {
-        Self::try_open(root, cfg)?.ok_or_else(|| format!("another figcraft-server (or a command) is using {}", root.display()))
+        Self::try_open(root, cfg)?.ok_or_else(|| format!("another lizard-server (or a command) is using {}", root.display()))
     }
 
     /// [`open`](Self::open), or `None` when someone else holds the directory.

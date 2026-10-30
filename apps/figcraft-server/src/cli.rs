@@ -1,4 +1,4 @@
-//! The command line: `figcraft-server` serves; `key`, `files`, `links` and `plugins` manage the
+//! The command line: `lizard-server` serves; `key`, `files`, `links` and `plugins` manage the
 //! data directory. When a server is running on the directory they ask it (so revoking a link
 //! disconnects whoever joined with it at once); otherwise they change the directory themselves.
 
@@ -20,23 +20,23 @@ use crate::store::{self, KEY, Store};
 pub const SERVER_JSON: &str = "server.json";
 
 pub const USAGE: &str = "\
-figcraft-server: Lizard's collaboration server (files, share links, live sessions)
+lizard-server: Lizard's collaboration server (files, share links, live sessions)
 
 Usage:
-  figcraft-server [serve] [--listen ADDR] [--data DIR] [--public-url URL] [--config FILE]
-  figcraft-server key [--rotate]                 the address to publish to, with the server key
-  figcraft-server check                          check the settings (after editing the --config file)
-  figcraft-server files [list] [--sort size|age|idle]  the files kept (biggest, oldest or longest unopened first)
-  figcraft-server files remove FILE              remove a file and its links for good
-  figcraft-server links list FILE                a file's share links
-  figcraft-server links create FILE --access edit|view [--label TEXT]
-  figcraft-server links revoke FILE LINK         revoke a link (whoever joined with it is disconnected)
-  figcraft-server plugins [list]                 the plugin directory: every plugin and its versions
-  figcraft-server plugins remove ID [--version V]  unpublish a plugin (every version, or one)
-  figcraft-server reports                        what people reported about files
-  figcraft-server block-ip IP                    refuse an address (an IPv6 address: its /64) and drop its connections
-  figcraft-server unblock-ip IP                  accept an address again
-  figcraft-server blocked                        the blocked addresses
+  lizard-server [serve] [--listen ADDR] [--data DIR] [--public-url URL] [--config FILE]
+  lizard-server key [--rotate]                 the address to publish to, with the server key
+  lizard-server check                          check the settings (after editing the --config file)
+  lizard-server files [list] [--sort size|age|idle]  the files kept (biggest, oldest or longest unopened first)
+  lizard-server files remove FILE              remove a file and its links for good
+  lizard-server links list FILE                a file's share links
+  lizard-server links create FILE --access edit|view [--label TEXT]
+  lizard-server links revoke FILE LINK         revoke a link (whoever joined with it is disconnected)
+  lizard-server plugins [list]                 the plugin directory: every plugin and its versions
+  lizard-server plugins remove ID [--version V]  unpublish a plugin (every version, or one)
+  lizard-server reports                        what people reported about files
+  lizard-server block-ip IP                    refuse an address (an IPv6 address: its /64) and drop its connections
+  lizard-server unblock-ip IP                  accept an address again
+  lizard-server blocked                        the blocked addresses
 
 Options (also keys of the --config TOML file):
   --listen ADDR       where to listen (default 127.0.0.1:47900; 0.0.0.0:47900 for every network)
@@ -200,8 +200,8 @@ pub fn run(cli: &Cli) -> Result<String, String> {
     let cfg = &cli.config;
     match &cli.command {
         Command::Help => Ok(USAGE.to_string()),
-        Command::Version => Ok(format!("figcraft-server {}\n", env!("CARGO_PKG_VERSION"))),
-        Command::Serve => Err("serving runs in the foreground: run figcraft-server without a command".into()),
+        Command::Version => Ok(format!("lizard-server {}\n", env!("CARGO_PKG_VERSION"))),
+        Command::Serve => Err("serving runs in the foreground: run lizard-server without a command".into()),
         Command::Key { rotate } => key(cfg, *rotate),
         Command::Files { sort } => match admin(cfg, Admin::Listing)? {
             AdminReply::Listing(files) => Ok(files_table(files, *sort, store::now())),
@@ -424,7 +424,7 @@ fn day(secs: u64) -> String {
 
 fn links_table(links: &[LinkInfo]) -> String {
     if links.is_empty() {
-        return "No links (make one with `figcraft-server links create FILE --access view`).\n".into();
+        return "No links (make one with `lizard-server links create FILE --access view`).\n".into();
     }
     let mut out = String::from("LINK              ACCESS  CREATED               LABEL\n");
     for l in links {
