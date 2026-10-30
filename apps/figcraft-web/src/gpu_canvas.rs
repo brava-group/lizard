@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_focused_outline_scene, make_outline_scene,
+    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_focused_subtree,
+    has_unhandled_effects_except_outlined_on_page_in_view, has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view,
+    make_focused_outline_scene, make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -91,7 +92,9 @@ impl WebGpuCanvas {
             focus.is_some_and(|id| page_backdrops.visible_ids(view).iter().any(|candidate| *candidate == id || doc.is_ancestor(id, *candidate)));
         let focused = focus.filter(|_| focus_has_backdrop).and_then(|id| focused_document(&doc, page, id));
         let render_doc = focused.as_ref().unwrap_or(&doc);
-        let unsupported = if let Some((selected, _)) = selected_outlines {
+        let unsupported = if let (Some(focus), Some((selected, _))) = (focus, selected_outlines) {
+            has_unhandled_effects_except_outlined_in_focused_subtree(&doc, view, true, focus, selected)
+        } else if let Some((selected, _)) = selected_outlines {
             has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected)
         } else if let Some(id) = focus {
             has_unhandled_effects_in_focused_subtree(&doc, view, true, id)
@@ -169,7 +172,9 @@ impl WebGpuCanvas {
         }
         let backdrops = if focused.is_some() { BackdropIndex::new(render_doc, page) } else { page_backdrops };
         if focus.is_some() && !focus_has_backdrop || backdrops.visible_ids(view).is_empty() {
-            let scene = if let Some((selected, options)) = selected_outlines {
+            let scene = if let (Some(focus), Some((selected, options))) = (focus, selected_outlines) {
+                canvas.make_scene_roots_outlined(&doc, &[focus], view, selected, options)
+            } else if let Some((selected, options)) = selected_outlines {
                 canvas.make_scene_selected_outlines(&doc, page, view, selected, options)
             } else if let Some(focus) = focus {
                 canvas.make_scene_roots(&doc, &[focus], view)
@@ -316,6 +321,38 @@ impl CanvasGpuBackend for WebGpuCanvas {
             }
             Err(error) => {
                 log::error!("browser WebGPU selected-outline pixel preview failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
+    fn focused_selected_outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        selected: &[NodeId],
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        proof_srgb: bool,
+        pixel_preview: bool,
+    ) -> Option<egui::TextureId> {
+        if self.disabled
+            || doc.page_of(focus) != Some(page)
+            || has_unhandled_effects_except_outlined_in_focused_subtree(&doc, view, true, focus, selected)
+        {
+            return None;
+        }
+        match self.update(doc, page, view, clear, false, proof_srgb, pixel_preview, Some(focus), Some((selected, options))) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU focused selected-outline view failed: {error}");
                 self.disabled = true;
                 self.current_gpu_rendered = false;
                 None

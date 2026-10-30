@@ -128,6 +128,22 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Show selected contours only inside a focused subtree, optionally at document pixel scale.
+    fn focused_selected_outline_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _focus: NodeId,
+        _selected: &[NodeId],
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _options: figcraft_render::Outline,
+        _proof_srgb: bool,
+        _pixel_preview: bool,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1197,7 +1213,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
-        && !(ds.focused().is_some() && ds.view.outlines_selection)
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
     {
@@ -1215,6 +1230,19 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                     ),
                 };
                 backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, &ctx)
+            } else if ds.view.outlines_selection {
+                let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
+                backend.focused_selected_outline_texture(
+                    gpu_doc,
+                    ds.page,
+                    focus,
+                    &ds.selection,
+                    &view,
+                    clear,
+                    options,
+                    ds.view.proof_srgb,
+                    ds.view.pixel_preview_scale().is_some(),
+                )
             } else if ds.view.pixel_preview_scale().is_some() {
                 backend.focused_pixel_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
             } else {
@@ -3015,6 +3043,74 @@ mod stale_render_tests {
         ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "selected outline capture lock poisoned")?;
         assert!(captured.contains(&id));
+        Ok(())
+    }
+
+    #[test]
+    fn focused_selected_outline_uses_gpu_at_normal_and_pixel_scale() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::Mutex;
+
+        struct Call {
+            focus: NodeId,
+            selected: Vec<NodeId>,
+            pixel_preview: bool,
+            scale: f64,
+        }
+        struct Capture(Arc<Mutex<Vec<Call>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn focused_selected_outline_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                focus: NodeId,
+                selected: &[NodeId],
+                view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _options: figcraft_render::Outline,
+                _proof_srgb: bool,
+                pixel_preview: bool,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push(Call { focus, selected: selected.to_vec(), pixel_preview, scale: view.scale });
+                None
+            }
+        }
+
+        let mut session = Session::new();
+        let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
+        let focus = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let mut ui = Ui::new(session);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        {
+            let ds = ui.app.session.ds_mut()?;
+            ds.focus = Some(focus);
+            ds.selection = vec![focus];
+            ds.view.outlines_selection = true;
+        }
+        ui.frame(vec![]);
+        {
+            let ds = ui.app.session.ds_mut()?;
+            ds.view.zoom = 8.0;
+            ds.view.pixel_preview = true;
+            ds.view.pixel_scale = 1;
+        }
+        ui.frame(vec![]);
+        let calls = seen.lock().map_err(|_| "focused outline capture lock poisoned")?;
+        assert!(calls.iter().any(|call| call.focus == focus && call.selected == [focus] && !call.pixel_preview));
+        assert!(calls.iter().any(|call| call.focus == focus && call.selected == [focus] && call.pixel_preview && call.scale == 1.0));
         Ok(())
     }
 

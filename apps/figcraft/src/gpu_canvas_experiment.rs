@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_focused_outline_scene, make_outline_scene,
-    make_scene_with_images,
+    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_focused_subtree,
+    has_unhandled_effects_except_outlined_on_page_in_view, has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view,
+    make_focused_outline_scene, make_outline_scene, make_scene_with_images,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -259,7 +259,9 @@ impl GpuCanvasExperiment {
                 canvas.prepare_static_effects(&doc)?;
                 self.direct_provisional_effects = false;
             }
-            let scene = if let Some((selected, options)) = selected_outlines {
+            let scene = if let (Some(focus), Some((selected, options))) = (focus, selected_outlines) {
+                canvas.make_scene_roots_outlined(&doc, &[focus], view, selected, options)
+            } else if let Some((selected, options)) = selected_outlines {
                 canvas.make_scene_selected_outlines(&doc, page, view, selected, options)
             } else if let Some(focus) = focus {
                 canvas.make_scene_roots(&doc, &[focus], view)
@@ -402,6 +404,38 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
             }
             Err(error) => {
                 eprintln!("Lizard GPU selected-outline pixel preview failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
+    fn focused_selected_outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        selected: &[NodeId],
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        proof_srgb: bool,
+        pixel_preview: bool,
+    ) -> Option<egui::TextureId> {
+        if self.disabled
+            || doc.page_of(focus) != Some(page)
+            || has_unhandled_effects_except_outlined_in_focused_subtree(&doc, view, self.direct_cached_blur, focus, selected)
+        {
+            return None;
+        }
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, pixel_preview, Some(focus), Some((selected, options))) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU focused selected-outline view failed: {error}");
                 self.disabled = true;
                 self.direct_current = false;
                 None

@@ -3641,6 +3641,84 @@ mod selected_outline_gpu_tests {
     }
 }
 
+#[cfg(test)]
+mod focused_selected_outline_tests {
+    use super::*;
+
+    #[test]
+    fn focused_selected_outline_ignores_outside_and_selected_unsupported_paints() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(110, 60) else { return Ok(()) };
+        let mut doc = Document::new("GPU focused selected outline");
+        let page = doc.current_page.ok_or("page missing")?;
+        let outside = doc.create(page, NodeKind::Rectangle, "outside", 0.0, 0.0, 110.0, 60.0)?;
+        let outer = doc.node_mut(outside).ok_or("outside missing")?;
+        outer.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        outer.blend = BlendMode::PlusDarker;
+        let focus = doc.create(page, NodeKind::Group, "focus", 5.0, 5.0, 90.0, 50.0)?;
+        let selected = doc.create(focus, NodeKind::Rectangle, "selected", 10.0, 10.0, 25.0, 25.0)?;
+        let selected_node = doc.node_mut(selected).ok_or("selected missing")?;
+        selected_node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        selected_node.blend = BlendMode::PlusDarker;
+        let sibling = doc.create(focus, NodeKind::Rectangle, "sibling", 50.0, 10.0, 25.0, 25.0)?;
+        doc.node_mut(sibling).ok_or("sibling missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 110, height: 60 };
+        assert!(has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[]));
+        assert!(!has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[selected]));
+        let options = figcraft_render::Outline::default();
+        let scene = gpu.make_scene_roots_outlined(&doc, &[focus], &view, &[selected], options);
+        let background = Color::DEFAULT_PAGE;
+        gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
+        let actual = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options { solo: Some(focus), outlined: vec![selected], ..Default::default() })
+            .ok_or("focused selected-outline reference unavailable")?;
+        for (x, y) in [(15, 25), (25, 25), (65, 25), (95, 25)] {
+            let index = ((y * view.width + x) * 4) as usize;
+            for channel in 0..3 {
+                assert!(
+                    actual[index + channel].abs_diff(reference.data()[index + channel]) <= 20,
+                    "focused selected outline at ({x}, {y}) channel {channel}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn focused_selected_outline_keeps_ordered_backdrop_inside_focus() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(110, 80) else { return Ok(()) };
+        let mut doc = Document::new("GPU focused selected backdrop");
+        let page = doc.current_page.ok_or("page missing")?;
+        let outside = doc.create(page, NodeKind::Rectangle, "outside", 0.0, 0.0, 110.0, 80.0)?;
+        doc.node_mut(outside).ok_or("outside missing")?.blend = BlendMode::PlusDarker;
+        let focus = doc.create(page, NodeKind::Group, "focus", 5.0, 0.0, 100.0, 80.0)?;
+        let base = doc.create(focus, NodeKind::Rectangle, "dark base", 0.0, 0.0, 50.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let selected = doc.create(focus, NodeKind::Rectangle, "selected", 22.0, 20.0, 30.0, 40.0)?;
+        doc.node_mut(selected).ok_or("selected missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        let pane = doc.create(focus, NodeKind::Rectangle, "background blur", 40.0, 10.0, 40.0, 60.0)?;
+        let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
+        pane_node.fills.clear();
+        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 110, height: 80 };
+        assert!(!has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[selected]));
+        let focused = focused_document(&doc, page, focus).ok_or("focused document missing")?;
+        let index = BackdropIndex::new(&focused, page);
+        assert_eq!(index.visible_ids(&view), vec![pane]);
+        let clear = [245.0 / 255.0; 3];
+        gpu.render_with_backdrop_blurs_indexed_outlined(&focused, page, &view, clear, &index, &[selected], figcraft_render::Outline::default())?;
+        let actual = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options { solo: Some(focus), outlined: vec![selected], ..Default::default() })
+            .ok_or("focused selected backdrop reference unavailable")?;
+        for (x, y) in [(15, 30), (35, 30), (50, 30), (60, 40), (85, 40), (100, 40)] {
+            let offset = ((y * view.width + x) * 4) as usize;
+            for channel in 0..3 {
+                assert!(actual[offset + channel].abs_diff(reference.data()[offset + channel]) <= 28, "focused backdrop at ({x},{y})");
+            }
+        }
+        Ok(())
+    }
+}
+
 fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Affine, scale: f64, options: figcraft_render::Outline, depth: usize) {
     if depth > 64 {
         return;
@@ -3743,8 +3821,21 @@ pub fn has_unhandled_effects_except_outlined_on_page_in_view(
 /// Focus mode only draws the selected subtree; unsupported paints in its siblings do not
 /// require a CPU fallback for this view.
 pub fn has_unhandled_effects_in_focused_subtree(doc: &Document, view: &View, cached_noise: bool, focus: NodeId) -> bool {
+    has_unhandled_effects_except_outlined_in_focused_subtree(doc, view, cached_noise, focus, &[])
+}
+
+/// Focused selected-outline mode skips siblings outside focus and the painted contents of
+/// selected subtrees. Neither can force a CPU render for pixels absent from this view.
+pub fn has_unhandled_effects_except_outlined_in_focused_subtree(
+    doc: &Document,
+    view: &View,
+    cached_noise: bool,
+    focus: NodeId,
+    outlined: &[NodeId],
+) -> bool {
     let kept: HashSet<_> = doc.subtree(focus).into_iter().collect();
-    let excluded = doc.ids().filter(|id| !kept.contains(id)).collect();
+    let mut excluded: HashSet<_> = doc.ids().filter(|id| !kept.contains(id)).collect();
+    excluded.extend(outlined.iter().flat_map(|id| doc.subtree(*id)));
     has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
 }
 
@@ -5016,6 +5107,18 @@ impl GpuCanvas {
     /// Build a scene for selected roots, preserving their world transforms and descendants.
     /// Callers must check any backdrop dependency before using this outside export.
     pub fn make_scene_roots(&self, doc: &Document, roots: &[NodeId], view: &View) -> Scene {
+        self.make_scene_roots_outlined(doc, roots, view, &[], figcraft_render::Outline::default())
+    }
+
+    /// Draw selected outlines within the supplied roots without traversing page siblings.
+    pub fn make_scene_roots_outlined(
+        &self,
+        doc: &Document,
+        roots: &[NodeId],
+        view: &View,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Scene {
         let mut scene = Scene::new(view.width as u16, view.height as u16);
         let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
         let world = Rect::new(
@@ -5030,8 +5133,8 @@ impl GpuCanvas {
             inner_shadows: Some(&self.inner_shadows),
             noise: Some(&self.noise_effects),
             texture: if view.scale <= 1.0 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
-            outlined: &[],
-            outline_options: figcraft_render::Outline::default(),
+            outlined,
+            outline_options: options,
         };
         for id in roots {
             draw_node(&mut scene, doc, *id, camera, world, 0, Some(&self.image_info), None, cached, (view.width as u16, view.height as u16));

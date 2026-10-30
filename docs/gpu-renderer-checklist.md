@@ -1,9 +1,10 @@
 # GPU renderer migration checklist
 
-The target is GPU rasterization for every user-facing drawing path when a compatible GPU is
-available. CPU rendering remains a fallback for unavailable devices and an oracle for parity
-tests. SVG and PDF keep their native vector output; only content they must rasterize belongs in
-this migration. A box is complete only after native and WASM checks, visual verification of
+The current target is GPU rasterization for the editor canvas, including interaction previews,
+when a compatible GPU is available. The egui controls are outside this milestone. Raster exports
+and secondary previews remain recorded below as follow-up work, not as blockers to the canvas
+milestone. CPU rendering remains a fallback for unavailable devices and an oracle for parity
+tests. SVG and PDF keep their native vector output. A box is complete only after native and WASM checks, visual verification of
 content and effect order, and an interaction or export test. The GPU image may differ aesthetically
 from the CPU reference; pixel comparisons detect missing content and severe artifacts rather than
 require an exact match. Do not remove a capability guard merely to mark a box done.
@@ -56,6 +57,8 @@ the migration concerns rasterization and pixel effects.
     unsupported blend at the same coordinates on another page no longer forces CPU rendering.
   - [x] Combine selected outlines with supported sibling backdrop blur or glass on native and
     browser WebGPU, preserving paint order even when the selected contour is behind the pane.
+  - [x] Combine Focus with selected outlines on native and browser WebGPU, with optional Pixel
+    Preview; draw only the focused subtree and exclude its siblings from capability checks.
   - [ ] Move the remaining mixed view modes and unsupported backdrop stacks to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
@@ -486,3 +489,12 @@ the migration concerns rasterization and pixel effects.
   the GPU backend at 1× document scale while the editor view was zoomed to 8×. All 96 canvas-GPU
   tests passed; 721 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0
   cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: Focus plus selected outlines now uses the focused-root GPU scene on native and
+  browser WebGPU, with the ordered backdrop compositor retained for a blur inside focus. The
+  focused capability check skips unsupported paint in outside siblings and selected contours.
+  The UI dispatch test covered normal and 1× document pixel scale; the GPU fixture matched the
+  focused CPU reference at selected contour, filled sibling, and backdrop samples. I inspected
+  the generated GPU image: one outlined rectangle, one filled blue sibling, no outside layer.
+  All 98 canvas-GPU tests passed; 722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1
+  CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting,
+  and layer checks.
