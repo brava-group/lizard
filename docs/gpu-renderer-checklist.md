@@ -42,7 +42,10 @@ the migration concerns rasterization and pixel effects.
     selected shape's own cached fill remains replaced by its outline.
   - [x] Ignore paint and effect capabilities inside a selected-outline subtree on native and
     browser WebGPU; keep unsupported siblings and their backdrop effects guarded.
-  - [ ] Move Focus/selected outlines combined with backdrop effects or other view modes to GPU.
+  - [x] Route Focus/solo groups with a supported backdrop blur or glass through the ordered GPU
+    compositor; sibling layers outside the focused subtree no longer force its CPU fallback.
+  - [ ] Move selected outlines combined with sibling backdrop effects and remaining mixed view
+    modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -64,6 +67,9 @@ the migration concerns rasterization and pixel effects.
     rectangle matched the CPU reference within the existing pixel tolerance.
   - [x] Render texture scatter on rotated shapes at 1× and 2× by aligning GPU cache bounds to
     document pixels; clipped and unclipped rotated fixtures match the CPU reference.
+  - [x] Keep texture scatter on GPU at 1× and 2× during fractional camera pan. The static cache
+    interpolates fine grains slightly; a fine-grain rotated fixture retained shape coverage and
+    stayed within a 5% viewport difference threshold at both zoom levels.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
@@ -346,3 +352,11 @@ the migration concerns rasterization and pixel effects.
   rendered vector texture. Native and WASM checks passed. The test app accepted a proof toggle,
   but its window screenshot timed out while the window was not being presented by macOS. All 77
   canvas-GPU tests and `CARGO_INCREMENTAL=0 cargo xtask ci` passed.
+- 2026-10-30: Focus mode now uses the ordered GPU backdrop compositor when the focused subtree
+  contains a supported blur or glass. A nested group with a background blur matched the CPU solo
+  view at sampled pixels; an unsupported Plus Darker sibling no longer disqualifies that focus
+  view. Fractional camera positions at 1×/2× keep texture scatter on GPU. Fine grains show some
+  interpolation, but the rotated fixture kept its coverage and changed fewer than 5% of viewport
+  pixels by more than 8/255. The acceptance criterion here is visual stability rather than an
+  exact CPU raster match. `CARGO_INCREMENTAL=0 cargo xtask ci` passed, including 84 canvas-GPU
+  tests, 718 UI tests, native workspace checks, WASM checks, plugins, formatting, Clippy and layers.

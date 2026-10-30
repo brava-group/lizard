@@ -1243,8 +1243,27 @@ mod effect_capability_tests {
                 assert_eq!(changed, 0, "rotated texture differs at {scale}x, angle {angle}, clipped {clipped}");
             }
         }
-        let fractional_view = View { origin: (0.25, 0.0), scale: 1.0, width: 256, height: 256 };
-        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &fractional_view, true));
+        if let EffectKind::Texture(texture) = &mut doc.node_mut(id).ok_or("shape missing")?.effects[0].kind {
+            texture.size = 0.5;
+            texture.radius = 4.0;
+        }
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.5, 0.5), scale, width: (384.0 * scale) as u32, height: (384.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.prepare_static_effects(&doc)?;
+            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                .count();
+            // The scatter stays in the same place and preserves its coverage; interpolation
+            // during fractional pan may legitimately soften individual grains.
+            assert!(changed * 100 < view.width as usize * view.height as usize * 5, "fractional texture changed {changed} pixels at {scale}x");
+        }
         Ok(())
     }
 
@@ -1938,6 +1957,49 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn focused_group_with_backdrop_matches_solo_view() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU focus backdrop");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let outside = doc.create(page, NodeKind::Rectangle, "Outside focus", 0.0, 0.0, 120.0, 120.0)?;
+        let outside_node = doc.node_mut(outside).ok_or("outside missing")?;
+        outside_node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        outside_node.blend = BlendMode::PlusDarker;
+        let section = doc.create(page, NodeKind::Section { contents_hidden: false }, "Section", 20.0, 0.0, 120.0, 120.0)?;
+        let group = doc.create(section, NodeKind::Group, "Focused group", 5.0, 0.0, 100.0, 100.0)?;
+        let dark = doc.create(group, NodeKind::Rectangle, "Dark half", 0.0, 0.0, 50.0, 100.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let focused = focused_document(&doc, page, group).ok_or("focus document missing")?;
+        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        assert!(!has_unhandled_effects_in_focused_subtree(&doc, &view, true, group));
+        assert_eq!(focused.node(page).ok_or("page missing")?.children, vec![group]);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&focused, &view, true));
+        let index = BackdropIndex::new(&focused, page);
+        assert_eq!(index.visible_ids(&view), vec![pane]);
+        let reference = render_view(&doc, page, &view, &Options { solo: Some(group), ..Default::default() }).ok_or("solo reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.prepare_static_effects(&focused)?;
+        gpu.render_with_backdrop_blurs_indexed(&focused, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        for (x, y) in [(10, 10), (40, 50), (70, 50), (100, 50), (145, 50)] {
+            let offset = (y * view.width + x) as usize * 4;
+            for channel in 0..3 {
+                assert!(
+                    actual[offset + channel].abs_diff(reference.data()[offset + channel]) <= 20,
+                    "focus pixel ({x},{y}) channel {channel}: GPU={} reference={}",
+                    actual[offset + channel],
+                    reference.data()[offset + channel]
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn stacked_gpu_backdrops_sample_prior_backdrop() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU ordered backdrops");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -2282,6 +2344,26 @@ pub struct ImageInfo {
 /// Rebuild when document geometry or effect properties change.
 pub struct BackdropIndex {
     candidates: Vec<(NodeId, f64, Rect, bool)>,
+}
+
+/// Build the page that Focus mode actually paints while retaining each node's original
+/// ancestry, so world transforms and backdrop ordering remain in document coordinates.
+pub fn focused_document(doc: &Document, page: NodeId, focus: NodeId) -> Option<Document> {
+    if focus == page || doc.page_of(focus)? != page {
+        return None;
+    }
+    let kept: HashSet<_> = doc.subtree(focus).into_iter().collect();
+    let mut focused = doc.clone();
+    for id in focused.ids().collect::<Vec<_>>() {
+        if id != page
+            && !kept.contains(&id)
+            && let Some(node) = focused.node_mut(id)
+        {
+            node.visible = false;
+        }
+    }
+    focused.node_mut(page)?.children = vec![focus];
+    Some(focused)
 }
 
 impl BackdropIndex {
@@ -3386,6 +3468,14 @@ pub fn has_unhandled_effects_except_outlined_in_view(doc: &Document, view: &View
     has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
 }
 
+/// Focus mode only draws the selected subtree; unsupported paints in its siblings do not
+/// require a CPU fallback for this view.
+pub fn has_unhandled_effects_in_focused_subtree(doc: &Document, view: &View, cached_noise: bool, focus: NodeId) -> bool {
+    let kept: HashSet<_> = doc.subtree(focus).into_iter().collect();
+    let excluded = doc.ids().filter(|id| !kept.contains(id)).collect();
+    has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
+}
+
 fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_noise: bool, excluded: &HashSet<NodeId>) -> bool {
     if has_matching_effects_excluding_in_view(doc, view, true, true, cached_noise, excluded) {
         return true;
@@ -3534,16 +3624,9 @@ fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture:
     let Some(bounds) = figcraft_render::raster_bounds(doc, node.id) else { return false };
     let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
     let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
-    let aligned = |coordinate: f64, origin: f64| {
-        let pixel = (coordinate - origin) * view.scale;
-        pixel.is_finite() && (pixel - pixel.round()).abs() <= 1e-5
-    };
-    scale == 2.0
-        && bounds.width().ceil() * bounds.height().ceil() <= 2_000_000.0
-        && aligned(bounds.x0, view.origin.0)
-        && aligned(bounds.x1, view.origin.0)
-        && aligned(bounds.y0, view.origin.1)
-        && aligned(bounds.y1, view.origin.1)
+    // A fractional camera origin interpolates the cached grain. That changes a few edge
+    // samples but keeps the shape and effect stable during smooth pan without a CPU frame.
+    scale == 2.0 && bounds.width().ceil() * bounds.height().ceil() <= 2_000_000.0
 }
 
 fn gpu_cached_shadow_bounds_supported(doc: &Document, node: &Node) -> bool {

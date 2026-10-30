@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_except_outlined_in_view, has_unhandled_effects_with_cached_noise_in_view,
-    make_outline_scene,
+    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_view,
+    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -84,6 +84,14 @@ impl WebGpuCanvas {
         if self.outline.take().is_some() {
             self.document = None;
         }
+        if focus.is_some_and(|id| doc.page_of(id) != Some(page)) {
+            return Ok(None);
+        }
+        let page_backdrops = BackdropIndex::new(&doc, page);
+        let focus_has_backdrop =
+            focus.is_some_and(|id| page_backdrops.visible_ids(view).iter().any(|candidate| *candidate == id || doc.is_ancestor(id, *candidate)));
+        let focused = focus.filter(|_| focus_has_backdrop).and_then(|id| focused_document(&doc, page, id));
+        let render_doc = focused.as_ref().unwrap_or(&doc);
         if view.width == 0
             || view.height == 0
             || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
@@ -91,7 +99,10 @@ impl WebGpuCanvas {
             || view.height > u16::MAX.into()
             || !view.scale.is_finite()
             || view.scale <= 0.0
-            || has_unhandled_effects_with_cached_noise_in_view(&doc, view, true)
+            || focus.map_or_else(
+                || has_unhandled_effects_with_cached_noise_in_view(render_doc, view, true),
+                |id| has_unhandled_effects_in_focused_subtree(&doc, view, true, id),
+            )
         {
             return Ok(None);
         }
@@ -153,8 +164,8 @@ impl WebGpuCanvas {
                 canvas.prepare_static_effects(&doc)?;
             }
         }
-        let backdrops = BackdropIndex::new(&doc, page);
-        if focus.is_some() || selected_outlines.is_some() || backdrops.visible_ids(view).is_empty() {
+        let backdrops = if focused.is_some() { BackdropIndex::new(render_doc, page) } else { page_backdrops };
+        if selected_outlines.is_some() || focus.is_some() && !focus_has_backdrop || backdrops.visible_ids(view).is_empty() {
             let scene = if let Some((selected, options)) = selected_outlines {
                 canvas.make_scene_selected_outlines(&doc, page, view, selected, options)
             } else if let Some(focus) = focus {
@@ -168,7 +179,7 @@ impl WebGpuCanvas {
                 canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
                 canvas.prepare_static_effects(&doc)?;
             }
-            canvas.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
+            canvas.render_with_backdrop_blurs_indexed(render_doc, page, view, clear, &backdrops)?;
         }
         canvas.convert_for_presentation_with_proof(profile, proof_srgb);
         self.document = Some(doc);
@@ -285,10 +296,7 @@ impl CanvasGpuBackend for WebGpuCanvas {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled
-            || has_unhandled_effects_with_cached_noise_in_view(&doc, view, true)
-            || !BackdropIndex::new(&doc, page).visible_ids(view).is_empty()
-        {
+        if self.disabled {
             return None;
         }
         match self.update(doc, page, view, clear, false, proof_srgb, false, Some(focus), None) {
