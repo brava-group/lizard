@@ -116,6 +116,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Tile wide pages with uniform background blur or glass using a conservative backdrop
     margin. GPU crop comparisons across the seam stayed within 8/255; selected-layer exports
     with backdrop effects still need the ordered page context.
+  - [x] Tile wide page and selection exports with progressive layer blur, plus wide pages with
+    progressive background blur. GPU crop comparisons across the seam stayed within 8/255.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
@@ -379,3 +381,9 @@ the migration concerns rasterization and pixel effects.
   complex backdrop stacks, and selected-layer backdrop exports remain open. `CARGO_INCREMENTAL=0
   cargo xtask ci` passed with 87 canvas-GPU tests and 718 UI tests, plus native workspace, WASM,
   plugin, Clippy, formatting and layer checks.
+- 2026-10-30: progressive layer blur now tiles on GPU for both page and selected-layer exports,
+  and progressive background blur tiles on GPU for pages. A 4200 × 128 layer fixture and the
+  backdrop fixture matched independent GPU crops within 8/255 around the 2048 px seam. Their
+  maximum radius supplies the conservative halo. Selected-layer backdrop exports remain open.
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 88 canvas-GPU tests and 718 UI tests, plus
+  native workspace, WASM, plugin, Clippy, formatting and layer checks.

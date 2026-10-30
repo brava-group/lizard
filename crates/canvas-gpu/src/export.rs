@@ -72,15 +72,13 @@ fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
                     shadow.radius.abs() * 6.0 + shadow.spread.abs() * 4.0 + shadow.offset.0.abs() + shadow.offset.1.abs()
                 }
                 EffectKind::InnerShadow(shadow) => shadow.radius.abs() * 6.0 + shadow.spread.abs() * 4.0,
-                EffectKind::LayerBlur(blur) if !blur.is_progressive() => blur.max_radius() * 6.0,
-                EffectKind::BackgroundBlur(blur) if !blur.is_progressive() => blur.max_radius() * 6.0,
+                EffectKind::LayerBlur(blur) | EffectKind::BackgroundBlur(blur) => blur.max_radius() * 6.0,
                 EffectKind::Glass(glass) => {
                     let glass = glass.sanitized();
                     glass.frost * 6.0 + glass.max_bend() + glass.depth
                 }
                 EffectKind::Noise(_) => 0.0,
                 EffectKind::Texture(texture) => texture.radius.abs() + 2.0,
-                _ => return None,
             };
             if !local.is_finite() {
                 return None;
@@ -216,7 +214,7 @@ mod tests {
     use figcraft_color::{
         Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
     };
-    use figcraft_doc::{Blur, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
+    use figcraft_doc::{Blur, BlurType, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
@@ -296,6 +294,46 @@ mod tests {
     }
 
     #[test]
+    fn wide_progressive_layer_blur_keeps_gpu_page_and_selection_seams() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide progressive blur export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Across seam", 2030.0, 32.0, 64.0, 64.0)?;
+        let node = doc.node_mut(id).ok_or("blur node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.1, 0.3, 1.0))];
+        node.effects = vec![Effect {
+            kind: EffectKind::LayerBlur(Blur {
+                radius: 16.0,
+                blur_type: BlurType::Progressive,
+                start_radius: 0.0,
+                start: (0.0, 0.0),
+                end: (1.0, 1.0),
+            }),
+            visible: true,
+        }];
+        let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let page_wide = render_page_gpu(&doc, page, &wide).ok_or("wide GPU page unavailable")?;
+        let area_wide = render_area_gpu(&doc, &[id], wide.page_rect(), 1.0).ok_or("wide GPU selection unavailable")?;
+        let crop = View { origin: (1872.0, 0.0), scale: 1.0, width: 384, height: 128 };
+        let page_crop = render_page_gpu(&doc, page, &crop).ok_or("GPU page crop unavailable")?;
+        let area_crop = render_area_gpu(&doc, &[id], crop.page_rect(), 1.0).ok_or("GPU selection crop unavailable")?;
+        for y in 0..128 {
+            for x in 2000..2112 {
+                for (wide, crop) in [(&page_wide, &page_crop), (&area_wide, &area_crop)] {
+                    let a = wide.pixel(x, y).ok_or("wide sample missing")?;
+                    let b = crop.pixel(x - 1872, y).ok_or("crop sample missing")?;
+                    for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                        assert!(one.abs_diff(two) <= 8, "progressive blur seam at ({x},{y}): wide={a:?} crop={b:?}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn wide_noise_and_texture_exports_match_gpu_across_tile_seams() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());
@@ -341,17 +379,22 @@ mod tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 2016.0, 24.0, 80.0, 80.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
-        let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
-        let actual = render_page_gpu(&doc, page, &wide).ok_or("wide GPU backdrop unavailable")?;
-        let crop = View { origin: (1968.0, 0.0), scale: 1.0, width: 192, height: 128 };
-        let expected = render_page_gpu(&doc, page, &crop).ok_or("GPU backdrop crop unavailable")?;
-        for y in [36, 48, 64, 80, 92] {
-            for x in 2024..2080 {
-                let a = actual.pixel(x, y).ok_or("wide sample missing")?;
-                let b = expected.pixel(x - 1968, y).ok_or("crop sample missing")?;
-                for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
-                    assert!(one.abs_diff(two) <= 8, "backdrop seam at ({x},{y}): wide={a:?} crop={b:?}");
+        for blur in
+            [Blur::uniform(8.0), Blur { radius: 16.0, blur_type: BlurType::Progressive, start_radius: 0.0, start: (0.5, 0.0), end: (0.5, 1.0) }]
+        {
+            let progressive = blur.is_progressive();
+            doc.node_mut(pane).ok_or("pane missing")?.effects = vec![Effect { kind: EffectKind::BackgroundBlur(blur), visible: true }];
+            let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+            let actual = render_page_gpu(&doc, page, &wide).ok_or("wide GPU backdrop unavailable")?;
+            let crop = View { origin: (1872.0, 0.0), scale: 1.0, width: 384, height: 128 };
+            let expected = render_page_gpu(&doc, page, &crop).ok_or("GPU backdrop crop unavailable")?;
+            for y in [36, 48, 64, 80, 92] {
+                for x in 2024..2080 {
+                    let a = actual.pixel(x, y).ok_or("wide sample missing")?;
+                    let b = expected.pixel(x - 1872, y).ok_or("crop sample missing")?;
+                    for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                        assert!(one.abs_diff(two) <= 8, "backdrop seam at ({x},{y}) progressive={progressive}: wide={a:?} crop={b:?}");
+                    }
                 }
             }
         }
