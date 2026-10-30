@@ -1,7 +1,7 @@
 //! The main menu (from the engine's menu catalog), the canvas/layer context menu and the
 //! Actions palette (⌘K / ⌘/).
 
-use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use figcraft_engine::catalog::{MENU, SEP};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -227,8 +227,6 @@ pub fn record_recent(app: &mut FigApp, key: &str) {
 /// clipboard) are handled here, the rest go to the engine.
 pub fn invoke(app: &mut FigApp, id: &str) {
     match id {
-        #[cfg(debug_assertions)]
-        "debug.componentLibrary" => app.ui.component_library.open = true,
         // Edit ▸ Delete (and the Delete binding) with an interaction open in the Prototype tab
         // removes that interaction, not the layer (#767).
         "edit.delete" if app.ui_context.clone().is_some_and(|ctx| crate::proto_panel::delete_selected_interaction(app, &ctx)) => {}
@@ -428,14 +426,6 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
                     return true;
                 }
             }
-        }
-    }
-    #[cfg(debug_assertions)]
-    if prefix == "Help" {
-        separator(ui);
-        if item(ui, "UI Library (dev)", "", true, false, &t) {
-            invoke(app, "debug.componentLibrary");
-            return true;
         }
     }
     if let Some(id) = clicked {
@@ -749,8 +739,7 @@ fn submenu_at<R>(
     }
     let pos = pos2(r.max.x + gap, r.min.y - 8.0);
     let child = At { root: at.root, path: key.to_string() };
-    let shown =
-        egui::Area::new(area).fixed_pos(pos).order(egui::Order::Foreground).constrain(constrain).show(ui.ctx(), |ui| menu_frame(ui, t, child, add));
+    let shown = crate::primitives::Menu::area(area, pos).constrain(constrain).show(ui.ctx(), |ui| menu_frame(ui, t, child, add));
     let panel = shown.response.rect;
     with_level(ui.ctx(), &at, |l| l.panel = Some(panel));
     shown.inner
@@ -898,7 +887,7 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
     // Main menu.
     if app.ui.main_menu {
         let mut close = false;
-        let area = egui::Area::new(main_menu_id()).fixed_pos(pos2(8.0, crate::tabs::HEIGHT + 48.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+        let area = crate::primitives::Menu::area(main_menu_id(), pos2(8.0, crate::tabs::HEIGHT + 48.0)).show(ctx, |ui| {
             menu_frame(ui, &t, At { root: main_menu_id(), path: String::new() }, |ui| {
                 // Quick actions search row.
                 let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
@@ -942,7 +931,7 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
             a11y::popup(&mut app.ui.nav, f, Id::new("ctx_menu"));
         }
         let mut close = false;
-        let area = egui::Area::new(ctx_menu_id()).fixed_pos(pos).order(egui::Order::Foreground).constrain(true).show(ctx, |ui| {
+        let area = crate::primitives::Menu::area(ctx_menu_id(), pos).constrain(true).show(ctx, |ui| {
             menu_frame(ui, &t, At { root: ctx_menu_id(), path: String::new() }, |ui| {
                 if select_layer_menu(app, ui, pos, &t) {
                     close = true;
@@ -982,6 +971,14 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
                     .ok()
                     .filter(|doc| figcraft_engine::cmd::component::can_combine_variants(doc, &app.session.selection()))
                     .map(|_| i18n::command("component.combineVariants", "Combine as variants"));
+                let vector_contours = app.session.ds().ok().and_then(|ds| {
+                    let edit = ds.vector_edit.as_ref()?;
+                    if !ids.contains(&edit.id) {
+                        return None;
+                    }
+                    let figcraft_doc::NodeKind::Vector { network } = &ds.doc.node(edit.id)?.kind else { return None };
+                    Some((!network.outer_contours().is_empty(), !network.inner_contours().is_empty()))
+                });
                 let mut entries: Vec<(&str, &str)> = if has_sel {
                     vec![
                         (tr("Copy"), "edit.copy"),
@@ -1043,6 +1040,19 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
                     && let Some(at) = entries.iter().position(|e| e.1 == "component.create")
                 {
                     entries.insert(at + 1, (label, "component.combineVariants"));
+                }
+                if let Some((outer, inner)) = vector_contours
+                    && (outer || inner)
+                    && let Some(at) = entries.iter().position(|entry| entry.1 == "vector.outlineStroke")
+                {
+                    let mut contour_entries = vec![("-", "")];
+                    if outer {
+                        contour_entries.push((tr("Select outer contour"), "vector.edit.selectOuterContour"));
+                    }
+                    if inner {
+                        contour_entries.push((tr("Select inner contours"), "vector.edit.selectInnerContours"));
+                    }
+                    entries.splice(at + 1..at + 1, contour_entries);
                 }
                 // A right-clicked ruler guide (selected, with no layers) can be removed.
                 if !has_sel && app.session.ds().is_ok_and(|d| d.selected_guide().is_some()) {
@@ -1128,8 +1138,9 @@ fn select_layer_menu(app: &mut FigApp, ui: &mut Ui, pos: egui::Pos2, t: &Tokens)
     }
 }
 
-/// The Actions palette's content height (the frame adds its own 8 px margins).
-const PALETTE_H: f32 = 450.0;
+/// Pencil node i1UCns / Bzs6D: 552 × 354 including 8 px surface insets.
+const PALETTE_W: f32 = 552.0;
+const PALETTE_H: f32 = 354.0;
 
 /// Open the Actions palette afresh (empty search, All tab, first row highlighted), or close it.
 pub fn set_palette(ui: &mut crate::UiState, open: bool) {
@@ -1151,11 +1162,10 @@ pub fn toggle_palette(ui: &mut crate::UiState) {
 fn palette(app: &mut FigApp, ctx: &egui::Context) {
     let Some(mut q) = app.ui.palette.clone() else { return };
     let t = Tokens::get(ctx);
-    // Same centre and width as the toolbar pill (it centres on the canvas, not the window),
-    // floating 8 px above it. Fixed size: switching tabs never resizes the panel.
+    // Centre on the canvas toolbar, 8 px above it. Tab changes keep the same panel size.
     let bar_w = crate::toolbar::main_width();
     let bar = crate::toolbar::pill_rect(app.canvas.rect, bar_w);
-    let area = Rect::from_min_max(pos2(bar.min.x, bar.min.y - 8.0 - (PALETTE_H + 16.0)), pos2(bar.max.x, bar.min.y - 8.0));
+    let area = Rect::from_min_size(pos2(bar.center().x - PALETTE_W / 2.0, bar.min.y - 8.0 - PALETTE_H), vec2(PALETTE_W, PALETTE_H));
     let mut run: Option<String> = None;
     let mut close = false;
     // A press anywhere outside closes the panel. The opening press is spared once, and the
@@ -1175,87 +1185,81 @@ fn palette(app: &mut FigApp, ctx: &egui::Context) {
         i.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as i64
             - i.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as i64
     });
-    egui::Area::new(Id::new("palette")).fixed_pos(area.min).order(egui::Order::Foreground).show(ctx, |ui| {
-        egui::Frame::NONE
-            .fill(t.panel)
-            .corner_radius(CornerRadius::same(13))
-            .stroke(Stroke::new(1.0, t.border))
-            .shadow(egui::Shadow { offset: [0, 8], blur: 32, spread: 0, color: t.shadow })
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                // Same outer width as the toolbar pill, and a fixed height: switching tabs
-                // never resizes the panel.
-                let inner = bar_w - 16.0;
-                ui.set_width(inner);
-                ui.set_height(PALETTE_H);
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut q)
-                        .hint_text(tr("Search actions, layers and tools"))
-                        .desired_width(inner - 16.0)
-                        .font(regular(14.0))
-                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(8))),
-                );
+    crate::primitives::Menu::area(Id::new("palette"), area.min).order(egui::Order::Tooltip).show(ctx, |ui| {
+        crate::primitives::Surface::palette().show(ui, |ui| {
+            let inner = PALETTE_W - 16.0;
+            ui.set_width(inner);
+            ui.set_min_height(PALETTE_H - 16.0);
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let r = crate::primitives::SearchField::new(Id::new("palette_search"), tr("Search actions, layers and tools"))
+                .width(crate::primitives::ControlWidth::Fill)
+                .show(ui, &mut q);
+            r.request_focus();
+            crate::widgets::select_all_on_focus(ui, &r, &q);
+            // A new search starts again at the first row.
+            if r.changed() {
+                app.ui.palette_hi = 0;
+            }
+            let tabs = [
+                crate::primitives::Tab::new(tr("All")),
+                crate::primitives::Tab::new(tr("Assets")),
+                crate::primitives::Tab::new(tr("Plugins & widgets")),
+            ];
+            let selected = match app.ui.palette_tab {
+                PaletteTab::All => 0,
+                PaletteTab::Assets => 1,
+                PaletteTab::Plugins => 2,
+            };
+            if let Some(index) =
+                crate::primitives::Tabs::new(Id::new("palette_tabs"), &tabs, Some(selected)).width(crate::primitives::ControlWidth::Fill).show(ui)
+            {
+                app.ui.palette_tab = match index {
+                    1 => PaletteTab::Assets,
+                    2 => PaletteTab::Plugins,
+                    _ => PaletteTab::All,
+                };
+                app.ui.palette_hi = 0;
                 r.request_focus();
-                crate::widgets::select_all_on_focus(ui, &r, &q);
-                // A new search starts again at the first row.
-                if r.changed() {
-                    app.ui.palette_hi = 0;
-                }
-                ui.add_space(4.0);
-                // Tabs: All, Assets, Plugins & widgets.
-                let tabs = [(PaletteTab::All, tr("All")), (PaletteTab::Assets, tr("Assets")), (PaletteTab::Plugins, tr("Plugins & widgets"))];
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(4.0, 0.0);
-                    for (tab, label) in tabs {
-                        let active = app.ui.palette_tab == tab;
-                        // The frame stays on for every tab (transparent when idle) so the
-                        // active pill never moves its neighbours.
-                        let resp = ui.add(
-                            egui::Button::new(egui::RichText::new(label).size(12.0).color(if active { t.text } else { t.text_secondary }))
-                                .frame(true)
-                                .fill(if active { t.hover } else { Color32::TRANSPARENT })
-                                .corner_radius(CornerRadius::same(6)),
-                        );
-                        if resp.clicked() {
-                            app.ui.palette_tab = tab;
-                            app.ui.palette_hi = 0;
-                        }
-                    }
-                });
-                ui.add_space(4.0);
-                let sections = palette_sections(app, &q, app.ui.palette_tab);
-                let count = sections.iter().map(|(_, rows)| rows.len()).sum::<usize>();
-                // At either end it stays where it was.
-                let hi = (app.ui.palette_hi as i64 + step).clamp(0, count.saturating_sub(1) as i64) as usize;
-                app.ui.palette_hi = hi;
-                // The pointer moving over a row moves the highlight there.
-                let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                    let mut i = 0;
-                    for (name, rows) in &sections {
-                        section(ui, &t, name, |ui| {
-                            for row in rows {
-                                let resp = draw_row(ui, &t, row, i == hi);
-                                if resp.clicked() {
-                                    run = Some(row.key.clone());
-                                }
-                                if pointer_moved && resp.hovered() && i != hi {
-                                    app.ui.palette_hi = i;
-                                    // Drawn there on the next frame, even if the pointer stops now.
-                                    ui.ctx().request_repaint();
-                                }
-                                if step != 0 && i == hi {
-                                    resp.scroll_to_me(None);
-                                }
-                                i += 1;
+            }
+            let sections = palette_sections(app, &q, app.ui.palette_tab);
+            let count = sections.iter().map(|(_, rows)| rows.len()).sum::<usize>();
+            // At either end it stays where it was.
+            let hi = (app.ui.palette_hi as i64 + step).clamp(0, count.saturating_sub(1) as i64) as usize;
+            app.ui.palette_hi = hi;
+            // The pointer moving over a row moves the highlight there.
+            let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
+            egui::ScrollArea::vertical().id_salt("palette_rows").max_height(274.0).show(ui, |ui| {
+                let mut i = 0;
+                for (section_index, (name, rows)) in sections.iter().enumerate() {
+                    section(ui, &t, name, section_index > 0, |ui| {
+                        for row in rows {
+                            let mut item = crate::primitives::MenuItem::new(&row.label).shortcut(&row.hint).palette(i == hi);
+                            if let Some(letter) = row.tile {
+                                item = item.tile(letter);
+                            } else {
+                                item = item.leading(action_icon(&row.key));
                             }
-                        });
-                    }
-                });
-                if run.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    run = sections.iter().flat_map(|(_, rows)| rows).nth(hi).map(|row| row.key.clone());
+                            let resp = item.show(ui);
+                            if resp.clicked() {
+                                run = Some(row.key.clone());
+                            }
+                            if pointer_moved && resp.hovered() && i != hi {
+                                app.ui.palette_hi = i;
+                                // Drawn there on the next frame, even if the pointer stops now.
+                                ui.ctx().request_repaint();
+                            }
+                            if step != 0 && i == hi {
+                                resp.scroll_to_me(None);
+                            }
+                            i += 1;
+                        }
+                    });
                 }
             });
+            if run.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                run = sections.iter().flat_map(|(_, rows)| rows).nth(hi).map(|row| row.key.clone());
+            }
+        });
     });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         close = true;
@@ -1266,7 +1270,6 @@ fn palette(app: &mut FigApp, ctx: &egui::Context) {
         return;
     }
     app.ui.palette = if close { None } else { Some(q) };
-    let _ = StrokeKind::Inside;
 }
 
 /// The rows a palette tab shows for the query, by section: All has Recents, the commands by menu,
@@ -1328,33 +1331,49 @@ pub(crate) struct ActionRow {
 }
 
 /// A section header with its rows.
-fn section(ui: &mut Ui, t: &Tokens, name: &str, rows: impl FnOnce(&mut Ui)) {
-    ui.add_space(10.0);
-    ui.painter().text(pos2(ui.min_rect().min.x + 10.0, ui.cursor().min.y + 8.0), Align2::LEFT_TOP, name, regular(12.5), t.text_secondary);
-    ui.add_space(22.0);
+fn section(ui: &mut Ui, t: &Tokens, name: &str, spaced: bool, rows: impl FnOnce(&mut Ui)) {
+    if spaced {
+        ui.add_space(8.0);
+    }
+    let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+    ui.painter().text(pos2(heading.left() + 8.0, heading.center().y), Align2::LEFT_CENTER, name, regular(11.0), t.text_secondary);
     rows(ui);
 }
 
-/// Draw one row (a letter tile for plugins, else just the label) with its right-side hint,
-/// `highlighted` when Enter runs it.
-fn draw_row(ui: &mut Ui, t: &Tokens, row: &ActionRow, highlighted: bool) -> egui::Response {
-    let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
-    // The highlight pill stays inside the row: it never touches the panel's edges.
-    let pill = r.shrink2(vec2(4.0, 1.0));
-    if highlighted {
-        ui.painter().rect_filled(pill, CornerRadius::same(6), t.hover);
+fn action_icon(key: &str) -> Icon {
+    if key.starts_with("component:") {
+        return Icon::Component;
     }
-    let mut label_x = r.min.x + 10.0;
-    if let Some(letter) = row.tile {
-        let tile = Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(18.0, 18.0));
-        ui.painter().rect_filled(tile, CornerRadius::same(5), t.hover);
-        ui.painter().text(tile.center(), Align2::CENTER_CENTER, letter.to_string(), regular(11.0), t.text);
-        label_x = r.min.x + 38.0;
+    if key.starts_with("style:") {
+        return Icon::Styles;
     }
-    ui.painter().text(pos2(label_x, r.center().y), Align2::LEFT_CENTER, &row.label, regular(13.0), t.text);
-    ui.painter().text(pos2(r.max.x - 10.0, r.center().y), Align2::RIGHT_CENTER, &row.hint, regular(11.0), t.text_secondary);
-    resp
+    if key.starts_with("widget:") {
+        return Icon::Grid;
+    }
+    let id = key.strip_prefix("command:").unwrap_or(key);
+    if id.contains("autoLayout") || id.contains("auto.layout") {
+        Icon::AutoLayout
+    } else if id.contains("image") || id.contains("Image") {
+        Icon::Image
+    } else if id.contains("component") || id.contains("Component") {
+        Icon::Component
+    } else if id.contains("frame") || id.contains("Frame") {
+        Icon::Frame
+    } else if id.contains("section") || id.contains("Section") {
+        Icon::Section
+    } else if id.contains("text") || id.contains("Text") {
+        Icon::Text
+    } else if id.contains("plugin") || id.contains("Plugin") {
+        Icon::Actions
+    } else if id.starts_with("file.") {
+        Icon::Page
+    } else if id.starts_with("view.") {
+        Icon::Eye
+    } else if id.starts_with("edit.") {
+        Icon::Layers
+    } else {
+        Icon::Actions
+    }
 }
 
 /// Whether `label` (or `extra`) matches the query, in any case.

@@ -3,16 +3,18 @@
 //! selected width point with the Variable width tool (in place of the layer's position and
 //! dimensions).
 
-use egui::{Id, Ui};
-use figcraft_doc::{Document, HandleMirroring, StrokeCap, StrokeJoin};
+use egui::{Color32, CornerRadius, Id, Rect, Stroke, StrokeKind, Ui, pos2, vec2};
+use figcraft_doc::{Document, HandleMirroring};
 use figcraft_engine::vectoredit::{self, VectorEdit};
 use serde_json::{Value, json};
 
 use crate::FigApp;
 use crate::i18n::tr;
 use crate::icons::Icon;
-use crate::right::{CAP_ART_W, cap_art, join_label, menu_item, menu_item_with, menu_popup, row};
-use crate::widgets::{self, FieldEdit, Lead};
+use crate::icons::{AppearanceIcon, PositionIcon, VectorPointIcon};
+use crate::primitives::{Button, ControlWidth, Segment, SegmentedControl};
+use crate::right::{menu_popup, row, row_rect};
+use crate::widgets::{self, Edit, FieldEdit, Lead, PAD};
 
 /// Run a point command from a field: typed values are one step, scrubs one step when released.
 fn point_field(app: &mut FigApp, cmd: &str, edit: Option<FieldEdit>, params: impl Fn(f64) -> Value) {
@@ -78,8 +80,8 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
     }
     let Some(net) = vectoredit::network(doc, ve.id) else { return };
     let pts = vectoredit::selected_points(net, ve);
-    widgets::section_header(ui, if pts.len() > 1 { tr("Points") } else { tr("Point") }, &[], false);
     if pts.is_empty() {
+        widgets::section_header(ui, if pts.len() > 1 { tr("Points") } else { tr("Point") }, &[], false);
         let t = crate::theme::Tokens::get(ui.ctx());
         widgets::note(ui, tr("Select points to edit their position, radius and mirroring"), t.text_secondary);
         return;
@@ -87,7 +89,28 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
     let col = widgets::col_width(ui.available_width());
     let pos = vectoredit::selection_position(doc, ve);
     let round = |v: f64| (v * 100.0).round() / 100.0;
-    widgets::sublabels(ui, tr("Position"), None);
+    let align = [
+        (PositionIcon::AlignLeft, tr("Align left"), "left"),
+        (PositionIcon::AlignHCenter, tr("Align horizontal centers"), "hcenter"),
+        (PositionIcon::AlignRight, tr("Align right"), "right"),
+        (PositionIcon::AlignTop, tr("Align top"), "top"),
+        (PositionIcon::AlignVCenter, tr("Align vertical centers"), "vcenter"),
+        (PositionIcon::AlignBottom, tr("Align bottom"), "bottom"),
+    ];
+    let align_row = row_rect(ui, 32.0, |ui| {
+        for group in [0..3, 3..6] {
+            let items = align[group.clone()].iter().map(|(icon, label, _)| Segment::position_icon(*icon, label)).collect::<Vec<_>>();
+            if let Some(index) = SegmentedControl::new(&items, None).width(ControlWidth::Fixed(col)).show(ui) {
+                app.run("vector.edit.align", json!({"mode": align[group.start + index].2}));
+            }
+        }
+    });
+    let more = Button::vector_point_icon(VectorPointIcon::More, tr("More actions")).icon_size(16.0).show_at(
+        ui,
+        Id::new("vpt_more"),
+        Rect::from_min_size(pos2(align_row.max.x - PAD - 24.0, align_row.min.y + 4.0), vec2(24.0, 24.0)),
+    );
+    point_options(app, pts.len(), &more);
     row(ui, 32.0, |ui| {
         let e = widgets::number_field(ui, Id::new("vpt_x"), Lead::Text("X"), pos.map(|p| round(p.x)), "", col, 1.0);
         point_field(app, "vector.edit.position", e, |v| json!({"x": v}));
@@ -103,64 +126,89 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
             point_field(app, "vector.edit.resize", e, |v| json!({"height": v.max(0.0)}));
         });
     }
-    let vertex = |v: &usize| net.vertices.get(*v).copied();
     let mirror = same(pts.iter().map(|v| net.mirroring(*v)));
-    // A point's own cap and join (`Some(None)`: the layer's; `None`: mixed).
-    let cap = same(pts.iter().map(|v| vertex(v).map(|x| x.cap))).flatten();
-    let join = same(pts.iter().map(|v| vertex(v).map(|x| x.join))).flatten();
-    widgets::sublabels(ui, tr("Mirroring"), None);
     row(ui, 32.0, |ui| {
-        let label = |m: HandleMirroring| match m {
-            HandleMirroring::None => tr("No mirroring"),
-            HandleMirroring::Angle => tr("Mirror angle"),
-            HandleMirroring::AngleAndLength => tr("Mirror angle and length"),
-        };
-        let resp = widgets::dropdown(ui, mirror.map(label).unwrap_or(tr("Mixed")), col * 2.0 + 8.0, None);
-        menu_popup(&resp).show(|ui| {
-            for m in [HandleMirroring::None, HandleMirroring::Angle, HandleMirroring::AngleAndLength] {
-                if menu_item(ui, label(m), "") {
-                    app.run("vector.edit.mirroring", json!({"mode": m.id()}));
-                    ui.close();
-                }
-            }
-        });
+        let modes = [HandleMirroring::None, HandleMirroring::Angle, HandleMirroring::AngleAndLength];
+        let items = [
+            Segment::vector_point_icon(VectorPointIcon::MirrorNone, tr("No mirroring")),
+            Segment::vector_point_icon(VectorPointIcon::MirrorAngle, tr("Mirror angle")),
+            Segment::vector_point_icon(VectorPointIcon::MirrorAngleAndLength, tr("Mirror angle and length")),
+        ];
+        let selected = mirror.and_then(|mode| modes.iter().position(|item| *item == mode));
+        if let Some(index) = SegmentedControl::new(&items, selected).width(ControlWidth::Fixed(col * 2.0 + 8.0)).show(ui) {
+            app.run("vector.edit.mirroring", json!({"mode": modes[index].id()}));
+        }
     });
-    // The stroke where it ends and turns at these points.
-    let own = |set: Option<Option<&'static str>>| match set {
-        None => tr("Mixed"),
-        Some(None) => tr("Same as layer"),
-        Some(Some(l)) => l,
-    };
-    widgets::sublabels(ui, tr("End point"), Some(tr("Join|stroke")));
+    let radius = crate::right::selected_point_radius(doc, ve).flatten();
     row(ui, 32.0, |ui| {
-        let resp = widgets::dropdown(ui, own(cap.map(|c| c.map(|c| tr(c.label())))), col, None);
-        menu_popup(&resp).show(|ui| {
-            if menu_item(ui, tr("Same as layer"), "") {
-                app.run("vector.edit.strokeCap", json!({"cap": null}));
-                ui.close();
+        let lead = Lead::AppearanceIcon(AppearanceIcon::CornerTopLeft, tr("Corner radius"));
+        let edit = widgets::number_field_mixed(ui, Id::new("vpt_radius"), lead, radius, "", col, 1.0);
+        match edit {
+            Some(Edit::All(field)) => point_field(app, "vector.edit.cornerRadius", Some(field), |v| json!({"radius": v.max(0.0)})),
+            Some(Edit::Each(widgets::Rel::Add(v))) => {
+                app.run("vector.edit.cornerRadius", json!({"add": v}));
             }
-            for c in StrokeCap::ALL {
-                if menu_item_with(ui, tr(c.label()), "", CAP_ART_W, |p, r, col| cap_art(p, r, col, c, false)) {
-                    app.run("vector.edit.strokeCap", json!({"cap": c}));
-                    ui.close();
-                }
+            Some(Edit::Each(widgets::Rel::Mul(v))) => {
+                app.run("vector.edit.cornerRadius", json!({"multiply": v}));
             }
-        });
-        let resp = widgets::dropdown(ui, own(join.map(|j| j.map(join_label))), col, None);
-        menu_popup(&resp).show(|ui| {
-            if menu_item(ui, tr("Same as layer"), "") {
-                app.run("vector.edit.strokeJoin", json!({"join": null}));
-                ui.close();
+            Some(Edit::Each(widgets::Rel::Div(v))) => {
+                app.run("vector.edit.cornerRadius", json!({"divide": v}));
             }
-            for j in StrokeJoin::ALL {
-                if menu_item(ui, join_label(j), "") {
-                    app.run("vector.edit.strokeJoin", json!({"join": j}));
-                    ui.close();
-                }
-            }
-        });
+            None => {}
+        }
     });
     ui.add_space(8.0);
+}
+
+/// Arrange actions from the point panel's rightmost button.
+fn point_options(app: &mut FigApp, selected_count: usize, more: &egui::Response) {
+    menu_popup(more).width(320.0).show(|ui| {
+        crate::primitives::MenuItem::new(tr("Tidy up"))
+            .shortcut(crate::shortcuts::shortcut("arrange.tidy").unwrap_or(""))
+            .enabled(false)
+            .show_with_parts(ui, 28.0, |painter, rect, ink| arrange_icon(painter, rect, ink, 0), 0.0, |_, _, _| {});
+        for (label, axis, command) in
+            [("Distribute vertical spacing", 1, "distribute.vertical"), ("Distribute horizontal spacing", 2, "distribute.horizontal")]
+        {
+            if crate::primitives::MenuItem::new(tr(label))
+                .shortcut(crate::shortcuts::shortcut(command).unwrap_or(""))
+                .enabled(selected_count >= 3)
+                .show_with_parts(ui, 28.0, |painter, rect, ink| arrange_icon(painter, rect, ink, axis), 0.0, |_, _, _| {})
+                .clicked()
+            {
+                app.run(command, json!({}));
+                ui.close();
+            }
+        }
+    });
+}
+
+/// Small arrangement marks from the supplied menu reference; the shared menu primitive owns
+/// layout, hit targets, hover and disabled states.
+fn arrange_icon(painter: &egui::Painter, rect: Rect, ink: Color32, kind: u8) {
+    let center = rect.center();
+    let muted = ink.gamma_multiply(0.55);
+    match kind {
+        0 => {
+            let box_rect = Rect::from_center_size(center, vec2(16.0, 16.0));
+            painter.rect_stroke(box_rect, CornerRadius::same(2), Stroke::new(1.2, ink), StrokeKind::Inside);
+            for y in [-4.0, 0.0, 4.0] {
+                painter.rect_filled(Rect::from_center_size(pos2(center.x, center.y + y), vec2(9.0, 1.5)), CornerRadius::same(1), ink);
+            }
+        }
+        1 => {
+            for y in [-6.0, 6.0] {
+                painter.line_segment([pos2(center.x - 8.0, center.y + y), pos2(center.x + 8.0, center.y + y)], Stroke::new(1.0, muted));
+            }
+            painter.rect_filled(Rect::from_center_size(center, vec2(9.0, 2.5)), CornerRadius::same(1), ink);
+        }
+        _ => {
+            for x in [-6.0, 6.0] {
+                painter.line_segment([pos2(center.x + x, center.y - 8.0), pos2(center.x + x, center.y + 8.0)], Stroke::new(1.0, muted));
+            }
+            painter.rect_filled(Rect::from_center_size(center, vec2(2.5, 9.0)), CornerRadius::same(1), ink);
+        }
+    }
 }
 
 /// The value every item shares, if they all share one.

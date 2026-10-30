@@ -47,9 +47,11 @@ fn layout_grid_tracks_are_clipped_to_their_frame() {
     assert!(ui.app.canvas.rect.contains_rect(bounds), "the frame is visible on the test canvas");
     let color = crate::theme::doc_c32(&ui.ctx, grid.color);
     let output = ui.frame_output(vec![]);
-    let grid_clips: Vec<_> = output.shapes.iter().filter_map(|clipped| {
-        matches!(&clipped.shape, Shape::Rect(rect) if rect.fill == color).then_some(clipped.clip_rect)
-    }).collect();
+    let grid_clips: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| matches!(&clipped.shape, Shape::Rect(rect) if rect.fill == color).then_some(clipped.clip_rect))
+        .collect();
     assert_eq!(grid_clips.len(), 10, "all configured rows and columns still exist");
     for clip in grid_clips {
         assert!((clip.min - bounds.min).length() < 0.5 && (clip.max - bounds.max).length() < 0.5, "grid clip {clip:?} exceeds frame {bounds:?}");
@@ -85,16 +87,23 @@ fn frame_outlines_and_slices_draw_when_shown() {
 #[test]
 fn open_vector_hover_and_selection_show_the_path_and_selection_box() {
     let mut s = Session::new();
-    let vector = id(&s.execute("vector.create", &json!({
-        "path": "M0 120 L100 0 L200 120", "x": 80, "y": 80,
-        "props": {"fills": [], "strokes": ["#000000"], "strokeWeight": 1},
-    })).unwrap());
+    let vector = id(&s
+        .execute(
+            "vector.create",
+            &json!({
+                "path": "M0 120 L100 0 L200 120", "x": 80, "y": 80,
+                "props": {"fills": [], "strokes": ["#000000"], "strokeWeight": 1},
+            }),
+        )
+        .unwrap());
     s.execute("select.none", &json!({})).unwrap();
     let mut u = Ui::new(s);
     let blue = egui::epaint::ColorMode::Solid(crate::theme::ACCENT);
     let blue_path = |shapes: &[Shape]| {
-        shapes.iter().any(|shape| matches!(shape, Shape::Path(path)
-            if !path.closed && path.points.len() >= 3 && path.stroke.color == blue))
+        shapes.iter().any(|shape| {
+            matches!(shape, Shape::Path(path)
+            if !path.closed && path.points.len() >= 3 && path.stroke.color == blue)
+        })
     };
     let hover = u.app.to_screen(130.0, 140.0);
     let shapes = flat(&u.frame_output(vec![egui::Event::PointerMoved(hover)]).shapes);
@@ -123,6 +132,7 @@ fn big_job(doc: &Arc<figcraft_doc::Document>, page: figcraft_doc::NodeId, scale:
         proof: false,
         uid: 0,
         zoom_preview: false,
+        time: 0.0,
         at: web_time::Instant::now(),
         texture_base: None,
         texture_view: None,

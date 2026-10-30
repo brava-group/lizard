@@ -198,14 +198,14 @@ fn the_widths_come_back_with_the_preferences() {
     u.frame(vec![]);
     assert_eq!(widths(&u), (360.0, 300.0));
     let (left, right) = edges(&u);
-    assert_eq!(right - left, 1440.0 - 56.0 - 360.0 - 300.0, "the canvas between them (the icon rail is 56 wide)");
+    assert_eq!(right - left, 1440.0 - 49.0 - 360.0 - 300.0, "the canvas between them (the icon rail is 49 wide)");
     // Widths from a damaged file are brought within the limits when drawn.
     let mut s = Session::new();
     s.prefs.panel_widths = (-5.0, f32::NAN);
     let mut u = Ui::new(s);
     u.frame(vec![]);
     let (left, right) = edges(&u);
-    assert_eq!((left, 1440.0 - right), (56.0 + *LEFT_PANEL.start(), PANEL_DEFAULT));
+    assert_eq!((left, 1440.0 - right), (49.0 + *LEFT_PANEL.start(), PANEL_DEFAULT));
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn minimize_ui_hides_the_panels_and_keeps_their_widths() {
     // The left sidebar alone: its edge goes with it, the right panel stays.
     u.app.run("view.leftSidebar", json!({}));
     u.frame(vec![]);
-    assert_eq!(edges(&u), (56.0, shown.1));
+    assert_eq!(edges(&u), (49.0, shown.1));
 }
 
 #[test]

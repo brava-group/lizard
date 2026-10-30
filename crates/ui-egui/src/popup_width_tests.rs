@@ -4,8 +4,8 @@
 use egui::{Color32, Event, Order, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use figcraft_engine::Session;
 
-use crate::right::{menu_item, menu_popup, menu_row_width};
-use crate::theme::regular;
+use crate::right::{menu_item, menu_popup};
+use crate::theme::{medium, regular};
 use crate::{FigApp, NoServices, RightTab};
 
 const SCREEN: egui::Vec2 = vec2(1440.0, 900.0);
@@ -26,12 +26,15 @@ fn menus(ctx: &egui::Context) -> Vec<Rect> {
 
 /// The popup frame's margins, left plus right.
 fn frame_margins(ctx: &egui::Context) -> f32 {
-    egui::Frame::popup(&ctx.global_style()).total_margin().sum().x
+    let _ = ctx;
+    // The shared Menu has a 0.5 pt stroke and no horizontal inner margin.
+    1.0
 }
 
 #[test]
 fn a_menu_is_as_wide_as_its_widest_row_and_does_not_wrap() {
     let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx, false, 0);
     let mut t = 0.0;
     let items = [("Copy as code", "Cmd+Shift+C"), ("Paste", "Cmd+V"), ("A much longer menu item label", "")];
     let mut frame = |events: Vec<Event>| {
@@ -55,9 +58,13 @@ fn a_menu_is_as_wide_as_its_widest_row_and_does_not_wrap() {
     }
     let shown = menus(&ctx);
     let [menu] = shown.as_slice() else { panic!("one menu open: {shown:?}") };
-    let width = |s: &str, size: f32| ctx.fonts_mut(|f| f.layout_no_wrap(crate::toolbar::pretty_shortcut(s), regular(size), Color32::WHITE).size().x);
-    let content =
-        items.iter().map(|(l, k)| menu_row_width(width(l, 11.5), if k.is_empty() { 0.0 } else { width(k, 11.0) + 8.0 }).ceil()).fold(0.0, f32::max);
+    let label_width = |s: &str| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), medium(11.0), Color32::WHITE).size().x);
+    let shortcut_width = |s: &str| ctx.fonts_mut(|f| f.layout_no_wrap(crate::toolbar::pretty_shortcut(s), regular(11.0), Color32::WHITE).size().x);
+    let content = items
+        .iter()
+        .map(|(label, shortcut)| 32.0 + label_width(label) + if shortcut.is_empty() { 0.0 } else { 24.0 + shortcut_width(shortcut) })
+        .fold(96.0, f32::max)
+        .ceil();
     let expected = content + frame_margins(&ctx);
     assert!((menu.width() - expected).abs() <= 2.0, "menu {} wide, content needs {expected}", menu.width());
     // One line per row.

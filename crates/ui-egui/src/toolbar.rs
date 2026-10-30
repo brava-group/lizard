@@ -1,6 +1,8 @@
 //! The floating bottom toolbar (UI3): tool groups with flyouts, comments, actions.
 
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use figcraft_color::{ImageScaleMode, Paint, PaintKind};
+use figcraft_doc::NodeId;
 use figcraft_engine::ToolId;
 use figcraft_engine::vectoredit::VTool;
 use serde_json::json;
@@ -9,6 +11,7 @@ use crate::FigApp;
 use crate::a11y::{self, Nav, Region, Tip};
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
+use crate::primitives::{Button, ButtonVariant, ControlWidth, Menu, MenuItem, Surface};
 use crate::theme::{Tokens, regular};
 
 struct Group {
@@ -92,8 +95,9 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         view_only_toolbar(app, ui, why);
         return;
     }
-    // Vector edit mode swaps the tools for the edit tools.
+    // Vector editing keeps the main tools available and adds its own toolbar above them.
     if let Some(tool) = app.session.ds().ok().and_then(|d| d.vector_edit.as_ref()).map(|v| v.tool) {
+        main_toolbar(app, ui, canvas, &t);
         edit_toolbar(app, ui, tool);
         return;
     }
@@ -103,6 +107,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         return;
     }
     main_toolbar(app, ui, canvas, &t);
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.pending_image_vectorize.is_some() {
+        crate::image_vectorize::toolbar(app, ui);
+        return;
+    }
+    if let Some((id, index, paint)) = selected_image_fill(app) {
+        image_toolbar(app, ui, id, index, paint);
+    }
 }
 
 /// The main toolbar pill's width: the Actions palette matches it so the two read as one bar.
@@ -117,7 +129,10 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let cell = 32.0;
     let width = main_width();
     let rect = pill(ui, &mut app.ui.nav, canvas, width, t);
-    let current = app.session.tool.tool;
+    let current = match app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).map(|ve| ve.tool) {
+        Some(VTool::Pen) => ToolId::Pen,
+        _ => app.session.tool.tool,
+    };
     let mut x = rect.min.x + 8.0;
     let cy = rect.center().y;
     for g in GROUPS {
@@ -162,12 +177,12 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             if cresp.clicked() {
                 app.ui.tool_flyout = if app.ui.tool_flyout == Some(g.key) { None } else { Some(g.key) };
             }
+            if app.ui.tool_flyout == Some(g.key) {
+                flyout(app, ui, g, &cresp, pos2(r.min.x, rect.min.y - 8.0));
+            }
             x += FLYOUT_WIDTH;
         }
         x += TOOL_GAP;
-        if app.ui.tool_flyout == Some(g.key) {
-            flyout(app, ui, g, pos2(r.min.x, rect.min.y - 8.0));
-        }
     }
     let actions = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
     let resp = ui.interact(actions, ui.id().with("actions"), Sense::click()).tip(crate::shortcuts::tip(tr("Actions"), "app.actions"));
@@ -309,47 +324,207 @@ fn view_only_toolbar(app: &mut FigApp, ui: &mut Ui, why: &'static str) {
     ui.painter().galley(pos2(badge.min.x + 12.0 + 14.0 + 6.0, cy - text.size().y / 2.0), text, t.text);
 }
 
-/// The pill shown in vector edit mode: the edit tools and Done.
+const VECTOR_EDIT_BUTTONS: [(VTool, Icon, &str, f32); 6] = [
+    (VTool::Move, Icon::Move, "Move", 68.0),
+    (VTool::Lasso, Icon::Lasso, "Lasso", 70.0),
+    (VTool::Paint, Icon::PaintBucket, "Paint vector", 68.0),
+    (VTool::Bend, Icon::Bend, "Bend", 70.0),
+    (VTool::Cut, Icon::Cut, "Cut vector", 68.0),
+    (VTool::Eraser, Icon::Eraser, "Erase vector", 74.0),
+];
+
+pub(crate) fn vector_edit_toolbar_width() -> f32 {
+    // Surface margins, six tool buttons, three separators, More and Close.
+    16.0 + VECTOR_EDIT_BUTTONS.iter().map(|(_, _, _, width)| width).sum::<f32>() + 3.0 * 17.0 + 68.0 + 24.0
+}
+
+fn vector_edit_separator(ui: &mut Ui, t: &Tokens) {
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(1.0, 24.0), Sense::hover());
+    ui.painter().vline(rect.center().x, rect.y_range(), Stroke::new(1.0, t.border));
+    ui.add_space(8.0);
+}
+
+/// A second toolbar above the main toolbar while a vector is being edited.
 fn edit_toolbar(app: &mut FigApp, ui: &mut Ui, current: VTool) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
-    let cell = 32.0;
-    let width = VTool::ALL.len() as f32 * (cell + 4.0) + 8.0 + 12.0 + DONE_W + 8.0;
-    let rect = pill(ui, &mut app.ui.nav, canvas, width, &t);
-    let cy = rect.center().y;
-    let mut x = rect.min.x + 8.0;
+    let width = vector_edit_toolbar_width();
+    let main = pill_rect(canvas, main_width());
+    let top_left = pos2(canvas.center().x - width / 2.0, main.min.y - 8.0 - 40.0);
     // Holding Cmd with the Move tool bends: show it.
     let held = current == VTool::Move && ui.input(|i| i.modifiers.command);
-    for tool in VTool::ALL {
-        let r = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
-        let tip = if tool == VTool::Bend {
-            trf("{tool}  hold {key}", &[("tool", &tr(tool.label())), ("key", &pretty_shortcut(tool.shortcut()))])
-        } else {
-            format!("{}  {}", tr(tool.label()), pretty_shortcut(tool.shortcut()))
-        };
-        let active = tool == current && !held || held && tool == VTool::Bend;
-        let icon = match tool {
-            VTool::Move => Icon::Move,
-            VTool::Pen => Icon::Pen,
-            VTool::Bend => Icon::Bend,
-            VTool::Paint => Icon::PaintBucket,
-            VTool::Lasso => Icon::Lasso,
-            VTool::Cut => Icon::Cut,
-            VTool::Eraser => Icon::Eraser,
-            VTool::Width => Icon::VariableWidth,
-        };
-        let resp = tool_cell(ui, &t, r, ("vtool", tool.id()), icon, active, &tip);
-        if active {
-            a11y::prefer(&mut app.ui.nav, Region::Toolbar, resp.id);
+    Menu::area(egui::Id::new("vector_edit_toolbar"), top_left).show(ui.ctx(), |ui| {
+        let bounds = Rect::from_min_size(top_left, vec2(width, 40.0));
+        ui.interact(bounds, ui.id().with("vector_edit_toolbar_background"), Sense::CLICK | Sense::DRAG);
+        a11y::area(&mut app.ui.nav, Region::Toolbar, bounds);
+        a11y::container_bounds(ui, bounds);
+        Surface::palette().show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal(|ui| {
+                for (index, (tool, icon, label, width)) in VECTOR_EDIT_BUTTONS.into_iter().enumerate() {
+                    if index == 2 {
+                        vector_edit_separator(ui, &t);
+                    }
+                    let active = (tool == current && !held) || (held && tool == VTool::Bend);
+                    let tip = if tool == VTool::Bend {
+                        trf("{tool}  hold {key}", &[("tool", &tr(tool.label())), ("key", &pretty_shortcut(tool.shortcut()))])
+                    } else {
+                        format!("{}  {}", tr(tool.label()), pretty_shortcut(tool.shortcut()))
+                    };
+                    let response = Button::new(tr(label))
+                        .leading(icon)
+                        .variant(if active { ButtonVariant::Primary } else { ButtonVariant::Ghost })
+                        .width(ControlWidth::Fixed(width))
+                        .show(ui)
+                        .on_hover_text(tip);
+                    if active {
+                        a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+                    }
+                    if response.clicked() {
+                        app.run("vector.edit.tool", json!({"tool": tool.id()}));
+                    }
+                }
+                vector_edit_separator(ui, &t);
+                let more = Button::new(tr("More"))
+                    .trailing(Icon::Chevron)
+                    .variant(if matches!(current, VTool::Pen | VTool::Width) { ButtonVariant::Primary } else { ButtonVariant::Ghost })
+                    .width(ControlWidth::Fixed(68.0))
+                    .show(ui);
+                Menu::popup(&more).width(164.0).align(egui::RectAlign::TOP_START).show(|ui| {
+                    for (tool, icon) in [(VTool::Pen, Icon::Pen), (VTool::Width, Icon::VariableWidth)] {
+                        let shortcut = pretty_shortcut(tool.shortcut());
+                        if MenuItem::new(tr(tool.label())).leading(icon).checked(tool == current).shortcut(&shortcut).show(ui).clicked() {
+                            app.run("vector.edit.tool", json!({"tool": tool.id()}));
+                            ui.close();
+                        }
+                    }
+                });
+                vector_edit_separator(ui, &t);
+                if Button::icon(Icon::Close, tr("Done editing")).width(ControlWidth::Fixed(24.0)).show(ui).on_hover_text("Esc").clicked() {
+                    app.run("vector.edit.end", json!({}));
+                }
+            });
+        });
+    });
+}
+
+#[derive(Clone, Copy)]
+enum ImageAction {
+    Crop,
+    SelectArea,
+    RemoveBackground,
+    EditPrompt,
+    Expand,
+    Enhance,
+    Vectorize,
+}
+
+const IMAGE_BUTTONS: [(ImageAction, Icon, &str, f32); 4] = [
+    (ImageAction::Crop, Icon::ImageCrop, "Crop", 66.0),
+    (ImageAction::SelectArea, Icon::ImageSelectArea, "Select area", 112.0),
+    (ImageAction::RemoveBackground, Icon::ImageRemoveBackground, "Remove background", 166.0),
+    (ImageAction::EditPrompt, Icon::ImageEditPrompt, "Edit with prompt", 128.0),
+];
+
+pub(crate) fn image_toolbar_width() -> f32 {
+    16.0 + IMAGE_BUTTONS.iter().map(|(_, _, _, width)| width).sum::<f32>() + 17.0 + 62.0
+}
+
+fn selected_image_fill(app: &FigApp) -> Option<(NodeId, usize, Paint)> {
+    let selection = app.session.selection();
+    let [id] = selection.as_slice() else { return None };
+    app.session
+        .doc()
+        .ok()?
+        .node(*id)?
+        .fills
+        .iter()
+        .enumerate()
+        .find(|(_, fill)| matches!(fill.kind, PaintKind::Image(_)))
+        .map(|(index, fill)| (*id, index, fill.clone()))
+}
+
+fn image_action(app: &mut FigApp, ui: &Ui, id: NodeId, index: usize, mut paint: Paint, action: ImageAction) {
+    if let ImageAction::Crop = action {
+        if let PaintKind::Image(image) = &mut paint.kind
+            && image.scale_mode != ImageScaleMode::Crop
+        {
+            image.scale_mode = ImageScaleMode::Crop;
+            app.run("fill.set", json!({"ids": [id], "index": index, "paint": paint}));
         }
-        if resp.clicked() {
-            app.run("vector.edit.tool", json!({"tool": tool.id()}));
-        }
-        x += cell + 4.0;
+        app.ui.picker = Some(crate::colorpicker::PickerTarget::Paint { fills: true, index, ids: vec![id] });
+        return;
     }
-    if done_button(ui, &t, x, cy, &format!("{}  Esc", tr("Done editing"))) {
-        app.run("vector.edit.end", json!({}));
+    if let ImageAction::SelectArea = action {
+        app.toast(tr("Image area selection is not available yet"));
+        return;
     }
+    if let ImageAction::RemoveBackground = action {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::background_removal::start(app, ui.ctx(), id, index);
+        #[cfg(target_arch = "wasm32")]
+        app.toast(tr("Local background removal is available in the desktop app"));
+        return;
+    }
+    if let ImageAction::Vectorize = action {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::image_vectorize::start(app, ui.ctx(), id, index);
+        #[cfg(target_arch = "wasm32")]
+        app.toast(tr("Image vectorization is available in the desktop app"));
+        return;
+    }
+    let prompt = match action {
+        ImageAction::EditPrompt => "Edit the selected image: ",
+        ImageAction::Expand => "Expand the selected image while preserving its content.",
+        ImageAction::Enhance => "Improve the resolution of the selected image.",
+        ImageAction::Crop | ImageAction::SelectArea | ImageAction::RemoveBackground | ImageAction::Vectorize => return,
+    };
+    app.select_left_tab(crate::LeftTab::Agent);
+    if app.ui.agent.draft.is_empty() {
+        app.ui.agent.draft = tr(prompt).to_string();
+    }
+    ui.memory_mut(|memory| memory.request_focus(egui::Id::new("agent_prompt")));
+}
+
+/// Contextual image actions above the normal toolbar while one image fill is selected.
+fn image_toolbar(app: &mut FigApp, ui: &mut Ui, id: NodeId, index: usize, paint: Paint) {
+    let t = Tokens::get(ui.ctx());
+    let canvas = app.canvas.rect;
+    let width = image_toolbar_width();
+    let main = pill_rect(canvas, main_width());
+    let top_left = pos2(canvas.center().x - width / 2.0, main.min.y - 48.0);
+    Menu::area(egui::Id::new("image_toolbar"), top_left).show(ui.ctx(), |ui| {
+        let bounds = Rect::from_min_size(top_left, vec2(width, 40.0));
+        ui.interact(bounds, ui.id().with("image_toolbar_background"), Sense::CLICK | Sense::DRAG);
+        a11y::area(&mut app.ui.nav, Region::Toolbar, bounds);
+        a11y::container_bounds(ui, bounds);
+        Surface::palette().show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal(|ui| {
+                for (action, icon, label, width) in IMAGE_BUTTONS {
+                    if Button::new(tr(label)).leading(icon).variant(ButtonVariant::Ghost).width(ControlWidth::Fixed(width)).show(ui).clicked() {
+                        image_action(app, ui, id, index, paint.clone(), action);
+                    }
+                }
+                vector_edit_separator(ui, &t);
+                let more =
+                    Button::new(tr("More")).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(62.0)).show(ui);
+                Menu::popup(&more).width(171.0).align(egui::RectAlign::TOP_START).show(|ui| {
+                    for (action, icon, label) in [
+                        (ImageAction::Expand, Icon::ImageExpand, "Expand"),
+                        (ImageAction::Enhance, Icon::ImageEnhance, "Enhance resolution"),
+                        (ImageAction::Vectorize, Icon::ImageVectorize, "Vectorize"),
+                    ] {
+                        if MenuItem::new(tr(label)).leading(icon).show(ui).clicked() {
+                            image_action(app, ui, id, index, paint.clone(), action);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        });
+    });
 }
 
 /// The pill shown while the shape builder is active: Merge and Remove modes, a hint and Done.
@@ -459,55 +634,7 @@ fn done_button(ui: &mut Ui, t: &Tokens, x: f32, cy: f32, tip: &str) -> bool {
     resp.clicked()
 }
 
-/// The Pencil export specifies shadows in CSS layout pixels. The toolbar uses one egui point per
-/// layout pixel; the display scale is only used when sampling the subpixel inset blur. Drawing a
-/// 0.438-point stroke at its full source opacity makes a much brighter border than CSS's inset
-/// shadow, which clips the blurred colour to the *inside* of the menu.
-fn inset_blur_edge_alpha(source_alpha: u8, blur_px: f32, pixels_per_point: f32) -> u8 {
-    // Approximate the coverage of the first physical pixel inside a Gaussian-blurred edge.
-    // Treat the CSS blur radius as its full width at half maximum, and sample at the pixel centre.
-    let sigma = blur_px / 2.354_82;
-    let distance = 0.5 / pixels_per_point.max(1.0);
-    let z = distance / (sigma * std::f32::consts::SQRT_2);
-    let t = 1.0 / (1.0 + 0.327_591_1 * z);
-    let erf = 1.0 - (((((1.061_405_4 * t - 1.453_152) * t) + 1.421_413_8) * t - 0.284_496_72) * t + 0.254_829_6) * t * (-z * z).exp();
-    (f32::from(source_alpha) * (1.0 - erf) * 0.5).round().clamp(0.0, 255.0) as u8
-}
-
-fn paint_flyout_surface(ui: &Ui, rect: Rect, t: &Tokens) {
-    let radius = CornerRadius::same(13);
-    let painter = ui.painter();
-    // panels-design.pen: two drop shadows, in CSS layout pixels and in CSS back-to-front order.
-    for (offset_y_px, blur_px) in [(10.0, 14.0), (2.0, 4.375)] {
-        painter.add(
-            egui::epaint::RectShape::filled(rect.translate(vec2(0.0, offset_y_px)), radius, Color32::from_black_alpha(0x59))
-                .with_blur_width(blur_px)
-                .with_round_to_pixels(false),
-        );
-    }
-    painter.rect_filled(rect, radius, t.menu);
-
-    // inset 0px 0px 0.438px #ffffff59: rasterize its inward coverage instead of painting a
-    // full-opacity border. A one-device-pixel stroke follows the rounded path and stays inside.
-    let ppp = ui.ctx().pixels_per_point();
-    let glow_alpha = inset_blur_edge_alpha(0x59, 0.438, ppp);
-    painter.add(
-        egui::epaint::RectShape::stroke(rect, radius, Stroke::new(1.0 / ppp.max(1.0), Color32::from_white_alpha(glow_alpha)), StrokeKind::Inside)
-            .with_round_to_pixels(false),
-    );
-
-    // inset 0px 0.5px 0px #ffffff14. Keep the half-pixel Y offset and zero blur as exported;
-    // a filled 0.5-layout-pixel strip avoids egui's stroke-centre rounding at Retina scale.
-    painter.rect_filled(
-        Rect::from_min_max(pos2(rect.min.x + 13.0, rect.min.y), pos2(rect.max.x - 13.0, rect.min.y + 0.5)),
-        CornerRadius::ZERO,
-        Color32::from_white_alpha(0x14),
-    );
-}
-
-fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, bottom_left: egui::Pos2) {
-    let t = Tokens::get(ui.ctx());
-    let item_h = 24.0;
+fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, anchor: &egui::Response, bottom_left: egui::Pos2) {
     let w = match g.key {
         "move" => 202.0,
         "frame" => 143.0,
@@ -516,39 +643,29 @@ fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, bottom_left: egui::Pos2) {
         "text" => 169.0,
         _ => 202.0,
     };
-    let h = item_h * g.tools.len() as f32 + 16.0;
     let mut chosen = None;
-    egui::Area::new(flyout_id(g.key)).fixed_pos(pos2(bottom_left.x, bottom_left.y - h)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
-        paint_flyout_surface(ui, rect, &t);
-        let mut y = rect.min.y + 8.0;
-        for (tid, icon) in g.tools {
-            let r = Rect::from_min_size(pos2(rect.min.x, y), vec2(w, item_h));
-            let resp = ui.interact(r, ui.id().with(("fly", tid.id())), Sense::click());
-            a11y::menu_item(&resp, tr(tid.label()), tid.shortcut(), Some(*tid == app.session.tool.tool));
-            // The keyboard's item is highlighted like the hovered one.
-            a11y::own_focus(&resp);
-            if resp.hovered() || resp.has_focus() {
-                ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), CornerRadius::same(5), t.menu_hover);
+    crate::primitives::Menu::popup(anchor)
+        .id(flyout_id(g.key))
+        .at_position(bottom_left)
+        .width(w)
+        .open_memory(true)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            for (tid, icon) in g.tools {
+                let shortcut = pretty_shortcut(tid.shortcut());
+                let resp = crate::primitives::MenuItem::new(tr(tid.label()))
+                    .checked(*tid == app.session.tool.tool)
+                    .leading(*icon)
+                    .shortcut(&shortcut)
+                    .show(ui);
+                if resp.clicked() {
+                    chosen = Some(*tid);
+                }
             }
-            if *tid == app.session.tool.tool {
-                // The reference checkmark sits at (3.499, 3.512) in the row's 16 px icon slot.
-                icons::paint_stroke_side(
-                    ui.painter(),
-                    Rect::from_min_size(pos2(r.min.x + 15.499, r.min.y + 7.512), vec2(8.992_507, 8.487_045)),
-                    0,
-                    t.menu_text,
-                );
-            }
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 44.0, r.center().y), vec2(16.0, 16.0)), *icon, t.menu_text);
-            ui.painter().text(pos2(r.min.x + 60.0, r.center().y), Align2::LEFT_CENTER, tr(tid.label()), regular(11.0), t.menu_text);
-            ui.painter().text(pos2(r.max.x - 16.0, r.center().y), Align2::RIGHT_CENTER, pretty_shortcut(tid.shortcut()), regular(11.0), t.menu_dim);
-            if resp.clicked() {
-                chosen = Some(*tid);
-            }
-            y += item_h;
-        }
-    });
+        });
+    if !egui::Popup::is_id_open(ui.ctx(), flyout_id(g.key)) {
+        app.ui.tool_flyout = None;
+    }
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.ui.tool_flyout = None;
     }

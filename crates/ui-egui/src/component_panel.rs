@@ -69,7 +69,14 @@ fn combine_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     }
     row(ui, 32.0, |ui| {
         let label = crate::i18n::command("component.combineVariants", "Combine as variants");
-        if widgets::dropdown(ui, &label, 160.0, Some(Icon::ComponentSet)).clicked() {
+        if crate::primitives::Button::new(&label)
+            .variant(crate::primitives::ButtonVariant::Input)
+            .align(crate::primitives::ButtonAlign::Start)
+            .width(crate::primitives::ControlWidth::Fill)
+            .leading(Icon::ComponentSet)
+            .show(ui)
+            .clicked()
+        {
             app.run("component.combineVariants", json!({"ids": sel}));
         }
     });
@@ -171,7 +178,7 @@ fn slot_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, prefer
         (false, _) => tr("Default content").to_string(),
         (true, k) => trn("{n} layers", k, &[]),
     };
-    let resp = widgets::dropdown(ui, &label, w, Some(Icon::Slot)).on_hover_text(tr("Add content to this slot"));
+    let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Slot)).on_hover_text(tr("Add content to this slot"));
     menu_popup(&resp).width(w.max(200.0)).show(|ui| {
         let insert = |app: &mut FigApp, c: NodeId| app.run("instance.slotInsert", json!({"id": slot, "component": c.0}));
         let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));
@@ -271,7 +278,7 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
                 app.run("component.editProperty", json!({"id": owner, "name": k, "newName": nn}));
             }
             let def = defaults.get(k).or(vals.first()).cloned().unwrap_or_default();
-            let resp = widgets::dropdown(ui, &def, 70.0, None).on_hover_text(tr("Default value (the top-left variant)"));
+            let resp = crate::primitives::Select::trigger(ui, &def, 70.0, None).on_hover_text(tr("Default value (the top-left variant)"));
             menu_popup(&resp).show(|ui| {
                 for v in vals {
                     if menu_item(ui, v, "") {
@@ -336,7 +343,7 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
                 }
                 PropDef::InstanceSwap { default, .. } => {
                     let label = doc.node(*default).map(|n| n.name.clone()).unwrap_or_else(|| tr("Missing").into());
-                    let resp = widgets::dropdown(ui, &label, 84.0, None);
+                    let resp = crate::primitives::Select::trigger(ui, &label, 84.0, None);
                     menu_popup(&resp).show(|ui| {
                         for (c, name) in comps.iter() {
                             if menu_item(ui, name, "") {
@@ -368,7 +375,7 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
                     k => trn("{n} preferred components", k, &[]),
                 };
                 let w = (ui.available_width() - 8.0).max(60.0);
-                let resp = widgets::dropdown(ui, &label, w, None).on_hover_text(tip);
+                let resp = crate::primitives::Select::trigger(ui, &label, w, None).on_hover_text(tip);
                 menu_popup(&resp).width(w.max(200.0)).show(|ui| {
                     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                         for (c, name) in comps.iter().filter(|(c, _)| *c != owner && first != Some(*c)) {
@@ -386,7 +393,14 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
     // A lone main component too: Add variant makes it a set of itself and the new variant.
     if can_add_variant(doc, owner) {
         row(ui, 32.0, |ui| {
-            if widgets::dropdown(ui, tr("Add variant"), 120.0, Some(Icon::Plus)).clicked() {
+            if crate::primitives::Button::new(tr("Add variant"))
+                .variant(crate::primitives::ButtonVariant::Input)
+                .align(crate::primitives::ButtonAlign::Start)
+                .width(crate::primitives::ControlWidth::Fill)
+                .leading(Icon::Plus)
+                .show(ui)
+                .clicked()
+            {
                 app.run("component.addVariant", json!({"id": owner}));
             }
         });
@@ -439,7 +453,7 @@ fn bind_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
             icons::paint(ui.painter(), ir, icon, if bound.is_some() { COMPONENT } else { t.icon_secondary });
             widgets::label(ui, tr(label), t.text_secondary);
             let shown = bound.clone().unwrap_or_else(|| tr("Not bound").into());
-            let resp = widgets::dropdown(ui, &shown, 120.0, None).on_hover_text(tr("Apply a component property"));
+            let resp = crate::primitives::Select::trigger(ui, &shown, 120.0, None).on_hover_text(tr("Apply a component property"));
             menu_popup(&resp).width(180.0).show(|ui| {
                 for k in &matching {
                     if menu_item(ui, k, "") {
@@ -579,8 +593,8 @@ fn instance_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
     });
     // Main component with a swap menu, and "go to main".
     row(ui, 32.0, |ui| {
-        let w = (ui.available_width() - 32.0).max(80.0);
-        let resp = widgets::dropdown(ui, &comp_name, w, Some(Icon::Instance)).on_hover_text(tr("Swap instance"));
+        let w = ui.available_width().max(80.0);
+        let resp = crate::primitives::Select::trigger(ui, &comp_name, w, Some(Icon::Instance)).on_hover_text(tr("Swap instance"));
         menu_popup(&resp).width(w.max(200.0)).show(|ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 let mut page = None;
@@ -667,7 +681,7 @@ fn instance_props(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node, comps
                 let w = ui.available_width().max(60.0);
                 // A string variable naming one of the values can choose it.
                 crate::variable_ui::bindable(app, ui, &[id], &format!("{PROP_BINDING}{k}"), VariableType::String, w, |app, ui| {
-                    let resp = widgets::dropdown(ui, &cur, w, None);
+                    let resp = crate::primitives::Select::trigger(ui, &cur, w, None);
                     menu_popup(&resp).show(|ui| {
                         for v in &vals {
                             if menu_item(ui, v, "") {
@@ -710,7 +724,7 @@ fn instance_props(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node, comps
                 PropDef::InstanceSwap { preferred, .. } => {
                     let cur = figcraft_engine::params::id_of(&v);
                     let label = cur.and_then(|c| doc.node(c)).map(|c| c.name.clone()).unwrap_or_else(|| tr("None").into());
-                    let resp = widgets::dropdown(ui, &label, w, Some(Icon::Instance));
+                    let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Instance));
                     menu_popup(&resp).width(200.0).show(|ui| {
                         let t = Tokens::get(ui.ctx());
                         let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));

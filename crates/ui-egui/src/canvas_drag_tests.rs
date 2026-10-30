@@ -196,6 +196,7 @@ fn complex_frame_drag_latency() {
             proof: false,
             uid: ds.uid,
             zoom_preview: false,
+            time: 0.0,
             at: Instant::now(),
             texture_base: None,
             texture_view: None,
@@ -248,6 +249,66 @@ fn complex_frame_drag_latency() {
         median(&mut frames)
     );
     ui.button(p + vec2(80.0, 0.0), false);
+}
+
+/// A repeatable render measurement on the saved icon document. Set LIZARD_BENCH_DOC to the
+/// .figcraft file; the same page centre and device viewport are used at every zoom level.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "manual saved-document canvas benchmark: set LIZARD_BENCH_DOC and run with --ignored --nocapture"]
+fn saved_document_zoom_latency() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::render_worker::{Job, Renders};
+    use figcraft_render::View;
+    use web_time::Instant;
+
+    let path = std::env::var("LIZARD_BENCH_DOC")?;
+    let mut session = Session::new();
+    session.execute("file.open", &json!({"path": path}))?;
+    let ds = session.ds()?;
+    let (width, height) = (1440_u32, 900_u32);
+    let center = (ds.view.cx, ds.view.cy);
+    let mut renders = Renders::default();
+    let output = std::env::var("LIZARD_BENCH_OUTPUT").ok();
+    println!("saved document: {} nodes; centre {center:?}; viewport {width}x{height}", ds.doc.node_count());
+    for scale in [1.0, 8.0, 16.0, 8.0, 1.0] {
+        let view = View { origin: (center.0 - f64::from(width) / (2.0 * scale), center.1 - f64::from(height) / (2.0 * scale)), scale, width, height };
+        let job = Job {
+            doc: ds.doc.clone(),
+            page: ds.page,
+            view,
+            time: 0.0,
+            outline: false,
+            outline_extras: Default::default(),
+            outlined: Vec::new(),
+            skip: Vec::new(),
+            solo: None,
+            proof: false,
+            uid: ds.uid,
+            zoom_preview: scale >= 4.0,
+            at: Instant::now(),
+            texture_base: None,
+            texture_view: None,
+            texture_style: None,
+        };
+        let started = Instant::now();
+        if let Some(preview) = renders.preview(&job) {
+            println!(
+                "scale {scale:>4.0}x: sharp geometry preview {:.1} ms, {}x{} device pixels",
+                started.elapsed().as_secs_f64() * 1000.0,
+                preview.view.width,
+                preview.view.height
+            );
+            if scale == 16.0
+                && let Some(path) = &output
+            {
+                let rgba: Vec<u8> = preview.image.pixels.iter().flat_map(|pixel| pixel.to_array()).collect();
+                image::save_buffer(path, &rgba, preview.image.size[0] as u32, preview.image.size[1] as u32, image::ColorType::Rgba8)?;
+            }
+        }
+        let done = renders.refine(&job).ok_or("render failed")?;
+        println!("scale {scale:>4.0}x: render {:.1} ms, total {:.1} ms, work {:?}", done.ms, started.elapsed().as_secs_f64() * 1000.0, done.work);
+    }
+    Ok(())
 }
 
 #[test]

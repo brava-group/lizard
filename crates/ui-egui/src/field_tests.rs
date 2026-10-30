@@ -448,10 +448,9 @@ fn lead(u: &Ui, id: Id) -> Pos2 {
 }
 
 #[test]
-fn scrubbing_colour_picker_fields_is_live_and_one_undo_step() {
+fn editing_colour_picker_components_commits_one_undo_step_each() {
     let (mut u, a, _) = setup();
     let rgba = |u: &Ui| u.app.session.doc().unwrap().node(a).unwrap().fills[0].solid_color().unwrap().to_rgba8();
-    let [r0, .., a0] = rgba(&u);
     u.ctx.data_mut(|d| d.insert_temp(Id::new("cp_model"), 1usize));
     u.app.ui.picker = Some(crate::colorpicker::PickerTarget::Paint { fills: true, index: 0, ids: vec![a] });
     // The picker window takes a frame to size itself.
@@ -459,14 +458,19 @@ fn scrubbing_colour_picker_fields_is_live_and_one_undo_step() {
         u.frame(vec![]);
     }
     let steps = undo_steps(&u);
-    let from = lead(&u, Id::new(("cp_f", "r")));
-    drag(&mut u, from, -20.0, Modifiers::NONE);
-    assert_eq!((rgba(&u)[0], undo_steps(&u)), (r0 - 20, steps + 1), "R");
-    // The alpha field: a scrub moves it too.
-    let from = lead(&u, Id::new("cp_a"));
-    drag(&mut u, from, -30.0, Modifiers::NONE);
+    let edit = |u: &mut Ui, id: &str, value: &str| {
+        let at = u.ctx.read_response(Id::new(id)).unwrap_or_else(|| panic!("no picker field {id}")).rect.center();
+        click(u, at);
+        key(u, Key::A, Modifiers::COMMAND);
+        u.frame(vec![Event::Text(value.into())]);
+        key(u, Key::Enter, Modifiers::NONE);
+        u.frame(vec![]);
+    };
+    edit(&mut u, "cp_component_0", "128");
+    assert_eq!((rgba(&u)[0], undo_steps(&u)), (128, steps + 1), "R");
+    edit(&mut u, "cp_alpha_exact", "50");
     let [.., alpha] = rgba(&u);
-    assert!(alpha < a0, "alpha {a0} → {alpha}");
+    assert!((alpha as i32 - 128).abs() <= 1, "50% alpha gives 128, got {alpha}");
     assert_eq!(undo_steps(&u), steps + 2, "alpha");
 }
 
@@ -542,6 +546,7 @@ fn the_glass_light_controls_have_their_group_label_and_values() {
 #[test]
 fn a_label_too_long_for_its_field_ends_in_an_ellipsis_before_the_value() {
     let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx, false, 0);
     let mut field = egui::Rect::NOTHING;
     let mut out = ctx.run_ui(Default::default(), |ui| {
         let lead = crate::widgets::Lead::Text("A label much wider than its field");
@@ -551,7 +556,7 @@ fn a_label_too_long_for_its_field_ends_in_an_ellipsis_before_the_value() {
     out.textures_delta.clear();
     let texts = painted_texts(&out.shapes);
     let [(_, label_cut, l), (value, value_cut, v)] = texts.as_slice() else { panic!("the label and the value: {texts:?}") };
-    assert!(*label_cut, "the label ends in an ellipsis");
+    assert!(*label_cut, "the label ends in an ellipsis: {texts:?}");
     assert_eq!((value.as_str(), *value_cut), ("80%", false), "the value shows whole");
     assert!(field.contains_rect(*l) && field.contains_rect(*v), "both inside the field {field:?}: {l:?} {v:?}");
     assert!(l.max.x < v.min.x, "the label stops before the value: {l:?} {v:?}");

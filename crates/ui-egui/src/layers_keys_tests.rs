@@ -143,17 +143,40 @@ fn delete_after_clicking_a_page_deletes_it_without_asking() {
     assert_eq!(u.app.session.page().unwrap(), second);
     key(&mut u, Key::Delete, false);
     // Gone at once, no confirmation: a toast says so and Undo brings it back.
-    assert_eq!(pages(&u), 1);
+    assert_eq!(
+        pages(&u),
+        1,
+        "page focus {:?}, pages open {}, selection {:?}, error {:?}",
+        u.app.ui.pages_focus,
+        u.app.ui.pages_open,
+        u.app.session.selection(),
+        u.app.ui.last_error
+    );
     assert!(!u.app.session.doc().unwrap().pages.contains(&second));
     assert_eq!(u.app.ui.toast.as_ref().map(|t| t.0.as_str()), Some("Page deleted"));
     u.app.run("edit.undo", json!({}));
     assert_eq!(pages(&u), 2);
     // Backspace (the Mac's delete key) does the same.
-    let row = page_row(&mut u, second, first);
+    // Keep the next click distinct from the earlier one so it does not enter page rename.
+    for _ in 0..40 {
+        u.frame(vec![]);
+    }
+    u.app.ui.pages_open = true;
+    u.frame(vec![]);
     u.button(row, true);
     u.button(row, false);
+    assert_eq!(u.app.session.page().unwrap(), second);
+    assert!(crate::layers::pages_have_keyboard(&u.app));
     key(&mut u, Key::Backspace, false);
-    assert_eq!(pages(&u), 1);
+    assert_eq!(
+        pages(&u),
+        1,
+        "Backspace: page focus {:?}, pages open {}, selection {:?}, error {:?}",
+        u.app.ui.pages_focus,
+        u.app.ui.pages_open,
+        u.app.session.selection(),
+        u.app.ui.last_error
+    );
     // The last page stays.
     key(&mut u, Key::Delete, false);
     assert_eq!(pages(&u), 1);

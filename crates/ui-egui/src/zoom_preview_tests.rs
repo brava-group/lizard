@@ -74,6 +74,7 @@ fn job(doc: &Arc<Document>, page: NodeId, uid: u64, view: View) -> Job {
         proof: false,
         uid,
         zoom_preview: true,
+        time: 0.0,
         at: web_time::Instant::now(),
         texture_base: None,
         texture_view: None,
@@ -84,6 +85,27 @@ fn job(doc: &Arc<Document>, page: NodeId, uid: u64, view: View) -> Job {
 /// Every pixel of `a` and `b` alike.
 fn same_pixels(a: &Done, b: &Done) -> bool {
     a.image.size == b.image.size && a.image.pixels == b.image.pixels
+}
+
+#[test]
+fn revisiting_a_zoom_reuses_exact_pixels_and_an_edit_invalidates_it() {
+    let (mut session, rect) = document();
+    let ds = session.ds().unwrap();
+    let low = job(&ds.doc, ds.page, ds.uid, view_at((180.0, 120.0), 1.0, 320, 200));
+    let high = job(&ds.doc, ds.page, ds.uid, view_at((180.0, 120.0), 2.0, 320, 200));
+    let mut renders = Renders::with_threshold(0.0);
+    assert_eq!(renders.refine(&low).unwrap().work, Work::Full);
+    assert_eq!(renders.refine(&high).unwrap().work, Work::Full);
+    assert!(renders.preview(&low).is_none(), "a cached full zoom should skip the coarse preview");
+    let returned = renders.refine(&low).unwrap();
+    assert_eq!(returned.work, Work::Reused);
+    assert!(same_pixels(&returned, &render_now(&low).unwrap()));
+
+    session.execute("node.set", &json!({"id": rect, "props": {"x": 125}})).unwrap();
+    let edited = session.ds().unwrap();
+    let changed = job(&edited.doc, edited.page, edited.uid, low.view.clone());
+    let updated = renders.refine(&changed).unwrap();
+    assert!(same_pixels(&updated, &render_now(&changed).unwrap()));
 }
 
 #[test]
@@ -154,7 +176,7 @@ fn pixel_wheel_zoom_is_processed_once_per_raw_event() {
 }
 
 #[test]
-fn immediate_zoom_out_preview_covers_the_new_view() {
+fn zoom_out_keeps_input_responsive_until_the_worker_covers_the_new_view() {
     let (s, _) = document();
     let mut ui = crate::layers_drag_tests::Ui::new(s);
     ui.app.run("view.zoom200", json!({}));
@@ -168,12 +190,25 @@ fn immediate_zoom_out_preview_covers_the_new_view() {
     let old = ui.app.canvas.tex_view.clone().expect("the starting vector image");
     ui.app.run("view.zoom50", json!({}));
     ui.frame(vec![]);
-    let current = ui.app.canvas.tex_view.clone().expect("a preview in the zoom event's frame");
+    let current = ui.app.canvas.tex_view.clone().expect("the previous image stays available");
     let ds = ui.app.session.ds().unwrap();
     let (w, h) = (ui.app.canvas.rect.width() as u32, ui.app.canvas.rect.height() as u32);
     let visible = View { origin: ds.view.origin(), scale: ds.view.zoom, width: w, height: h };
     assert!(!covers(&old, &visible), "the old image cannot cover the zoomed-out viewport");
-    assert!(ui.app.canvas.tex_coarse && covers(&current, &visible), "the immediate vector preview fills the new viewport");
+    assert!(!ui.app.canvas.tex_coarse, "zoom must not synchronously rasterize a coarse replacement");
+    assert!(
+        (current.origin == old.origin && current.scale == old.scale && current.width == old.width && current.height == old.height)
+            || covers(&current, &visible),
+        "input uses cached pixels or an already completed worker image"
+    );
+    for _ in 0..100 {
+        ui.frame(vec![]);
+        if ui.app.canvas.tex_view.as_ref().is_some_and(|view| covers(view, &visible)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the worker did not fill the zoomed-out viewport");
 }
 
 #[test]
@@ -448,6 +483,23 @@ fn outline_mode_proofing_and_glass_preview_and_settle_like_fresh_renders() {
         let d = r.refine(&next).unwrap();
         assert!(same_pixels(&d, &render_now(&next).unwrap()), "outline {outline}, proof {proof}");
     }
+}
+
+#[test]
+fn effect_heavy_zoom_first_shows_native_resolution_geometry() {
+    let (mut session, rect) = document();
+    session.execute("effect.add", &json!({"ids": [rect], "type": "DROP_SHADOW"})).unwrap();
+    let ds = session.ds().unwrap();
+    let view = view_at((100.0, 100.0), 8.0, 320, 240);
+    let job = job(&ds.doc, ds.page, ds.uid, view.clone());
+    let mut renders = Renders::with_threshold(f64::INFINITY);
+    let preview = renders.preview(&job).expect("high zoom should show geometry before effects");
+    assert!(preview.coarse);
+    assert_eq!(preview.view.scale, view.scale);
+    assert!(covers(&preview.view, &view));
+    let full = renders.refine(&job).expect("full effect render");
+    assert!(same_pixels(&full, &render_now(&job).unwrap()));
+    assert!(!same_pixels(&preview, &full), "the shadow is composed only in the final pass");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! The left panel: file header, File/Assets tabs, pages and the layers tree.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -9,8 +9,8 @@ use serde_json::json;
 
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
-use crate::icons::{self, Icon, NavIcon};
-use crate::theme::{ACCENT, COMPONENT, Tokens, regular, semibold};
+use crate::icons::{self, HeaderIcon, Icon, NavIcon};
+use crate::theme::{ACCENT, ColorRole, Tokens, regular, semibold};
 use crate::{FigApp, LeftTab};
 
 pub const ROW: f32 = 32.0;
@@ -123,12 +123,7 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
         } else if resp.hovered() {
             ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
         }
-        let size = match icon {
-            NavIcon::File => vec2(10.0, 14.0),
-            NavIcon::Agent | NavIcon::Assets => vec2(14.0, 14.0),
-            NavIcon::Variables => vec2(12.0, 13.23847),
-            NavIcon::Logo => vec2(18.0, 20.0),
-        };
+        let size = vec2(20.0, 20.0);
         icons::paint_nav(ui.painter(), Rect::from_center_size(ir.center(), size), icon, if active { t.accent_text } else { ink });
         if resp.clicked() {
             match tab {
@@ -185,7 +180,7 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
     if hresp.hovered() {
         ui.painter().rect_filled(hr, CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), hr.shrink(5.0), Icon::Panels, t.icon);
+    icons::paint_header(ui.painter(), hr, HeaderIcon::CollapsePanel, t.icon);
     if hresp.clicked() {
         app.ui.left_collapsed = true;
     }
@@ -228,7 +223,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     if aresp.hovered() {
         ui.painter().rect_filled(ar, CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), ar, Icon::Plus, t.icon);
+    icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(18.0, 18.0)), Icon::Plus, t.icon);
     if aresp.clicked() {
         app.ui.pages_focus = app.session.ds().ok().map(|d| d.uid);
         app.run("page.add", json!({}));
@@ -521,6 +516,32 @@ fn listed_rows(doc: &Document, page: NodeId, expanded: &BTreeSet<NodeId>, filter
     rows
 }
 
+/// Visible links from each masked sibling to the next sibling below it, ending at its mask.
+/// Scanning bottom to top follows the same sibling order used by the document's mask runs.
+fn mask_links(doc: &Document, rows: &[Row]) -> Vec<(usize, usize, bool)> {
+    if !doc.has_masks() {
+        return Vec::new();
+    }
+    let mut next_by_parent: HashMap<NodeId, (usize, bool)> = HashMap::new();
+    let mut links = Vec::new();
+    for (index, row) in rows.iter().enumerate().rev() {
+        let Some(node) = doc.node(row.id) else { continue };
+        let Some(parent) = node.parent else { continue };
+        if node.is_mask {
+            if node.visible {
+                next_by_parent.insert(parent, (index, true));
+            } else {
+                next_by_parent.remove(&parent);
+            }
+        } else if let Some((next, arrow)) = next_by_parent.get_mut(&parent) {
+            links.push((index, *next, *arrow));
+            *next = index;
+            *arrow = false;
+        }
+    }
+    links
+}
+
 /// Whether the children of `n` don't show on the canvas (given whether `n` itself doesn't).
 fn hides_children(n: &figcraft_doc::Node, dimmed: bool) -> bool {
     dimmed || !n.visible || n.hides_contents()
@@ -669,13 +690,13 @@ fn rename_id(id: NodeId) -> Id {
 
 /// Left edge of a row's contents. Each tree level takes one 24-point column.
 fn row_x0(rr: Rect, depth: usize) -> f32 {
-    rr.min.x + depth as f32 * 24.0
+    rr.min.x + 8.0 + depth as f32 * 24.0
 }
 
 /// The name field of the row being renamed (row rect `r`): the new name once committed. The
 /// rename ends when the field lets go of the keyboard.
 fn rename_field(app: &mut FigApp, ui: &mut Ui, id: NodeId, depth: usize, name: &str, r: Rect) -> Option<String> {
-    let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), r.max);
+    let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
     let rect = Rect::from_min_max(pos2(row_x0(rr, depth) + 36.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0));
     let start = app.ui.rename.is_some_and(|x| x.start);
     let (out, open) = crate::widgets::rename_field(ui, rename_id(id), name, rect, regular(11.0), start);
@@ -736,12 +757,23 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     let w = ui.available_width();
     let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
     ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Layers"), semibold(11.0), t.text);
-    let sr = Rect::from_center_size(pos2(hr.max.x - 22.0, hr.center().y), vec2(24.0, 24.0));
+    let sr = Rect::from_center_size(pos2(hr.max.x - 48.0, hr.center().y), vec2(24.0, 24.0));
     let sresp = ui.interact(sr, ui.id().with("layer_search_btn"), Sense::click()).tip(tr("Search layers"));
     if sresp.hovered() || app.ui.layer_search {
         ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
     }
     icons::paint(ui.painter(), sr.shrink(5.0), Icon::Search, t.icon);
+    let cr = Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0));
+    let cresp = ui.interact(cr, ui.id().with("collapse_layers_btn"), Sense::click()).tip(tr("Collapse layers"));
+    a11y::button(&cresp, tr("Collapse layers"));
+    if cresp.hovered() {
+        ui.painter().rect_filled(cr, CornerRadius::same(5), t.hover);
+    }
+    icons::paint_layer(ui.painter(), cr, icons::LayerIcon::CollapseAll, t.icon);
+    if cresp.clicked() {
+        collapse_all(app);
+    }
+    ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0, t.border));
     let search_id = Id::new("layer_search_field");
     if sresp.clicked() {
         app.ui.layer_search = !app.ui.layer_search;
@@ -770,6 +802,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     }
     let filter = app.ui.layer_filter.trim().to_lowercase();
     let rows = rows_for(ui, &doc, page, &app.ui.expanded, &filter);
+    let mask_links = if filter.is_empty() { mask_links(&doc, &rows) } else { Vec::new() };
     let mut scroll_to = if reveal { sel.first().and_then(|s| rows.iter().position(|r| r.id == *s)) } else { None };
     // A rename in progress ends when its layer isn't listed any more; Tab / Shift+Tab commit it and
     // go on to the next / previous row.
@@ -813,9 +846,10 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     // Only the rows in view are laid out and drawn; the rest is empty scroll space.
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        const TOP_PAD: f32 = 4.0;
         let pitch = ROW + ui.spacing().item_spacing.y;
-        let top = ui.max_rect().top();
-        let total = rows.len() as f32 * pitch;
+        let top = ui.max_rect().top() + TOP_PAD;
+        let total = TOP_PAD + rows.len() as f32 * pitch;
         ui.set_height(total.max(viewport.height()));
         if let Some(i) = scroll_to {
             ui.scroll_to_rect(Rect::from_min_size(pos2(ui.max_rect().left(), top + i as f32 * pitch), vec2(w, ROW)), None);
@@ -846,14 +880,14 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 ui.ctx().request_repaint();
             }
         }
-        let first = ((viewport.min.y / pitch).floor().max(0.0) as usize).min(rows.len());
-        let last = ((viewport.max.y / pitch).ceil().max(0.0) as usize).saturating_add(1).min(rows.len());
+        let first = (((viewport.min.y - TOP_PAD) / pitch).floor().max(0.0) as usize).min(rows.len());
+        let last = (((viewport.max.y - TOP_PAD) / pitch).ceil().max(0.0) as usize).saturating_add(1).min(rows.len());
         let band = Rect::from_x_y_ranges(ui.max_rect().x_range(), (top + first as f32 * pitch)..=(top + last as f32 * pitch));
         let mut band_ui = ui.new_child(egui::UiBuilder::new().max_rect(band));
         // Stable widget ids for a row wherever the list is scrolled.
         band_ui.skip_ahead_auto_ids(first);
         let ui = &mut band_ui;
-        for row in rows.iter().take(last).skip(first) {
+        for (index, row) in rows.iter().enumerate().take(last).skip(first) {
             let Some(n) = doc.node(row.id) else { continue };
             let (r, resp) = ui.allocate_exact_size(vec2(w, ROW), Sense::click_and_drag());
             let selected = sel.contains(&row.id);
@@ -870,9 +904,10 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 locked: n.locked,
             };
             a11y::tree_item(&resp, if n.name.is_empty() { tr(n.kind.label()) } else { &n.name }, &info);
-            let in_selected = !selected && doc.ancestors(row.id).iter().any(|a| sel.contains(a));
+            let selected_ancestor = doc.ancestors(row.id).into_iter().find(|a| sel.contains(a));
+            let in_selected = !selected && selected_ancestor.is_some();
             let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. });
-            let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), r.max);
+            let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
             let hover_rect = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y + 4.0), pos2(r.max.x - 8.0, r.max.y - 4.0));
             a11y::ring_around(ui, rr, &resp);
             // Over the row, its eye and padlock included (they sit on top of it).
@@ -887,11 +922,16 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                     t.selected_row
                 };
                 let fill = if over { base.gamma_multiply(hover_brightness) } else { base };
-                ui.painter().rect_filled(rr, CornerRadius::same(5), fill);
+                let joins_body = rows.get(index + 1).is_some_and(|next| next.depth > row.depth);
+                let corners = if joins_body { CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 } } else { CornerRadius::same(5) };
+                ui.painter().rect_filled(rr, corners, fill);
             } else if in_selected {
                 let base = if t.dark { Color32::from_rgb(0x32, 0x39, 0x4D) } else { t.selected_row_child };
                 let fill = if over || hover == Some(row.id) { base.gamma_multiply(hover_brightness) } else { base };
-                ui.painter().rect_filled(rr, CornerRadius::ZERO, fill);
+                let continues =
+                    selected_ancestor.is_some_and(|ancestor| rows.get(index + 1).is_some_and(|next| doc.ancestors(next.id).contains(&ancestor)));
+                let corners = if continues { CornerRadius::ZERO } else { CornerRadius { nw: 0, ne: 0, sw: 5, se: 5 } };
+                ui.painter().rect_filled(rr, corners, fill);
             } else {
                 if over || hover == Some(row.id) {
                     ui.painter().rect_filled(hover_rect, CornerRadius::same(5), t.hover);
@@ -923,7 +963,8 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             let icon = node_icon(&doc, row.id);
             let shown = n.visible && !row.dimmed;
             let icon_col = if is_comp || icon == Icon::Slot {
-                COMPONENT.gamma_multiply(if shown { 1.0 } else { 0.5 })
+                let purple = if t.dark && in_selected { Color32::from_rgb(0x7F, 0x69, 0x9B) } else { ColorRole::IconComponent.value(t.dark) };
+                purple.gamma_multiply(if shown { 1.0 } else { 0.5 })
             } else if selected {
                 t.text
             } else if shown {
@@ -936,28 +977,51 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             if absolute {
                 icons::paint_layer(ui.painter(), Rect::from_center_size(icon_center, vec2(16.0, 16.0)), icons::LayerIcon::Absolute, icon_col);
             }
-            let layer_icon = match icon {
-                Icon::Frame => Some(icons::LayerIcon::Frame),
-                Icon::LayoutH => Some(icons::LayerIcon::LayoutH),
-                Icon::LayoutV => Some(icons::LayerIcon::LayoutV),
-                Icon::LayoutGrid => Some(icons::LayerIcon::LayoutGrid),
-                Icon::Text => Some(icons::LayerIcon::Text),
-                _ => None,
+            let mask_group = matches!(n.kind, NodeKind::Group) && n.children.iter().any(|child| doc.node(*child).is_some_and(|node| node.is_mask));
+            let layer_icon = if mask_group {
+                Some(icons::LayerIcon::Mask)
+            } else if n.is_mask && icon == Icon::Ellipse {
+                Some(icons::LayerIcon::EllipseMask)
+            } else if n.is_mask {
+                Some(icons::LayerIcon::Mask)
+            } else {
+                match icon {
+                    Icon::Frame => Some(icons::LayerIcon::Frame),
+                    Icon::LayoutH => Some(icons::LayerIcon::LayoutH),
+                    Icon::LayoutV => Some(icons::LayerIcon::LayoutV),
+                    Icon::LayoutGrid => Some(icons::LayerIcon::LayoutGrid),
+                    Icon::Text => Some(icons::LayerIcon::Text),
+                    Icon::Ellipse => Some(icons::LayerIcon::Ellipse),
+                    Icon::Component => Some(icons::LayerIcon::Component),
+                    Icon::Instance => Some(icons::LayerIcon::Instance),
+                    Icon::Vector => Some(icons::LayerIcon::Vector),
+                    Icon::Image => Some(icons::LayerIcon::Image),
+                    Icon::Star => Some(icons::LayerIcon::Star),
+                    Icon::Polygon => Some(icons::LayerIcon::Polygon),
+                    Icon::Arrow => Some(icons::LayerIcon::Arrow),
+                    Icon::Line => Some(icons::LayerIcon::Line),
+                    Icon::Rectangle => Some(icons::LayerIcon::Rectangle),
+                    Icon::Group => Some(icons::LayerIcon::Group),
+                    _ => None,
+                }
             };
-            let glyph_rect = Rect::from_center_size(icon_center, vec2(10.0, 10.0));
+            let glyph_rect = Rect::from_center_size(icon_center, vec2(16.0, 16.0));
             if let Some(layer_icon) = layer_icon {
                 icons::paint_layer(ui.painter(), glyph_rect, layer_icon, icon_col);
             } else {
                 icons::paint(ui.painter(), glyph_rect, icon, icon_col);
             }
             let name_x = x0 + 36.0;
+            let mask_badge = n.is_mask && !over;
+            let badge_width =
+                if mask_badge { ui.painter().layout_no_wrap(tr("Mask").to_owned(), regular(11.0), t.text_secondary).size().x + 8.0 } else { 0.0 };
             if app.ui.rename.is_some_and(|rn| rn.id == row.id) {
                 if let Some(new) = rename_field(app, ui, row.id, row.depth, &n.name, r) {
                     rename_done = Some((row.id, new));
                 }
             } else {
                 let col = if is_comp {
-                    COMPONENT.gamma_multiply(if shown { 1.0 } else { 0.5 })
+                    ColorRole::TextComponent.value(t.dark).gamma_multiply(if shown { 1.0 } else { 0.5 })
                 } else if shown {
                     t.text
                 } else {
@@ -966,8 +1030,11 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 let font = regular(11.0);
                 let name = if n.name.is_empty() { tr(n.kind.label()).to_string() } else { n.name.clone() };
                 // Room left of the lock and eye buttons.
-                let max_w = (rr.max.x - 56.0 - name_x).max(20.0);
+                let max_w = (rr.max.x - 56.0_f32.max(badge_width + 16.0) - name_x).max(20.0);
                 crate::bidi::paint_name(ui.painter(), pos2(name_x, r.center().y), &name, font, col, max_w);
+            }
+            if mask_badge {
+                ui.painter().text(pos2(rr.max.x - 16.0, r.center().y), Align2::RIGHT_CENTER, tr("Mask"), regular(11.0), t.text_secondary);
             }
             // A sweep across the eyes or padlocks takes in the rows the pointer passes.
             if let Some(sw) = sweep.as_mut()
@@ -1073,6 +1140,24 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 if ui.input(|i| i.pointer.any_released()) {
                     drop = Some((row.id, zone));
                 }
+            }
+        }
+        // Draw in the gaps after row backgrounds, so selected and hovered rows keep the
+        // connector visible. Expanded descendants are skipped by the sibling-only links.
+        let connector = if t.dark { Color32::from_white_alpha(102) } else { t.icon_secondary };
+        for &(from, to, arrow) in &mask_links {
+            if from >= last || to < first {
+                continue;
+            }
+            let x = band.min.x + 36.0 + rows[from].depth as f32 * 24.0;
+            let start = top + from as f32 * pitch + ROW * 0.5 + 10.0;
+            let end = top + to as f32 * pitch + ROW * 0.5 - 10.0;
+            let stem_end = if arrow { end - 4.0 } else { end };
+            let stroke = Stroke::new(1.0, connector);
+            ui.painter().line_segment([pos2(x, start), pos2(x, stem_end)], stroke);
+            if arrow {
+                ui.painter().line_segment([pos2(x - 4.0, end - 4.0), pos2(x, end)], stroke);
+                ui.painter().line_segment([pos2(x, end), pos2(x + 4.0, end - 4.0)], stroke);
             }
         }
         // The field of a rename scrolled out of view stays (unseen), so the rename goes on.

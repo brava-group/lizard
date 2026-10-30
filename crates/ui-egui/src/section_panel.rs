@@ -37,7 +37,7 @@ pub fn status_dropdown(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[Nod
         Some((d, _)) => tr(d.label()),
         None => tr("Mixed"),
     };
-    let resp = widgets::dropdown(ui, label, width, Some(Icon::Code));
+    let resp = crate::primitives::Select::trigger(ui, label, width, Some(Icon::Code));
     menu_popup(&resp).show(|ui| {
         for d in DevStatus::ALL {
             if menu_item(ui, tr(d.label()), "") {

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
+use figcraft_color::{BlendMode, PaintKind};
 use figcraft_doc::{Document, NodeId, NodeKind};
 use figcraft_engine::Preedit;
 use figcraft_engine::tools::{PointerEvent, PointerKind, ToolId, selection_box, selection_frame};
@@ -13,8 +14,22 @@ use serde_json::json;
 
 use crate::FigApp;
 use crate::i18n::{tr, trf, trn};
-use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker, preview_now};
+use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
 use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
+
+/// Optional native canvas experiment. The ordinary render worker remains the fallback until a
+/// GPU backend has a current, complete view to show.
+pub trait CanvasGpuBackend {
+    fn texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &figcraft_render::View,
+        clear: [f32; 3],
+        gesture_active: bool,
+        ctx: &egui::Context,
+    ) -> Option<egui::TextureId>;
+}
 
 pub struct CanvasState {
     pub rect: Rect,
@@ -28,6 +43,8 @@ pub struct CanvasState {
     /// The document version behind the texture, so stale previews cannot replace newer pixels.
     tex_doc: Option<Arc<Document>>,
     tex_style: Option<RenderStyle>,
+    /// A newly created simple layer shown while the page's slower render is still in flight.
+    pending_layer: Option<PendingLayer>,
     /// A wider, still-current view kept while a zoomed-in texture is shown. It fills newly
     /// exposed areas on zoom-out without doing a whole-view raster pass in the input frame.
     zoom_fallback: Option<ZoomFallback>,
@@ -37,6 +54,7 @@ pub struct CanvasState {
     /// The view of the last render asked for.
     want_view: Option<figcraft_render::View>,
     visible_view: Option<figcraft_render::View>,
+    shader_started: web_time::Instant,
     /// What the last canvas render had to do (shown by `ui.inspect`).
     pub render_work: Option<figcraft_render::Work>,
     /// Device pixels uploaded for the last completed render (zero when its texture was reused).
@@ -80,11 +98,13 @@ impl Default for CanvasState {
             tex_of: None,
             tex_doc: None,
             tex_style: None,
+            pending_layer: None,
             zoom_fallback: None,
             tex_coarse: false,
             submitted: None,
             want_view: None,
             visible_view: None,
+            shader_started: web_time::Instant::now(),
             render_work: None,
             upload_pixels: 0,
             preview_latency_ms: None,
@@ -116,16 +136,18 @@ struct ZoomFallback {
     style: RenderStyle,
 }
 
+struct PendingLayer {
+    doc: Arc<Document>,
+    id: NodeId,
+    visible: figcraft_render::View,
+    image_view: figcraft_render::View,
+    texture: egui::TextureHandle,
+}
+
 struct CanvasTile {
     view: figcraft_render::View,
     image: Arc<egui::ColorImage>,
     texture: egui::TextureHandle,
-}
-
-impl ZoomFallback {
-    fn matches(&self, job: &Job) -> bool {
-        self.of == (job.uid, job.page) && Arc::ptr_eq(&self.doc, &job.doc) && self.style == job.style()
-    }
 }
 
 fn view_area(view: &figcraft_render::View) -> f64 {
@@ -731,6 +753,33 @@ struct JobKey {
     /// Text lays out anew when fonts arrive (system fonts load in the background).
     fonts: u64,
     proof: bool,
+    animation_frame: u64,
+}
+
+/// Only visible animated paints keep the canvas clock awake. Hidden branches do not count.
+fn animated_shader_visible(doc: &Document, page: NodeId, view: &figcraft_render::View) -> bool {
+    let visible = view.page_rect();
+    let mut pending = doc.node(page).map(|node| node.children.clone()).unwrap_or_default();
+    while let Some(id) = pending.pop() {
+        let Some(node) = doc.node(id) else { continue };
+        if !node.visible || node.opacity <= 0.0 {
+            continue;
+        }
+        let intersects = doc.world_bounds(id).is_some_and(|b| b.x0 <= visible.x1 && b.x1 >= visible.x0 && b.y0 <= visible.y1 && b.y1 >= visible.y0);
+        if intersects
+            && node.fills.iter().chain(&node.strokes).any(|paint| {
+                paint.visible
+                    && paint.opacity > 0.0
+                    && matches!(&paint.kind, PaintKind::Shader(fill) if doc.shaders.get(&fill.shader_id).is_some_and(|def| def.features.animated))
+            })
+        {
+            return true;
+        }
+        if intersects || !node.clip {
+            pending.extend(node.children.iter().copied());
+        }
+    }
+    false
 }
 
 impl FigApp {
@@ -790,6 +839,97 @@ fn measured_wheel_zoom(delta_y: f32, modifiers: egui::Modifiers) -> Option<f64> 
         return None;
     };
     Some(factor.clamp(0.1, 10.0))
+}
+
+/// A selected, newly added page layer can appear over the last canvas texture immediately. A
+/// large effect behind it may still be rendering, but it cannot change this layer's own pixels.
+fn simple_pending_layer(doc: &Document, page: NodeId, id: NodeId) -> bool {
+    let Some(node) = doc.node(id) else { return false };
+    if node.parent != Some(page)
+        || doc.node(page).and_then(|p| p.children.last()) != Some(&id)
+        || !node.visible
+        || node.is_mask
+        || !node.children.is_empty()
+        || !node.effects.is_empty()
+        || node.blend != BlendMode::Normal
+        || node.fills.iter().chain(&node.strokes).any(|p| !matches!(p.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+        || doc.nodes().any(|n| n.is_mask && doc.page_of(n.id) == Some(page))
+    {
+        return false;
+    }
+    matches!(
+        node.kind,
+        NodeKind::Text(_) | NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Line
+    )
+}
+
+/// The device-pixel rectangle needed for just this layer, aligned with a snapped full render.
+fn pending_layer_view(doc: &Document, id: NodeId, visible: &figcraft_render::View) -> Option<figcraft_render::View> {
+    let (snapped, px) = figcraft_render::retained::snap(visible)?;
+    let bounds = figcraft_render::draw::paint_bounds(doc, id)?;
+    let s = snapped.scale;
+    let (left, top, right, bottom) = (bounds.x0 * s, bounds.y0 * s, bounds.x1 * s, bounds.y1 * s);
+    if ![left, top, right, bottom].iter().all(|n| n.is_finite() && n.abs() < 1e15) {
+        return None;
+    }
+    let x0 = ((left.floor() - 1.0) - px.0 as f64).clamp(0.0, f64::from(snapped.width)) as u32;
+    let y0 = ((top.floor() - 1.0) - px.1 as f64).clamp(0.0, f64::from(snapped.height)) as u32;
+    let x1 = ((right.ceil() + 1.0) - px.0 as f64).clamp(0.0, f64::from(snapped.width)) as u32;
+    let y1 = ((bottom.ceil() + 1.0) - px.1 as f64).clamp(0.0, f64::from(snapped.height)) as u32;
+    let (width, height) = (x1.checked_sub(x0)?, y1.checked_sub(y0)?);
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 4_000_000 {
+        return None;
+    }
+    Some(figcraft_render::View { origin: ((px.0 + i64::from(x0)) as f64 / s, (px.1 + i64::from(y0)) as f64 / s), scale: s, width, height })
+}
+
+fn paint_pending_layer(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Context, ppp: f32) {
+    let candidate = (|| {
+        let ds = app.session.ds().ok()?;
+        if app.canvas.texture_current(ds)
+            || ds.view.outlines
+            || ds.view.outlines_selection
+            || ds.view.pixel_preview_scale().is_some()
+            || ds.view.proof_srgb
+            || ds.focused().is_some()
+            || app.preedit_view().is_some()
+        {
+            return None;
+        }
+        let [id] = ds.selection.as_slice() else { return None };
+        if app.canvas.tex_of == Some((ds.uid, ds.page)) && app.canvas.tex_doc.as_ref().is_some_and(|old| old.node(*id).is_some()) {
+            return None;
+        }
+        let visible = app.canvas.visible_view.clone()?;
+        simple_pending_layer(&ds.doc, ds.page, *id).then(|| (ds.doc.clone(), *id, visible, ds.view.zoom))
+    })();
+    let Some((doc, id, visible, zoom)) = candidate else {
+        app.canvas.pending_layer = None;
+        return;
+    };
+    let cached = app.canvas.pending_layer.as_ref().is_some_and(|old| {
+        Arc::ptr_eq(&old.doc, &doc)
+            && old.id == id
+            && old.visible.origin == visible.origin
+            && old.visible.scale.to_bits() == visible.scale.to_bits()
+            && old.visible.width == visible.width
+            && old.visible.height == visible.height
+    });
+    if !cached {
+        app.canvas.pending_layer = (|| {
+            let image_view = pending_layer_view(&doc, id, &visible)?;
+            let mut pix = figcraft_render::Pixmap::new(image_view.width, image_view.height)?;
+            figcraft_render::render_nodes_into_preview(&doc, &[id], &image_view, &mut pix, true);
+            let image = crate::render_worker::screen_image(&pix, doc.color_profile);
+            let texture = ctx.load_texture("lizard-pending-layer", image, egui::TextureOptions::LINEAR);
+            Some(PendingLayer { doc, id, visible, image_view, texture })
+        })();
+    }
+    if let Some(layer) = &app.canvas.pending_layer {
+        let tl = app.to_screen(layer.image_view.origin.0, layer.image_view.origin.1);
+        let image_rect = presented_image_rect(tl, &layer.image_view, zoom, ppp, false);
+        painter.image(layer.texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
 }
 
 /// Bypass egui's delayed wheel smoothing for zoom; it would otherwise apply the
@@ -878,7 +1018,41 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     // Observe the latest completed texture before submitting the next document preview. During a
     // fast drag this lets the worker produce a small patch against the frame actually on screen.
     let fast_drag = app.canvas.dragging && !composing_drag && !worker.in_flight() && (0.0..=10.0).contains(&app.ui.render_ms);
-    if !app.canvas.dragging || !composing_drag {
+    let t = Tokens::get(&ctx);
+    let bg = app
+        .session
+        .ds()
+        .ok()
+        .and_then(|ds| match ds.doc.node(ds.page).map(|n| &n.kind) {
+            Some(NodeKind::Page { background, background_visible: true, .. }) => Some(doc_c32(&ctx, *background)),
+            _ => None,
+        })
+        .unwrap_or(t.canvas);
+    // The GPU backend can satisfy the view without calling `request_render`. Keep its camera and
+    // texture dimensions current when the window resizes, even if the CPU worker stays idle.
+    app.canvas.visible_view = app.session.ds().ok().map(|ds| visible_view_for(&ds.view, rect, ppp));
+    // Ask the shared-device renderer first. A resident GPU texture already contains this camera
+    // and document; scheduling the CPU worker as well duplicates the most expensive work.
+    let gpu_texture = if !composing_drag
+        && shown.is_some()
+        && let Ok(ds) = app.session.ds()
+        && !ds.view.outlines
+        && !ds.view.outlines_selection
+        && !ds.view.proof_srgb
+        && ds.view.pixel_preview_scale().is_none()
+        && ds.focused().is_none()
+        && app.canvas.preedit.is_none()
+        && let Some(view) = app.canvas.visible_view.clone()
+        && let Some(mut backend) = app.gpu_canvas.take()
+    {
+        let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
+        let texture = backend.texture(Arc::clone(&ds.doc), ds.page, &view, clear, app.canvas.dragging, &ctx);
+        app.gpu_canvas = Some(backend);
+        texture
+    } else {
+        None
+    };
+    if (!app.canvas.dragging || !composing_drag) && gpu_texture.is_none() {
         request_render(app, worker, &ctx, ppp, max_texture_side);
     }
     if fast_drag
@@ -888,17 +1062,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         apply_render(app, &ctx, done, shown);
     }
     let painter = ui.painter_at(rect);
-    let t = Tokens::get(&ctx);
     // Page background (also behind a stale/partial texture).
-    let bg = app
-        .session
-        .ds()
-        .ok()
-        .and_then(|ds| match ds.doc.node(ds.page).map(|n| &n.kind) {
-            Some(NodeKind::Page { background, .. }) => Some(doc_c32(&ctx, *background)),
-            _ => None,
-        })
-        .unwrap_or(t.canvas);
     painter.rect_filled(rect, CornerRadius::ZERO, bg);
     #[cfg(not(target_arch = "wasm32"))]
     let painted_drag = paint_drag_visual(app, &painter);
@@ -944,6 +1108,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
             painter.image(tile.texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
+    if !painted_drag && let Some(texture) = gpu_texture {
+        painter.image(texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    if !painted_drag {
+        paint_pending_layer(app, &painter, &ctx, ppp);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::image_vectorize::paint_preview(app, &painter, bg);
     app.session.tool.labels = overlays(app, &painter, &t);
     crate::frame_labels::rename_field(app, ui);
     // The zoom tool's area.
@@ -1064,6 +1236,12 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option<(u64, NodeId)>) {
+    // A paste followed by Delete can finish while an older effect render is still running.
+    // Never put that older document back on screen after a discrete edit. During a live drag,
+    // intermediate snapshots still provide useful visual feedback until the newest one arrives.
+    if !app.canvas.dragging && !app.session.ds().ok().is_some_and(|ds| Arc::ptr_eq(&ds.doc, &done.doc)) {
+        return;
+    }
     if shown != Some((done.uid, done.page)) || !shows(&app.canvas, &done, shown) {
         return;
     }
@@ -1261,19 +1439,43 @@ fn covers(outer: &figcraft_render::View, inner: &figcraft_render::View) -> bool 
     o.x0 <= i.x0 + eps && o.y0 <= i.y0 + eps && o.x1 >= i.x1 - eps && o.y1 >= i.y1 - eps
 }
 
-fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
-    let Ok(ds) = app.session.ds() else { return };
-    let rect = app.canvas.rect;
-    let (mut ox, mut oy) = ds.view.origin();
-    let (scale, visible_w, visible_h) = if let Some(k) = ds.view.pixel_preview_scale() {
-        // Pixel preview: render `k` pixels per page unit from a whole-pixel origin, shown magnified
-        // without smoothing.
+fn visible_view_for(view: &figcraft_engine::ViewState, rect: Rect, ppp: f32) -> figcraft_render::View {
+    let (mut ox, mut oy) = view.origin();
+    let (scale, width, height) = if let Some(k) = view.pixel_preview_scale() {
+        // Pixel preview renders whole page pixels and magnifies them without smoothing.
         (ox, oy) = ((ox * k).floor() / k, (oy * k).floor() / k);
-        let z = ds.view.zoom.max(1e-9) / k;
+        let z = view.zoom.max(1e-9) / k;
         (k, (f64::from(rect.width()) / z).ceil() as u32 + 2, (f64::from(rect.height()) / z).ceil() as u32 + 2)
     } else {
-        (ds.view.zoom * f64::from(ppp), (rect.width() * ppp).ceil().max(1.0) as u32, (rect.height() * ppp).ceil().max(1.0) as u32)
+        (view.zoom * f64::from(ppp), (rect.width() * ppp).ceil().max(1.0) as u32, (rect.height() * ppp).ceil().max(1.0) as u32)
     };
+    figcraft_render::View { origin: (ox, oy), scale, width, height }
+}
+
+#[cfg(test)]
+mod visible_view_tests {
+    use super::*;
+
+    #[test]
+    fn resizing_changes_gpu_view_dimensions_without_a_cpu_render() {
+        let mut view = figcraft_engine::ViewState { zoom: 2.0, ..Default::default() };
+        let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 400.0));
+        let before = visible_view_for(&view, small, 2.0);
+        view.vw = f64::from(wide.width());
+        view.vh = f64::from(wide.height());
+        let after = visible_view_for(&view, wide, 2.0);
+        assert_eq!((before.width, before.height), (1200, 800));
+        assert_eq!((after.width, after.height), (2400, 800));
+        assert_eq!(after.scale, before.scale);
+    }
+}
+
+fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
+    let Ok(ds) = app.session.ds() else { return };
+    let visible_view = visible_view_for(&ds.view, app.canvas.rect, ppp);
+    let (ox, oy) = visible_view.origin;
+    let (scale, visible_w, visible_h) = (visible_view.scale, visible_view.width, visible_view.height);
     // The edited text is drawn live (an IME composition included); the caret is an overlay.
     let doc = app.preedit_view().map(|p| p.doc.clone()).unwrap_or_else(|| ds.doc.clone());
     let outlined = if ds.view.outlines_selection { ds.selection.clone() } else { vec![] };
@@ -1285,8 +1487,13 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     let margin = overscan_margin(visible_w, visible_h, max_texture_side);
     let origin = (ox, oy);
     let visible = (visible_w, visible_h);
-    let visible_view = figcraft_render::View { origin, scale, width: visible.0, height: visible.1 };
-    app.canvas.visible_view = Some(visible_view.clone());
+    let animation_frame = if !app.reduce_motion() && !ds.view.outlines && animated_shader_visible(&doc, ds.page, &visible_view) {
+        ctx.request_repaint_after(std::time::Duration::from_millis(67));
+        (app.canvas.shader_started.elapsed().as_secs_f64() * 15.0).floor() as u64
+    } else {
+        0
+    };
+    let animation_time = animation_frame as f64 / 15.0;
     let requested = (ox - f64::from(margin) / scale, oy - f64::from(margin) / scale);
     let size = (visible_w.saturating_add(margin * 2).min(max_texture_side), visible_h.saturating_add(margin * 2).min(max_texture_side));
     let key = JobKey {
@@ -1302,6 +1509,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
         solo: ds.focused(),
         fonts: figcraft_text::layout_generation(),
         proof,
+        animation_frame,
     };
     // A completed request is not a usable cache entry if its result was dropped or could not
     // update the texture. This can happen while several style or paint edits arrive in quick
@@ -1322,10 +1530,11 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
         return;
     }
     let visible_texture = !app.canvas.tex_coarse && app.canvas.tex_of == Some((ds.uid, ds.page));
-    let mut job = Job {
+    let job = Job {
         doc,
         page: ds.page,
         view: figcraft_render::View { origin: requested, scale, width: size.0, height: size.1 },
+        time: animation_time,
         outline: ds.view.outlines,
         outline_extras,
         outlined,
@@ -1333,30 +1542,17 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
         solo: key.solo,
         proof,
         uid: ds.uid,
-        zoom_preview: ds.view.pixel_preview_scale().is_none(),
+        zoom_preview: ds.view.pixel_preview_scale().is_none()
+            && scale >= 4.0
+            && ds.doc.nodes().any(|node| node.visible && node.effects.iter().any(|effect| effect.visible)),
         at: web_time::Instant::now(),
         texture_base: if visible_texture { app.canvas.tex_doc.clone() } else { None },
         texture_view: if visible_texture { app.canvas.tex_view.clone() } else { None },
         texture_style: if visible_texture { app.canvas.tex_style.clone() } else { None },
     };
     app.canvas.want_view = Some(job.view.clone());
-    // A fast zoom-out can expose page area outside the previous texture. Draw a whole-view
-    // vector preview before painting this UI frame, then let the worker refine it. Otherwise the
-    // newly exposed areas show only the page background for one or more frames.
-    let exposed_zoom_out = app.canvas.tex_of == Some((job.uid, job.page))
-        && app.canvas.tex_view.as_ref().is_some_and(|old| scale < old.scale * 0.98 && !covers(old, &visible_view));
-    let fallback_covers = app.canvas.zoom_fallback.as_ref().is_some_and(|cached| cached.matches(&job) && covers(&cached.view, &visible_view));
-    if exposed_zoom_out
-        && job.zoom_preview
-        && !fallback_covers
-        && !crate::render_worker::uses_tiles(&job.view, &job.doc, job.proof)
-        && let Some(preview) = preview_now(&job)
-    {
-        apply_render(app, ctx, preview, Some((job.uid, job.page)));
-    }
-    // The UI keeps its last sharp image, or made a sharp exposed-area fill above. A delayed
-    // half-resolution worker preview would replace either with visibly blurred pixels.
-    job.zoom_preview = false;
+    // A geometry-only native-resolution preview is prepared on the worker for effect-heavy
+    // views, then replaced by the complete render. No raster work runs on the input thread.
     worker.submit(job);
     app.canvas.submitted = Some(key);
 }
@@ -2023,9 +2219,16 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
             } else {
                 4
             };
-            let is_vector = sel.len() == 1
-                && sel.first().and_then(|id| doc.node(*id)).is_some_and(|n| matches!(n.kind, NodeKind::Vector { .. }));
-            size_label = transform_box(app, painter, b.map(|p| app.to_screen(p.x, p.y)), col, sel.len() > 1 || is_vector, handles, (!measuring).then_some(label));
+            let is_vector = sel.len() == 1 && sel.first().and_then(|id| doc.node(*id)).is_some_and(|n| matches!(n.kind, NodeKind::Vector { .. }));
+            size_label = transform_box(
+                app,
+                painter,
+                b.map(|p| app.to_screen(p.x, p.y)),
+                col,
+                sel.len() > 1 || is_vector,
+                handles,
+                (!measuring).then_some(label),
+            );
             if !measuring {
                 arc_overlay(app, painter, col);
                 shape_overlay(app, painter, col);
@@ -2147,6 +2350,12 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
                     }
                 }
             }
+        }
+    }
+    if let Some([x0, y0, x1, y1]) = ov.angle_guide {
+        let (a, b) = (app.to_screen(x0, y0), app.to_screen(x1, y1));
+        if a.distance_sq(b) > 1.0 {
+            painter.add(Shape::dashed_line(&[a, b], stroke(Color32::from_rgb(236, 99, 110), 1.5), 4.0, 3.0));
         }
     }
     // Eraser brush (vector edit mode).
@@ -2534,6 +2743,11 @@ pub fn fmt(v: f64) -> String {
 #[path = "zoom_preview_tests.rs"]
 mod zoom_preview_tests;
 
+/// The branch's blue canvas overlay color.
+fn accent(p: &egui::Painter) -> Color32 {
+    crate::theme::canvas_accent(p.ctx())
+}
+
 #[cfg(test)]
 mod stale_render_tests {
     use std::{sync::Arc, time::Duration};
@@ -2542,6 +2756,59 @@ mod stale_render_tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn a_new_simple_layer_has_a_cropped_immediate_preview() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = Session::new();
+        let created = session.execute("text.create", &json!({"text": "Pasted text", "x": 10, "y": 10}))?;
+        let Some(id) = figcraft_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
+        let ds = session.ds()?;
+        assert!(super::simple_pending_layer(&ds.doc, ds.page, id));
+        let visible = figcraft_render::View { origin: (0.0, 0.0), scale: 16.0, width: 1600, height: 900 };
+        let Some(crop) = super::pending_layer_view(&ds.doc, id, &visible) else { return Err("text has no visible preview".into()) };
+        assert!(crop.width < visible.width && crop.height < visible.height, "a small text layer must not rasterize the whole canvas");
+        session.execute("effect.add", &json!({"ids": [id], "type": "dropShadow"}))?;
+        let ds = session.ds()?;
+        assert!(!super::simple_pending_layer(&ds.doc, ds.page, id), "an effect needs the regular render path");
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_text_cannot_reappear_from_an_older_render() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = Session::new();
+        let created = session.execute("text.create", &json!({"text": "temporary", "x": 10, "y": 10}))?;
+        let Some(id) = figcraft_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
+        let ds = session.ds()?;
+        let job = crate::render_worker::Job {
+            doc: ds.doc.clone(),
+            page: ds.page,
+            view: figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 },
+            time: 0.0,
+            outline: false,
+            outline_extras: Default::default(),
+            outlined: Vec::new(),
+            skip: Vec::new(),
+            solo: None,
+            proof: false,
+            uid: ds.uid,
+            zoom_preview: false,
+            at: web_time::Instant::now(),
+            texture_base: None,
+            texture_view: None,
+            texture_style: None,
+        };
+        let Some(done) = crate::render_worker::Renders::default().refine(&job) else { return Err("render failed".into()) };
+        let shown = Some((job.uid, job.page));
+        session.execute("edit.delete", &json!({"ids": [id]}))?;
+        assert!(session.ds()?.doc.node(id).is_none(), "the delete command must remove the text");
+        let mut ui = Ui::new(session);
+        super::apply_render(&mut ui.app, &egui::Context::default(), done, shown);
+        assert!(
+            ui.app.canvas.tex_doc.as_ref().is_none_or(|doc| !Arc::ptr_eq(doc, &job.doc)),
+            "the deleted text must not be uploaded from an old document snapshot"
+        );
+        Ok(())
+    }
 
     #[test]
     fn a_style_change_retries_when_the_submitted_render_left_a_stale_texture() -> Result<(), Box<dyn std::error::Error>> {
@@ -2585,9 +2852,4 @@ mod stale_render_tests {
         assert!(ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)), "the style's canvas texture must recover");
         Ok(())
     }
-}
-
-/// The branch's blue canvas overlay color.
-fn accent(p: &egui::Painter) -> Color32 {
-    crate::theme::canvas_accent(p.ctx())
 }

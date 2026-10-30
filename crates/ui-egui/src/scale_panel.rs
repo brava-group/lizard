@@ -70,6 +70,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             }
         }
     }
+    ui.add_space(12.0);
 }
 
 /// The factor (clamped to 0.01–100) and pivot for scaling `b` by `k` around `anchor`; None when

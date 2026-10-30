@@ -120,7 +120,8 @@ pub fn panel(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId]) {
             (&layout.vertical, "vertical", Icon::DistributeV, tr("Vertical spacing")),
         ] {
             let Some(axis) = axis else { continue };
-            let edit = widgets::number_field(ui, Id::new(("selection_spacing", key)), Lead::Icon(icon, tip), axis.value, "", col, 1.0);
+            let width = if layout.horizontal.is_some() && layout.vertical.is_some() { col } else { ui.available_width() };
+            let edit = widgets::number_field(ui, Id::new(("selection_spacing", key)), Lead::Icon(icon, tip), axis.value, "", width, 1.0);
             app.field_run(edit, "arrange.spacing", |v| json!({"ids":ids,key:v.clamp(-1e6,1e6),"fromGesture":true}));
         }
     });

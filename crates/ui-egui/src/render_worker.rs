@@ -24,10 +24,20 @@ pub const PREVIEW_AFTER_MS: f64 = 12.0;
 /// Wide Retina canvases are split into GPU textures of this size instead of one viewport image.
 pub const TILE_SIDE: u32 = 512;
 const TILED_MIN_PIXELS: u64 = 4_000_000;
+const HIGH_ZOOM_TILED_MIN_PIXELS: u64 = 1_000_000;
+/// Keep only a few recently visited full views. Large canvases already use tiles and do not
+/// benefit from retaining several complete viewport images in CPU memory.
+const ZOOM_CACHE_MAX_PIXELS: u64 = 3_000_000;
+const ZOOM_CACHE_MAX_VIEWS: usize = 2;
 
 pub fn uses_tiles(view: &View, doc: &Document, proof: bool) -> bool {
-    u64::from(view.width) * u64::from(view.height) >= TILED_MIN_PIXELS
+    let pixels = u64::from(view.width) * u64::from(view.height);
+    // Each tile would otherwise build and blur the same padded layer again. A broad shadow can
+    // cost more across 16 tiles than one viewport render, even with parallel workers.
+    let effect_reach = doc.nodes().filter(|n| n.visible).map(figcraft_render::draw::effect_margin).fold(0.0, f64::max) * view.scale;
+    (pixels >= TILED_MIN_PIXELS || view.scale >= 8.0 && pixels >= HIGH_ZOOM_TILED_MIN_PIXELS)
         && !proof
+        && effect_reach <= f64::from(TILE_SIDE)
         // A huge backdrop kernel would make every tile redraw most of its neighbours.
         && doc.max_backdrop_radius() * view.scale * 1.5 + 3.0 <= 256.0
         && tile_views(view).is_some()
@@ -54,6 +64,8 @@ pub struct Job {
     pub doc: Arc<Document>,
     pub page: NodeId,
     pub view: View,
+    /// Animation time, quantized by the canvas clock. Zero for static scenes.
+    pub time: f64,
     pub outline: bool,
     /// Outline mode's options (hidden layers, object bounds).
     pub outline_extras: figcraft_render::Outline,
@@ -240,6 +252,7 @@ fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
         height: view.height + bleed * 2,
     };
     let opts = figcraft_render::Options {
+        time: job.time,
         outline_mode: job.outline,
         outline: job.outline_extras,
         outlined: job.outlined.clone(),
@@ -254,16 +267,18 @@ fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
 }
 
 /// Render `view` of the job (its own view, or the coarse one standing in for it).
-fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, base_doc: Option<Arc<Document>>) -> Option<Done> {
+fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, skip_effects: bool, base_doc: Option<Arc<Document>>) -> Option<Done> {
     let t0 = Instant::now();
     // The canvas is a preview: what's too small to see in detail at this zoom is approximated.
     let opts = figcraft_render::Options {
+        time: job.time,
         outline_mode: job.outline,
         outline: job.outline_extras,
         outlined: job.outlined.clone(),
         skip: job.skip.clone(),
         solo: job.solo,
         lod: true,
+        skip_effects,
         ..Default::default()
     };
     let (view, pix, work, damage) = retained.render_with_damage(&job.doc, job.page, view, &opts)?;
@@ -349,15 +364,39 @@ pub fn coarse_view(view: &View) -> View {
     View { origin: view.origin, scale: view.scale / PREVIEW_FACTOR, width: shrink(view.width), height: shrink(view.height) }
 }
 
+/// At a large zoom, enlarging a previous texture is especially noticeable. Draw the page's
+/// geometry at the requested device resolution first, then replace it with the full effect pass.
+fn sharp_geometry_preview(job: &Job) -> bool {
+    !job.proof
+        && !job.outline
+        && job.view.scale >= 4.0
+        && job.doc.nodes().any(|node| node.visible && node.effects.iter().any(|effect| effect.visible))
+}
+
 /// What the render thread keeps between jobs: the canvas image, the previews standing in for it
 /// while the zoom changes, and how long the last full render took.
+#[derive(Clone)]
+struct CachedZoom {
+    scale: u64,
+    pixels: u64,
+    view: View,
+    retained: Retained,
+}
+
+#[derive(Clone)]
 pub struct Renders {
     full: Retained,
+    zoom_cache: Vec<CachedZoom>,
+    full_style: Option<RenderStyle>,
+    full_time: u64,
+    full_pixels: u64,
+    full_view: Option<View>,
     preview: Retained,
     tiles: Vec<RenderTile>,
     tile_doc: Option<Arc<Document>>,
     tile_style: Option<RenderStyle>,
     tile_page: Option<(u64, NodeId)>,
+    tile_time: u64,
     /// The last full render's document, page and scale.
     last: Option<(u64, NodeId, f64)>,
     last_doc: Option<Arc<Document>>,
@@ -378,11 +417,17 @@ impl Renders {
     pub fn with_threshold(ms: f64) -> Self {
         Self {
             full: Retained::default(),
+            zoom_cache: Vec::new(),
+            full_style: None,
+            full_time: 0,
+            full_pixels: 0,
+            full_view: None,
             preview: Retained::default(),
             tiles: Vec::new(),
             tile_doc: None,
             tile_style: None,
             tile_page: None,
+            tile_time: 0,
             last: None,
             last_doc: None,
             full_ms: 0.0,
@@ -390,16 +435,42 @@ impl Renders {
         }
     }
 
+    /// Only a document edit at the same scale can reuse the retained pixels after cancellation.
+    /// Cloning a whole viewport on every zoom step doubles peak image memory for no benefit.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn needs_cancel_snapshot(&self, job: &Job) -> bool {
+        self.full_ms > 100.0
+            && self.last.is_some_and(|(uid, page, scale)| uid == job.uid && page == job.page && scale.to_bits() == job.view.scale.to_bits())
+            && self.last_doc.as_ref().is_some_and(|old| !Arc::ptr_eq(old, &job.doc))
+            && !uses_tiles(&job.view, &job.doc, job.proof)
+    }
+
     /// Whether `job` gets a preview first. A nearby zoom whose currently visible, full-resolution
     /// texture covers the requested area keeps that texture while the vector render catches up.
     /// Replacing it with a lower-resolution preview makes a smooth pinch visibly pixelated.
     fn wants_preview(&self, job: &Job) -> bool {
-        if !job.zoom_preview || self.full_ms < self.preview_after_ms || uses_tiles(&job.view, &job.doc, job.proof) {
+        let sharp = sharp_geometry_preview(job);
+        if !job.zoom_preview || !sharp && (self.full_ms < self.preview_after_ms || uses_tiles(&job.view, &job.doc, job.proof)) {
+            return false;
+        }
+        // A complete image at this scale is already waiting in the zoom cache. A coarse render
+        // would delay it and briefly replace sharp pixels with blurry ones.
+        if self.last.is_some_and(|(uid, page, _)| uid == job.uid && page == job.page)
+            && self.last_doc.as_ref().is_some_and(|old| Arc::ptr_eq(old, &job.doc))
+            && self.full_style.as_ref() == Some(&job.style())
+            && self.full_time == job.time.to_bits()
+            && figcraft_render::retained::snap(&job.view).is_some_and(|(requested, _)| {
+                self.zoom_cache.iter().any(|entry| entry.scale == job.view.scale.to_bits() && same_view(&entry.view, &requested))
+            })
+        {
             return false;
         }
         let changed = self.last.is_some_and(|(uid, page, scale)| uid != job.uid || page != job.page || scale.to_bits() != job.view.scale.to_bits());
-        if !changed {
+        if !(changed || sharp && self.last.is_none()) {
             return false;
+        }
+        if sharp {
+            return true;
         }
         let old_covers = job.texture_base.as_ref().is_some_and(|old| Arc::ptr_eq(old, &job.doc))
             && job.texture_style.as_ref() == Some(&job.style())
@@ -422,13 +493,19 @@ impl Renders {
         if !self.wants_preview(job) {
             return None;
         }
-        let view = coarse_view(&job.view);
-        guarded(&mut self.preview, |r| run(job, &view, r, true, None))
+        let sharp = sharp_geometry_preview(job);
+        let view = if sharp { job.view.clone() } else { coarse_view(&job.view) };
+        guarded(&mut self.preview, |r| run(job, &view, r, true, sharp, None))
     }
 
     /// The image of `job`'s view, built on the kept one where it can be.
     pub fn refine(&mut self, job: &Job) -> Option<Done> {
         if uses_tiles(&job.view, &job.doc, job.proof) {
+            self.full.clear();
+            self.zoom_cache.clear();
+            self.full_style = None;
+            self.full_pixels = 0;
+            self.full_view = None;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.refine_tiles(job)));
             return match result {
                 Ok(done) => done,
@@ -445,11 +522,46 @@ impl Renders {
         self.tile_doc = None;
         self.tile_style = None;
         self.tile_page = None;
-        let base_doc = self.last_doc.clone();
-        let done = guarded(&mut self.full, |r| run(job, &job.view, r, false, base_doc));
+        let style = job.style();
+        let same_content = self.last.is_some_and(|(uid, page, _)| uid == job.uid && page == job.page)
+            && self.last_doc.as_ref().is_some_and(|old| Arc::ptr_eq(old, &job.doc))
+            && self.full_style.as_ref() == Some(&style)
+            && self.full_time == job.time.to_bits();
+        if !same_content {
+            self.zoom_cache.clear();
+        } else if let Some((_, _, old_scale)) = self.last
+            && old_scale.to_bits() != job.view.scale.to_bits()
+        {
+            let previous = std::mem::take(&mut self.full);
+            let cached = self.zoom_cache.iter().position(|entry| entry.scale == job.view.scale.to_bits());
+            let incoming = cached.map(|index| self.zoom_cache.remove(index));
+            let previous_view = self.full_view.take();
+            if let Some(entry) = incoming {
+                self.full = entry.retained;
+                self.full_view = Some(entry.view);
+            } else {
+                self.full_view = None;
+            }
+            if self.full_pixels <= ZOOM_CACHE_MAX_PIXELS
+                && let Some(view) = previous_view
+            {
+                self.zoom_cache.push(CachedZoom { scale: old_scale.to_bits(), pixels: self.full_pixels, view, retained: previous });
+            }
+            while self.zoom_cache.len() > ZOOM_CACHE_MAX_VIEWS
+                || self.zoom_cache.iter().map(|entry| entry.pixels).sum::<u64>() > ZOOM_CACHE_MAX_PIXELS
+            {
+                self.zoom_cache.remove(0);
+            }
+        }
+        let base_doc = same_content.then(|| job.doc.clone()).or_else(|| self.last_doc.clone());
+        let done = guarded(&mut self.full, |r| run(job, &job.view, r, false, false, base_doc));
         if let Some(d) = &done {
             self.last = Some((job.uid, job.page, job.view.scale));
             self.last_doc = Some(job.doc.clone());
+            self.full_style = Some(style);
+            self.full_time = job.time.to_bits();
+            self.full_pixels = u64::from(d.view.width) * u64::from(d.view.height);
+            self.full_view = Some(d.view.clone());
             if d.work == Work::Full {
                 self.full_ms = d.ms;
             }
@@ -461,7 +573,8 @@ impl Renders {
         let start = Instant::now();
         let (view, desired) = tile_views(&job.view)?;
         let style = job.style();
-        let same_content = self.tile_page == Some((job.uid, job.page)) && self.tile_style.as_ref() == Some(&style);
+        let same_content =
+            self.tile_page == Some((job.uid, job.page)) && self.tile_style.as_ref() == Some(&style) && self.tile_time == job.time.to_bits();
         let make_tile = |tile_view: &View| -> Option<(RenderTile, bool)> {
             let cached = same_content.then(|| self.tiles.iter().find(|tile| same_view(&tile.view, tile_view))).flatten();
             let reuse = cached.is_some_and(|_| {
@@ -493,6 +606,7 @@ impl Renders {
         self.tile_doc = Some(job.doc.clone());
         self.tile_style = Some(style.clone());
         self.tile_page = Some((job.uid, job.page));
+        self.tile_time = job.time.to_bits();
         self.last = Some((job.uid, job.page, job.view.scale));
         self.last_doc = Some(job.doc.clone());
         if work == Work::Full {
@@ -533,6 +647,8 @@ pub struct Worker {
     rx: std::sync::mpsc::Receiver<Done>,
     /// Jobs submitted so far.
     submitted: u64,
+    /// Updated by the UI before enqueueing, so a long CPU effect can abandon obsolete work.
+    latest: Arc<std::sync::atomic::AtomicU64>,
     /// The newest job the thread is done with: rendered (or skipped for a newer one) and the UI
     /// woken for it.
     finished: Arc<std::sync::atomic::AtomicU64>,
@@ -545,6 +661,8 @@ impl Worker {
         let (done_tx, rx) = std::sync::mpsc::channel::<Done>();
         let finished = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let done_with = finished.clone();
+        let latest = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let requested = latest.clone();
         // The window that renders with it (each window has its own worker).
         let viewport = ctx.viewport_id();
         let spawned = std::thread::Builder::new().name("figcraft-render".into()).spawn(move || {
@@ -556,7 +674,22 @@ impl Worker {
                 while let Ok(newer) = jobs.try_recv() {
                     (seq, job) = newer;
                 }
-                if let Some(d) = renders.preview(&job) {
+                if requested.load(std::sync::atomic::Ordering::Acquire) != seq {
+                    continue;
+                }
+                // Keep a stable base while an expensive effect is being edited. If a newer edit
+                // interrupts this render, the next small change (such as pasted text) can still
+                // patch the last complete canvas instead of redrawing every effect from scratch.
+                if renders.last_doc.as_ref().is_some_and(|old| !Arc::ptr_eq(old, &job.doc)) {
+                    renders.zoom_cache.clear();
+                }
+                let saved = renders.needs_cancel_snapshot(&job).then(|| renders.clone());
+                let preview = figcraft_render::with_interruption(requested.clone(), seq, || renders.preview(&job));
+                if requested.load(std::sync::atomic::Ordering::Acquire) != seq {
+                    renders = saved.unwrap_or_default();
+                    continue;
+                }
+                if let Some(d) = preview {
                     if done_tx.send(d).is_err() {
                         break;
                     }
@@ -567,7 +700,12 @@ impl Worker {
                         continue;
                     }
                 }
-                if let Some(d) = renders.refine(&job)
+                let refined = figcraft_render::with_interruption(requested.clone(), seq, || renders.refine(&job));
+                if requested.load(std::sync::atomic::Ordering::Acquire) != seq {
+                    renders = saved.unwrap_or_default();
+                    continue;
+                }
+                if let Some(d) = refined
                     && done_tx.send(d).is_err()
                 {
                     break;
@@ -579,11 +717,13 @@ impl Worker {
         if let Err(e) = spawned {
             log::error!("render thread: {e}");
         }
-        Self { tx, rx, submitted: 0, finished }
+        Self { tx, rx, submitted: 0, latest, finished }
     }
 
     pub fn submit(&mut self, job: Job) {
-        if self.tx.send((self.submitted + 1, job)).is_ok() {
+        let next = self.submitted + 1;
+        self.latest.store(next, std::sync::atomic::Ordering::Release);
+        if self.tx.send((next, job)).is_ok() {
             self.submitted += 1;
         }
     }
@@ -653,14 +793,14 @@ impl Inline {
 
 /// Render synchronously from scratch (tests, screenshots).
 pub fn render_now(job: &Job) -> Option<Done> {
-    run(job, &job.view, &mut Retained::default(), false, None)
+    run(job, &job.view, &mut Retained::default(), false, false, None)
 }
 
 /// Fill an exposed viewport immediately while a zoom-out's vector render is still pending.
 /// Keep native device resolution: the earlier half-resolution fill was visibly blurry during
 /// trackpad zoom. The worker's retained image is still refined independently.
 pub fn preview_now(job: &Job) -> Option<Done> {
-    guarded(&mut Retained::default(), |retained| run(job, &job.view, retained, true, None))
+    guarded(&mut Retained::default(), |retained| run(job, &job.view, retained, true, false, None))
 }
 
 #[cfg(test)]
@@ -698,6 +838,60 @@ fn stable_tile_grid_covers_pans_without_changing_existing_cells() {
 
 #[cfg(test)]
 #[test]
+fn high_zoom_uses_regions_before_a_whole_view_effect_buffer_grows_large() {
+    let doc = figcraft_doc::Document::new("high zoom");
+    let view = View { origin: (0.0, 0.0), scale: 8.0, width: 1300, height: 1200 };
+    assert!(uses_tiles(&view, &doc, false));
+    assert!(!uses_tiles(&View { scale: 4.0, ..view.clone() }, &doc, false));
+    assert!(!uses_tiles(&View { width: 900, height: 900, ..view }, &doc, false));
+
+    let mut session = figcraft_engine::Session::new();
+    let shape = session.execute("shape.rectangle", &serde_json::json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap();
+    let id = figcraft_engine::params::id_of(&shape["id"]).unwrap();
+    session.execute("effect.add", &serde_json::json!({"ids": [id], "type": "dropShadow"})).unwrap();
+    let mut with_shadow = (*session.ds().unwrap().doc).clone();
+    let node = with_shadow.node_mut(id).unwrap();
+    if let figcraft_doc::EffectKind::DropShadow(shadow) = &mut node.effects[0].kind {
+        shadow.radius = 80.0;
+    }
+    assert!(!uses_tiles(&view, &with_shadow, false));
+}
+
+#[cfg(test)]
+#[test]
+fn zoom_changes_do_not_clone_the_retained_view_for_cancellation() {
+    let mut session = figcraft_engine::Session::new();
+    let ds = session.ds().unwrap();
+    let mut job = Job {
+        doc: ds.doc.clone(),
+        page: ds.page,
+        view: View { origin: (0.0, 0.0), scale: 1.0, width: 800, height: 600 },
+        time: 0.0,
+        outline: false,
+        outline_extras: Default::default(),
+        outlined: Vec::new(),
+        skip: Vec::new(),
+        solo: None,
+        proof: false,
+        uid: ds.uid,
+        zoom_preview: false,
+        at: Instant::now(),
+        texture_base: None,
+        texture_view: None,
+        texture_style: None,
+    };
+    let renders = Renders { last: Some((job.uid, job.page, job.view.scale)), last_doc: Some(job.doc.clone()), full_ms: 250.0, ..Default::default() };
+    job.view.scale = 8.0;
+    assert!(!renders.needs_cancel_snapshot(&job));
+
+    job.view.scale = 1.0;
+    session.execute("shape.rectangle", &serde_json::json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
+    job.doc = session.ds().unwrap().doc.clone();
+    assert!(renders.needs_cancel_snapshot(&job), "an edit at the same zoom can reuse its completed base");
+}
+
+#[cfg(test)]
+#[test]
 fn adjacent_tiles_match_one_vector_render_through_a_blur() {
     use serde_json::json;
     let mut session = figcraft_engine::Session::new();
@@ -720,6 +914,7 @@ fn adjacent_tiles_match_one_vector_render_through_a_blur() {
         proof: false,
         uid: ds.uid,
         zoom_preview: false,
+        time: 0.0,
         at: Instant::now(),
         texture_base: None,
         texture_view: None,
@@ -758,6 +953,7 @@ fn wide_pan_reuses_gpu_tile_images() {
         proof: false,
         uid: ds.uid,
         zoom_preview: true,
+        time: 0.0,
         at: Instant::now(),
         texture_base: None,
         texture_view: None,
@@ -797,6 +993,7 @@ fn wide_edit_replaces_only_the_affected_tile() {
         proof: false,
         uid: ds.uid,
         zoom_preview: false,
+        time: 0.0,
         at: Instant::now(),
         texture_base: None,
         texture_view: None,
