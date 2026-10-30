@@ -30,6 +30,19 @@ pub trait CanvasGpuBackend {
         ctx: &egui::Context,
     ) -> Option<egui::TextureId>;
 
+    /// Rasterize the editor's outline view as GPU strokes when supported.
+    fn outline_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1099,7 +1112,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
-        && !ds.view.outlines
         && !ds.view.outlines_selection
         && ds.view.pixel_preview_scale().is_none()
         && ds.focused().is_none()
@@ -1110,7 +1122,19 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         // that document on the GPU as well, keeping the visible caret/underline as egui overlays.
         let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
-        let texture = backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx);
+        let texture = if ds.view.outlines {
+            let options = figcraft_render::Outline {
+                hidden: ds.view.outline_hidden,
+                bounds: ds.view.outline_bounds,
+                light: ds
+                    .doc
+                    .node(ds.page)
+                    .is_some_and(|node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark())),
+            };
+            backend.outline_texture(gpu_doc, ds.page, &view, clear, options, &ctx)
+        } else {
+            backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx)
+        };
         app.gpu_canvas = Some(backend);
         texture
     } else {
@@ -2829,10 +2853,57 @@ fn accent(p: &egui::Painter) -> Color32 {
 mod stale_render_tests {
     use std::{sync::Arc, time::Duration};
 
+    use figcraft_doc::{Document, NodeId};
     use figcraft_engine::Session;
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<figcraft_render::Outline>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn outline_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                options: figcraft_render::Outline,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push(options);
+                None
+            }
+        }
+
+        let mut ui = Ui::new(Session::new());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        let ds = ui.app.session.ds_mut()?;
+        ds.view.outlines = true;
+        ds.view.outline_hidden = true;
+        ds.view.outline_bounds = true;
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "outline capture lock poisoned")?;
+        assert!(captured.iter().any(|options| options.hidden && options.bounds));
+        Ok(())
+    }
 
     #[test]
     fn current_gpu_scene_clears_the_cpu_creation_preview() -> Result<(), Box<dyn std::error::Error>> {

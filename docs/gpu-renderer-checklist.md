@@ -6,6 +6,22 @@ tests. SVG and PDF keep their native vector output; only content they must raste
 this migration. A box is complete only after native and WASM checks, representative visual parity,
 and an interaction or export test. Do not remove a capability guard merely to mark a box done.
 
+## Remaining production CPU raster paths (code audit)
+
+| Entry point | Current CPU work | GPU completion condition |
+| --- | --- | --- |
+| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for selected outlines, pixel preview, focus view, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
+| `crates/ui-egui/src/canvas.rs` | Cropped creation preview and eyedropper when GPU cannot present | Current GPU scene covers supported interactions; no CPU scene raster on a working GPU |
+| `crates/canvas-gpu/src/geometry_atlas.rs` | Legacy atlas raster tiles with `render_view` | Retire atlas after direct mode covers its cases |
+| `crates/canvas-gpu/src/vello_scene.rs` | CPU effect tile fallback in the GPU compositor | GPU passes support every effect stack and region, including large surfaces |
+| `crates/engine/src/cmd/file.rs` | WASM export and unsupported native export fallback | Browser asynchronous WebGPU readback and complete GPU export coverage |
+| `crates/svg/src/import/paint.rs` and `crates/svg/src/lib.rs` | SVG paint sources and effect/mask PNG embedding | GPU raster service supplies required embedded pixels |
+| `crates/pdf/src/draw.rs` and `crates/pdf/src/raster.rs` | PDF paint sources and effect/mask embedding | Same GPU raster service supplies PDF embedded pixels |
+| Browser plugin grid | Icon PNG previews on WebGL/CPU path | Async WebGPU icon rendering and readback |
+
+Image decoding, font shaping, vector geometry, and native SVG/PDF path emission remain CPU tasks;
+the migration concerns rasterization and pixel effects.
+
 ## Native editor canvas
 
 - [x] Use Vello/wgpu as the default canvas backend for supported scenes.
@@ -16,6 +32,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
     presented texture on a proof toggle without rerasterizing the vector scene.
   - [x] Send the stable transient IME composition document to the GPU canvas on the next frame;
     caret and composition underline remain lightweight egui overlays.
+  - [x] Draw full-page Outline mode with Vello strokes on native and browser WebGPU, including
+    hidden-layer contours, group bounds, and light strokes over a dark background.
+  - [ ] Move selected-only outlines, pixel preview, and focus/solo rendering to the GPU path.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -106,6 +125,11 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 ## Evidence log
 
+- 2026-10-30: full-page Outline mode now builds Vello GPU strokes rather than using the CPU
+  canvas. A pixel fixture checked visible and hidden rectangles, group bounds, and light strokes
+  on a dark canvas; its output was visually inspected. The UI dispatch test confirmed that Outline
+  options reach the GPU backend. Native and WASM `cargo check` and
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed; 715 UI tests passed.
 - 2026-10-30: the current GPU scene now suppresses the redundant CPU creation preview, and
   an active IME composition sends its stable transient document to the GPU backend on the next
   frame. Both interaction tests passed; `CARGO_INCREMENTAL=0 cargo xtask ci` passed, including

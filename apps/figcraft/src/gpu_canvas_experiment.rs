@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::geometry_atlas::{GeometryAtlas, required_slots};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_scene_with_images,
+    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene, make_scene_with_images,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -23,6 +23,7 @@ pub struct GpuCanvasExperiment {
     direct_texture_id: Option<egui::TextureId>,
     direct_profile: Option<ColorProfile>,
     direct_proof: bool,
+    direct_outline: Option<figcraft_render::Outline>,
     direct_size: (u32, u32),
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
@@ -57,6 +58,7 @@ impl GpuCanvasExperiment {
             direct_texture_id: None,
             direct_profile: None,
             direct_proof: false,
+            direct_outline: None,
             direct_size: (0, 0),
             direct_document: None,
             direct_page: None,
@@ -254,6 +256,9 @@ impl GpuCanvasExperiment {
         gesture_active: bool,
         proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
+        if self.direct_outline.take().is_some() {
+            self.direct_document = None;
+        }
         if view.width == 0
             || view.height == 0
             || view.width > u16::MAX as u32
@@ -401,9 +406,95 @@ impl GpuCanvasExperiment {
         }
         Ok(self.direct_texture_id)
     }
+
+    fn update_outline(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+    ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
+        if view.width == 0
+            || view.height == 0
+            || view.width > u16::MAX.into()
+            || view.height > u16::MAX.into()
+            || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
+            || !view.scale.is_finite()
+            || view.scale <= 0.0
+        {
+            return Ok(None);
+        }
+        let size = (view.width, view.height);
+        let profile = doc.color_profile;
+        let clear = if profile == ColorProfile::DisplayP3 {
+            let converted = ColorProfile::Srgb.conversion_to(profile).apply(Color::new(clear[0], clear[1], clear[2], 1.0));
+            [converted.r, converted.g, converted.b]
+        } else {
+            clear
+        };
+        if self.direct.is_none() {
+            self.direct =
+                Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "eframe shared device".to_owned(), size.0, size.1));
+            self.register_direct_view(profile)?;
+            self.direct_size = size;
+            self.direct_document = None;
+        } else if self.direct_size != size {
+            self.direct.as_mut().ok_or("GPU outline canvas missing on resize")?.resize(size.0, size.1);
+            self.register_direct_view(profile)?;
+            self.direct_size = size;
+            self.direct_document = None;
+        }
+        if self.direct_profile != Some(profile) {
+            self.register_direct_view(profile)?;
+        }
+        let camera = (view.origin.0, view.origin.1, view.scale);
+        if self.direct_outline == Some(options)
+            && self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc))
+            && self.direct_page == Some(page)
+            && self.direct_camera == Some(camera)
+        {
+            return Ok(self.direct_texture_id);
+        }
+        let scene = make_outline_scene(&doc, page, view, options);
+        let canvas = self.direct.as_mut().ok_or("GPU outline canvas missing before render")?;
+        canvas.render_submit_with_clear(&scene, clear)?;
+        canvas.convert_for_presentation(profile);
+        self.direct_document = Some(doc);
+        self.direct_page = Some(page);
+        self.direct_camera = Some(camera);
+        self.direct_outline = Some(options);
+        Ok(self.direct_texture_id)
+    }
 }
 
 impl CanvasGpuBackend for GpuCanvasExperiment {
+    fn outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update_outline(doc, page, view, clear, options) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU outline failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
     fn texture(
         &mut self,
         doc: Arc<Document>,

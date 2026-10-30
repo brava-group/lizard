@@ -4,7 +4,9 @@ use std::error::Error;
 use std::sync::Arc;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
-use figcraft_canvas_gpu::vello_scene::{BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view};
+use figcraft_canvas_gpu::vello_scene::{
+    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene,
+};
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
 use figcraft_geom::Point;
@@ -18,6 +20,7 @@ pub struct WebGpuCanvas {
     size: (u32, u32),
     profile: Option<ColorProfile>,
     proof_srgb: bool,
+    outline: Option<figcraft_render::Outline>,
     document: Option<Arc<Document>>,
     page: Option<NodeId>,
     camera: Option<(f64, f64, f64)>,
@@ -35,6 +38,7 @@ impl WebGpuCanvas {
             size: (0, 0),
             profile: None,
             proof_srgb: false,
+            outline: None,
             document: None,
             page: None,
             camera: None,
@@ -64,6 +68,9 @@ impl WebGpuCanvas {
         gesture_active: bool,
         proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
+        if self.outline.take().is_some() {
+            self.document = None;
+        }
         if view.width == 0
             || view.height == 0
             || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
@@ -143,9 +150,94 @@ impl WebGpuCanvas {
         self.proof_srgb = proof_srgb;
         Ok(self.texture)
     }
+
+    fn update_outline(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+    ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
+        if view.width == 0
+            || view.height == 0
+            || view.width > u16::MAX.into()
+            || view.height > u16::MAX.into()
+            || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
+            || !view.scale.is_finite()
+            || view.scale <= 0.0
+        {
+            return Ok(None);
+        }
+        let size = (view.width, view.height);
+        let profile = doc.color_profile;
+        let clear = if profile == ColorProfile::DisplayP3 {
+            let converted = ColorProfile::Srgb.conversion_to(profile).apply(Color::new(clear[0], clear[1], clear[2], 1.0));
+            [converted.r, converted.g, converted.b]
+        } else {
+            clear
+        };
+        if self.canvas.is_none() {
+            self.canvas =
+                Some(GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "browser WebGPU".to_owned(), size.0, size.1));
+            self.size = size;
+            self.register_view(profile)?;
+        } else if self.size != size {
+            self.canvas.as_mut().ok_or("WebGPU outline canvas missing during resize")?.resize(size.0, size.1);
+            self.size = size;
+            self.document = None;
+            self.register_view(profile)?;
+        }
+        if self.profile != Some(profile) {
+            self.register_view(profile)?;
+        }
+        let camera = (view.origin.0, view.origin.1, view.scale);
+        if self.outline == Some(options)
+            && self.document.as_ref().is_some_and(|old| Arc::ptr_eq(old, &doc))
+            && self.page == Some(page)
+            && self.camera == Some(camera)
+        {
+            return Ok(self.texture);
+        }
+        let scene = make_outline_scene(&doc, page, view, options);
+        let canvas = self.canvas.as_mut().ok_or("WebGPU outline canvas missing before render")?;
+        canvas.render_submit_with_clear(&scene, clear)?;
+        canvas.convert_for_presentation(profile);
+        self.document = Some(doc);
+        self.page = Some(page);
+        self.camera = Some(camera);
+        self.outline = Some(options);
+        Ok(self.texture)
+    }
 }
 
 impl CanvasGpuBackend for WebGpuCanvas {
+    fn outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update_outline(doc, page, view, clear, options) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU outline failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
     fn texture(
         &mut self,
         doc: Arc<Document>,

@@ -3064,6 +3064,91 @@ pub fn make_scene(doc: &Document, page: NodeId, view: &View) -> Scene {
     make_scene_with_images(doc, page, view, None)
 }
 
+/// Build outline mode as GPU strokes. Effects and fills do not participate in this view.
+pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: figcraft_render::Outline) -> Scene {
+    let mut scene = Scene::new(view.width as u16, view.height as u16);
+    let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
+    if let Some(page_node) = doc.node(page) {
+        for id in page_node.paint_order() {
+            stroke_outline_node(&mut scene, doc, id, camera, view.scale, options, 0);
+        }
+    }
+    scene
+}
+
+#[cfg(test)]
+mod outline_gpu_tests {
+    use super::*;
+
+    #[test]
+    fn outline_strokes_visible_hidden_and_bounds_on_gpu() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 70) else { return Ok(()) };
+        let mut doc = Document::new("GPU outlines");
+        let page = doc.current_page.ok_or("page missing")?;
+        let visible = doc.create(page, NodeKind::Rectangle, "visible", 10.0, 10.0, 40.0, 30.0)?;
+        let hidden = doc.create(page, NodeKind::Rectangle, "hidden", 60.0, 10.0, 20.0, 30.0)?;
+        let _group = doc.create(page, NodeKind::Group, "bounds", 10.0, 50.0, 70.0, 15.0)?;
+        doc.node_mut(hidden).ok_or("hidden rectangle missing")?.visible = false;
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 70 };
+        let options = figcraft_render::Outline { hidden: false, bounds: false, light: false };
+        let scene = make_outline_scene(&doc, page, &view, options);
+        gpu.render_with_clear(&scene, [1.0; 3])?;
+        let pixels = gpu.pixels()?;
+        let red = |pixels: &[u8], x: usize, y: usize| pixels[(y * 100 + x) * 4];
+        assert!(red(&pixels, 10, 20) < 180, "visible outline missing");
+        assert!(red(&pixels, 20, 20) > 230, "outline mode filled a shape");
+        assert!(red(&pixels, 60, 20) > 230, "hidden outline appeared without the option");
+        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { hidden: true, ..options });
+        gpu.render_with_clear(&scene, [1.0; 3])?;
+        let pixels = gpu.pixels()?;
+        if let Ok(path) = std::env::var("LIZARD_GPU_OUTLINE_SCREENSHOT") {
+            image::save_buffer(path, &pixels, view.width, view.height, image::ColorType::Rgba8)?;
+        }
+        assert!(red(&pixels, 60, 20) < 180, "hidden outline option did not draw the shape");
+        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { bounds: true, ..options });
+        gpu.render_with_clear(&scene, [1.0; 3])?;
+        let pixels = gpu.pixels()?;
+        assert!(red(&pixels, 10, 55) < 180, "group bounds option did not draw the box");
+        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { light: true, ..options });
+        gpu.render_with_clear(&scene, [0.0; 3])?;
+        let pixels = gpu.pixels()?;
+        assert!(red(&pixels, 10, 20) > 100, "light outline missing on a dark canvas: {}", red(&pixels, 10, 20));
+        assert!(red(&pixels, 20, 20) < 30, "light outline filled a shape");
+        let reference = render_view(&doc, page, &view, &Options { outline_mode: true, outline: options, ..Default::default() })
+            .ok_or("CPU outline reference failed")?;
+        assert!(red(reference.data(), 10, 20) < 180);
+        assert!(doc.node(visible).is_some());
+        Ok(())
+    }
+}
+
+fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Affine, scale: f64, options: figcraft_render::Outline, depth: usize) {
+    if depth > 64 {
+        return;
+    }
+    let Some(node) = doc.node(id) else { return };
+    if node.is_mask || node.visible && node.opacity <= 0.0 || !node.visible && !options.hidden {
+        return;
+    }
+    scene.set_transform(camera * doc.world_transform(id));
+    scene.set_paint(peniko::Color::new(if options.light { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] }));
+    scene.set_stroke(peniko::kurbo::Stroke::new(1.0 / scale.max(1e-6)));
+    if !matches!(node.kind, NodeKind::Group)
+        && let Some((path, _)) = draw::node_outline(doc, node)
+    {
+        scene.stroke_path(&path);
+    }
+    let boxed = matches!(node.kind, NodeKind::Rectangle) && node.corners.uniform() == Some(0.0) || node.kind.is_frame_like();
+    if options.bounds && !boxed {
+        scene.stroke_path(&node.local_rect().to_path(0.1));
+    }
+    if !matches!(node.kind, NodeKind::BooleanOp { .. }) && !node.hides_contents() {
+        for child in node.paint_order() {
+            stroke_outline_node(scene, doc, child, camera, scale, options, depth + 1);
+        }
+    }
+}
+
 pub fn has_effects_in_view(doc: &Document, view: &View) -> bool {
     has_matching_effects_in_view(doc, view, false, false, false)
 }
