@@ -1083,6 +1083,12 @@ pub fn copy_png(doc: &Document, ids: &[NodeId]) -> Option<figcraft_render::Pixma
     render_export_area(doc, &super::edit::z_sorted(doc, ids), area, 2.0)
 }
 
+/// The sRGB clipboard image. Native GPUs convert the document profile before readback.
+pub fn copy_png_screen(doc: &Document, ids: &[NodeId]) -> Option<figcraft_render::Pixmap> {
+    let area = export_area(doc, ids, &ExportSetting::default())?;
+    render_export_area_screen(doc, &super::edit::z_sorted(doc, ids), area, 2.0)
+}
+
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let fig = match string(p, "format") {

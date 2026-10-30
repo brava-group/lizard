@@ -325,6 +325,9 @@ fn copy_as_png_svg_and_code() {
     let doc = s.doc().unwrap();
     let png = crate::cmd::file::copy_png(doc, &[a, b]).unwrap();
     assert_eq!((png.width(), png.height()), (200, 40), "docs silent: Copy as PNG copies the selection at 2x, all of it in one image");
+    let screen = crate::cmd::file::copy_png_screen(doc, &[a, b]).unwrap();
+    assert_eq!((screen.width(), screen.height()), (200, 40));
+    assert_eq!(screen.pixel(20, 20), png.pixel(20, 20), "an sRGB document keeps its clipboard colors");
     let svg = crate::cmd::file::export_bytes(doc, &[a, b], figcraft_doc::ExportFormat::Svg, 1.0).unwrap();
     assert!(text(&svg).starts_with("<svg width=\"100\""), "Copy as SVG is the selection's SVG export");
     let css = crate::codegen::code_for(doc, a, crate::codegen::CodeLang::Css);
