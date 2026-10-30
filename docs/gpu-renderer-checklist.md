@@ -48,6 +48,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Export all page and layer selections, including masks, backdrop effects, P3, and surfaces
   larger than 4096 px, through the GPU with correct alpha, clipping, and effect order.
   - [x] Tile wide or tall effect-free page and selection exports, retaining alpha and seam pixels.
+  - [x] Tile wide page and selection exports with bounded drop/inner shadows and uniform layer
+    blur, including an effect halo around every tile.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
@@ -133,3 +135,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   in the destination paint. Grid, horizontal hex, and vertical hex samples matched CPU at 1×
   and 2× zoom with source and paint opacity. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with
   67 GPU tests and 712 UI tests. Nested/effected/text sources are still guarded.
+- 2026-10-30: large exports now render bounded drop/inner shadows and uniform layer blurs in
+  overlapping GPU tiles. Page and selected-layer shadow pixels matched CPU across the 2048 px
+  seam; a layer blur and a 2× transformed shadow did too. The halo includes the node's maximum
+  transform scale. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 70 GPU tests and 712 UI
+  tests. An unrelated local-code network test failed once under workspace load and passed both
+  alone and on the full retry. Backdrop, progressive, grain, and unbounded effects remain open.

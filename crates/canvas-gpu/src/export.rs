@@ -16,7 +16,7 @@ static DEVICE: OnceLock<Option<DevicePair>> = OnceLock::new();
 const EXPORT_TILE_SIDE: u32 = 2048;
 const MAX_EXPORT_PIXELS: u64 = 64_000_000;
 
-fn render_tiled(view: &View, mut render: impl FnMut(&View) -> Option<Pixmap>) -> Option<Pixmap> {
+fn render_tiled(view: &View, halo: u32, mut render: impl FnMut(&View) -> Option<Pixmap>) -> Option<Pixmap> {
     if u64::from(view.width) * u64::from(view.height) > MAX_EXPORT_PIXELS {
         return None;
     }
@@ -24,26 +24,68 @@ fn render_tiled(view: &View, mut render: impl FnMut(&View) -> Option<Pixmap>) ->
     let output_stride = usize::try_from(view.width).ok()?.checked_mul(4)?;
     for y in (0..view.height).step_by(EXPORT_TILE_SIDE as usize) {
         for x in (0..view.width).step_by(EXPORT_TILE_SIDE as usize) {
+            let core_width = (view.width - x).min(EXPORT_TILE_SIDE);
+            let core_height = (view.height - y).min(EXPORT_TILE_SIDE);
+            let left = x.saturating_sub(halo);
+            let top = y.saturating_sub(halo);
+            let right = x.saturating_add(core_width).saturating_add(halo).min(view.width);
+            let bottom = y.saturating_add(core_height).saturating_add(halo).min(view.height);
             let tile_view = View {
-                origin: (view.origin.0 + f64::from(x) / view.scale, view.origin.1 + f64::from(y) / view.scale),
+                origin: (view.origin.0 + f64::from(left) / view.scale, view.origin.1 + f64::from(top) / view.scale),
                 scale: view.scale,
-                width: (view.width - x).min(EXPORT_TILE_SIDE),
-                height: (view.height - y).min(EXPORT_TILE_SIDE),
+                width: right - left,
+                height: bottom - top,
             };
             let tile = render(&tile_view)?;
             let tile_stride = usize::try_from(tile_view.width).ok()?.checked_mul(4)?;
-            for row in 0..tile_view.height {
-                let source = usize::try_from(row).ok()?.checked_mul(tile_stride)?;
+            let copy_stride = usize::try_from(core_width).ok()?.checked_mul(4)?;
+            for row in 0..core_height {
+                let source =
+                    usize::try_from(y - top + row).ok()?.checked_mul(tile_stride)?.checked_add(usize::try_from(x - left).ok()?.checked_mul(4)?)?;
                 let target = usize::try_from(y + row).ok()?.checked_mul(output_stride)?.checked_add(usize::try_from(x).ok()?.checked_mul(4)?)?;
-                result.data_mut().get_mut(target..target + tile_stride)?.copy_from_slice(tile.data().get(source..source + tile_stride)?);
+                result.data_mut().get_mut(target..target + copy_stride)?.copy_from_slice(tile.data().get(source..source + copy_stride)?);
             }
         }
     }
     Some(result)
 }
 
-fn simple_tiling_supported(doc: &Document) -> bool {
-    doc.nodes().all(|node| !node.visible || node.effects.iter().all(|effect| !effect.visible))
+/// Conservative blur/shadow footprint in device pixels. Large or backdrop-dependent effects
+/// still use the fallback until they can be tiled without breaking compositing order.
+fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
+    let mut reach = 0.0f64;
+    for node in doc.nodes().filter(|node| node.visible) {
+        if node.effects.iter().all(|effect| !effect.visible) {
+            continue;
+        }
+        let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
+        let sum = a * a + b * b + c * c + d * d;
+        let determinant = a * d - b * c;
+        let discriminant = (sum * sum - 4.0 * determinant * determinant).max(0.0);
+        let world_scale = ((sum + discriminant.sqrt()) * 0.5).sqrt();
+        if !world_scale.is_finite() {
+            return None;
+        }
+        for effect in node.effects.iter().filter(|effect| effect.visible) {
+            let local = match &effect.kind {
+                EffectKind::DropShadow(shadow) => {
+                    shadow.radius.abs() * 6.0 + shadow.spread.abs() * 4.0 + shadow.offset.0.abs() + shadow.offset.1.abs()
+                }
+                EffectKind::InnerShadow(shadow) => shadow.radius.abs() * 6.0 + shadow.spread.abs() * 4.0,
+                EffectKind::LayerBlur(blur) if !blur.is_progressive() => blur.max_radius() * 6.0,
+                _ => return None,
+            };
+            if !local.is_finite() {
+                return None;
+            }
+            reach = reach.max(local * world_scale);
+        }
+    }
+    if reach == 0.0 {
+        return Some(0);
+    }
+    let pixels = (reach * scale + 2.0).ceil();
+    (pixels.is_finite() && pixels <= 512.0).then_some(pixels as u32)
 }
 
 /// Rasterize selected page roots at export resolution on the native GPU. `None` means that the
@@ -68,7 +110,8 @@ pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64
     }
     let view = View { origin: (x0, y0), scale, width: width as u32, height: height as u32 };
     if view.width > 4096 || view.height > 4096 {
-        return simple_tiling_supported(doc).then(|| render_tiled(&view, |tile| render_area_gpu_at(doc, ids, tile.page_rect(), scale, time)))?;
+        let halo = effect_tile_halo(doc, scale)?;
+        return render_tiled(&view, halo, |tile| render_area_gpu_at(doc, ids, tile.page_rect(), scale, time));
     }
     let page = doc.page_of(*ids.first()?)?;
     if ids.iter().any(|id| *id == page || doc.page_of(*id) != Some(page)) {
@@ -107,7 +150,8 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
         return None;
     }
     if view.width > 4096 || view.height > 4096 {
-        return simple_tiling_supported(doc).then(|| render_tiled(view, |tile| render_page_gpu(doc, page, tile)))?;
+        let halo = effect_tile_halo(doc, view.scale)?;
+        return render_tiled(view, halo, |tile| render_page_gpu(doc, page, tile));
     }
     let (device, queue) = DEVICE.get_or_init(|| GpuCanvas::new(1, 1).ok().map(|canvas| canvas.device_queue())).as_ref()?;
     if view.width.max(view.height) > device.limits().max_texture_dimension_2d {
@@ -136,10 +180,120 @@ mod tests {
     use figcraft_color::{
         Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
     };
-    use figcraft_doc::{ImageData, NodeKind};
+    use figcraft_doc::{Blur, Effect, EffectKind, ImageData, NodeKind, Shadow};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
+
+    #[test]
+    fn wide_shadow_export_matches_cpu_across_tile_seams() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide shadow export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "Across seam", 2036.0, 32.0, 48.0, 48.0)?;
+        let shadow = Shadow { radius: 5.0, offset: (5.0, 7.0), ..Shadow::default() };
+        let node = doc.node_mut(id).ok_or("shadow node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::DropShadow(shadow), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("wide GPU shadow page unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU shadow page unavailable")?;
+        let area = Rect::new(0.0, 0.0, 4200.0, 128.0);
+        let gpu_selected = render_area_gpu(&doc, &[id], area, 1.0).ok_or("wide GPU shadow selection unavailable")?;
+        let cpu_selected = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("wide CPU shadow selection unavailable")?;
+        for y in [34, 60, 81, 87, 96] {
+            for x in [2026, 2038, 2047, 2048, 2056, 2078, 2090] {
+                for (actual_image, expected_image) in [(&gpu, &cpu), (&gpu_selected, &cpu_selected)] {
+                    let actual = actual_image.pixel(x, y).ok_or("GPU shadow sample missing")?;
+                    let expected = expected_image.pixel(x, y).ok_or("CPU shadow sample missing")?;
+                    for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                        expected.red(),
+                        expected.green(),
+                        expected.blue(),
+                        expected.alpha(),
+                    ]) {
+                        assert!(a.abs_diff(b) <= 12, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_layer_blur_export_keeps_tile_seam_continuous() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide blur export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "Across seam", 2030.0, 32.0, 64.0, 64.0)?;
+        let node = doc.node_mut(id).ok_or("blur node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.1, 0.3, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::LayerBlur(Blur::uniform(5.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("wide GPU blur unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU blur unavailable")?;
+        for y in [25, 32, 40, 80, 96, 103] {
+            for x in [2022, 2030, 2047, 2048, 2064, 2094, 2102] {
+                let actual = gpu.pixel(x, y).ok_or("GPU blur sample missing")?;
+                let expected = cpu.pixel(x, y).ok_or("CPU blur sample missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn scaled_shadow_export_keeps_gpu_tile_halo() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("scaled shadow export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "Scaled across seam", 1018.0, 16.0, 48.0, 48.0)?;
+        let node = doc.node_mut(id).ok_or("scaled shadow node missing")?;
+        node.transform = figcraft_geom::Affine::translate((1018.0, 16.0)) * figcraft_geom::Affine::scale(2.0);
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 5.0, offset: (5.0, 7.0), ..Shadow::default() }), visible: true }];
+        assert!(effect_tile_halo(&doc, 2.0).is_some_and(|halo| halo >= 120));
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 4200, height: 256 };
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("scaled GPU shadow unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("scaled CPU shadow unavailable")?;
+        for y in [25, 40, 80, 180, 230, 245] {
+            for x in [2010, 2038, 2047, 2048, 2060, 2100, 2200] {
+                let actual = gpu.pixel(x, y).ok_or("GPU scaled shadow sample missing")?;
+                let expected = cpu.pixel(x, y).ok_or("CPU scaled shadow sample missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn gpu_pattern_cells_match_cpu_for_grid_and_hex_tiles() -> Result<(), Box<dyn std::error::Error>> {
