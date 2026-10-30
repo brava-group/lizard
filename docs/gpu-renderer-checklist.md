@@ -43,6 +43,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   - [x] Isolate the content of an opaque shadowed leaf before applying paint blend modes; all
     Vello-supported modes match the CPU reference with a Drop Shadow. Partial-opacity shadow
     stacks remain guarded.
+  - [x] Apply node blend modes to opaque leaf content after drawing its Drop Shadow; all
+    Vello-supported modes match CPU samples at the fill, shadow, and background.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
@@ -216,4 +218,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   shadowed leaf content after drawing its shadow made all Vello-supported paint blends match the
   reference at fill, shadow, and background samples. Partial-opacity shadow stacks still hit a
   separate effect guard and remain on the CPU fallback. All 75 canvas-GPU tests and
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed.
+- 2026-10-30: blending a whole shadowed node exposed a separate ordering issue: Lighten had
+  erased the GPU shadow while the CPU reference retained it. Drawing the shadow before the
+  node's blend layer brought every supported node blend mode back within 12/255 at sampled fill,
+  shadow, and background pixels. Partial opacity remains guarded. All 76 canvas-GPU tests and
   `CARGO_INCREMENTAL=0 cargo xtask ci` passed.

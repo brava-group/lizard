@@ -2824,7 +2824,8 @@ fn draw_node(
     }
     let transform = camera * doc.world_transform(id);
     let blend = gpu_node_blend(node);
-    if let Some(blend) = blend {
+    let shadow_outside_blend = gpu_shadowed_node_blend_supported(node);
+    if let Some(blend) = blend.filter(|_| !shadow_outside_blend) {
         scene.push_blend_layer(blend);
     }
     let opacity_layer = node.opacity < 0.999;
@@ -2838,6 +2839,9 @@ fn draw_node(
         } else {
             draw_shadow(scene, doc, node, camera);
         }
+    }
+    if let Some(blend) = blend.filter(|_| shadow_outside_blend) {
+        scene.push_blend_layer(blend);
     }
     let blur = if backdrops.is_some_and(|entries| entries.contains_key(&id)) && gpu_glass_stack_supported(doc, node) {
         None
@@ -2921,7 +2925,14 @@ fn gpu_blend_mode(mode: BlendMode) -> Option<peniko::BlendMode> {
 }
 
 fn gpu_simple_node_blend_supported(node: &Node) -> bool {
-    gpu_node_blend(node).is_some() && node.effects.iter().all(|effect| !effect.visible)
+    gpu_node_blend(node).is_some() && (node.effects.iter().all(|effect| !effect.visible) || gpu_shadowed_node_blend_supported(node))
+}
+
+fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
+    node.children.is_empty()
+        && node.opacity >= 0.999
+        && node.effects.iter().any(|effect| effect.visible)
+        && node.effects.iter().all(|effect| !effect.visible || matches!(effect.kind, EffectKind::DropShadow(_)))
 }
 
 fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {

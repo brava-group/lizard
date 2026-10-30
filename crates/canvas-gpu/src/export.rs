@@ -1080,6 +1080,44 @@ mod tests {
     }
 
     #[test]
+    fn leaf_node_blend_with_shadow_matches_cpu_samples() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("node blend and shadow");
+        let page = doc.current_page.ok_or("page missing")?;
+        let base = doc.create(page, NodeKind::Rectangle, "Base", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.5, 0.8, 1.0))];
+        let top = doc.create(page, NodeKind::Rectangle, "Top", 20.0, 20.0, 40.0, 40.0)?;
+        let node = doc.node_mut(top).ok_or("top missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 4.0, offset: (5.0, 0.0), ..Shadow::default() }), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
+        for blend in figcraft_color::BlendMode::ALL {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+                continue;
+            }
+            doc.node_mut(top).ok_or("top missing for blend")?.blend = blend;
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
+            let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU node blend and shadow unavailable")?;
+            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU node blend and shadow unavailable")?;
+            for (x, y) in [(30, 30), (62, 40), (15, 15)] {
+                let actual = gpu.pixel(x, y).ok_or("GPU node blend/shadow sample missing")?;
+                let expected = cpu.pixel(x, y).ok_or("CPU node blend/shadow sample missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "{blend:?} node with shadow at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn gpu_page_export_keeps_mask_and_ordered_backdrop() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());
