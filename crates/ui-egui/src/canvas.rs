@@ -408,14 +408,17 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     let spawned = std::thread::Builder::new().name("figcraft-drag-layers".into()).spawn(move || {
         let started = web_time::Instant::now();
         let base = if let Some(view) = background_for_job.as_ref() {
-            let opts = figcraft_render::Options { skip: vec![root], lod: true, ..Default::default() };
-            let Some(pix) = figcraft_render::render_view(&job_doc, page, view, &opts) else { return };
-            Some(crate::render_worker::screen_image(&pix, job_doc.color_profile))
+            let mut background = (*job_doc).clone();
+            let Some(node) = background.node_mut(root) else { return };
+            node.visible = false;
+            let Some(pix) = figcraft_engine::cmd::file::render_page_pixels(&background, page, view) else { return };
+            Some(crate::render_worker::screen_image(&pix, background.color_profile))
         } else {
             None
         };
-        let Some(mut moving) = figcraft_render::Pixmap::new(root_for_job.width, root_for_job.height) else { return };
-        figcraft_render::render_nodes_into_preview(&job_doc, &[root], &root_for_job, &mut moving, true);
+        let Some(moving) = figcraft_engine::cmd::file::render_export_area(&job_doc, &[root], root_for_job.page_rect(), root_for_job.scale) else {
+            return;
+        };
         let images = (base, crate::render_worker::screen_image(&moving, job_doc.color_profile), started.elapsed().as_secs_f64() * 1000.0);
         if tx.send(images).is_ok() {
             repaint.request_repaint_of(viewport);
@@ -511,8 +514,7 @@ fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
     let viewport = ctx.viewport_id();
     let (tx, rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new().name("figcraft-drag-detail".into()).spawn(move || {
-        let Some(mut pix) = figcraft_render::Pixmap::new(view.width, view.height) else { return };
-        figcraft_render::render_nodes_into_preview(&source, &[root], &view, &mut pix, true);
+        let Some(pix) = figcraft_engine::cmd::file::render_export_area(&source, &[root], view.page_rect(), view.scale) else { return };
         let image = crate::render_worker::screen_image(&pix, source.color_profile);
         if tx.send((view, image)).is_ok() {
             repaint.request_repaint_of(viewport);
@@ -639,6 +641,41 @@ mod drag_visual_tests {
     }
 
     #[test]
+    fn gpu_first_drag_layers_preserve_background_and_moving_frame() {
+        let mut session = figcraft_engine::Session::new();
+        let id = |value: serde_json::Value| figcraft_engine::params::id_of(&value["id"]).unwrap();
+        session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 120, "height": 80, "props": {"fill": "#406080"}})).unwrap();
+        let frame = id(session.execute("frame.create", &json!({"x": 40, "y": 30, "width": 80, "height": 60, "props": {"fill": "#203040"}})).unwrap());
+        session
+            .execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20, "parent": frame, "props": {"fill": "#e03030"}}))
+            .unwrap();
+        let ds = session.ds().unwrap();
+        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()).unwrap();
+        let mut hidden = (*ds.doc).clone();
+        hidden.node_mut(frame).unwrap().visible = false;
+        let mut base = figcraft_engine::cmd::file::render_page_pixels(&hidden, ds.page, &view).unwrap();
+        let crop = cropped_drag_view(&ds.doc, frame, &view).unwrap();
+        let moving = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], crop.page_rect(), crop.scale).unwrap();
+        assert_eq!((moving.width(), moving.height()), (crop.width, crop.height));
+        let x = ((crop.origin.0 - view.origin.0) * view.scale).round() as i32;
+        let y = ((crop.origin.1 - view.origin.1) * view.scale).round() as i32;
+        base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        for (x, y) in [(20, 20), (45, 35), (55, 45), (135, 95)] {
+            let actual = base.pixel(x, y).unwrap();
+            let expected = full.pixel(x, y).unwrap();
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 2, "x={x}, y={y}: GPU-first={actual:?}, CPU={expected:?}");
+            }
+        }
+    }
+
+    #[test]
     fn zoomed_frame_uses_bounded_preview_and_sharp_visible_tile() {
         let mut session = figcraft_engine::Session::new();
         let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
@@ -653,6 +690,8 @@ mod drag_visual_tests {
         assert!(preview.scale < view.scale);
         assert!(preview.width <= 4096 && preview.height <= 4096);
         assert!(u64::from(preview.width) * u64::from(preview.height) <= 8_000_000);
+        let preview_pixels = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], preview.page_rect(), preview.scale).unwrap();
+        assert_eq!((preview_pixels.width(), preview_pixels.height()), (preview.width, preview.height));
         let visual = DragVisual {
             uid: ds.uid,
             page: ds.page,
@@ -676,6 +715,8 @@ mod drag_visual_tests {
         assert_eq!(detail.scale, view.scale);
         assert!(detail_covers_visible(&visual, &detail, (0.0, 0.0)));
         assert!(!detail_covers_visible(&visual, &detail, (-90.0, -60.0)));
+        let detail_pixels = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], detail.page_rect(), detail.scale).unwrap();
+        assert_eq!((detail_pixels.width(), detail_pixels.height()), (detail.width, detail.height));
         let opts = figcraft_render::Options { lod: true, ..Default::default() };
         let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
         let opts = figcraft_render::Options { skip: vec![frame], lod: true, ..Default::default() };

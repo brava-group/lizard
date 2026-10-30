@@ -1989,6 +1989,7 @@ dependencies = [
  "figcraft-doc",
  "figcraft-geom",
  "figcraft-render",
+ "image 0.25.10",
  "pollster 0.4.0",
  "rayon",
  "vello_common 0.3.0",

@@ -50,6 +50,11 @@ fn simple_tiling_supported(doc: &Document) -> bool {
 /// Rasterize selected page roots at export resolution on the native GPU. `None` means that the
 /// faithful CPU renderer should handle this export instead.
 pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -> Option<Pixmap> {
+    render_area_gpu_at(doc, ids, area, scale, 0.0)
+}
+
+/// Render a selected subtree using animated image frames at `time` seconds.
+pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64, time: f64) -> Option<Pixmap> {
     if ids.is_empty() || !scale.is_finite() || scale <= 0.0 || doc.color_profile != ColorProfile::Srgb {
         return None;
     }
@@ -64,7 +69,7 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
     }
     let view = View { origin: (x0, y0), scale, width: width as u32, height: height as u32 };
     if view.width > 4096 || view.height > 4096 {
-        return simple_tiling_supported(doc).then(|| render_tiled(&view, |tile| render_area_gpu(doc, ids, tile.page_rect(), scale)))?;
+        return simple_tiling_supported(doc).then(|| render_tiled(&view, |tile| render_area_gpu_at(doc, ids, tile.page_rect(), scale, time)))?;
     }
     let page = doc.page_of(*ids.first()?)?;
     if ids.iter().any(|id| *id == page || doc.page_of(*id) != Some(page)) {
@@ -82,7 +87,7 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
         return None;
     }
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native raster export".into(), view.width, view.height);
-    canvas.register_images(doc).ok()?;
+    canvas.register_images_at(doc, time).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
     canvas.render_export_roots(doc, ids, &view).ok()?;
     let pixels = canvas.pixels().ok()?;
@@ -134,7 +139,10 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
 mod tests {
     use super::*;
     use figcraft_color::{Color, Paint};
-    use figcraft_doc::NodeKind;
+    use figcraft_doc::{ImageData, NodeKind};
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame, RgbaImage};
+    use std::sync::Arc;
 
     #[test]
     fn gpu_export_keeps_alpha_and_only_draws_selected_roots() -> Result<(), Box<dyn std::error::Error>> {
@@ -159,6 +167,34 @@ mod tests {
         assert!(found.alpha().abs_diff(expected.alpha()) <= 2);
         for (a, b) in [found.red(), found.green(), found.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
             assert!(a.abs_diff(b) <= 2);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn animated_image_frames_render_on_gpu_at_presentation_time() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            encoder.set_repeat(Repeat::Infinite)?;
+            let frames = [[255, 0, 0, 255], [0, 255, 0, 255]]
+                .into_iter()
+                .map(|color| Frame::from_parts(RgbaImage::from_pixel(4, 4, image::Rgba(color)), 0, 0, Delay::from_numer_denom_ms(100, 1)));
+            encoder.encode_frames(frames)?;
+        }
+        let mut doc = Document::new("animated GPU image");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "GIF", 0.0, 0.0, 4.0, 4.0)?;
+        let hash = "animated-export-test".to_string();
+        doc.images.insert(hash.clone(), ImageData { bytes: Arc::new(bytes), width: 4, height: 4 });
+        doc.node_mut(id).ok_or("GIF node missing")?.fills = vec![Paint::image(hash, figcraft_color::ImageScaleMode::Fill)];
+        for (time, expected) in [(0.0, [255, 0, 0]), (0.15, [0, 255, 0]), (0.25, [255, 0, 0])] {
+            let gpu = render_area_gpu_at(&doc, &[id], Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, time).ok_or("animated GPU export unavailable")?;
+            let pixel = gpu.pixel(2, 2).ok_or("GIF sample missing")?;
+            assert_eq!([pixel.red(), pixel.green(), pixel.blue()], expected, "time={time}");
         }
         Ok(())
     }
@@ -311,6 +347,45 @@ mod tests {
             let expected = cpu.pixel(40, 40).ok_or("CPU sample missing")?;
             for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
                 assert!(a.abs_diff(b) <= 10, "{blend:?}: GPU={actual:?}, CPU={expected:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn group_blend_modes_match_cpu_samples() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("group blend export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let base = doc.create(page, NodeKind::Rectangle, "Base", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.5, 0.8, 1.0))];
+        let group = doc.create(page, NodeKind::Group, "Group", 10.0, 10.0, 60.0, 60.0)?;
+        let first = doc.create(group, NodeKind::Rectangle, "First", 0.0, 0.0, 40.0, 40.0)?;
+        doc.node_mut(first).ok_or("first missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
+        let second = doc.create(group, NodeKind::Rectangle, "Second", 20.0, 20.0, 40.0, 40.0)?;
+        doc.node_mut(second).ok_or("second missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 0.7))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
+        for opacity in [1.0, 0.65] {
+            for blend in figcraft_color::BlendMode::ALL {
+                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker)
+                {
+                    continue;
+                }
+                let node = doc.node_mut(group).ok_or("group missing")?;
+                node.blend = blend;
+                node.opacity = opacity;
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
+                let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU group blend export unavailable")?;
+                let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU group blend reference unavailable")?;
+                for (x, y) in [(20, 20), (40, 40), (60, 60)] {
+                    let actual = gpu.pixel(x, y).ok_or("GPU sample missing")?;
+                    let expected = cpu.pixel(x, y).ok_or("CPU sample missing")?;
+                    for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
+                        assert!(a.abs_diff(b) <= 10, "{blend:?} opacity={opacity} at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                    }
+                }
             }
         }
         Ok(())

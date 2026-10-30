@@ -936,6 +936,18 @@ pub fn render_node_pixels(doc: &Document, id: NodeId, scale: f64) -> Option<figc
     render_export_area(doc, &[id], figcraft_render::export_bounds(doc, id)?, scale)
 }
 
+/// Render an animated layer at presentation time, using the GPU for supported content.
+pub fn render_node_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(area) = figcraft_render::export_bounds(doc, id)
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_area_gpu_at(doc, &[id], area, scale, time)
+    {
+        return Some(pixmap);
+    }
+    figcraft_render::render_node_at(doc, id, scale, time)
+}
+
 /// Preview a traced SVG through the same vector importer and raster path as document content.
 pub fn render_svg_preview_pixels(svg: &str, width: u32, height: u32) -> std::result::Result<figcraft_render::Pixmap, String> {
     let mut doc = Document::new("Vector preview");

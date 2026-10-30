@@ -2784,7 +2784,7 @@ fn gpu_blend_mode(mode: BlendMode) -> Option<peniko::BlendMode> {
 }
 
 fn gpu_simple_node_blend_supported(node: &Node) -> bool {
-    gpu_node_blend(node).is_some() && node.children.is_empty() && node.effects.iter().all(|effect| !effect.visible)
+    gpu_node_blend(node).is_some() && node.effects.iter().all(|effect| !effect.visible)
 }
 
 fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
@@ -4852,6 +4852,11 @@ impl GpuCanvas {
     }
 
     pub fn register_images(&mut self, doc: &Document) -> Result<usize, Box<dyn Error>> {
+        self.register_images_at(doc, 0.0)
+    }
+
+    /// Upload the image frame visible at `time`; static renders use the first frame.
+    pub fn register_images_at(&mut self, doc: &Document, time: f64) -> Result<usize, Box<dyn Error>> {
         let mut count = 0;
         for node in doc.nodes() {
             for paint in node.fills.iter().chain(&node.strokes) {
@@ -4860,7 +4865,10 @@ impl GpuCanvas {
                 if self.image_info.contains_key(&key) {
                     continue;
                 }
-                let Some(pm) = figcraft_render::images::get(&img.image, doc.images.get(&img.image), &img.filters, doc.color_profile) else {
+                let data = doc.images.get(&img.image);
+                let Some(pm) = figcraft_render::images::frame_at(&img.image, data, &img.filters, doc.color_profile, time)
+                    .or_else(|| figcraft_render::images::get(&img.image, data, &img.filters, doc.color_profile))
+                else {
                     continue;
                 };
                 let (Ok(width), Ok(height)) = (u16::try_from(pm.width()), u16::try_from(pm.height())) else { continue };

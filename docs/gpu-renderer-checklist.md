@@ -14,14 +14,17 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Render outline mode, soft proof, selection/drag previews, and other canvas overlays on GPU.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
   speeds for documents with mixed effects; check error paths and resize behavior.
+  - [x] Prepare the composited drag background, moving layer, and zoom detail with GPU-first
+    rendering, retaining the existing GPU texture composition on screen.
+  - [ ] Remove CPU rendering from unsupported drag scenes and measure latency on mixed effects.
 - [ ] Remove the CPU atlas path after direct GPU covers its use cases.
 
 ## Paints, effects, and composition
 
 - [ ] Support image filters, diamond gradients, pattern fills, shader fills, per-paint blend modes,
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
-  - [x] Render the Vello-supported blend modes on simple leaf nodes and individual paints.
-  - [ ] Implement Plus Darker and blends on complex groups/effect stacks.
+  - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
+  - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
   and glass on rotated/skewed shapes and groups, including multiple shadows.
@@ -42,7 +45,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   - [x] Route static previews, vectorization backgrounds, static presentation textures,
     rasterize, eyedropper, and MCP renders through the shared GPU-first renderer.
   - [x] Render the vectorization SVG preview through imported vectors and GPU-first export.
-  - [ ] Render animated presentation textures on GPU.
+  - [x] Render animated presentation textures through GPU composition after frame decoding.
 - [ ] Use the same GPU effect path when SVG/PDF must embed rasterized effects or masks; keep
   their ordinary vector drawing as vector output.
 
@@ -82,3 +85,14 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` passed after updating the blend capability
   regression to expect GPU Multiply and a guarded Plus Darker fallback. Native workspace tests,
   711 UI tests, WASM checks, plugin checks, Clippy, formatting, and crate layers all passed.
+- 2026-10-30: the composed drag's background, moving root, and sharp detail now use the shared
+  GPU-first path. Four drag tests passed, including a recomposed scene comparison and high-zoom
+  tile dimensions. Mixed unsupported effects can still take the guarded CPU fallback.
+- 2026-10-30: Vello-supported node blend modes now include effect-free groups. GPU/CPU samples
+  matched for every supported mode in an overlapping two-child group at full and partial opacity.
+- 2026-10-30: animated GIF frames can now use the native GPU export path at presentation time.
+  A two-frame GIF passed red/green/red samples at 0, 150, and 250 ms. Frame decoding remains a
+  CPU image codec step; image filters and unsupported scene effects remain guarded.
+- 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` passed with the drag and GIF work: 59 GPU
+  tests and 712 UI tests passed, along with the remaining workspace, WASM, plugin, Clippy,
+  format, and layer checks.

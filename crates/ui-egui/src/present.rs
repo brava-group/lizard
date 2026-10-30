@@ -974,7 +974,7 @@ impl Presenter {
         let pix = if clock.is_none() {
             figcraft_engine::cmd::file::render_node_pixels(doc, id, scale)?
         } else {
-            figcraft_render::render_node_at(doc, id, scale, t)?
+            figcraft_engine::cmd::file::render_node_pixels_at(doc, id, scale, t)?
         };
         let img = crate::render_worker::screen_image(&pix, doc.color_profile);
         let tex = ctx.load_texture(format!("present-{}", id.0), img, egui::TextureOptions::LINEAR);
