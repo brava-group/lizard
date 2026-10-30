@@ -840,6 +840,52 @@ mod tests {
     }
 
     #[test]
+    fn display_p3_soft_proof_marks_only_clipped_stripes_on_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(mut canvas) = GpuCanvas::new(16, 16) else { return Ok(()) };
+        let mut doc = Document::new("GPU soft proof");
+        doc.color_profile = ColorProfile::DisplayP3;
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let red = doc.create(page, NodeKind::Rectangle, "P3 red", 0.0, 0.0, 8.0, 16.0)?;
+        doc.node_mut(red).ok_or("red node missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        let grey = doc.create(page, NodeKind::Rectangle, "P3 grey", 8.0, 0.0, 8.0, 16.0)?;
+        doc.node_mut(grey).ok_or("grey node missing")?.fills = vec![Paint::solid(Color::new(0.5, 0.5, 0.5, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 16, height: 16 };
+        canvas.render_submit_document_rgba(&doc, page, &view, [0.0; 4])?;
+        let source = canvas.pixels()?;
+        let clipped = ColorProfile::DisplayP3.conversion_to(ColorProfile::Srgb).clipped_pixels(&source);
+        assert!(clipped[18]);
+        assert!(!clipped[28]);
+        let mut expected = source.clone();
+        ColorProfile::DisplayP3.conversion_to(ColorProfile::Srgb).apply_pixels(&mut expected);
+        for (index, out) in clipped.iter().copied().enumerate() {
+            if out && (index % 16 + index / 16) % 8 < 4 {
+                expected[index * 4..index * 4 + 4].copy_from_slice(&[128, 128, 128, 255]);
+            }
+        }
+        canvas.convert_for_presentation_with_proof(ColorProfile::DisplayP3, true);
+        let proof = canvas.presented_pixels()?;
+        if let Ok(path) = std::env::var("LIZARD_GPU_PROOF_SCREENSHOT") {
+            let preview = image::RgbaImage::from_raw(16, 16, proof.clone()).ok_or("proof preview pixels missing")?;
+            image::imageops::resize(&preview, 512, 512, image::imageops::FilterType::Nearest).save(path)?;
+        }
+        for (index, (gpu, cpu)) in proof.iter().zip(&expected).enumerate() {
+            assert!(gpu.abs_diff(*cpu) <= 4, "soft proof byte {index}: GPU={gpu}, CPU={cpu}");
+        }
+        fn sample(pixels: &[u8], x: usize, y: usize) -> &[u8] {
+            &pixels[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4]
+        }
+        assert_eq!(sample(&proof, 2, 1), &[128, 128, 128, 255]);
+        canvas.convert_for_presentation_with_proof(ColorProfile::DisplayP3, false);
+        let normal = canvas.presented_pixels()?;
+        assert_eq!(sample(&proof, 6, 1), sample(&normal, 6, 1));
+        assert_eq!(sample(&proof, 12, 1), sample(&normal, 12, 1));
+        Ok(())
+    }
+
+    #[test]
     fn backdrop_effects_keep_cpu_export() -> Result<(), Box<dyn std::error::Error>> {
         let mut doc = Document::new("backdrop export");
         let page = doc.current_page.ok_or("page missing")?;

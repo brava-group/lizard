@@ -22,6 +22,7 @@ pub struct GpuCanvasExperiment {
     direct: Option<GpuCanvas>,
     direct_texture_id: Option<egui::TextureId>,
     direct_profile: Option<ColorProfile>,
+    direct_proof: bool,
     direct_size: (u32, u32),
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
@@ -55,6 +56,7 @@ impl GpuCanvasExperiment {
             direct: None,
             direct_texture_id: None,
             direct_profile: None,
+            direct_proof: false,
             direct_size: (0, 0),
             direct_document: None,
             direct_page: None,
@@ -100,12 +102,13 @@ impl GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
         ctx: &egui::Context,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.direct_mode {
             let cached_effects = self.direct_cached_blur;
             if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, cached_effects) {
-                return self.update_direct(doc, page, view, clear, gesture_active);
+                return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb);
             }
         }
         if self.direct_mode {
@@ -249,6 +252,7 @@ impl GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -291,6 +295,16 @@ impl GpuCanvasExperiment {
         }
         let changed_doc = !self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
+        if !changed_doc
+            && self.direct_page == Some(page)
+            && self.direct_camera == Some(camera)
+            && self.direct_proof != proof_srgb
+            && let Some(canvas) = self.direct.as_mut()
+        {
+            canvas.convert_for_presentation_with_proof(profile, proof_srgb);
+            self.direct_proof = proof_srgb;
+            return Ok(self.direct_texture_id);
+        }
         if !doc.shaders.is_empty() && (changed_doc || self.direct_camera.is_none_or(|previous| previous.2 != view.scale)) {
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during shader zoom")?;
             canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
@@ -308,10 +322,11 @@ impl GpuCanvasExperiment {
             if changed_doc || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 canvas.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
-                canvas.convert_for_presentation(profile);
+                canvas.convert_for_presentation_with_proof(profile, proof_srgb);
                 self.direct_document = Some(doc);
                 self.direct_page = Some(page);
                 self.direct_camera = Some(camera);
+                self.direct_proof = proof_srgb;
                 self.direct_provisional_effects = false;
             }
             return Ok(self.direct_texture_id);
@@ -375,13 +390,14 @@ impl GpuCanvasExperiment {
                 make_scene_with_images(&doc, page, view, Some(canvas.image_info()))
             };
             let ms = canvas.render_submit_with_clear(&scene, clear)?;
-            canvas.convert_for_presentation(profile);
+            canvas.convert_for_presentation_with_proof(profile, proof_srgb);
             if ms > 16.0 {
                 eprintln!("Lizard direct Vello GPU frame: {ms:.1} ms at {:.2}x", view.scale);
             }
             self.direct_document = Some(doc);
             self.direct_page = Some(page);
             self.direct_camera = Some(camera);
+            self.direct_proof = proof_srgb;
         }
         Ok(self.direct_texture_id)
     }
@@ -395,12 +411,13 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
         ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, gesture_active, ctx) {
+        match self.update(doc, page, view, clear, gesture_active, proof_srgb, ctx) {
             Ok(texture) => {
                 self.direct_current = texture.is_some() && texture == self.direct_texture_id;
                 texture

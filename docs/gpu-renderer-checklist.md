@@ -12,8 +12,10 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Replace the unsupported-scene CPU fallback with GPU implementations for every visible
   paint, effect, mask, blend mode, text run, and color profile. Keep a fallback only for GPU failure.
 - [ ] Render outline mode, soft proof, selection/drag previews, and other canvas overlays on GPU.
-  - [ ] Replace `render_worker`'s CPU `render_view` path for outline, soft proof, and fallback
-    previews with a GPU scene or explicit GPU-free fallback.
+  - [x] Render Display P3 soft-proof stripes in the GPU profile-conversion pass and update the
+    presented texture on a proof toggle without rerasterizing the vector scene.
+  - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
+    with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
   speeds for documents with mixed effects; check error paths and resize behavior.
   - [x] Prepare the composited drag background, moving layer, and zoom detail with GPU-first
@@ -232,3 +234,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   stroke samples at 72 px matched the prior renderer within 8/255; a direct GPU export of the
   imported icon succeeded. `CARGO_INCREMENTAL=0 cargo xtask ci` passed. Browser plugin icons
   still use the CPU fallback until WebGPU export readback is available.
+- 2026-10-30: Display P3 soft proof now marks out-of-gamut pixels in the same GPU pass that
+  converts the canvas for presentation. A 16 × 16 fixture matched every byte of the CPU proof
+  within 4/255, and its enlarged GPU output was visually inspected. Toggling proof reuses the
+  rendered vector texture. Native and WASM checks passed. The test app accepted a proof toggle,
+  but its window screenshot timed out while the window was not being presented by macOS. All 77
+  canvas-GPU tests and `CARGO_INCREMENTAL=0 cargo xtask ci` passed.

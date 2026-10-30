@@ -17,6 +17,7 @@ pub struct WebGpuCanvas {
     texture: Option<egui::TextureId>,
     size: (u32, u32),
     profile: Option<ColorProfile>,
+    proof_srgb: bool,
     document: Option<Arc<Document>>,
     page: Option<NodeId>,
     camera: Option<(f64, f64, f64)>,
@@ -33,6 +34,7 @@ impl WebGpuCanvas {
             texture: None,
             size: (0, 0),
             profile: None,
+            proof_srgb: false,
             document: None,
             page: None,
             camera: None,
@@ -60,6 +62,7 @@ impl WebGpuCanvas {
         view: &View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -96,10 +99,15 @@ impl WebGpuCanvas {
         }
         let changed_doc = !self.document.as_ref().is_some_and(|old| Arc::ptr_eq(old, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
-        if !changed_doc && self.page == Some(page) && self.camera == Some(camera) {
+        if !changed_doc && self.page == Some(page) && self.camera == Some(camera) && self.proof_srgb == proof_srgb {
             return Ok(self.texture);
         }
         let canvas = self.canvas.as_mut().ok_or("WebGPU canvas missing before render")?;
+        if !changed_doc && self.page == Some(page) && self.camera == Some(camera) {
+            canvas.convert_for_presentation_with_proof(profile, proof_srgb);
+            self.proof_srgb = proof_srgb;
+            return Ok(self.texture);
+        }
         if changed_doc || self.camera.is_none_or(|previous| previous.2 != view.scale) {
             let reused = changed_doc
                 && self.document.as_deref().is_some_and(|old| {
@@ -128,10 +136,11 @@ impl WebGpuCanvas {
             }
             canvas.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
         }
-        canvas.convert_for_presentation(profile);
+        canvas.convert_for_presentation_with_proof(profile, proof_srgb);
         self.document = Some(doc);
         self.page = Some(page);
         self.camera = Some(camera);
+        self.proof_srgb = proof_srgb;
         Ok(self.texture)
     }
 }
@@ -144,12 +153,13 @@ impl CanvasGpuBackend for WebGpuCanvas {
         view: &View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, gesture_active) {
+        match self.update(doc, page, view, clear, gesture_active, proof_srgb) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture

@@ -22,6 +22,17 @@ fn encode(linear: vec3<f32>) -> vec3<f32> {
     return select(value * 12.92, 1.055 * pow(value, vec3<f32>(1.0 / 2.4)) - 0.055, value > vec3<f32>(0.0031308));
 }
 
+fn encoded_positive(value: f32) -> f32 {
+    if value <= 0.0031308 { return value * 12.92; }
+    return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+}
+
+fn outside_srgb(value: f32) -> bool {
+    let slack = 2.0 / 255.0;
+    return (value < 0.0 && encoded_positive(-value) > slack)
+        || (value > 1.0 && encoded_positive(value) > 1.0 + slack);
+}
+
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if id.x >= params.dimensions.x || id.y >= params.dimensions.y { return; }
@@ -37,6 +48,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         dot(params.row1.xyz, linear),
         dot(params.row2.xyz, linear),
     );
+    if params.dimensions.z != 0u
+        && (outside_srgb(converted.r) || outside_srgb(converted.g) || outside_srgb(converted.b))
+        && (id.x + id.y) % 8u < 4u {
+        textureStore(destination, xy, vec4<f32>(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0));
+        return;
+    }
     textureStore(destination, xy, vec4<f32>(encode(converted) * pixel.a, pixel.a));
 }
 "#;
@@ -120,7 +137,7 @@ impl GpuColorProfile {
         &self.output
     }
 
-    pub fn submit(&self, device: &wgpu::Device, queue: &wgpu::Queue, source: &wgpu::Texture, matrix: [[f32; 3]; 3]) {
+    pub fn submit(&self, device: &wgpu::Device, queue: &wgpu::Queue, source: &wgpu::Texture, matrix: [[f32; 3]; 3], proof: bool) {
         let size = source.size();
         let mut bytes = Vec::with_capacity(64);
         for row in matrix {
@@ -128,7 +145,7 @@ impl GpuColorProfile {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
-        for value in [size.width, size.height, 0, 0] {
+        for value in [size.width, size.height, u32::from(proof), 0] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {

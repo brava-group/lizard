@@ -26,6 +26,7 @@ pub trait CanvasGpuBackend {
         view: &figcraft_render::View,
         clear: [f32; 3],
         gesture_active: bool,
+        proof_srgb: bool,
         ctx: &egui::Context,
     ) -> Option<egui::TextureId>;
 
@@ -1094,7 +1095,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && let Ok(ds) = app.session.ds()
         && !ds.view.outlines
         && !ds.view.outlines_selection
-        && !ds.view.proof_srgb
         && ds.view.pixel_preview_scale().is_none()
         && ds.focused().is_none()
         && app.canvas.preedit.is_none()
@@ -1102,7 +1102,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && let Some(mut backend) = app.gpu_canvas.take()
     {
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
-        let texture = backend.texture(Arc::clone(&ds.doc), ds.page, &view, clear, app.canvas.dragging, &ctx);
+        let texture = backend.texture(Arc::clone(&ds.doc), ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx);
         app.gpu_canvas = Some(backend);
         texture
     } else {

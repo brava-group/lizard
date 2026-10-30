@@ -4402,10 +4402,16 @@ impl GpuCanvas {
 
     /// Convert the finished Display P3 canvas on the GPU without changing document-space pixels.
     pub fn convert_for_presentation(&mut self, profile: ColorProfile) {
+        self.convert_for_presentation_with_proof(profile, false);
+    }
+
+    /// Present Display P3 in sRGB and optionally mark out-of-gamut pixels with the editor's
+    /// diagonal proof stripes in the same GPU pass.
+    pub fn convert_for_presentation_with_proof(&mut self, profile: ColorProfile, proof: bool) {
         if profile == ColorProfile::DisplayP3 {
             let pass = self.gpu_color_profile.get_or_insert_with(|| GpuColorProfile::new(&self.device, self.texture.size()));
             if let Some(matrix) = profile.conversion_to(ColorProfile::Srgb).linear_matrix() {
-                pass.submit(&self.device, &self.queue, &self.texture, matrix);
+                pass.submit(&self.device, &self.queue, &self.texture, matrix, proof);
             }
         }
     }
