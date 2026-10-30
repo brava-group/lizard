@@ -43,6 +43,20 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Rasterize the focused subtree in Outline mode without drawing its siblings.
+    fn focused_outline_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _focus: NodeId,
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Present a lower-resolution GPU scene with nearest-neighbor sampling.
     fn pixel_texture(
         &mut self,
@@ -1154,7 +1168,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
-        && !(ds.focused().is_some() && (ds.view.outlines || ds.view.outlines_selection || ds.view.pixel_preview_scale().is_some()))
+        && !(ds.focused().is_some() && (ds.view.outlines_selection || ds.view.pixel_preview_scale().is_some()))
         && !(ds.view.outlines_selection && ds.view.pixel_preview_scale().is_some())
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
@@ -1164,7 +1178,18 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
         let texture = if let Some(focus) = ds.focused() {
-            backend.focus_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
+            if ds.view.outlines {
+                let options = figcraft_render::Outline {
+                    hidden: ds.view.outline_hidden,
+                    bounds: ds.view.outline_bounds,
+                    light: ds.doc.node(ds.page).is_some_and(
+                        |node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark()),
+                    ),
+                };
+                backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, &ctx)
+            } else {
+                backend.focus_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
+            }
         } else if ds.view.outlines {
             let options = figcraft_render::Outline {
                 hidden: ds.view.outline_hidden,
@@ -3095,6 +3120,54 @@ mod stale_render_tests {
         ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "outline capture lock poisoned")?;
         assert!(captured.iter().any(|options| options.hidden && options.bounds));
+        Ok(())
+    }
+
+    #[test]
+    fn focused_outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<NodeId>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn focused_outline_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                focus: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _options: figcraft_render::Outline,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push(focus);
+                None
+            }
+        }
+
+        let mut ui = Ui::new(Session::new());
+        let result = ui.app.session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 30, "height": 20}))?;
+        let focus = NodeId(result["id"].as_u64().ok_or("created shape id missing")?);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        let ds = ui.app.session.ds_mut()?;
+        ds.focus = Some(focus);
+        ds.view.outlines = true;
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "focused outline capture lock poisoned")?;
+        assert!(captured.contains(&focus), "focused Outline should use the GPU backend");
         Ok(())
     }
 

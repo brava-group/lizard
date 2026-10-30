@@ -6,7 +6,7 @@ use std::sync::Arc;
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene,
+    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_focused_outline_scene, make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -205,6 +205,7 @@ impl WebGpuCanvas {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        focus: Option<NodeId>,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -240,13 +241,18 @@ impl WebGpuCanvas {
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.outline == Some(options)
+            && self.focus == focus
             && self.document.as_ref().is_some_and(|old| Arc::ptr_eq(old, &doc))
             && self.page == Some(page)
             && self.camera == Some(camera)
         {
             return Ok(self.texture);
         }
-        let scene = make_outline_scene(&doc, page, view, options);
+        let scene = if let Some(focus) = focus {
+            make_focused_outline_scene(&doc, focus, view, options)
+        } else {
+            make_outline_scene(&doc, page, view, options)
+        };
         let canvas = self.canvas.as_mut().ok_or("WebGPU outline canvas missing before render")?;
         canvas.render_submit_with_clear(&scene, clear)?;
         canvas.convert_for_presentation(profile);
@@ -254,7 +260,7 @@ impl WebGpuCanvas {
         self.page = Some(page);
         self.camera = Some(camera);
         self.outline = Some(options);
-        self.focus = None;
+        self.focus = focus;
         self.selected_outlines = None;
         Ok(self.texture)
     }
@@ -354,13 +360,40 @@ impl CanvasGpuBackend for WebGpuCanvas {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options) {
+        match self.update_outline(doc, page, view, clear, options, None) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture
             }
             Err(error) => {
                 log::error!("browser WebGPU outline failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
+    fn focused_outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update_outline(doc, page, view, clear, options, Some(focus)) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU focused outline failed: {error}");
                 self.disabled = true;
                 self.current_gpu_rendered = false;
                 None

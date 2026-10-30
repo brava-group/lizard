@@ -7,7 +7,8 @@ use std::time::Duration;
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene, make_scene_with_images,
+    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_focused_outline_scene, make_outline_scene,
+    make_scene_with_images,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -289,6 +290,7 @@ impl GpuCanvasExperiment {
         view: &View,
         clear: [f32; 3],
         options: figcraft_render::Outline,
+        focus: Option<NodeId>,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if view.width == 0
             || view.height == 0
@@ -325,13 +327,18 @@ impl GpuCanvasExperiment {
         }
         let camera = (view.origin.0, view.origin.1, view.scale);
         if self.direct_outline == Some(options)
+            && self.direct_focus == focus
             && self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc))
             && self.direct_page == Some(page)
             && self.direct_camera == Some(camera)
         {
             return Ok(self.direct_texture_id);
         }
-        let scene = make_outline_scene(&doc, page, view, options);
+        let scene = if let Some(focus) = focus {
+            make_focused_outline_scene(&doc, focus, view, options)
+        } else {
+            make_outline_scene(&doc, page, view, options)
+        };
         let canvas = self.direct.as_mut().ok_or("GPU outline canvas missing before render")?;
         canvas.render_submit_with_clear(&scene, clear)?;
         canvas.convert_for_presentation(profile);
@@ -339,7 +346,7 @@ impl GpuCanvasExperiment {
         self.direct_page = Some(page);
         self.direct_camera = Some(camera);
         self.direct_outline = Some(options);
-        self.direct_focus = None;
+        self.direct_focus = focus;
         self.direct_selected_outlines = None;
         Ok(self.direct_texture_id)
     }
@@ -439,13 +446,40 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         if self.disabled {
             return None;
         }
-        match self.update_outline(doc, page, view, clear, options) {
+        match self.update_outline(doc, page, view, clear, options, None) {
             Ok(texture) => {
                 self.direct_current = texture.is_some();
                 texture
             }
             Err(error) => {
                 eprintln!("Lizard GPU outline failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
+    fn focused_outline_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled {
+            return None;
+        }
+        match self.update_outline(doc, page, view, clear, options, Some(focus)) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU focused outline failed: {error}");
                 self.disabled = true;
                 self.direct_current = false;
                 None

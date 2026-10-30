@@ -3388,12 +3388,20 @@ pub fn make_scene(doc: &Document, page: NodeId, view: &View) -> Scene {
 
 /// Build outline mode as GPU strokes. Effects and fills do not participate in this view.
 pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: figcraft_render::Outline) -> Scene {
+    let roots = doc.node(page).map(|node| node.paint_order().collect::<Vec<_>>()).unwrap_or_default();
+    make_outline_scene_roots(doc, &roots, view, options)
+}
+
+/// Outline only the focused subtree, keeping its normal document-space position.
+pub fn make_focused_outline_scene(doc: &Document, focus: NodeId, view: &View, options: figcraft_render::Outline) -> Scene {
+    make_outline_scene_roots(doc, &[focus], view, options)
+}
+
+fn make_outline_scene_roots(doc: &Document, roots: &[NodeId], view: &View, options: figcraft_render::Outline) -> Scene {
     let mut scene = Scene::new(view.width as u16, view.height as u16);
     let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
-    if let Some(page_node) = doc.node(page) {
-        for id in page_node.paint_order() {
-            stroke_outline_node(&mut scene, doc, id, camera, view.scale, options, 0);
-        }
+    for id in roots {
+        stroke_outline_node(&mut scene, doc, *id, camera, view.scale, options, 0);
     }
     scene
 }
@@ -3401,6 +3409,26 @@ pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: fi
 #[cfg(test)]
 mod outline_gpu_tests {
     use super::*;
+
+    #[test]
+    fn focused_outline_omits_sibling_contours() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 50) else { return Ok(()) };
+        let mut doc = Document::new("Focused GPU outline");
+        let page = doc.current_page.ok_or("page missing")?;
+        let focused = doc.create(page, NodeKind::Rectangle, "Focused", 10.0, 10.0, 20.0, 20.0)?;
+        let _sibling = doc.create(page, NodeKind::Rectangle, "Sibling", 60.0, 10.0, 20.0, 20.0)?;
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 50 };
+        let options = figcraft_render::Outline { hidden: false, bounds: false, light: false };
+        gpu.render_with_clear(&make_outline_scene(&doc, page, &view, options), [1.0; 3])?;
+        let full = gpu.pixels()?;
+        gpu.render_with_clear(&make_focused_outline_scene(&doc, focused, &view, options), [1.0; 3])?;
+        let focused_pixels = gpu.pixels()?;
+        let sample = |pixels: &[u8], x: usize, y: usize| pixels[(y * 100 + x) * 4];
+        assert!(sample(&full, 60, 20) < 230, "full outline should contain the sibling, got {}", sample(&full, 60, 20));
+        assert!(sample(&focused_pixels, 60, 20) > 230, "focused outline leaked a sibling");
+        assert!(sample(&focused_pixels, 10, 20) < 230, "focused outline lost its contour, got {}", sample(&focused_pixels, 10, 20));
+        Ok(())
+    }
 
     #[test]
     fn outline_strokes_visible_hidden_and_bounds_on_gpu() -> Result<(), Box<dyn Error>> {

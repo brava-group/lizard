@@ -10,7 +10,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 | Entry point | Current CPU work | GPU completion condition |
 | --- | --- | --- |
-| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for combined view modes, focus/selected outlines with backdrop effects, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
+| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for remaining combined view modes, unsupported backdrop stacks, and other unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
 | `crates/ui-egui/src/canvas.rs` | Cropped creation preview and eyedropper when GPU cannot present | Current GPU scene covers supported interactions; no CPU scene raster on a working GPU |
 | `crates/canvas-gpu/src/vello_scene.rs` | CPU effect tile fallback in the GPU compositor | GPU passes support every effect stack and region, including large surfaces |
 | `crates/engine/src/cmd/file.rs` | WASM export and unsupported native export fallback | Browser asynchronous WebGPU readback and complete GPU export coverage |
@@ -33,6 +33,8 @@ the migration concerns rasterization and pixel effects.
     caret and composition underline remain lightweight egui overlays.
   - [x] Draw full-page Outline mode with Vello strokes on native and browser WebGPU, including
     hidden-layer contours, group bounds, and light strokes over a dark background.
+  - [x] Draw Outline mode while focused on one subtree through native and browser WebGPU;
+    sibling contours stay outside the focused scene.
   - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
     with nearest-neighbor sampling on native and browser WebGPU.
   - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
@@ -460,3 +462,10 @@ the migration concerns rasterization and pixel effects.
   still use fallback because separate glyph styles are not yet represented in the cache. All
   95 canvas-GPU tests passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
   passed across native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: Outline plus Focus now routes through one GPU outline scene containing only the
+  focused subtree. A 100 × 50 GPU fixture retained the focused rectangle contour and omitted
+  its sibling. The UI dispatch test confirmed the focused backend call, and the native/browser
+  backends track focus in their outline texture cache keys. I inspected the generated GPU PNG:
+  it showed the focused rectangle only. All 96 canvas-GPU and 722 UI tests passed, and
+  `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM,
+  plugins, Clippy, formatting, and layer checks.
