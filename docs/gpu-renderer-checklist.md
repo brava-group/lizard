@@ -101,6 +101,8 @@ the migration concerns rasterization and pixel effects.
     sampled reveal levels remain within 16/255 of the reference.
   - [x] Compose a single solid or gradient luminance stroke as the mask source on GPU;
     sampled edges and empty interior remain within 16/255 of the reference.
+  - [x] Compose uniform-style text luminance masks with one solid or gradient paint on GPU;
+    rich text runs remain guarded until their separate colors can be converted.
 - [x] Keep composited inner and drop shadows on rotated groups in the GPU cache for tested spreads
   through ±32 document units; unsupported descendants and larger effects remain guarded.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
@@ -443,3 +445,9 @@ the migration concerns rasterization and pixel effects.
   the texture cache can be rendered at the required resolution. All 93 canvas-GPU tests passed,
   and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM,
   plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: uniform-style text with a single visible solid or gradient paint now serves as
+  a luminance mask on GPU. In a 200 × 100 fixture, the solid mask revealed 1915 glyph pixels
+  and differed from CPU by more than 16/255 at 43 pixels; the gradient revealed 1873 and
+  differed at 41. Text with per-run styles still uses the guarded CPU fallback. All 94
+  canvas-GPU tests passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
+  passed across native/WASM, plugins, Clippy, formatting, and layer checks.

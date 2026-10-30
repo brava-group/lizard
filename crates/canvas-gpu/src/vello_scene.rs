@@ -867,6 +867,49 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn uniform_text_luminance_mask_uses_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU text luminance mask");
+        let page = doc.current_page.ok_or("page missing")?;
+        let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 200.0, 100.0)?;
+        let mut text = figcraft_doc::TextData::new("Lizard");
+        text.style.font_size = 52.0;
+        let mask = doc.create(group, NodeKind::Text(text), "Text mask", 12.0, 10.0, 180.0, 70.0)?;
+        let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
+        mask_node.is_mask = true;
+        mask_node.mask_type = MaskType::Luminance;
+        mask_node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.8, 0.75))];
+        let content = doc.create(group, NodeKind::Rectangle, "Content", 0.0, 0.0, 200.0, 100.0)?;
+        doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        if draw::node_outline(&doc, doc.node(mask).ok_or("mask missing")?).is_none() {
+            return Ok(());
+        }
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 200, height: 100 };
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        let mut gradient = figcraft_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
+        gradient.stops = vec![
+            figcraft_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
+            figcraft_color::ColorStop { position: 1.0, color: Color::new(0.3, 0.3, 0.3, 0.5) },
+        ];
+        for (label, paint) in [("solid", Paint::solid(Color::new(0.8, 0.8, 0.8, 0.75))), ("gradient", Paint::gradient(gradient))] {
+            doc.node_mut(mask).ok_or("mask missing")?.fills = vec![paint];
+            assert!(!has_unhandled_effects_in_view(&doc, &view), "GPU capability for {label} text mask");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference rendering failed")?;
+            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+            let actual = gpu.pixels()?;
+            let revealed = reference.data().chunks_exact(4).filter(|pixel| pixel[0] < 220).count();
+            assert!(revealed > 100, "{label} text mask fixture must reveal glyphs");
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 16))
+                .count();
+            eprintln!("{label} text luminance mask revealed={revealed} changed={changed}");
+            assert!(changed * 100 < view.width as usize * view.height as usize, "{label} text luminance mask changed {changed} pixels");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn page_level_alpha_mask_preserves_siblings() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Page mask order");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3325,7 +3368,7 @@ fn luminance_alpha(source: Color) -> Color {
 fn gpu_luminance_mask_supported(node: &Node) -> bool {
     node.effects.iter().all(|effect| !effect.visible)
         && node.children.is_empty()
-        && !matches!(node.kind, NodeKind::Text(_))
+        && !matches!(&node.kind, NodeKind::Text(text) if !text.runs.is_empty())
         && !matches!(node.kind, NodeKind::Vector { ref network } if network.regions.iter().any(|region| region.fills.is_some()))
         && node.fills.iter().chain(&node.strokes).filter(|paint| paint.visible && paint.opacity > 0.0).count() == 1
         && node.fills.iter().chain(&node.strokes).all(|paint| {
