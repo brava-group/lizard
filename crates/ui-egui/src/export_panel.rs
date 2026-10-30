@@ -45,6 +45,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     }
     let jobs = export_jobs(doc, sel);
     if jobs.is_empty() {
+        ui.add_space(12.0);
         return;
     }
     if let Some(first) = jobs.first().map(|j| j.id) {
@@ -58,6 +59,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if wide_button(ui, &label) {
         export_layers(app, sel, false);
     }
+    ui.add_space(12.0);
 }
 
 /// One export setting: size (typed or picked; images only, SVG and PDF are vector), suffix,
@@ -68,7 +70,8 @@ fn setting_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, e: &Expo
         ui.spacing_mut().item_spacing.x = 4.0;
         let (format_w, button, gap) = (54.0, 22.0, ui.spacing().item_spacing.x);
         let size_w = e.format.is_raster().then_some(52.0);
-        let suffix_w = (ui.available_width() - size_w.map_or(0.0, |w| w + gap) - format_w - button * 2.0 - gap * 3.0).max(32.0);
+        let suffix_w =
+            (ui.available_width() + widgets::PROPERTY_ACTION_SLOT - size_w.map_or(0.0, |w| w + gap) - format_w - button * 2.0 - gap * 3.0).max(32.0);
         if let Some(size_w) = size_w {
             let presets: Vec<String> =
                 ExportSize::SCALES.iter().map(|value| ExportSize::Scale { value: *value }.label()).chain(["512w".into(), "512h".into()]).collect();
@@ -83,7 +86,7 @@ fn setting_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, e: &Expo
         {
             app.run("export.update", json!({"ids": ids, "index": i, "suffix": sfx}));
         }
-        let resp = widgets::dropdown(ui, e.format.label(), format_w, None);
+        let resp = crate::primitives::Select::trigger(ui, e.format.label(), format_w, None);
         menu_popup(&resp).show(|ui| {
             for f in ExportFormat::ALL {
                 if menu_item(ui, f.label(), "") {
@@ -93,17 +96,13 @@ fn setting_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, e: &Expo
             }
         });
         let more = icons::button(ui, Icon::Dots, button, false, tr("Export settings"));
-        egui::Popup::from_toggle_button_response(&more)
-            .id(Id::new(("export_more", i)))
-            .width(216.0)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| {
-                if let Some(mut params) = advanced_options(ui, e) {
-                    params["ids"] = json!(ids);
-                    params["index"] = json!(i);
-                    app.run("export.update", params);
-                }
-            });
+        settings_panel(ui, Id::new(("export_more", i)), more.rect, more.clicked(), tr("Export settings"), |ui| {
+            if let Some(mut params) = advanced_options(ui, e) {
+                params["ids"] = json!(ids);
+                params["index"] = json!(i);
+                app.run("export.update", params);
+            }
+        });
         if icons::button(ui, Icon::Minus, button, false, tr("Remove export setting")).clicked() {
             app.run("export.remove", json!({"ids": ids, "index": i}));
         }
@@ -137,7 +136,7 @@ fn print_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &PrintS
     let t = Tokens::get(ui.ctx());
     row(ui, 26.0, |ui| {
         let open_id = Id::new(("export_print", i));
-        let open = egui::Popup::is_id_open(ui.ctx(), open_id);
+        let open = crate::primitives::FloatingPanel::toggle(ui.ctx(), open_id, false);
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), FIELD_H), Sense::click());
         if resp.hovered() || open {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
@@ -145,19 +144,36 @@ fn print_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &PrintS
         let label = ui.painter().layout(print_summary(p), regular(11.0), t.text_secondary, r.width() - 32.0);
         ui.painter().galley(pos2(r.min.x + 8.0, r.center().y - label.size().y / 2.0), label, t.text_secondary);
         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.max.x - 12.0, r.center().y), vec2(14.0, 14.0)), Icon::Dots, t.icon_secondary);
-        egui::Popup::from_toggle_button_response(&resp.on_hover_text(tr("PDF print settings")))
-            .id(open_id)
-            .width(216.0)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| {
-                if let Some(next) = print_options(ui, Id::new(("export_print_fields", i)), p) {
-                    let mut params = print_params(&next);
-                    params["ids"] = json!(ids);
-                    params["index"] = json!(i);
-                    app.run("export.update", params);
-                }
-            });
+        settings_panel(ui, open_id, r, resp.on_hover_text(tr("PDF print settings")).clicked(), tr("PDF print settings"), |ui| {
+            if let Some(next) = print_options(ui, Id::new(("export_print_fields", i)), p) {
+                let mut params = print_params(&next);
+                params["ids"] = json!(ids);
+                params["index"] = json!(i);
+                app.run("export.update", params);
+            }
+        });
     });
+}
+
+fn settings_panel(ui: &mut Ui, id: Id, anchor: Rect, clicked: bool, title: &str, content: impl FnOnce(&mut Ui)) {
+    let ctx = ui.ctx().clone();
+    if !crate::primitives::FloatingPanel::toggle(&ctx, id, clicked) {
+        return;
+    }
+    let initial = pos2(anchor.left() - 224.0, anchor.top());
+    let mut close = false;
+    crate::primitives::FloatingPanel::new(id, initial).width(crate::primitives::FloatingPanelWidth::Fixed(216.0)).show_with_header(
+        &ctx,
+        |ui, header| {
+            close = crate::primitives::FloatingPanel::title_header(ui, header, title, id.with("close"));
+            ui.add_space(8.0);
+            egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12, 0)).show(ui, content);
+            ui.add_space(8.0);
+        },
+    );
+    if close {
+        crate::primitives::FloatingPanel::dismiss(&ctx, id);
+    }
 }
 
 /// "3 mm bleed, crop marks, CMYK" (or "RGB, no bleed").
@@ -292,18 +308,13 @@ fn preview(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
 
 /// A full-width outlined button row; true when clicked.
 pub(crate) fn wide_button(ui: &mut Ui, label: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
     let mut clicked = false;
     row(ui, 40.0, |ui| {
-        let w = ui.available_width();
-        let (r, resp) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::click());
-        if resp.hovered() {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
-        }
-        ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
-        let galley = ui.painter().layout(label.to_string(), regular(11.0), t.text, w - 16.0);
-        ui.painter().galley(r.center() - galley.size() / 2.0, galley, t.text);
-        clicked = resp.clicked();
+        clicked = crate::primitives::Button::new(label)
+            .variant(crate::primitives::ButtonVariant::Secondary)
+            .width(crate::primitives::ControlWidth::Fill)
+            .show(ui)
+            .clicked();
     });
     clicked
 }
@@ -362,4 +373,5 @@ pub fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId)
         let file = format!("{page_name}.{}", setting.format.ext());
         save_one(app, &all, &setting, &file);
     }
+    ui.add_space(12.0);
 }

@@ -78,7 +78,7 @@ fn items(ui: &mut Ui, menu: &[MenuItem], t: &Tokens) -> Option<(String, Value)> 
             MenuKind::Dropdown => {
                 let shown = value.and_then(Value::as_str).unwrap_or_default();
                 widgets::label(ui, label, t.text_secondary);
-                let resp = widgets::dropdown(ui, shown, DROPDOWN_W, None);
+                let resp = crate::primitives::Select::trigger(ui, shown, DROPDOWN_W, None);
                 crate::a11y::combo(&resp, label, shown, crate::a11y::menu_open(&resp));
                 let mut picked = None;
                 menu_popup(&resp).show(|ui| {

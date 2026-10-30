@@ -245,7 +245,7 @@ fn action_item(app: &mut FigApp, ui: &mut Ui, cx: &Cx, a: &Action, path: Vec<usi
         }
         let w = ui.available_width() - if single { 0.0 } else { 32.0 };
         if open {
-            let resp = widgets::dropdown(ui, tr(a.label()), w, None);
+            let resp = crate::primitives::Select::trigger(ui, tr(a.label()), w, None);
             menu_popup(&resp).show(|ui| {
                 if let Some(l) = action_menu(ui) {
                     match action_of(l, cx.doc, cx.page, cx.node, Some(a)) {
@@ -468,11 +468,11 @@ fn builder_row(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, s:
         // The variable tested, from the variable picker.
         let name = var.map_or(tr("Missing variable"), |v| v.name.as_str());
         let shown = widgets::elide(ui, name, side - 48.0);
-        let resp = widgets::dropdown(ui, &shown, side, Some(Icon::Variable)).on_hover_text(name);
+        let resp = crate::primitives::Select::trigger(ui, &shown, side, Some(Icon::Variable)).on_hover_text(name);
         if resp.clicked() {
             crate::variable_ui::open_proto(ui, VarSlot { slot: slot.clone(), part: VarPart::Lhs(b) }, None, resp.rect.left_bottom());
         }
-        let resp = widgets::dropdown(ui, s.op.symbol(), op_w, None);
+        let resp = crate::primitives::Select::trigger(ui, s.op.symbol(), op_w, None);
         menu_popup(&resp).show(|ui| {
             for op in ops_for(kind) {
                 if menu_check(ui, *op == s.op, op.symbol(), "") {
@@ -518,7 +518,7 @@ fn literal_field(ui: &mut Ui, id: Id, cur: &VariableValue, w: f32) -> Option<Var
             _ => None,
         },
         VariableValue::Boolean(on) => {
-            let resp = widgets::dropdown(ui, if *on { "true" } else { "false" }, w, None);
+            let resp = crate::primitives::Select::trigger(ui, if *on { "true" } else { "false" }, w, None);
             let mut out = None;
             menu_popup(&resp).show(|ui| {
                 for v in [true, false] {
@@ -554,7 +554,7 @@ fn set_variable_fields(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, vari
         let name = var.map_or(tr("Choose variable"), |v| v.name.as_str());
         let w = ui.available_width();
         let shown = widgets::elide(ui, name, w - 48.0);
-        let resp = widgets::dropdown(ui, &shown, w, Some(Icon::Variable));
+        let resp = crate::primitives::Select::trigger(ui, &shown, w, Some(Icon::Variable));
         if resp.clicked() {
             crate::variable_ui::open_proto(ui, VarSlot { slot: slot.clone(), part: VarPart::SetVariable }, None, resp.rect.left_bottom());
         }

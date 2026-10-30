@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use crate::FigApp;
 use crate::a11y::{self, Tip};
 use crate::i18n::{tr, tr_noop, trf, trn};
-use crate::icons::{self, HeaderIcon, Icon};
+use crate::icons::{self, HeaderIcon};
 use crate::right::{menu_item, menu_item_with, menu_popup};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
 use crate::widgets;
@@ -41,7 +41,7 @@ const VIEW_NOTE: &str = tr_noop("View only: you see every change as it happens b
 
 /// What a published file's links are.
 const PUBLISHED_NOTE: &str = tr_noop(
-    "Anyone with the edit link can change the file; the view link only lets people look. The links carry their secrets: share them like passwords. `figcraft-server links` makes more and revokes them.",
+    "Anyone with the edit link can change the file; the view link only lets people look. The links carry their secrets: share them like passwords. `lizard-server links` makes more and revokes them.",
 );
 
 /// What the owner token is for (shown once, when a file is published without the server key).
@@ -530,7 +530,11 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
             t.hover
         },
     );
-    icons::paint(ui.painter(), chev, Icon::Chevron, t.icon);
+    icons::paint_compact_chevron(
+        ui.painter(),
+        Rect::from_center_size(chev.center(), vec2(crate::primitives::CONTROL_CHEVRON_SIZE, crate::primitives::CONTROL_CHEVRON_SIZE)),
+        t.icon,
+    );
     menu_popup(&cresp).width(220.0).show(|ui| {
         let row = |ui: &mut Ui, label: &str, fill: Color32, check: bool| {
             menu_item_with(ui, label, if check { tr("Following") } else { "" }, 22.0, |p, r, _| {
@@ -545,10 +549,10 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
             }
         }
         if peers.is_empty() {
-            widgets::label(
+            ui.add_space(4.0);
+            crate::primitives::Menu::status(
                 ui,
                 if app.session.live().status.active() { tr("Nobody else is here yet") } else { tr("Not in a live session") },
-                t.text_secondary,
             );
         }
     });
@@ -567,58 +571,62 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
 
 /// The Share button's popover: the live session (start, invite link, stop or leave) and export.
 pub fn share_popover(app: &mut FigApp, anchor: &egui::Response) {
-    menu_popup(anchor).width(300.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    const WIDTH: f32 = 340.0;
+    menu_popup(anchor).width(WIDTH).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
-        ui.spacing_mut().item_spacing.y = 6.0;
-        ui.set_max_width(300.0);
-        // Menus lay out justified and don't wrap: the session's notes wrap, left-aligned, within
-        // the popover's width.
-        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            ui.add_space(4.0);
-            let status = app.session.live().status.clone();
-            let role = app.session.live().role();
-            let others = app.session.live().peers.len();
-            let published = app.session.live().published.is_some();
-            let share = app.session.live().share.clone().filter(|_| status.active());
-            let title = if status.active() { tr("Live session") } else { tr("Share this file") };
-            ui.label(egui::RichText::new(title).font(semibold(12.0)));
-            // Connecting with a tab already chosen and nobody's welcome yet: the upload.
-            let publishing = status == Status::Connecting && role.is_none() && app.session.live().doc_uid.is_some();
-            let (line, col) = match (&status, role) {
-                (Status::Off, _) => (String::new(), t.text_secondary),
-                // On the server and not shared at the moment: the file is its owner's alone.
-                (Status::Live, _) if share.as_ref().is_some_and(|s| s.links.is_none()) => (tr("Not shared").to_string(), t.text_secondary),
-                (Status::Live, _) if share.as_ref().is_some_and(|s| s.via == Via::Online) => {
-                    (trf("Sharing online · {people}", &[("people", &people_count(others))]), t.success)
+        ui.set_width(WIDTH);
+        egui::Frame::NONE.inner_margin(egui::Margin { left: 16, right: 16, top: 4, bottom: 8 }).show(ui, |ui| {
+            ui.set_width(WIDTH - 32.0);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            // Menus do not wrap; the share notes need left-aligned lines within the padded body.
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                let status = app.session.live().status.clone();
+                let role = app.session.live().role();
+                let others = app.session.live().peers.len();
+                let published = app.session.live().published.is_some();
+                let share = app.session.live().share.clone().filter(|_| status.active());
+                let title = if status.active() { tr("Live session") } else { tr("Share this file") };
+                ui.label(egui::RichText::new(title).font(semibold(12.0)));
+                // Connecting with a tab already chosen and nobody's welcome yet: the upload.
+                let publishing = status == Status::Connecting && role.is_none() && app.session.live().doc_uid.is_some();
+                let (line, col) = match (&status, role) {
+                    (Status::Off, _) => (String::new(), t.text_secondary),
+                    // On the server and not shared at the moment: the file is its owner's alone.
+                    (Status::Live, _) if share.as_ref().is_some_and(|s| s.links.is_none()) => (tr("Not shared").to_string(), t.text_secondary),
+                    (Status::Live, _) if share.as_ref().is_some_and(|s| s.via == Via::Online) => {
+                        (trf("Sharing online · {people}", &[("people", &people_count(others))]), t.success)
+                    }
+                    (Status::Live, _) if share.is_some() => {
+                        (trf("Sharing on your network · {people}", &[("people", &people_count(others))]), t.success)
+                    }
+                    (Status::Connecting, _) if share.is_some() => (tr("Starting to share…").to_string(), t.text_secondary),
+                    (Status::Live, Some(Role::Host)) => (trf("Live · {people}", &[("people", &people_count(others))]), t.success),
+                    (Status::Live, _) if published => (trf("Published · {people}", &[("people", &people_count(others))]), t.success),
+                    (Status::Connecting, _) if publishing => (tr("Publishing…").to_string(), t.text_secondary),
+                    (Status::Live, _) => {
+                        let file = app.session.live().info.as_ref().map(|i| i.file_name.clone()).unwrap_or_default();
+                        (if file.is_empty() { tr("Joined").to_string() } else { trf("Joined {file}", &[("file", &file)]) }, t.success)
+                    }
+                    (Status::Reconnecting { attempt }, _) => {
+                        (trf("Connection lost, reconnecting (attempt {attempt})…", &[("attempt", attempt)]), t.text_secondary)
+                    }
+                    (Status::Failed { reason }, _) => (failure_text(reason).into_owned(), t.danger),
+                    _ => (tr(&status.label()).to_string(), t.text_secondary),
+                };
+                if !line.is_empty() {
+                    widgets::label(ui, &line, col);
                 }
-                (Status::Live, _) if share.is_some() => (trf("Sharing on your network · {people}", &[("people", &people_count(others))]), t.success),
-                (Status::Connecting, _) if share.is_some() => (tr("Starting to share…").to_string(), t.text_secondary),
-                (Status::Live, Some(Role::Host)) => (trf("Live · {people}", &[("people", &people_count(others))]), t.success),
-                (Status::Live, _) if published => (trf("Published · {people}", &[("people", &people_count(others))]), t.success),
-                (Status::Connecting, _) if publishing => (tr("Publishing…").to_string(), t.text_secondary),
-                (Status::Live, _) => {
-                    let file = app.session.live().info.as_ref().map(|i| i.file_name.clone()).unwrap_or_default();
-                    (if file.is_empty() { tr("Joined").to_string() } else { trf("Joined {file}", &[("file", &file)]) }, t.success)
+                match (&status, role, &share) {
+                    (Status::Off | Status::Failed { .. }, ..) => start_ui(app, ui, &t),
+                    (Status::Live, _, Some(share)) if share.links.is_none() => private_ui(app, ui, &t, share),
+                    (_, _, Some(share)) => share_ui(app, ui, &t, share),
+                    (Status::Live, Some(Role::Host), _) => host_ui(app, ui),
+                    _ => guest_ui(app, ui, &t),
                 }
-                (Status::Reconnecting { attempt }, _) => {
-                    (trf("Connection lost, reconnecting (attempt {attempt})…", &[("attempt", attempt)]), t.text_secondary)
-                }
-                (Status::Failed { reason }, _) => (failure_text(reason).into_owned(), t.danger),
-                _ => (tr(&status.label()).to_string(), t.text_secondary),
-            };
-            if !line.is_empty() {
-                widgets::label(ui, &line, col);
-            }
-            match (&status, role, &share) {
-                (Status::Off | Status::Failed { .. }, ..) => start_ui(app, ui, &t),
-                (Status::Live, _, Some(share)) if share.links.is_none() => private_ui(app, ui, &t, share),
-                (_, _, Some(share)) => share_ui(app, ui, &t, share),
-                (Status::Live, Some(Role::Host), _) => host_ui(app, ui),
-                _ => guest_ui(app, ui, &t),
-            }
+            });
         });
-        ui.separator();
+        crate::primitives::Menu::separator(ui, None);
         if menu_item(ui, tr("Export…"), "") {
             app.ui.export_preview = true;
             ui.close();
@@ -722,14 +730,17 @@ fn start_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal(|ui| {
         widgets::label(ui, tr("Your name"), t.text);
         let name = app.session.prefs.user_name.clone();
-        if let Some(n) = widgets::text_field(ui, egui::Id::new("live_name"), &name, 160.0, tr("Your name")) {
+        let field_width = ui.available_width();
+        if let Some(n) = widgets::text_field(ui, egui::Id::new("live_name"), &name, field_width, tr("Your name")) {
             app.run("pref.userName", json!({"name": n}));
         }
     });
     if !app.session.live.can_host() {
         widgets::label(ui, tr("Sharing a file needs the desktop app; here you can join one."), t.text_secondary);
+        ui.separator();
         widgets::label(ui, tr("Join with a code"), t.text);
-        join_row(app, ui, JOIN_WIDTH);
+        let field_width = (ui.available_width() - 52.0).max(120.0);
+        join_row(app, ui, field_width);
         widgets::label(ui, tr(BROWSER_NOTE), t.text_secondary);
         return;
     }
@@ -783,7 +794,8 @@ fn start_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 fn join_and_advanced(app: &mut FigApp, ui: &mut Ui, t: &Tokens, advanced: impl FnOnce(&mut FigApp, &mut Ui, &Tokens)) {
     ui.separator();
     widgets::label(ui, tr("Join with a code"), t.text);
-    join_row(app, ui, JOIN_WIDTH);
+    let field_width = (ui.available_width() - 52.0).max(120.0);
+    join_row(app, ui, field_width);
     if widgets::disclosure(ui, tr("Advanced"), app.ui.live.advanced) {
         app.ui.live.advanced = !app.ui.live.advanced;
     }
@@ -852,9 +864,6 @@ fn private_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens, share: &Share) {
 
 const SHARE: &str = "collab.share";
 const STOP: &str = "collab.stop";
-
-/// The join field's width in the Share popover (the Join button fits beside it).
-const JOIN_WIDTH: f32 = 196.0;
 
 /// What sharing without a join code falls back to.
 const NO_CODE_NOTE: &str =
@@ -1200,12 +1209,12 @@ pub fn publish_dialog(app: &mut FigApp, ctx: &egui::Context) {
             }
             Some(_) => widgets::label(
                 ui,
-                tr("This server needs its key: add ?key=… to the address (`figcraft-server key` prints it on the server's machine)."),
+                tr("This server needs its key: add ?key=… to the address (`lizard-server key` prints it on the server's machine)."),
                 t.danger,
             ),
             None => widgets::label(
                 ui,
-                tr("Give the address of a server open to the public, or a server's address with its key (`figcraft-server key` prints it)."),
+                tr("Give the address of a server open to the public, or a server's address with its key (`lizard-server key` prints it)."),
                 t.text_secondary,
             ),
         }

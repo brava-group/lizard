@@ -237,6 +237,7 @@ fn a_finished_background_render_wakes_the_ui() {
         proof: false,
         uid: 0,
         zoom_preview: false,
+        time: 0.0,
         at: web_time::Instant::now(),
         texture_base: None,
         texture_view: None,

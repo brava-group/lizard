@@ -17,14 +17,17 @@ use crate::a11y::Tip;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
-use crate::right::menu_item;
+use crate::primitives::{
+    AliasValue, Button, ButtonBehavior, ButtonVariant, ColorControl, ColorValue, ControlWidth, InlineField, SearchField, Surface, Switch,
+};
+use crate::right::{menu_check, menu_item};
 use crate::theme::{Tokens, regular, semibold};
-use crate::widgets::{self, FieldEdit, Lead};
+use crate::widgets::{self, FieldEdit};
 
-const SIDEBAR_W: f32 = 200.0;
-const NAME_W: f32 = 240.0;
-const MODE_W: f32 = 200.0;
-const ROW_H: f32 = 36.0;
+const SIDEBAR_W: f32 = 240.0;
+const NAME_W: f32 = 200.0;
+const MODE_W: f32 = 280.0;
+const ROW_H: f32 = 40.0;
 const TYPES: [VariableType; 4] = [VariableType::Color, VariableType::Number, VariableType::String, VariableType::Boolean];
 
 /// What's being renamed inline.
@@ -53,6 +56,8 @@ pub struct Editor {
     details: Option<String>,
     /// The group the table shows ("space" or "color/brand"); None = every variable.
     group: Option<String>,
+    kind_filter: Option<VariableType>,
+    expanded: bool,
 }
 
 impl Editor {
@@ -145,9 +150,10 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
     st.collection = coll.map(|c| c.id.clone());
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
-    let size = vec2(880.0_f32.min(screen.width() - 80.0).max(480.0), 480.0_f32.min(screen.height() - 120.0).max(240.0));
+    let available = vec2((screen.width() - 32.0).max(320.0), (screen.height() - 32.0).max(240.0));
+    let size = if st.expanded { available } else { vec2(1131.0_f32.min(available.x), 491.0_f32.min(available.y)) };
     let mut open = true;
-    egui::Window::new(tr("Local variables"))
+    egui::Window::new(tr("Variables"))
         .id(Id::new("variables_window"))
         .title_bar(false)
         .collapsible(false)
@@ -155,12 +161,12 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
         .fixed_size(size)
         .pivot(Align2::CENTER_CENTER)
         .default_pos(screen.center())
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.panel).inner_margin(egui::Margin::same(0)))
+        .frame(Surface::palette().frame(t).inner_margin(egui::Margin::same(0)))
         .show(ctx, |ui| {
             ui.set_min_size(size);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            header(app, ui, &mut open);
-            let h = (size.y - 44.0).max(160.0);
+            header(ui, &mut st, &mut open);
+            let h = (size.y - 40.0).max(160.0);
             let top_down = egui::Layout::top_down(egui::Align::Min);
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(vec2(SIDEBAR_W, h), top_down, |ui| sidebar(app, ui, &views, &doc.variables, &mut st));
@@ -168,40 +174,61 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 ui.painter().rect_filled(line, CornerRadius::ZERO, t.border);
                 ui.allocate_ui_with_layout(vec2(size.x - SIDEBAR_W - 1.0, h), top_down, |ui| table(app, ui, view, &mut st));
             });
+            Surface::palette().paint_top_highlight(ui.painter(), ui.max_rect());
         });
     details(app, ctx, &doc.variables, &mut st);
     app.ui.variables = open.then_some(st);
 }
 
-fn header(app: &mut FigApp, ui: &mut Ui, open: &mut bool) {
+fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool) {
     let t = Tokens::get(ui.ctx());
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::hover());
-    // Import and export, left of Close.
-    let bar = Rect::from_min_max(pos2(r.max.x - 280.0, r.min.y + 10.0), pos2(r.max.x - 40.0, r.max.y - 10.0));
-    let mut bar = ui.new_child(UiBuilder::new().max_rect(bar).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    let export = widgets::button(&mut bar, tr("Export…"), false, true);
-    crate::right::menu_popup(&export).show(|ui| {
-        for (label, format) in [(tr("Variables JSON…"), "json"), (tr("CSS custom properties…"), "css")] {
-            if menu_item(ui, label, "") {
-                export_dialog(app, format);
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Variables"), semibold(11.0), t.text);
+    let close = Rect::from_center_size(pos2(r.max.x - 20.0, r.center().y), vec2(24.0, 24.0));
+    let expand = close.translate(vec2(-28.0, 0.0));
+    let filter = close.translate(vec2(-56.0, 0.0));
+    if r.width() >= 400.0 {
+        let search = Rect::from_min_size(pos2(filter.min.x - 176.0, r.min.y + 8.0), vec2(175.0, 24.0));
+        let mut search_ui = ui.new_child(UiBuilder::new().max_rect(search));
+        SearchField::new(Id::new("vars_search"), tr("Search"))
+            .compact()
+            .width(ControlWidth::Fixed(search.width()))
+            .show(&mut search_ui, &mut st.query);
+    }
+    let filter_resp = Button::icon(Icon::Adjust, tr("Filter variables"))
+        .variant(ButtonVariant::Secondary)
+        .behavior(ButtonBehavior::Toggle { selected: st.kind_filter.is_some() })
+        .icon_size(14.0)
+        .show_at(ui, Id::new("vars_filter"), filter);
+    crate::right::menu_popup(&filter_resp).width(160.0).show(|ui| {
+        if menu_check(ui, st.kind_filter.is_none(), tr("All"), "") {
+            st.kind_filter = None;
+            ui.close();
+        }
+        for (kind, label) in [
+            (VariableType::Color, tr("Color")),
+            (VariableType::Number, tr("Number")),
+            (VariableType::String, tr("String")),
+            (VariableType::Boolean, tr("Boolean")),
+        ] {
+            if menu_check(ui, st.kind_filter == Some(kind), label, "") {
+                st.kind_filter = Some(kind);
                 ui.close();
             }
         }
     });
-    if widgets::button(&mut bar, tr("Import…"), false, true).on_hover_text(tr("Add or update collections from a variables JSON")).clicked() {
-        import_dialog(app);
+    if Button::icon(if st.expanded { Icon::WinRestore } else { Icon::WinMaximize }, tr("Expand variables"))
+        .icon_size(12.0)
+        .show_at(ui, Id::new("vars_expand"), expand)
+        .clicked()
+    {
+        st.expanded = !st.expanded;
     }
-    ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Local variables"), semibold(13.0), t.text);
-    if widgets::icon_button_at(
-        ui,
-        Id::new("vars_close"),
-        Rect::from_center_size(pos2(r.max.x - 22.0, r.center().y), vec2(24.0, 24.0)),
-        Icon::Close,
-        tr("Close"),
-    ) {
+    if Button::icon(Icon::Close, tr("Close")).icon_size(14.0).show_at(ui, Id::new("vars_close"), close).clicked() {
         *open = false;
     }
     ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.border));
+    ui.painter().line_segment([pos2(r.min.x + SIDEBAR_W, r.min.y), pos2(r.min.x + SIDEBAR_W, r.max.y)], Stroke::new(1.0, t.border));
 }
 
 /// Export this file's collections through a save dialog, or as a download where the platform has
@@ -284,17 +311,38 @@ fn unique(base: &str, taken: impl Fn(&str) -> bool) -> String {
 fn sidebar(app: &mut FigApp, ui: &mut Ui, views: &[View], local: &Variables, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     let (hr, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 40.0), Sense::hover());
-    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Collections"), semibold(11.0), t.text_secondary);
-    if widgets::icon_button_at(
+    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Collections"), semibold(11.0), t.text);
+    let options = Button::icon(Icon::Adjust, tr("Collection options")).icon_size(14.0).show_at(
         ui,
-        Id::new("vars_add_coll"),
-        Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0)),
-        Icon::Plus,
-        tr("Create collection"),
-    ) {
+        Id::new("vars_collection_options"),
+        Rect::from_center_size(pos2(hr.max.x - 48.0, hr.center().y), vec2(24.0, 24.0)),
+    );
+    crate::right::menu_popup(&options).width(190.0).show(|ui| {
+        if menu_item(ui, tr("Import…"), "") {
+            import_dialog(app);
+            ui.close();
+        }
+        crate::primitives::Menu::separator(ui, Some(tr("Export")));
+        for (label, format) in [(tr("Variables JSON…"), "json"), (tr("CSS custom properties…"), "css")] {
+            if menu_item(ui, label, "") {
+                export_dialog(app, format);
+                ui.close();
+            }
+        }
+    });
+    if Button::icon(Icon::Plus, tr("Create collection"))
+        .icon_size(14.0)
+        .show_at(ui, Id::new("vars_add_coll"), Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0)))
+        .clicked()
+    {
         create_collection(app, local, st);
     }
-    egui::ScrollArea::vertical().id_salt("vars_collections").auto_shrink([false, false]).show(ui, |ui| {
+    let collection_rows: f32 = views
+        .iter()
+        .map(|view| view.collections.len() as f32 * 32.0 + if view.library.is_some() && !view.collections.is_empty() { 34.0 } else { 0.0 })
+        .sum();
+    let collections_height = (collection_rows + 8.0).min((ui.available_height() * 0.5).max(72.0));
+    egui::ScrollArea::vertical().id_salt("vars_collections").max_height(collections_height).auto_shrink([false, false]).show(ui, |ui| {
         for view in views {
             if let Some((_, name)) = view.library
                 && !view.collections.is_empty()
@@ -304,6 +352,18 @@ fn sidebar(app: &mut FigApp, ui: &mut Ui, views: &[View], local: &Variables, st:
             for c in &view.collections {
                 collection_row(app, ui, view, c, st);
             }
+        }
+    });
+    ui.add_space(8.0);
+    let (divider, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 1.0), Sense::hover());
+    ui.painter().rect_filled(divider, CornerRadius::ZERO, t.border);
+    let (groups_header, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 40.0), Sense::hover());
+    ui.painter().text(pos2(groups_header.min.x + 16.0, groups_header.center().y), Align2::LEFT_CENTER, tr("Groups"), semibold(11.0), t.text);
+    egui::ScrollArea::vertical().id_salt("vars_groups").auto_shrink([false, false]).show(ui, |ui| {
+        if let Some((view, coll)) = views.iter().find_map(|view| {
+            view.is(st.library.as_deref()).then(|| st.collection.as_deref().and_then(|id| view.collection(id)).map(|coll| (view, coll))).flatten()
+        }) {
+            group_rows(app, ui, view, coll, st);
         }
     });
 }
@@ -322,11 +382,11 @@ fn library_title(ui: &mut Ui, name: &str) {
 /// One collection in the sidebar (with its groups while selected).
 fn collection_row(app: &mut FigApp, ui: &mut Ui, view: &View, c: &Collection, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 30.0), Sense::click());
-    let r = r.shrink2(vec2(8.0, 1.0));
+    let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 32.0), Sense::click());
+    let r = r.shrink2(vec2(10.0, 4.0));
     let selected = view.is(st.library.as_deref()) && st.collection.as_deref() == Some(c.id.as_str());
     if selected {
-        ui.painter().rect_filled(r, CornerRadius::same(5), t.selected_row);
+        ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
     } else if resp.hovered() {
         ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
     }
@@ -373,9 +433,6 @@ fn collection_row(app: &mut FigApp, ui: &mut Ui, view: &View, c: &Collection, st
             }
         });
     }
-    if selected {
-        group_rows(app, ui, view, c, st);
-    }
 }
 
 /// Every group path in `names` with its ancestors ("a/b/c" → "a", "a/b"), sorted.
@@ -401,22 +458,19 @@ fn group_rows(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
     let members: Vec<&Variable> = view.in_collection(&coll.id).collect();
     let names: Vec<&str> = members.iter().map(|v| v.name.as_str()).collect();
     let list = groups(names.iter().copied());
-    if list.is_empty() {
-        return;
-    }
     let rows = std::iter::once(None).chain(list.iter().map(Some));
     for g in rows {
-        let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 26.0), Sense::click());
-        let r = r.shrink2(vec2(8.0, 0.0));
+        let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 32.0), Sense::click());
+        let r = r.shrink2(vec2(10.0, 4.0));
         let on = st.group.as_ref() == g;
         if on {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
+            ui.painter().rect_filled(r, CornerRadius::same(5), t.selected_row);
         } else if resp.hovered() {
             ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
         }
         let depth = g.map_or(0, |g| g.matches('/').count());
-        let x = r.min.x + 20.0 + depth as f32 * 12.0;
-        let label = g.map_or(tr("All variables"), |g| g.rsplit('/').next().unwrap_or(g));
+        let x = r.min.x + 8.0 + depth as f32 * 12.0;
+        let label = g.map_or(tr("All"), |g| g.rsplit('/').next().unwrap_or(g));
         let count = names.iter().filter(|n| g.is_none_or(|g| n.starts_with(&format!("{g}/")))).count();
         ui.painter().text(pos2(r.max.x - 8.0, r.center().y), Align2::RIGHT_CENTER, count.to_string(), regular(10.0), t.text_tertiary);
         let name_r = Rect::from_min_max(pos2(x, r.min.y + 3.0), pos2(r.max.x - 28.0, r.max.y - 3.0));
@@ -523,86 +577,45 @@ fn table(app: &mut FigApp, ui: &mut Ui, view: &View, st: &mut Editor) {
                     t.text_secondary,
                 );
                 ui.add_space(12.0);
-                if widgets::button(ui, tr("Create collection"), true, true).clicked() {
+                if Button::new(tr("Create collection")).show(ui).clicked() {
                     create_collection(app, view.vars, st);
                 }
             });
         });
         return;
     };
-    // Search.
-    let (sr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    let field = Rect::from_min_size(pos2(sr.min.x + 16.0, sr.center().y - 12.0), vec2(220.0, 24.0));
-    ui.painter().rect_filled(field, CornerRadius::same(5), t.field);
-    icons::paint(ui.painter(), Rect::from_center_size(pos2(field.min.x + 13.0, field.center().y), vec2(12.0, 12.0)), Icon::Search, t.icon_secondary);
-    let mut child = ui.new_child(
-        UiBuilder::new().max_rect(Rect::from_min_max(pos2(field.min.x + 24.0, field.min.y + 4.0), pos2(field.max.x - 4.0, field.max.y - 4.0))),
-    );
-    let r = child.add(
-        egui::TextEdit::singleline(&mut st.query)
-            .frame(egui::Frame::NONE)
-            .hint_text(tr("Search"))
-            .font(regular(11.0))
-            .vertical_align(egui::Align::Center),
-    );
-    crate::widgets::select_all_on_focus(ui, &r, &st.query);
-    let note = Rect::from_min_max(pos2(field.max.x + 16.0, sr.min.y + 8.0), pos2(sr.max.x - 16.0, sr.max.y - 8.0));
-    let mut bar = ui.new_child(UiBuilder::new().max_rect(note).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    let text = match (view.library, coll.extends.as_deref().and_then(|p| view.vars.collection(p))) {
-        (Some((lib, name)), _) => {
-            let tip = tr("A collection of this file with these modes and variables: override their values per mode and add variables of its own");
-            if widgets::button(&mut bar, tr("Extend collection"), false, true).on_hover_text(tip).clicked() {
-                extend(app, lib, &coll.id, st);
-            }
-            bar.add_space(8.0);
-            Some(trf("From the library \"{name}\": read-only", &[("name", &name)]))
-        }
-        (None, Some(parent)) => Some(trf("Extends \"{name}\": overridden values are marked", &[("name", &parent.name)])),
-        _ => None,
-    };
-    if let Some(text) = text {
-        bar.add(egui::Label::new(egui::RichText::new(text).font(regular(11.0)).color(t.text_secondary)).truncate());
-    }
     let q = st.query.trim().to_lowercase();
     let in_group = |v: &Variable| st.group.as_ref().is_none_or(|g| v.name.starts_with(&format!("{g}/")));
-    let mut list: Vec<&Variable> =
-        view.in_collection(&coll.id).filter(|v| in_group(v) && (q.is_empty() || v.name.to_lowercase().contains(&q))).collect();
+    let mut list: Vec<&Variable> = view
+        .in_collection(&coll.id)
+        .filter(|v| in_group(v) && st.kind_filter.is_none_or(|kind| v.kind == kind) && (q.is_empty() || v.name.to_lowercase().contains(&q)))
+        .collect();
     list.sort_by(|a, b| group_of(&a.name).cmp(group_of(&b.name)));
     let width = (NAME_W + coll.modes.len() as f32 * MODE_W + 40.0).max(ui.available_width());
-    egui::ScrollArea::both().id_salt("vars_table").auto_shrink([false, false]).show(ui, |ui| {
+    let table_height = (ui.available_height() - 41.0).max(80.0);
+    egui::ScrollArea::both().id_salt("vars_table").auto_shrink([false, false]).max_height(table_height).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         header_row(app, ui, view, coll, st, width);
-        let mut group: Option<&str> = None;
         for v in &list {
-            let g = group_of(&v.name);
-            if group != Some(g) {
-                group = Some(g);
-                if !g.is_empty() {
-                    let (r, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
-                    ui.painter().text(pos2(r.min.x + 16.0, r.center().y + 2.0), Align2::LEFT_CENTER, g, semibold(11.0), t.text_secondary);
-                }
-            }
             var_row(app, ui, view, coll, v, st, width);
         }
-        if list.is_empty() && !q.is_empty() {
+        if list.is_empty() && (!q.is_empty() || st.kind_filter.is_some()) {
             let (r, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
             ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("No matching variables"), regular(11.0), t.text_secondary);
         }
-        if view.editable() {
-            create_row(app, ui, view, coll, st);
-        }
     });
+    create_row(app, ui, view, coll, st);
 }
 
 fn header_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor, width: f32) {
     let t = Tokens::get(ui.ctx());
     // An extended collection has the modes of the one it extends.
     let editable = view.editable() && coll.extends.is_none();
-    let (r, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
-    ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Name"), regular(11.0), t.text_secondary);
+    let (r, _) = ui.allocate_exact_size(vec2(width, 40.0), Sense::hover());
+    ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Name"), semibold(11.0), t.text);
     for (i, m) in coll.modes.iter().enumerate() {
         let x = r.min.x + NAME_W + i as f32 * MODE_W;
-        let cell = Rect::from_min_max(pos2(x + 4.0, r.min.y + 4.0), pos2(x + MODE_W - 8.0, r.max.y - 4.0));
+        let cell = Rect::from_min_max(pos2(x + 12.0, r.min.y + 4.0), pos2(x + MODE_W - 8.0, r.max.y - 4.0));
         let target = Rename::Mode(coll.id.clone(), m.id.clone());
         if editable && st.rename.as_ref() == Some(&target) {
             if let Some(name) = rename_field(ui, st, &target, &m.name, cell.shrink2(vec2(4.0, 2.0)), regular(11.0)) {
@@ -611,15 +624,16 @@ fn header_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
             continue;
         }
         let name_pos = pos2(cell.min.x + 4.0, cell.center().y);
+        let label = if coll.modes.len() == 1 { tr("Value") } else { &m.name };
         if !editable {
-            ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, &m.name, regular(11.0), t.text_secondary);
+            ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, label, semibold(11.0), t.text);
             continue;
         }
         let resp = ui.interact(cell, Id::new(("vars_mode", &m.id)), Sense::click());
         if resp.hovered() {
             ui.painter().rect_filled(cell, CornerRadius::same(4), t.hover);
         }
-        ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, &m.name, regular(11.0), t.text_secondary);
+        ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, label, semibold(11.0), t.text);
         if resp.double_clicked() {
             start_rename(st, target.clone());
         }
@@ -654,15 +668,11 @@ fn header_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
             }
         });
     }
-    let x = r.min.x + NAME_W + coll.modes.len() as f32 * MODE_W;
     if editable
-        && widgets::icon_button_at(
-            ui,
-            Id::new("vars_add_mode"),
-            Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(24.0, 24.0)),
-            Icon::Plus,
-            tr("Add mode"),
-        )
+        && Button::icon(Icon::Plus, tr("Add mode"))
+            .icon_size(14.0)
+            .show_at(ui, Id::new("vars_add_mode"), Rect::from_center_size(pos2(r.max.x - 20.0, r.center().y), vec2(24.0, 24.0)))
+            .clicked()
     {
         let name = unique("Mode", |n| coll.modes.iter().any(|m| m.name == n));
         if let Some(id) = app.run("variable.addMode", json!({"collection": coll.id, "name": name})).and_then(|r| r["id"].as_str().map(str::to_string))
@@ -670,7 +680,20 @@ fn header_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
             start_rename(st, Rename::Mode(coll.id.clone(), id));
         }
     }
-    ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.border));
+    table_grid(ui, r, coll.modes.len());
+}
+
+fn table_grid(ui: &Ui, row: Rect, mode_count: usize) {
+    let stroke = Stroke::new(1.0, Tokens::get(ui.ctx()).border);
+    ui.painter().line_segment([row.left_bottom(), row.right_bottom()], stroke);
+    for index in 0..=mode_count {
+        let x = row.left() + NAME_W + index as f32 * MODE_W;
+        if x < row.right() - 40.0 {
+            ui.painter().line_segment([pos2(x, row.top()), pos2(x, row.bottom())], stroke);
+        }
+    }
+    let trailing = row.right() - 40.0;
+    ui.painter().line_segment([pos2(trailing, row.top()), pos2(trailing, row.bottom())], stroke);
 }
 
 fn var_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Variable, st: &mut Editor, width: f32) {
@@ -681,7 +704,7 @@ fn var_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Va
         ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
     }
     kind_glyph(ui, view.vars, v, coll, Rect::from_center_size(pos2(r.min.x + 24.0, r.center().y), vec2(14.0, 14.0)));
-    let name_r = Rect::from_min_max(pos2(r.min.x + 40.0, r.min.y + 8.0), pos2(r.min.x + NAME_W - 8.0, r.max.y - 8.0));
+    let name_r = Rect::from_min_max(pos2(r.min.x + 44.0, r.min.y + 8.0), pos2(r.min.x + NAME_W - 8.0, r.max.y - 8.0));
     let target = Rename::Variable(v.id.clone());
     // An inherited variable is named (and deleted) in the collection it extends.
     let inherited = v.extends.is_some();
@@ -696,7 +719,7 @@ fn var_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Va
     }
     for (i, m) in coll.modes.iter().enumerate() {
         let x = r.min.x + NAME_W + i as f32 * MODE_W;
-        let cell = Rect::from_min_max(pos2(x + 4.0, r.center().y - 12.0), pos2(x + MODE_W - 8.0, r.center().y + 12.0));
+        let cell = Rect::from_min_max(pos2(x + 16.0, r.center().y - 12.0), pos2(x + MODE_W - 8.0, r.center().y + 12.0));
         value_cell(app, ui, view, v, coll, &m.id, cell);
     }
     if editable {
@@ -726,30 +749,19 @@ fn var_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Va
             }
         });
     }
-    ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.border));
+    table_grid(ui, r, coll.modes.len());
 }
 
 /// The type marker before a variable's name: its colour (default mode), or a type glyph.
-fn kind_glyph(ui: &Ui, vars: &Variables, v: &Variable, coll: &Collection, rect: Rect) {
+fn kind_glyph(ui: &Ui, _vars: &Variables, v: &Variable, _coll: &Collection, rect: Rect) {
     let t = Tokens::get(ui.ctx());
-    let p = ui.painter();
-    match v.kind {
-        VariableType::Color => {
-            let modes = coll.modes.first().map(|m| [(coll.id.clone(), m.id.clone())].into_iter().collect()).unwrap_or_default();
-            if let Some(VariableValue::Color(c)) = vars.resolve(&v.id, &modes) {
-                widgets::paint_swatch(p, rect, &figcraft_color::Paint::solid(c));
-            }
-        }
-        VariableType::Number => {
-            p.text(rect.center(), Align2::CENTER_CENTER, "#", semibold(12.0), t.icon_secondary);
-        }
-        VariableType::String => icons::paint(p, rect, Icon::Text, t.icon_secondary),
-        VariableType::Boolean => {
-            let track = Rect::from_center_size(rect.center(), vec2(14.0, 8.0));
-            p.rect_stroke(track, CornerRadius::same(4), Stroke::new(1.2, t.icon_secondary), StrokeKind::Inside);
-            p.circle_filled(pos2(track.max.x - 4.0, track.center().y), 2.0, t.icon_secondary);
-        }
-    }
+    let icon = match v.kind {
+        VariableType::Color => Icon::VariableColor,
+        VariableType::Number => Icon::VariableNumber,
+        VariableType::String => Icon::VariableString,
+        VariableType::Boolean => Icon::VariableBoolean,
+    };
+    icons::paint(ui.painter(), rect, icon, t.icon);
 }
 
 /// `val` as a `variable.set` value.
@@ -786,33 +798,23 @@ fn value_cell(app: &mut FigApp, ui: &mut Ui, view: &View, v: &Variable, coll: &C
         ui.interact(mark.expand2(vec2(2.0, 0.0)), id.with("mark"), Sense::hover())
             .tip(tr("Overridden here (the collection it extends has another value)"));
         if hovered
-            && widgets::icon_button_at(ui, id.with("reset"), alias_btn.translate(vec2(-24.0, 0.0)), Icon::Reset, tr("Reset to the inherited value"))
+            && Button::icon(Icon::Reset, tr("Reset to the inherited value"))
+                .icon_size(14.0)
+                .show_at(ui, id.with("reset"), alias_btn.translate(vec2(-24.0, 0.0)))
+                .clicked()
         {
             app.run("variable.resetOverride", json!({"variable": v.id, "mode": mode}));
         }
     }
     if let VariableValue::Alias(target) = val {
         let full = view.vars.get(target).map(|x| x.name.as_str()).unwrap_or(tr("Missing variable"));
-        let resp = ui.interact(body, id.with("alias"), if editable { Sense::click() } else { Sense::hover() });
+        let resp = AliasValue::new(id.with("alias"), full).editable(editable).show_at(ui, body);
         let resp = if editable { resp.on_hover_text(tr("Change alias")) } else { resp };
-        ui.painter().rect_filled(body, CornerRadius::same(5), t.field);
-        let chip = body.shrink2(vec2(3.0, 3.0));
-        ui.painter().rect_filled(chip, CornerRadius::same(4), t.hover);
-        let border = if editable && resp.hovered() { t.border_strong } else { t.border };
-        ui.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, border), StrokeKind::Inside);
-        icons::paint(
-            ui.painter(),
-            Rect::from_center_size(pos2(chip.min.x + 11.0, chip.center().y), vec2(12.0, 12.0)),
-            Icon::Variable,
-            t.icon_secondary,
-        );
-        let text_r = Rect::from_min_max(pos2(chip.min.x + 21.0, chip.min.y), pos2(chip.max.x - 4.0, chip.max.y));
-        ui.painter().with_clip_rect(text_r).text(text_r.left_center(), Align2::LEFT_CENTER, full, regular(11.0), t.text);
         if resp.clicked() {
             crate::variable_ui::open_alias(ui, &v.id, mode, v.kind, body.left_bottom());
         }
         // Detach: keep the value it resolves to now.
-        if hovered && widgets::icon_button_at(ui, id.with("detach"), alias_btn, Icon::Detach, tr("Detach alias")) {
+        if hovered && Button::icon(Icon::Detach, tr("Detach alias")).icon_size(14.0).show_at(ui, id.with("detach"), alias_btn).clicked() {
             let modes = [(coll.id.clone(), mode.to_string())].into_iter().collect();
             if let Some(resolved) = view.vars.resolve(&v.id, &modes) {
                 set(app, v, mode, value_json(&resolved));
@@ -826,14 +828,13 @@ fn value_cell(app: &mut FigApp, ui: &mut Ui, view: &View, v: &Variable, coll: &C
     }
     match val {
         VariableValue::Color(c) => {
-            ui.painter().rect_filled(body, CornerRadius::same(5), t.field);
-            let sw = Rect::from_center_size(pos2(body.min.x + 13.0, body.center().y), vec2(14.0, 14.0));
-            widgets::paint_swatch(ui.painter(), sw, &figcraft_color::Paint::solid(*c));
-            if ui.interact(sw.expand(3.0), id.with("swatch"), Sense::click()).tip(tr("Edit colour")).clicked() {
+            let paint = figcraft_color::Paint::solid(*c);
+            let hex = c.to_hex();
+            let edit = ColorControl::new(id, &paint, ColorValue::EditableHex(&hex), f64::from(c.a) * 100.0).inline().show_at(ui, body);
+            if edit.open_picker {
                 app.ui.picker = Some(PickerTarget::Variable { id: v.id.clone(), mode: mode.to_string() });
             }
-            let hex_r = Rect::from_min_max(pos2(sw.max.x + 8.0, body.min.y + 4.0), pos2(body.max.x - 44.0, body.max.y - 4.0));
-            if let Some(h) = widgets::text_field_inline(ui, id.with("hex"), &c.to_hex(), hex_r, regular(11.0))
+            if let Some(h) = edit.edited_hex
                 && let Some(nc) = figcraft_color::Color::from_hex_or_name(&h)
             {
                 // Six digits (or a colour name) keep the alpha; eight digits set it.
@@ -841,68 +842,68 @@ fn value_cell(app: &mut FigApp, ui: &mut Ui, view: &View, v: &Variable, coll: &C
                 let nc = if digits.len() == 8 && digits.chars().all(|ch| ch.is_ascii_hexdigit()) { nc } else { nc.with_alpha(c.a) };
                 set(app, v, mode, json!(nc.to_css_hex()));
             }
-            alpha_text(ui, c, body);
         }
         VariableValue::Number(x) => {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(body));
-            match widgets::number_field(&mut child, id.with("num"), Lead::None, Some(*x), "", body.width(), 1.0) {
-                Some(FieldEdit::Set(n)) => set(app, v, mode, json!(n)),
-                Some(FieldEdit::Scrub(n, done)) => {
-                    crate::typography::live(app, "Edit variable", "variable.set", json!({"variable": v.id, "mode": mode, "value": n}), done)
+            let displayed = widgets::fmt_num(*x);
+            let (edit, scrub) = InlineField::new(id.with("num"), &displayed).show_numeric_at(ui, body, *x, 1.0);
+            if let Some(text) = edit
+                && let Ok(value) = text.trim().parse::<f64>()
+                && value.is_finite()
+            {
+                set(app, v, mode, json!(value));
+            }
+            match scrub {
+                Some(FieldEdit::Scrub(value, done)) => {
+                    crate::typography::live(app, "Edit variable", "variable.set", json!({"variable": v.id, "mode": mode, "value": value}), done);
                 }
+                Some(FieldEdit::Set(value)) => set(app, v, mode, json!(value)),
                 None => {}
             }
         }
         VariableValue::String(s) => {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(body));
-            if let Some(n) = widgets::text_field(&mut child, id.with("str"), s, body.width(), "") {
+            if let Some(n) = InlineField::new(id.with("str"), s).show_at(ui, body) {
                 set(app, v, mode, json!(n));
             }
         }
         VariableValue::Boolean(b) => {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(body.shrink2(vec2(6.0, 0.0))));
-            if widgets::checkbox(&mut child, *b, if *b { tr("True") } else { tr("False") }) {
+            if Switch::new(id.with("boolean"), *b, if *b { tr("True") } else { tr("False") }).show_at(ui, body).clicked() {
                 set(app, v, mode, json!(!b));
             }
         }
         VariableValue::Alias(_) => {}
     }
-    if hovered && widgets::icon_button_at(ui, id.with("mkalias"), alias_btn, Icon::Variable, tr("Create alias")) {
+    if hovered && Button::icon(Icon::Variable, tr("Create alias")).icon_size(14.0).show_at(ui, id.with("mkalias"), alias_btn).clicked() {
         crate::variable_ui::open_alias(ui, &v.id, mode, v.kind, body.left_bottom());
     }
-}
-
-/// A colour's alpha as a percentage at the right end of `body`.
-fn alpha_text(ui: &Ui, c: &figcraft_color::Color, body: Rect) {
-    let t = Tokens::get(ui.ctx());
-    let pct = format!("{}%", (c.a * 100.0).round());
-    ui.painter().text(pos2(body.max.x - 8.0, body.center().y), Align2::RIGHT_CENTER, pct, regular(11.0), t.text_secondary);
 }
 
 /// A value that only shows (a library's): its swatch and hex for colours, else its text.
 fn read_only_value(ui: &Ui, val: &VariableValue, body: Rect) {
     let t = Tokens::get(ui.ctx());
-    ui.painter().rect_filled(body, CornerRadius::same(5), t.field);
-    let mut x = body.min.x + 8.0;
+    let mut x = body.min.x;
     if let VariableValue::Color(c) = val {
-        let sw = Rect::from_center_size(pos2(body.min.x + 13.0, body.center().y), vec2(14.0, 14.0));
+        let sw = Rect::from_center_size(pos2(body.min.x + 8.0, body.center().y), vec2(16.0, 16.0));
         widgets::paint_swatch(ui.painter(), sw, &figcraft_color::Paint::solid(*c));
-        x = sw.max.x + 8.0;
-        alpha_text(ui, c, body);
+        x = sw.max.x + 4.0;
     }
     let text = match val {
         VariableValue::Boolean(b) => (if *b { tr("True") } else { tr("False") }).to_string(),
         other => other.display(),
     };
-    let text_r = Rect::from_min_max(pos2(x, body.min.y), pos2(body.max.x - 44.0, body.max.y));
+    let text_r = Rect::from_min_max(pos2(x, body.min.y), body.max);
     ui.painter().with_clip_rect(text_r).text(text_r.left_center(), Align2::LEFT_CENTER, text, regular(11.0), t.text);
 }
 
 fn create_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor) {
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(12.0);
-        let resp = widgets::button(ui, tr("+ Create variable"), false, true);
+    let (footer, _) = ui.allocate_exact_size(vec2(ui.available_width(), 41.0), Sense::hover());
+    ui.painter().line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, Tokens::get(ui.ctx()).border));
+    if view.editable() {
+        let button = Rect::from_min_size(pos2(footer.left() + 8.0, footer.top() + 8.0), vec2(142.0, 24.0));
+        let resp = Button::new(tr("+ Create variable").trim_start_matches("+ ")).variant(ButtonVariant::Ghost).leading(Icon::Plus).show_at(
+            ui,
+            Id::new("vars_create_variable"),
+            button,
+        );
         crate::right::menu_popup(&resp).show(|ui| {
             for kind in TYPES {
                 let label = match kind {
@@ -913,7 +914,8 @@ fn create_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
                     VariableType::Boolean => tr_noop("Boolean"),
                 };
                 if menu_item(ui, tr(label), "") {
-                    let name = unique(label, |n| view.in_collection(&coll.id).any(|v| v.name == n));
+                    let base = st.group.as_ref().map_or_else(|| label.to_string(), |group| format!("{group}/{label}"));
+                    let name = unique(&base, |n| view.in_collection(&coll.id).any(|v| v.name == n));
                     let params = json!({"collection": coll.id, "name": name, "type": kind.id()});
                     if let Some(id) = app.run("variable.create", params).and_then(|r| r["id"].as_str().map(str::to_string)) {
                         st.query.clear();
@@ -923,8 +925,17 @@ fn create_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
                 }
             }
         });
-    });
-    ui.add_space(12.0);
+    } else if let Some((library, _)) = view.library {
+        let button = Rect::from_min_size(pos2(footer.left() + 8.0, footer.top() + 8.0), vec2(142.0, 24.0));
+        if Button::new(tr("Extend collection"))
+            .variant(ButtonVariant::Ghost)
+            .leading(Icon::Plus)
+            .show_at(ui, Id::new("vars_extend"), button)
+            .clicked()
+        {
+            extend(app, library, &coll.id, st);
+        }
+    }
 }
 
 /// The details of one of this file's variables: name, description, where pickers offer it and

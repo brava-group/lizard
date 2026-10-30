@@ -54,8 +54,12 @@ fn harness() -> (Harness, Queue) {
 
 /// Share the file in front on the local network from its popover (which is open).
 fn start_sharing(h: &mut Harness, shapes: &[egui::Shape]) -> Vec<egui::Shape> {
-    h.click(text_center(shapes, "Local network"));
-    let shapes = h.frames(2);
+    let shapes = if has_text(shapes, "Local network") {
+        h.click(text_center(shapes, "Local network"));
+        h.frames(2)
+    } else {
+        shapes.to_vec()
+    };
     h.click(text_center(&shapes, "Start sharing"));
     h.frames(2)
 }

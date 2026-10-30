@@ -245,6 +245,26 @@ pub fn number_field(
     number_field_or(app, ui, ids, field, id, value, width, tr("Mixed"), lead, suffix)
 }
 
+/// A bindable number field with a joined preset menu.
+pub fn number_field_with_options(
+    app: &mut FigApp,
+    ui: &mut Ui,
+    ids: &[NodeId],
+    field: &str,
+    id: Id,
+    value: Option<f64>,
+    width: f32,
+    options: &[f64],
+) -> crate::primitives::NumberFieldResponse {
+    let name = app.session.doc().ok().and_then(|d| bound_name(d, ids, field));
+    let mut result = crate::primitives::NumberField::new(id, Lead::Named(tr("Font size")), value, "")
+        .binding(Some(name.as_deref()))
+        .options(options)
+        .show(ui, crate::primitives::ControlWidth::Fixed(width));
+    handle(app, ui, ids, field, VariableType::Number, result.binding.take());
+    result
+}
+
 /// [`number_field`] showing `empty` (e.g. "Auto") for no value.
 pub fn number_field_or(
     app: &mut FigApp,
@@ -324,9 +344,12 @@ fn number_field_edit(
     suffix: &str,
 ) -> Option<Edit> {
     let name = app.session.doc().ok().and_then(|d| bound_name(d, ids, field));
-    let (edit, ev) = widgets::number_field_bindable(ui, id, lead, value, suffix, width, 1.0, Some(name.as_deref()), empty);
-    handle(app, ui, ids, field, VariableType::Number, ev);
-    edit
+    let result = crate::primitives::NumberField::new(id, lead, value, suffix)
+        .binding(Some(name.as_deref()))
+        .empty(empty)
+        .show(ui, crate::primitives::ControlWidth::Fixed(width));
+    handle(app, ui, ids, field, VariableType::Number, result.binding);
+    result.edit
 }
 
 /// When `field` of `ids` is bound: the variable's chip in `rect` (change or detach it) and true;
@@ -433,7 +456,7 @@ pub fn picker(app: &mut FigApp, ctx: &egui::Context) {
     let groups = groups(&doc, &libs, keep);
     let mut chosen: Option<Pick> = None;
     let mut close = false;
-    let area = egui::Area::new(Id::new("variable_picker_area")).order(egui::Order::Foreground).fixed_pos(p.at + vec2(0.0, 4.0)).show(ctx, |ui| {
+    let area = crate::primitives::Menu::area(Id::new("variable_picker_area"), p.at + vec2(0.0, 4.0)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.menu).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
             ui.set_width(240.0);
             ui.horizontal(|ui| {

@@ -7,11 +7,25 @@ use crate::a11y::{self, Tip};
 pub use crate::field_math::{Rel, Typed, eval, parse, stepped};
 use crate::i18n::tr;
 use crate::icons::{self, AppearanceIcon, Icon, LayoutIcon, PositionIcon};
-use crate::theme::{Tokens, regular, semibold};
+use crate::primitives::{Button, ButtonVariant};
+use crate::theme::{Tokens, medium, regular, semibold};
+
+fn appearance_lead_size(icon: AppearanceIcon) -> f32 {
+    match icon {
+        AppearanceIcon::Corners
+        | AppearanceIcon::CornerTopLeft
+        | AppearanceIcon::CornerTopRight
+        | AppearanceIcon::CornerBottomLeft
+        | AppearanceIcon::CornerBottomRight => 14.0,
+        _ => 16.0,
+    }
+}
 
 pub const ROW_H: f32 = 32.0;
 pub const FIELD_H: f32 = 24.0;
 pub const PAD: f32 = 16.0;
+/// Space at the end of every property row for a section action, even when empty.
+pub const PROPERTY_ACTION_SLOT: f32 = 32.0;
 
 /// What a numeric field's label shows: text ("X") or an icon with the field's name (for screen
 /// readers: an icon doesn't say which property it is).
@@ -182,6 +196,36 @@ pub fn number_field(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, suffix:
     number_field_mixed(ui, id, lead, value, suffix, width, step)?.settled()
 }
 
+/// Number editor used inside a composite control whose outer border owns focus feedback.
+pub(crate) fn number_field_without_ring(ui: &mut Ui, id: Id, value: f64, width: f32) -> Option<FieldEdit> {
+    number_field_without_ring_with_padding(ui, id, value, width, 7.0, 0.0)
+}
+
+/// Numeric editor for a segmented control whose design defines each channel's inset.
+pub(crate) fn number_field_without_ring_with_padding(
+    ui: &mut Ui,
+    id: Id,
+    value: f64,
+    width: f32,
+    leading_padding: f32,
+    trailing_padding: f32,
+) -> Option<FieldEdit> {
+    number_field_impl(
+        ui,
+        id,
+        Lead::None,
+        Some(value),
+        "",
+        width,
+        1.0,
+        None,
+        Empty::Text(""),
+        FieldDecoration::ExternalRing { leading_padding, trailing_padding },
+    )
+    .0?
+    .settled()
+}
+
 /// [`number_field`] over several layers: without a single value (`value` None, "Mixed") a relative
 /// edit comes back as one for each layer ([`Edit::Each`]).
 pub fn number_field_mixed(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, suffix: &str, width: f32, step: f64) -> Option<Edit> {
@@ -191,11 +235,11 @@ pub fn number_field_mixed(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, s
 /// [`number_field`] that shows `empty` (dim) for no value instead of "Mixed" (e.g. "Auto"): there
 /// is no value to edit relative to, so `+4` is 4.
 pub fn number_field_or(ui: &mut Ui, id: Id, value: Option<f64>, empty: &str, width: f32, step: f64) -> Option<FieldEdit> {
-    number_field_impl(ui, id, Lead::None, value, "", width, step, None, Empty::Text(empty), None).0?.settled()
+    number_field_impl(ui, id, Lead::None, value, "", width, step, None, Empty::Text(empty), FieldDecoration::Plain).0?.settled()
 }
 
 /// [`number_field`] that can bind a variable: `binding` None = not bindable, `Some(None)` = shows
-/// a variable button on hover, `Some(Some(name))` = bound (shows the name; click to change, the
+/// a variable button on hover, `Some(Some(name))` = bound (shows the resolved value; click to change, the
 /// detach button unbinds). No value shows `empty` ("Mixed", "Auto"); [`Empty::Auto`] also takes
 /// the word for Auto as 0.
 pub fn number_field_bindable(
@@ -209,7 +253,7 @@ pub fn number_field_bindable(
     binding: Option<Option<&str>>,
     empty: Empty<'_>,
 ) -> (Option<Edit>, Option<BindEvent>) {
-    let (edit, bind, _) = number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty, None);
+    let (edit, bind, _) = number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty, FieldDecoration::Plain);
     (edit, bind)
 }
 
@@ -224,9 +268,34 @@ pub fn number_field_with_sizing(
     binding: Option<Option<&str>>,
     label: &str,
 ) -> (Option<Edit>, Option<BindEvent>, egui::Response) {
-    let (edit, bind, selector) = number_field_impl(ui, id, lead, value, "", width, 1.0, binding, Empty::Text(tr("Mixed")), Some(label));
+    let (edit, bind, selector) =
+        number_field_impl(ui, id, lead, value, "", width, 1.0, binding, Empty::Text(tr("Mixed")), FieldDecoration::Sizing(label));
     let selector = selector.unwrap_or_else(|| ui.interact(Rect::NOTHING, id.with("sizing_fallback"), Sense::hover()));
     (edit, bind, selector)
+}
+
+/// A number input and preset-menu trigger inside one continuous field.
+pub fn number_field_with_dropdown(
+    ui: &mut Ui,
+    id: Id,
+    lead: Lead,
+    value: Option<f64>,
+    suffix: &str,
+    width: f32,
+    step: f64,
+    binding: Option<Option<&str>>,
+    empty: Empty<'_>,
+) -> (Option<Edit>, Option<BindEvent>, egui::Response) {
+    let (edit, bind, dropdown) = number_field_impl(ui, id, lead, value, suffix, width, step, binding, empty, FieldDecoration::Dropdown);
+    let dropdown = dropdown.unwrap_or_else(|| ui.interact(Rect::NOTHING, id.with("dropdown_fallback"), Sense::hover()));
+    (edit, bind, dropdown)
+}
+
+enum FieldDecoration<'a> {
+    Plain,
+    Sizing(&'a str),
+    Dropdown,
+    ExternalRing { leading_padding: f32, trailing_padding: f32 },
 }
 
 fn number_field_impl(
@@ -239,26 +308,46 @@ fn number_field_impl(
     step: f64,
     binding: Option<Option<&str>>,
     empty: Empty<'_>,
-    sizing: Option<&str>,
+    decoration: FieldDecoration<'_>,
 ) -> (Option<Edit>, Option<BindEvent>, Option<egui::Response>) {
+    let external_padding = match &decoration {
+        FieldDecoration::ExternalRing { leading_padding, trailing_padding } => Some((*leading_padding, *trailing_padding)),
+        FieldDecoration::Plain | FieldDecoration::Sizing(_) | FieldDecoration::Dropdown => None,
+    };
+    let external_ring = external_padding.is_some();
+    let dropdown = matches!(&decoration, FieldDecoration::Dropdown);
+    let value_font = medium(11.0);
+    let (sizing, own_focus_ring) = match decoration {
+        FieldDecoration::Plain => (None, true),
+        FieldDecoration::Sizing(label) => (Some(label), true),
+        FieldDecoration::Dropdown => (None, true),
+        FieldDecoration::ExternalRing { .. } => (None, false),
+    };
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
     let mut out: Option<Edit> = None;
     let lead_w = match lead {
-        Lead::None | Lead::Named(_) => 6.0,
-        Lead::Text(s) => (12.0 + s.chars().count() as f32 * 7.0).max(24.0),
+        Lead::None | Lead::Named(_) => external_padding.map_or(6.0, |(leading, _)| leading),
+        Lead::Text(s) => text_lead_width(ui, s, rect.width()),
         Lead::Icon(..) | Lead::PositionIcon(..) | Lead::LayoutIcon(..) | Lead::AppearanceIcon(..) | Lead::PropertyIcon(..) => 24.0,
     };
     let lead_rect = Rect::from_min_size(rect.min, vec2(lead_w, FIELD_H));
-    let selector_x = sizing.map(|_| (rect.min.x + 56.0).min(rect.max.x - 24.0));
-    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), pos2(selector_x.unwrap_or(rect.max.x), rect.max.y));
+    let selector_x = if dropdown { Some(rect.max.x - 24.0) } else { sizing.map(|_| (rect.min.x + 56.0).min(rect.max.x - 24.0)) };
+    let trailing_padding = external_padding.map_or(0.0, |(_, trailing)| trailing);
+    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), pos2(selector_x.unwrap_or(rect.max.x) - trailing_padding, rect.max.y));
     if let Some(Some(name)) = binding {
-        let bind = bound_field(ui, id, lead, Rect::from_min_max(rect.min, edit_rect.max), name);
-        let selector = sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t));
+        let displayed = value.map(|v| format!("{}{}", fmt_num(v), suffix));
+        let bind = bound_field_impl(ui, id, lead, Rect::from_min_max(rect.min, edit_rect.max), name, displayed.as_deref());
+        let selector = if dropdown {
+            Some(dropdown_selector(ui, id, rect, t, false))
+        } else {
+            sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t))
+        };
         return (None, bind, selector);
     }
     let editing_id = id.with("editing");
     let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
+    let editing_active = editing.is_some();
     let field_resp = ui.interact(edit_rect, id.with("field"), if sizing.is_some() { Sense::CLICK | Sense::DRAG } else { Sense::click() });
     a11y::number(&field_resp, lead.name(), value, suffix, empty.text());
     a11y::ring_around(ui, rect, &field_resp);
@@ -266,10 +355,10 @@ fn number_field_impl(
     let lead_resp = ui.interact(lead_rect, id.with("lead"), Sense::CLICK | Sense::DRAG);
     let hovered = field_resp.hovered() || lead_resp.hovered() || editing.is_some();
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
-    if editing.is_some() {
+    if own_focus_ring && editing.is_some() {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
-    } else if hovered {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
+    } else if own_focus_ring && hovered {
+        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
     }
     match lead {
         Lead::Text(s) => {
@@ -280,21 +369,20 @@ fn number_field_impl(
             }
             ui.painter().galley(pos2(lead_rect.min.x + 8.0, rect.center().y - galley.size().y / 2.0), galley, t.text_secondary);
         }
-        Lead::Icon(i, _) => {
-            icons::paint(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(14.0, 14.0)), i, t.icon_secondary)
-        }
+        Lead::Icon(i, _) => paint_number_lead(ui, lead_rect, i, t),
         Lead::PositionIcon(i, _) => icons::paint_position(
             ui.painter(),
-            Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)),
+            Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(16.0, 16.0)),
             i,
             t.icon_secondary,
             t.text_tertiary,
         ),
         Lead::LayoutIcon(i, _) => {
-            icons::paint_layout(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)), i, t.icon_secondary)
+            icons::paint_layout(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(16.0, 16.0)), i, t.icon_secondary)
         }
         Lead::AppearanceIcon(i, _) => {
-            icons::paint_appearance(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(24.0, 24.0)), i, t.icon_secondary)
+            let size = appearance_lead_size(i);
+            icons::paint_appearance(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(size, size)), i, t.icon_secondary)
         }
         Lead::PropertyIcon(i, _) => {
             icons::paint_property(ui.painter(), Rect::from_center_size(lead_rect.center() + vec2(1.0, 0.0), vec2(12.0, 12.0)), i, t.icon_secondary)
@@ -376,10 +464,11 @@ fn number_field_impl(
             let te = egui::TextEdit::singleline(&mut text)
                 .id(id.with("te"))
                 .frame(egui::Frame::NONE)
-                .font(regular(11.0))
-                .desired_width(edit_rect.width() - 6.0)
-                .vertical_align(egui::Align::Center);
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit_rect.shrink2(vec2(0.0, 4.0))));
+                .font(value_font.clone())
+                .desired_width((edit_rect.width() - if external_ring { 0.0 } else { 6.0 }).max(0.0))
+                .vertical_align(egui::Align::Center)
+                .min_size(vec2(0.0, edit_rect.height()));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(edit_rect));
             let r = child.add(te);
             a11y::own_focus(&r);
             keep_focus(&r, started);
@@ -437,27 +526,51 @@ fn number_field_impl(
                 None => empty.text().to_string(),
             };
             let col = if value.is_some() { t.text } else { t.text_secondary };
-            ui.painter().with_clip_rect(edit_rect).text(pos2(edit_rect.min.x, rect.center().y), Align2::LEFT_CENTER, s, regular(11.0), col);
+            ui.painter().with_clip_rect(edit_rect).text(pos2(edit_rect.min.x, rect.center().y), Align2::LEFT_CENTER, s, value_font, col);
         }
     }
     // The variable button shows while the pointer is over a bindable field.
     let mut bind = None;
     if binding.is_some() && sizing.is_none() && ui.data(|d| d.get_temp::<String>(editing_id)).is_none() {
-        let br = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, 18.0));
+        let br = Rect::from_center_size(pos2(rect.max.x - if dropdown { 35.0 } else { 11.0 }, rect.center().y), vec2(22.0, 20.0));
         let bresp = ui.interact(br, id.with("bind"), Sense::click());
         if bresp.has_focus() || rect.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN))) {
             if bresp.hovered() {
                 ui.painter().rect_filled(br, CornerRadius::same(4), t.hover);
             }
-            icons::paint(ui.painter(), br.shrink(3.0), Icon::Variable, t.icon_secondary);
+            icons::paint_number_variable(
+                ui.painter(),
+                Rect::from_center_size(br.center(), vec2(12.0, 12.0)),
+                if t.dark { Color32::from_white_alpha(178) } else { t.icon_secondary },
+            );
         }
         let bresp = bresp.tip(tr("Apply variable"));
         if bresp.clicked() {
             bind = Some(BindEvent::Open(rect.left_bottom()));
         }
     }
-    let selector = sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t));
+    let selector = if dropdown {
+        Some(dropdown_selector(ui, id, rect, t, editing_active || field_resp.has_focus()))
+    } else {
+        sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t))
+    };
     (out, bind, selector)
+}
+
+fn dropdown_selector(ui: &mut Ui, id: Id, field: Rect, t: Tokens, input_focused: bool) -> egui::Response {
+    let rect = Rect::from_min_max(pos2(field.right() - 24.0, field.top()), field.right_bottom());
+    let response = ui.interact(rect, id.with("dropdown"), Sense::click());
+    crate::a11y::combo(&response, tr("Presets"), "", response.clicked());
+    ui.painter().rect_filled(rect, CornerRadius { nw: 0, ne: 5, sw: 0, se: 5 }, t.field);
+    ui.painter().vline(rect.left(), rect.y_range(), Stroke::new(1.0, t.border));
+    icons::paint_compact_chevron(ui.painter(), Rect::from_center_size(rect.center(), vec2(10.0, 10.0)), t.icon);
+    let hovered = field.contains(ui.input(|input| input.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN)));
+    if response.has_focus() || input_focused {
+        ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, t.focus), StrokeKind::Inside);
+    } else if hovered {
+        ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    }
+    response
 }
 
 fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, t: Tokens) -> egui::Response {
@@ -485,12 +598,36 @@ pub(crate) fn text_lead_width(ui: &Ui, label: &str, field_w: f32) -> f32 {
 /// picker and the detach button unbinds.
 /// A field showing the variable `name` bound to it in `rect`: click to change, detach to unbind.
 pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> Option<BindEvent> {
+    bound_field_impl(ui, id, lead, rect, name, None)
+}
+
+fn paint_number_lead(ui: &Ui, lead_rect: Rect, icon: Icon, t: Tokens) {
+    if icon == Icon::Opacity {
+        icons::paint_appearance(
+            ui.painter(),
+            Rect::from_center_size(lead_rect.center(), vec2(16.0, 16.0)),
+            AppearanceIcon::Opacity,
+            if t.dark { Color32::from_white_alpha(178) } else { t.icon_secondary },
+        );
+    } else {
+        icons::paint(ui.painter(), Rect::from_center_size(lead_rect.center(), vec2(12.0, 12.0)), icon, t.icon_secondary);
+    }
+}
+
+fn bound_field_impl(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str, displayed_value: Option<&str>) -> Option<BindEvent> {
     let t = Tokens::get(ui.ctx());
+    let numeric = displayed_value.is_some();
     let resp = ui.interact(rect, id.with("bound"), Sense::click());
+    let hovered = if numeric { ui.is_enabled() && ui.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))) } else { resp.hovered() };
     a11y::combo(&resp, lead.name(), name, false);
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
-    if resp.hovered() {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
+    if hovered {
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(5),
+            Stroke::new(1.0, if numeric { t.border } else { t.field_hover_border }),
+            StrokeKind::Inside,
+        );
     }
     let lead_w = match lead {
         Lead::None | Lead::Named(_) => 4.0,
@@ -500,13 +637,17 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
             w
         }
         Lead::Icon(i, _) => {
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(14.0, 14.0)), i, t.icon_secondary);
+            if numeric {
+                paint_number_lead(ui, Rect::from_min_size(rect.min, vec2(24.0, FIELD_H)), i, t);
+            } else {
+                icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(14.0, 14.0)), i, t.icon_secondary);
+            }
             24.0
         }
         Lead::PositionIcon(i, _) => {
             icons::paint_position(
                 ui.painter(),
-                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(16.0, 16.0)),
                 i,
                 t.icon_secondary,
                 t.text_tertiary,
@@ -516,16 +657,17 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
         Lead::LayoutIcon(i, _) => {
             icons::paint_layout(
                 ui.painter(),
-                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(16.0, 16.0)),
                 i,
                 t.icon_secondary,
             );
             24.0
         }
         Lead::AppearanceIcon(i, _) => {
+            let size = appearance_lead_size(i);
             icons::paint_appearance(
                 ui.painter(),
-                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(24.0, 24.0)),
+                Rect::from_center_size(pos2(rect.min.x + 13.0, rect.center().y), vec2(size, size)),
                 i,
                 t.icon_secondary,
             );
@@ -541,20 +683,43 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
             24.0
         }
     };
-    let dr = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, 18.0));
-    let chip = Rect::from_min_max(pos2(rect.min.x + lead_w - 2.0, rect.min.y + 3.0), pos2(dr.min.x - 2.0, rect.max.y - 3.0));
-    ui.painter().rect_filled(chip, CornerRadius::same(4), t.hover);
-    ui.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, t.border), StrokeKind::Inside);
-    // Grouped names ("size/card") show their last part; the tooltip has the full name.
-    let short = name.rsplit('/').next().unwrap_or(name);
-    let galley = ui.painter().layout_no_wrap(short.to_string(), regular(11.0), t.text);
-    ui.painter().with_clip_rect(chip.shrink2(vec2(5.0, 0.0))).galley(pos2(chip.min.x + 5.0, chip.center().y - galley.size().y / 2.0), galley, t.text);
+    let dr = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, if numeric { 16.0 } else { 18.0 }));
+    // The number primitive shows the resolved value in a hug-width chip; other bound fields keep
+    // their existing variable-name chip.
+    let short = displayed_value.unwrap_or_else(|| name.rsplit('/').next().unwrap_or(name));
+    let galley = ui.painter().layout_no_wrap(short.to_string(), if numeric { medium(11.0) } else { regular(11.0) }, t.text);
+    let chip_left = rect.min.x + lead_w - if numeric { 0.0 } else { 2.0 };
+    let chip_right = if numeric { (chip_left + galley.size().x + 8.0).min(dr.min.x - 2.0) } else { dr.min.x - 2.0 };
+    let chip = Rect::from_min_max(
+        pos2(chip_left, rect.min.y + if numeric { 2.0 } else { 3.0 }),
+        pos2(chip_right.max(chip_left), rect.max.y - if numeric { 2.0 } else { 3.0 }),
+    );
+    ui.painter().rect_filled(
+        chip,
+        CornerRadius::same(if numeric { 5 } else { 4 }),
+        if numeric { if hovered { t.border } else { t.bg } } else { t.hover },
+    );
+    ui.painter().rect_stroke(chip, CornerRadius::same(if numeric { 5 } else { 4 }), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    let text_x = if numeric { 4.0 } else { 5.0 };
+    ui.painter().with_clip_rect(chip.shrink2(vec2(text_x, 0.0))).galley(
+        pos2(chip.min.x + text_x, chip.center().y - galley.size().y / 2.0),
+        galley,
+        t.text,
+    );
     let dresp = ui.interact(dr, id.with("detach"), Sense::click()).tip(tr("Detach variable"));
-    if resp.hovered() || dresp.hovered() || dresp.has_focus() {
-        if dresp.hovered() {
+    if hovered || dresp.hovered() || dresp.has_focus() {
+        if dresp.hovered() && !numeric {
             ui.painter().rect_filled(dr, CornerRadius::same(4), t.hover);
         }
-        icons::paint(ui.painter(), dr.shrink(3.0), Icon::Detach, t.icon_secondary);
+        if numeric {
+            icons::paint_number_detach(
+                ui.painter(),
+                Rect::from_center_size(dr.center() - vec2(1.0, 0.0), vec2(10.0, 10.0)),
+                if t.dark { Color32::from_white_alpha(178) } else { t.icon_secondary },
+            );
+        } else {
+            icons::paint(ui.painter(), dr.shrink(3.0), Icon::Detach, t.icon_secondary);
+        }
     }
     if dresp.clicked() {
         return Some(BindEvent::Detach);
@@ -585,7 +750,7 @@ pub fn multiline_field(ui: &mut Ui, id: Id, value: &str, hint: &str, rows: usize
     let mut done = false;
     ui.horizontal(|ui| {
         ui.add_space(PAD);
-        let w = ui.available_width() - PAD;
+        let w = (ui.available_width() - PAD - PROPERTY_ACTION_SLOT).max(40.0);
         let r = egui::Frame::NONE.fill(t.field).corner_radius(CornerRadius::same(5)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
             ui.add(
                 egui::TextEdit::multiline(&mut text)
@@ -684,14 +849,16 @@ fn text_field_in(ui: &mut Ui, id: Id, value: &str, rect: Rect, placeholder: &str
 /// its own (the field draws it), showing `hint` while empty.
 fn field_editor(ui: &mut Ui, rect: Rect, id: Id, text: &mut String, hint: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(8.0, 4.0))));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(8.0, 0.0))));
     let r = child.add(
         egui::TextEdit::singleline(text)
             .id(id)
             .frame(egui::Frame::NONE)
             .font(regular(11.0))
             .hint_text(egui::RichText::new(hint).font(regular(11.0)).color(t.text_tertiary))
-            .desired_width(rect.width() - 16.0),
+            .desired_width(rect.width() - 16.0)
+            .vertical_align(egui::Align::Center)
+            .min_size(vec2(0.0, rect.height())),
     );
     select_all_on_focus(ui, &r, text);
     r
@@ -776,50 +943,6 @@ fn select_all_id(te_id: Id) -> Id {
     te_id.with("select_all_on_focus")
 }
 
-/// What a dropdown shows before its label.
-#[derive(Clone, Copy)]
-pub enum DropLead {
-    Icon(Icon),
-    /// A colour dot (a category's colour).
-    Dot(Color32),
-}
-
-/// A dropdown-looking button showing `label`; returns the response (open a menu on click).
-pub fn dropdown(ui: &mut Ui, label: &str, width: f32, lead: Option<Icon>) -> Response {
-    dropdown_lead(ui, label, width, lead.map(DropLead::Icon))
-}
-
-/// [`dropdown`] with an icon or a colour dot before the label.
-pub fn dropdown_lead(ui: &mut Ui, label: &str, width: f32, lead: Option<DropLead>) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::click());
-    a11y::combo(&resp, "", label, a11y::menu_open(&resp));
-    let bg = t.field;
-    ui.painter().rect_filled(rect, CornerRadius::same(5), bg);
-    if resp.hovered() {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
-    }
-    let mut x = rect.min.x + 8.0;
-    match lead {
-        Some(DropLead::Icon(i)) => {
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(x + 6.0, rect.center().y), vec2(14.0, 14.0)), i, t.icon_secondary);
-            x += 18.0;
-        }
-        Some(DropLead::Dot(c)) => {
-            ui.painter().circle_filled(pos2(x + 5.0, rect.center().y), 4.5, c);
-            x += 16.0;
-        }
-        None => {}
-    }
-    // One line: a label longer than the field (a variable font style like "SemiBold SemiCondensed",
-    // a long translation) ends with an ellipsis and shows in full on hover.
-    let shown = elide(ui, label, rect.max.x - x - 20.0);
-    let galley = ui.painter().layout_no_wrap(shown.clone(), regular(11.0), t.text);
-    ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, t.text);
-    icons::paint_colorpicker(ui.painter(), Rect::from_center_size(pos2(rect.max.x - 12.0, rect.center().y), vec2(5.002, 3.002)), 7, t.icon_secondary);
-    if shown != label { resp.on_hover_text(label) } else { resp }
-}
-
 /// `s` shortened with an ellipsis to fit `max_w` on one line at the UI's 11 px.
 pub fn elide(ui: &Ui, s: &str, max_w: f32) -> String {
     elide_font(ui, s, max_w, regular(11.0))
@@ -856,60 +979,15 @@ pub fn elide_start_font(ui: &Ui, s: &str, max_w: f32, font: egui::FontId) -> Str
 
 /// A row of icon buttons; returns the index clicked.
 pub fn segmented(ui: &mut Ui, items: &[(Icon, &str)], active: Option<usize>, cell: f32) -> Option<usize> {
-    let names: Vec<&str> = items.iter().map(|(_, tip)| *tip).collect();
-    segments(ui, &names, active, cell, true, |ui, r, i, on, t| {
-        if let Some((icon, _)) = items.get(i) {
-            icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(14.0, 14.0)), *icon, if on { t.icon } else { t.icon_secondary });
-        }
-    })
+    let segments: Vec<_> = items.iter().map(|(icon, label)| crate::primitives::Segment::icon(*icon, label)).collect();
+    crate::primitives::SegmentedControl::new(&segments, active).width(crate::primitives::ControlWidth::Fixed(cell * items.len() as f32)).show(ui)
 }
 
 /// A choice between a few labelled options across the available width (the active one raised);
 /// returns the index clicked. A label too long for its cell ends with an ellipsis.
 pub fn segmented_text(ui: &mut Ui, labels: &[&str], active: usize) -> Option<usize> {
-    let cell = (ui.available_width() / labels.len().max(1) as f32).floor();
-    segments(ui, labels, Some(active), cell, false, |ui, r, i, on, t| {
-        let label = labels.get(i).copied().unwrap_or_default();
-        let font = if on { semibold(11.0) } else { regular(11.0) };
-        let shown = elide_font(ui, label, r.width() - 12.0, font.clone());
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, shown, font, if on { t.text } else { t.text_secondary });
-    })
-}
-
-/// The cells of a segmented control, each `cell` wide and named by `names` (shown on hover when
-/// `tips`), drawn by `paint(ui, cell, index, active, tokens)`; returns the index clicked.
-fn segments(
-    ui: &mut Ui,
-    names: &[&str],
-    active: Option<usize>,
-    cell: f32,
-    tips: bool,
-    paint: impl Fn(&Ui, Rect, usize, bool, &Tokens),
-) -> Option<usize> {
-    let t = Tokens::get(ui.ctx());
-    let w = cell * names.len() as f32;
-    let (rect, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
-    let mut out = None;
-    for (i, name) in names.iter().enumerate() {
-        let r = Rect::from_min_size(pos2(rect.min.x + i as f32 * cell, rect.min.y), vec2(cell, FIELD_H));
-        let mut resp = ui.interact(r, ui.id().with(("seg", i, *name)), Sense::click());
-        if tips {
-            resp = resp.on_hover_text(*name);
-        }
-        a11y::toggle(&resp, name, active == Some(i));
-        if active == Some(i) {
-            ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(4), t.panel);
-            ui.painter().rect_stroke(r.shrink(2.0), CornerRadius::same(4), Stroke::new(1.0, t.border), StrokeKind::Inside);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(4), t.hover);
-        }
-        paint(ui, r, i, active == Some(i), &t);
-        if resp.clicked() {
-            out = Some(i);
-        }
-    }
-    out
+    let segments: Vec<_> = labels.iter().copied().map(crate::primitives::Segment::text).collect();
+    crate::primitives::SegmentedControl::new(&segments, Some(active)).width(crate::primitives::ControlWidth::Fill).show(ui)
 }
 
 /// A row that shows or hides what is under it: a chevron and `label`; returns whether it was
@@ -934,44 +1012,50 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
+    let has_styles = buttons.iter().any(|(icon, _)| *icon == Icon::Styles);
+    let hovered = has_styles && ui.rect_contains_pointer(rect);
     ui.painter().text(
         pos2(rect.min.x + PAD, rect.center().y),
         Align2::LEFT_CENTER,
         title,
         semibold(11.0),
-        if dim { t.text_secondary } else { t.text },
+        if hovered {
+            Color32::WHITE
+        } else if dim {
+            t.text_secondary
+        } else {
+            t.text
+        },
     );
     let mut out = None;
     let mut x = rect.max.x - 8.0;
     for (i, (icon, tip)) in buttons.iter().enumerate().rev() {
         let r = Rect::from_min_size(pos2(x - 24.0, rect.center().y - 12.0), vec2(24.0, 24.0));
+        x -= 28.0;
+        if *icon == Icon::Styles && dim && !hovered {
+            continue;
+        }
         let resp = ui.interact(r, ui.id().with(("hdr", title, i)), Sense::click()).tip(*tip);
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
         }
         let glyph = Rect::from_center_size(r.center(), vec2(12.0, 12.0));
+        let color = if hovered { Color32::WHITE } else { t.icon };
         match icon {
-            Icon::Styles => icons::paint_property(ui.painter(), glyph, 0, t.icon),
-            Icon::Plus => icons::paint_colorpicker(ui.painter(), glyph, 8, t.icon),
-            _ => icons::paint(ui.painter(), r.shrink(5.0), *icon, t.icon),
+            Icon::Styles => icons::paint_property(ui.painter(), glyph, 0, color),
+            Icon::Plus => icons::paint_colorpicker(ui.painter(), glyph, 8, color),
+            _ => icons::paint(ui.painter(), r.shrink(5.0), *icon, color),
         }
         if resp.clicked() {
             out = Some(i);
         }
-        x -= 28.0;
     }
     out
 }
 
 /// An icon button at `rect` (hover highlight, tooltip); true when clicked.
 pub fn icon_button_at(ui: &mut Ui, id: Id, rect: Rect, icon: Icon, tip: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let resp = ui.interact(rect, id, Sense::click()).tip(tip);
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(5), t.hover);
-    }
-    icons::paint(ui.painter(), rect.shrink(5.0), icon, t.icon);
-    resp.clicked()
+    Button::icon(icon, tip).show_at(ui, id, rect).clicked()
 }
 
 /// A 24×24 icon button laid out in place; true when clicked.
@@ -1023,38 +1107,16 @@ pub fn slider(
     value: Option<f64>,
     width: f32,
 ) -> (Response, Option<(f64, bool)>) {
-    let t = Tokens::get(ui.ctx());
-    let (min, max) = range;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
-    let resp = ui.interact(rect, id, Sense::click_and_drag());
-    a11y::slider(&resp, name, value, range);
-    let track = Rect::from_center_size(rect.center(), vec2(width - 12.0, 4.0));
-    let span = (max - min).max(1e-9);
-    let x_of = |v: f64| track.min.x + ((v - min) / span).clamp(0.0, 1.0) as f32 * track.width();
-    let p = ui.painter();
-    p.rect_filled(track, CornerRadius::same(2), t.border);
+    let mut slider = crate::primitives::Slider::new(id, name)
+        .range(range.0, range.1)
+        .value(value)
+        .text(false)
+        .width(crate::primitives::ControlWidth::Fixed(width));
     if let Some(tick) = tick {
-        let x = x_of(tick);
-        p.line_segment([pos2(x, track.min.y - 3.0), pos2(x, track.max.y + 3.0)], Stroke::new(1.0, t.border_strong));
+        slider = slider.reference(tick);
     }
-    if let Some(v) = value {
-        let x = x_of(v);
-        p.rect_filled(Rect::from_min_max(track.min, pos2(x, track.max.y)), CornerRadius::same(2), t.accent);
-        p.circle_filled(pos2(x, track.center().y), 6.0, Color32::WHITE);
-        let ring = if resp.hovered() || resp.dragged() { t.accent } else { t.border_strong };
-        p.circle_stroke(pos2(x, track.center().y), 6.0, Stroke::new(1.0, ring));
-    }
-    let moved = if (resp.dragged() || resp.clicked() || resp.drag_started())
-        && let Some(pos) = resp.interact_pointer_pos()
-    {
-        let f = f64::from(((pos.x - track.min.x) / track.width().max(1.0)).clamp(0.0, 1.0));
-        Some((min + f * span, resp.drag_stopped() || resp.clicked()))
-    } else if resp.drag_stopped() {
-        value.map(|v| (v, true))
-    } else {
-        None
-    };
-    (resp, moved)
+    let result = slider.show(ui);
+    (result.response, result.change)
 }
 
 /// A progress bar `width` wide filled to `fraction` (0–1), named `name` for screen readers.
@@ -1131,6 +1193,7 @@ pub fn paint_name(paint: &figcraft_color::Paint) -> String {
         PaintKind::Gradient(_) => tr("Gradient").into(),
         PaintKind::Image(_) => tr("Image").into(),
         PaintKind::Pattern(_) => tr("Pattern").into(),
+        PaintKind::Shader(_) => tr("Shader").into(),
     }
 }
 
@@ -1178,6 +1241,10 @@ pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &figcraft_color:
             let icon = if matches!(paint.kind, PaintKind::Image(_)) { Icon::Image } else { Icon::ViewGrid };
             swatch_region(painter, &rounded, rect, Color32::from_gray(0xB3));
             icons::paint(painter, rect.shrink(2.0), icon, Color32::WHITE);
+        }
+        PaintKind::Shader(_) => {
+            swatch_region(painter, &rounded, rect, Color32::from_rgb(58, 58, 58));
+            icons::paint_colorpicker(painter, rect.shrink(1.0), 5, Color32::WHITE);
         }
     }
     painter.rect_stroke(rect, CornerRadius::same(3), Stroke::new(1.0, t.border), StrokeKind::Inside);
@@ -1279,25 +1346,7 @@ pub fn radio(ui: &mut Ui, on: bool, label: &str) -> bool {
 /// A text button: `primary` is filled with the accent colour, otherwise outlined. A disabled
 /// button is grey with dim text (still readable) and never reports clicks.
 pub fn button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(label.to_string(), regular(11.0), t.text);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 24.0, FIELD_H), sense);
-    a11y::button(&resp, label);
-    let (fill, text) = match (enabled, primary, resp.hovered()) {
-        (false, true, _) => (t.field, t.text_tertiary),
-        (false, false, _) => (Color32::TRANSPARENT, t.text_tertiary),
-        (true, true, false) => (t.accent, t.accent_on),
-        (true, true, true) => (t.accent_hover, t.accent_on),
-        (true, false, false) => (Color32::TRANSPARENT, t.text),
-        (true, false, true) => (t.hover, t.text),
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
-    if !primary {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
-    }
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, regular(11.0), text);
-    resp
+    Button::new(label).variant(if primary { ButtonVariant::Primary } else { ButtonVariant::Secondary }).enabled(enabled).show(ui)
 }
 
 /// Text in a row.
@@ -1308,6 +1357,15 @@ pub fn label(ui: &mut Ui, text: &str, color: Color32) {
 /// Text shown in `rect` that turns into an editor on click (or when its editor has focus, e.g.
 /// after a double-click rename). Returns the new text on Enter / focus loss.
 pub fn text_field_inline(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egui::FontId) -> Option<String> {
+    text_field_inline_impl(ui, id, value, rect, font, true)
+}
+
+/// Inline editor inside a composite field whose containing control paints the focus ring.
+pub(crate) fn text_field_inline_without_ring(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egui::FontId) -> Option<String> {
+    text_field_inline_impl(ui, id, value, rect, font, false)
+}
+
+fn text_field_inline_impl(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egui::FontId, own_focus_ring: bool) -> Option<String> {
     let t = Tokens::get(ui.ctx());
     let te_id = id.with("te");
     let buf_id = id.with("buf");
@@ -1323,8 +1381,10 @@ pub fn text_field_inline(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egu
     }
     match buf {
         Some(mut text) => {
-            ui.painter().rect_filled(rect.expand(2.0), CornerRadius::same(4), t.panel);
-            ui.painter().rect_stroke(rect.expand(2.0), CornerRadius::same(4), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
+            if own_focus_ring {
+                ui.painter().rect_filled(rect.expand(2.0), CornerRadius::same(4), t.panel);
+                ui.painter().rect_stroke(rect.expand(2.0), CornerRadius::same(4), Stroke::new(1.0, crate::theme::ACCENT), StrokeKind::Inside);
+            }
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             let r = crate::bidi::single_line(&mut child, te_id, &mut text, font, rect.width());
             a11y::own_focus(&r);
@@ -1348,7 +1408,7 @@ pub fn text_field_inline(ui: &mut Ui, id: Id, value: &str, rect: Rect, font: egu
             }
         }
         None => {
-            if resp.hovered() {
+            if own_focus_ring && resp.hovered() {
                 ui.painter().rect_filled(rect.expand(2.0), CornerRadius::same(4), t.hover);
             }
             crate::bidi::paint_name(ui.painter(), rect.left_center(), value, font, t.text, rect.width());
@@ -1410,7 +1470,12 @@ pub fn sublabels(ui: &mut Ui, a: &str, b: Option<&str>) {
     }
 }
 
-/// Width of one of the two field columns in a panel `w` wide (leaving the icon column).
+/// Width available to property controls in a panel `w` wide, before the icon column.
+pub fn property_body_width(w: f32) -> f32 {
+    (w - PAD * 2.0 - PROPERTY_ACTION_SLOT).max(0.0)
+}
+
+/// Width of one of the two field columns in a property panel `w` wide.
 pub fn col_width(w: f32) -> f32 {
-    ((w - PAD * 2.0 - 8.0 - 32.0) / 2.0).max(40.0)
+    ((property_body_width(w) - 8.0) / 2.0).max(40.0)
 }

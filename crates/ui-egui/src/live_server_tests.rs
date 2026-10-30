@@ -52,6 +52,7 @@ fn joined(h: &mut Harness, access: Access) {
 #[test]
 fn the_publish_dialog() {
     let (mut h, _) = Harness::new();
+    h.app.run("pref.publishServer", json!({"url": "ws://127.0.0.1:47900"}));
     crate::menus::invoke(&mut h.app, "collab.publish");
     h.frames(2);
     assert_eq!(h.app.ui.live.publish.as_ref().map(|f| f.name.as_str()), Some("Untitled"), "the file's name to start with");
@@ -69,7 +70,7 @@ fn the_publish_dialog() {
     let shapes = h.frames(2);
     assert!(has_text(
         &shapes,
-        "Give the address of a server open to the public, or a server's address with its key (`figcraft-server key` prints it)."
+        "Give the address of a server open to the public, or a server's address with its key (`lizard-server key` prints it)."
     ));
     h.frame(vec![Event::Text("ws://127.0.0.1:47900/?key=KeyKeyKeyKeyKeyKeyKey0".into())]);
     let shapes = h.frames(1);

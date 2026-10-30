@@ -267,14 +267,14 @@ fn contributors_in(ui: &mut egui::Ui, contributors: &[Contributor], total_commit
         }
         ui.separator();
         ui.label(RichText::new(tr("Sort")).color(t.text_secondary));
-        egui::ComboBox::from_id_salt("credits_sort").selected_text(v.key.label().0).show_ui(ui, |ui| {
-            for k in SortKey::ALL {
-                if ui.selectable_label(v.key == k, k.label().0).clicked() {
-                    v.key = k;
-                    v.ascending = k.default_ascending();
-                }
-            }
-        });
+        let sort_labels = SortKey::ALL.map(|key| key.label().0);
+        let selected = SortKey::ALL.iter().position(|key| *key == v.key).unwrap_or(0);
+        if let Some(index) = crate::primitives::Select::new(&sort_labels, selected).label(tr("Sort")).show(ui)
+            && let Some(key) = SortKey::ALL.get(index).copied()
+        {
+            v.key = key;
+            v.ascending = key.default_ascending();
+        }
         // egui's icon font has these arrows; the UI font (Inter) may not have ▲/▼.
         if ui.button(if v.ascending { "⏶" } else { "⏷" }).on_hover_text(tr("Reverse the order")).clicked() {
             v.ascending = !v.ascending;

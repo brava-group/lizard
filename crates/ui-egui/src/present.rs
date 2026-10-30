@@ -1798,41 +1798,57 @@ fn navigation_bar(p: &mut Presenter, ctx: &egui::Context, now: f64) -> Option<St
                     }
                     ui.separator();
                     let model = if settings.device.is_empty() || settings.device == "None" { tr("No device") } else { &settings.device };
-                    let device_menu = ui.menu_button(format!("{model}    "), |ui| {
-                        navigation_menu(ui, |ui| {
-                            egui::ScrollArea::vertical().max_height(410.0).show(ui, |ui| {
-                                if ui.selectable_label(settings.device.is_empty() || settings.device == "None", tr("No device")).clicked() {
-                                    device_choice = Some("None".to_owned());
-                                    ui.close();
-                                }
-                                ui.separator();
-                                for device in PrototypeSettings::DEVICES {
-                                    let label = format!("{}  {}×{}", device.name, device.width as u32, device.height as u32);
-                                    if ui.selectable_label(settings.device == device.name, label).clicked() {
-                                        device_choice = Some(device.name.to_owned());
-                                        ui.close();
-                                    }
-                                }
-                                ui.separator();
-                                if ui.selectable_label(settings.device == PrototypeSettings::CUSTOM_DEVICE, tr("Custom size")).clicked() {
-                                    device_choice = Some(PrototypeSettings::CUSTOM_DEVICE.to_owned());
-                                    ui.close();
-                                }
-                            });
-                        });
-                    });
-                    paint_menu_chevron(ui.painter(), device_menu.response.rect, t.icon_secondary);
-                    let scale_menu = ui.menu_button(format!("{}    ", tr(p.view.scale.label(settings.device().is_some()))), |ui| {
-                        navigation_menu(ui, |ui| {
-                            for scale in PresentScale::options(settings.device().is_some()) {
-                                if ui.selectable_label(p.view.scale == *scale, tr(scale.label(settings.device().is_some()))).clicked() {
-                                    p.set_scale(*scale);
+                    let device_button = ui.button(format!("{model}    "));
+                    crate::a11y::menu_button(&device_button, model, crate::a11y::menu_open(&device_button));
+                    crate::primitives::Menu::popup(&device_button).width(212.0).show(|ui| {
+                        egui::ScrollArea::vertical().max_height(410.0).show(ui, |ui| {
+                            if crate::primitives::MenuItem::new(tr("No device"))
+                                .checked(settings.device.is_empty() || settings.device == "None")
+                                .show(ui)
+                                .clicked()
+                            {
+                                device_choice = Some("None".to_owned());
+                                ui.close();
+                            }
+                            crate::primitives::Menu::separator(ui, None);
+                            for device in PrototypeSettings::DEVICES {
+                                let label = format!("{}  {}×{}", device.name, device.width as u32, device.height as u32);
+                                if crate::primitives::MenuItem::new(&label).checked(settings.device == device.name).show(ui).clicked() {
+                                    device_choice = Some(device.name.to_owned());
                                     ui.close();
                                 }
                             }
+                            crate::primitives::Menu::separator(ui, None);
+                            if crate::primitives::MenuItem::new(tr("Custom size"))
+                                .checked(settings.device == PrototypeSettings::CUSTOM_DEVICE)
+                                .show(ui)
+                                .clicked()
+                            {
+                                device_choice = Some(PrototypeSettings::CUSTOM_DEVICE.to_owned());
+                                ui.close();
+                            }
                         });
                     });
-                    paint_menu_chevron(ui.painter(), scale_menu.response.rect, t.icon_secondary);
+                    paint_menu_chevron(ui.painter(), device_button.rect, t.icon_secondary);
+                    let scale_button = ui.button(format!("{}    ", tr(p.view.scale.label(settings.device().is_some()))));
+                    crate::a11y::menu_button(
+                        &scale_button,
+                        tr(p.view.scale.label(settings.device().is_some())),
+                        crate::a11y::menu_open(&scale_button),
+                    );
+                    crate::primitives::Menu::popup(&scale_button).width(212.0).show(|ui| {
+                        for scale in PresentScale::options(settings.device().is_some()) {
+                            if crate::primitives::MenuItem::new(tr(scale.label(settings.device().is_some())))
+                                .checked(p.view.scale == *scale)
+                                .show(ui)
+                                .clicked()
+                            {
+                                p.set_scale(*scale);
+                                ui.close();
+                            }
+                        }
+                    });
+                    paint_menu_chevron(ui.painter(), scale_button.rect, t.icon_secondary);
                 });
             });
     });
@@ -1845,11 +1861,6 @@ fn navigation_bar(p: &mut Presenter, ctx: &egui::Context, now: f64) -> Option<St
 fn paint_menu_chevron(painter: &egui::Painter, button: Rect, color: Color32) {
     let icon = Rect::from_center_size(pos2(button.right() - 11.0, button.center().y), vec2(17.0, 17.0));
     icons::paint(painter, icon, Icon::Chevron, color);
-}
-
-fn navigation_menu(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    ui.set_min_width(212.0);
-    add(ui);
 }
 
 /// How often the player polls the controllers while its prototype has gamepad triggers (seconds).

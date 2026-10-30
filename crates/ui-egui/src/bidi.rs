@@ -193,14 +193,19 @@ pub fn single_line(ui: &mut Ui, id: Id, text: &mut String, font: FontId, width: 
     let o = origin(scroll);
     let painter = ui.painter().with_clip_rect(clip.expand2(vec2(1.0, 0.0)));
     let h = shown.galley.size().y;
+    let mut selected_rects = Vec::new();
     if focused && let Some(r) = range {
         let (a, b) = (r.primary.index.0, r.secondary.index.0);
         for (x0, x1) in shown.line.selection(a, b, &shown.edges) {
             let sel = Rect::from_min_max(pos2(o.x + x0 as f32, o.y), pos2(o.x + x1 as f32, o.y + h));
             painter.rect_filled(sel, 0.0, ui.visuals().selection.bg_fill);
+            selected_rects.push(sel);
         }
     }
     painter.galley(o, shown.galley.clone(), color);
+    for sel in selected_rects {
+        painter.with_clip_rect(sel).galley_with_override_text_color(o, shown.galley.clone(), ui.visuals().selection.stroke.color);
+    }
     if focused {
         let x = (o.x + cx).round() + 0.5;
         painter.line_segment([pos2(x, o.y), pos2(x, o.y + h)], ui.visuals().text_cursor.stroke);

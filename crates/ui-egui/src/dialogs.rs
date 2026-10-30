@@ -18,7 +18,7 @@ use crate::theme::{Tokens, regular, semibold};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Where a report goes.
-const ISSUES: &str = "https://github.com/storytold/figcraft/issues";
+const ISSUES: &str = "https://github.com/brava-group/lizard/issues";
 
 /// What the desktop app says when its window couldn't open with `error` (no frame was drawn: the
 /// language is the one [`i18n::set`] picked from the preferences). `backend_set`: `WGPU_BACKEND`
@@ -98,24 +98,15 @@ pub const ABOUT_WIDTH: f32 = 660.0;
 
 /// The About window's tab row, drawn like the Design / Prototype tabs of the right panel.
 /// A row of tabs (the About window's, the shortcuts panel's): the current one highlighted.
-pub(crate) fn tab_strip<T: Copy + PartialEq>(ui: &mut egui::Ui, t: &Tokens, tabs: &[T], label: fn(T) -> &'static str, current: &mut T) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for &tab in tabs {
-            let label = label(tab);
-            let active = *current == tab;
-            let galley = ui.painter().layout_no_wrap(label.into(), semibold(11.0), if active { t.text } else { t.text_secondary });
-            let (r, resp) = ui.allocate_exact_size(vec2(galley.size().x + 16.0, 24.0), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, label));
-            if active || resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
-            }
-            ui.painter().galley(egui::pos2(r.min.x + 8.0, r.center().y - galley.size().y / 2.0), galley, t.text);
-            if resp.clicked() {
-                *current = tab;
-            }
-        }
-    });
+pub(crate) fn tab_strip<T: Copy + PartialEq>(ui: &mut egui::Ui, _t: &Tokens, tabs: &[T], label: fn(T) -> &'static str, current: &mut T) {
+    let items: Vec<_> = tabs.iter().copied().map(|tab| crate::primitives::Tab::new(label(tab))).collect();
+    let selected = tabs.iter().position(|tab| tab == current);
+    if let Some(index) =
+        crate::primitives::Tabs::new(ui.id().with("dialog_tabs"), &items, selected).width(crate::primitives::ControlWidth::Hug).show(ui)
+        && let Some(tab) = tabs.get(index)
+    {
+        *current = *tab;
+    }
 }
 
 /// About ▸ About: the logo, version, blurb and links.
@@ -134,6 +125,8 @@ fn about_body(ui: &mut egui::Ui, t: &Tokens) {
     ui.add_space(8.0);
     ui.hyperlink_to("getartcraft.com/apps/figcraft", "https://getartcraft.com/apps/figcraft");
     ui.hyperlink_to(tr("Join us on Discord"), "https://discord.gg/artcraft");
+    ui.hyperlink_to("Background removal: withoutBG Open Model", "https://withoutbg.com/open-model/license");
+    ui.hyperlink_to("Built with DINOv3", "https://ai.meta.com/resources/models-and-libraries/dinov3-license/");
     ui.add_space(8.0);
     ui.label(
         RichText::new(tr("Dual-licensed MIT OR Apache-2.0. Made by the ArtCraft team and community.")).color(t.text_secondary).font(regular(11.0)),
@@ -259,7 +252,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                     app.run("pref.publishServer", json!({"url": url}));
                 }
                 let usual = prefs.publish_server == figcraft_engine::live::DEFAULT_SERVER;
-                if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Back to the Lizard server")).clicked() {
+                if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Clear saved server")).clicked() {
                     app.run("pref.publishServer", json!({}));
                 }
             });
@@ -299,7 +292,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 };
                 let on = |code: &str| app.session.prefs.language.eq_ignore_ascii_case(code);
                 let selected = langs().find(|(code, _)| on(code)).map_or(tr("System"), |(_, name)| name);
-                let resp = crate::widgets::dropdown(ui, selected, 220.0, None);
+                let resp = crate::primitives::Select::trigger(ui, selected, 220.0, None);
                 let mut pick = None;
                 crate::right::menu_popup(&resp).show(|ui| {
                     for (code, name) in langs() {
@@ -494,7 +487,7 @@ fn interface_size(app: &mut FigApp, ui: &mut egui::Ui, chosen: f64) {
     let shown = percent(chosen);
     ui.horizontal(|ui| {
         ui.label(tr("Interface size"));
-        let resp = crate::widgets::dropdown(ui, &shown, 120.0, None);
+        let resp = crate::primitives::Select::trigger(ui, &shown, 120.0, None);
         crate::a11y::combo(&resp, tr("Interface size"), &shown, crate::a11y::menu_open(&resp));
         crate::right::menu_popup(&resp).show(|ui| {
             for size in crate::ui_scale::SIZES {

@@ -328,6 +328,7 @@ fn clicking_an_avatar_follows_and_escape_stops() {
 #[test]
 fn share_popover_and_join_dialog() {
     let (mut h, _) = Harness::new();
+    h.app.run("pref.publishServer", json!({"url": "ws://127.0.0.1:47900"}));
     let shapes = h.frames(3);
     let share = text_center(&shapes, "Share");
     h.click(share);

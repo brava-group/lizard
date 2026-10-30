@@ -154,14 +154,17 @@ fn menu_worded_differently() -> BTreeSet<&'static str> {
 /// The string literals passed to `tr`, `trf`, `trn` and `tr_noop` in this crate's sources.
 fn used_keys() -> BTreeSet<String> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let primitives = dir.join("primitives");
     let mut keys = BTreeSet::new();
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let path = entry.path();
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        if !name.ends_with(".rs") || name.ends_with("_tests.rs") || name == "i18n.rs" {
-            continue;
+    for folder in [&dir, &primitives] {
+        for entry in std::fs::read_dir(folder).unwrap().flatten() {
+            let path = entry.path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || name == "i18n.rs" {
+                continue;
+            }
+            keys.extend(literals(&std::fs::read_to_string(&path).unwrap(), LOOKUPS));
         }
-        keys.extend(literals(&std::fs::read_to_string(&path).unwrap(), LOOKUPS));
     }
     keys
 }

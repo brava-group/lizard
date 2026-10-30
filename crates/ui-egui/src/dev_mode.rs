@@ -18,9 +18,10 @@ use serde_json::json;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
+use crate::primitives::SelectLead;
 use crate::right::{menu_check, menu_item_with, menu_popup, prop_row, row};
 use crate::theme::{ACCENT, Tokens, doc_c32, regular, semibold};
-use crate::widgets::{self, DropLead, PAD};
+use crate::widgets::{self, PAD};
 use crate::{FigApp, RightTab};
 
 /// Width of an annotation callout on the canvas.
@@ -330,7 +331,7 @@ pub fn playground_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: Nod
         match kind {
             "variant" => row(ui, 32.0, |ui| {
                 widgets::label(ui, name, t.text_secondary);
-                let resp = widgets::dropdown(ui, value.as_str().unwrap_or(""), ui.available_width().max(60.0), None);
+                let resp = crate::primitives::Select::trigger(ui, value.as_str().unwrap_or(""), ui.available_width().max(60.0), None);
                 crate::a11y::combo(&resp, name, value.as_str().unwrap_or(""), crate::a11y::menu_open(&resp));
                 menu_popup(&resp).show(|ui| {
                     for o in p["options"].as_array().into_iter().flatten().filter_map(|o| o.as_str()) {
@@ -496,7 +497,7 @@ pub fn status(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     }
     widgets::separator(ui);
     widgets::sublabels(ui, tr("Status"), None);
-    let w = ui.available_width() - PAD * 2.0;
+    let w = widgets::property_body_width(ui.available_width());
     row(ui, 32.0, |ui| crate::section_panel::status_dropdown(app, ui, doc, sel, w));
     if let [id] = sel {
         let changed = doc.node(*id).is_some_and(|n| n.dev_status == DevStatus::ReadyForDev && n.dev_changed);
@@ -653,7 +654,7 @@ pub fn dev_resources_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: 
         }
     }
     if adding {
-        let w = ui.available_width() - PAD * 2.0;
+        let w = widgets::property_body_width(ui.available_width());
         let mut added = None;
         row(ui, 32.0, |ui| added = widgets::text_field(ui, Id::new(("devres_new", id)), "", w, tr("Paste a link (https://…)")));
         if let Some(url) = added.filter(|u| !u.trim().is_empty())
@@ -680,11 +681,11 @@ pub fn dev_resources_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: 
 fn category_menu(ui: &mut Ui, doc: &Document, id: Id, a: &Annotation) -> Option<serde_json::Value> {
     let current = annotations::category_of(doc, a);
     let mut out = None;
-    let w = ui.available_width() - PAD * 2.0;
+    let w = widgets::property_body_width(ui.available_width());
     row(ui, 30.0, |ui| {
-        let lead = current.map(|c| DropLead::Dot(doc_c32(ui.ctx(), c.color)));
+        let lead = current.map(|c| SelectLead::Dot(doc_c32(ui.ctx(), c.color)));
         let label = current.map_or(tr("No category"), |c| c.name.as_str());
-        let resp = ui.push_id(id, |ui| widgets::dropdown_lead(ui, label, w, lead)).inner;
+        let resp = ui.push_id(id, |ui| crate::primitives::Select::trigger_with_lead(ui, label, w, lead)).inner;
         menu_popup(&resp).show(|ui| {
             if menu_check(ui, current.is_none(), tr("No category"), "") {
                 out = Some(serde_json::Value::Null);
@@ -717,14 +718,17 @@ pub fn categories_section(app: &mut FigApp, ui: &mut Ui) {
     let Ok(doc) = app.session.doc().cloned() else { return };
     widgets::separator(ui);
     let add = widgets::section_header(ui, tr("Annotations"), &[(Icon::Plus, tr("Add a category"))], false).is_some();
-    let w = ui.available_width() - PAD * 2.0;
+    let w = widgets::property_body_width(ui.available_width());
     let filter = app.ui.dev.categories.clone();
     row(ui, 32.0, |ui| {
         let lead = match &filter {
-            CategoryFilter::Only(id) => annotations::categories(&doc).iter().find(|c| c.id == *id).map(|c| DropLead::Dot(doc_c32(ui.ctx(), c.color))),
-            _ => Some(DropLead::Icon(Icon::Comment)),
+            CategoryFilter::Only(id) => {
+                annotations::categories(&doc).iter().find(|c| c.id == *id).map(|c| SelectLead::Dot(doc_c32(ui.ctx(), c.color)))
+            }
+            _ => Some(SelectLead::Icon(Icon::Comment)),
         };
-        let resp = widgets::dropdown_lead(ui, &filter.label(&doc), w, lead).on_hover_text(tr("Annotations shown on the canvas"));
+        let resp =
+            crate::primitives::Select::trigger_with_lead(ui, &filter.label(&doc), w, lead).on_hover_text(tr("Annotations shown on the canvas"));
         menu_popup(&resp).show(|ui| {
             for (f, label) in [(CategoryFilter::All, tr("All categories")), (CategoryFilter::Uncategorized, tr("No category"))] {
                 if menu_check(ui, filter == f, label, "") {
@@ -752,7 +756,7 @@ pub fn categories_section(app: &mut FigApp, ui: &mut Ui) {
         if sw_resp.hovered() {
             ui.painter().rect_stroke(sw.expand(2.0), CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
         }
-        egui::Popup::menu(&sw_resp).style(crate::right::menu_style).show(|ui| {
+        crate::primitives::Menu::popup(&sw_resp).show(|ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 for col in AnnotationCategory::COLORS {
@@ -795,9 +799,9 @@ pub fn categories_section(app: &mut FigApp, ui: &mut Ui) {
 /// returns the one picked.
 fn pin_menu(ui: &mut Ui, id: Id, sections: &[devinspect::Section], pinned: &[String]) -> Option<&'static Pinnable> {
     let mut out = None;
-    let w = ui.available_width() - PAD * 2.0;
+    let w = widgets::property_body_width(ui.available_width());
     row(ui, 30.0, |ui| {
-        let resp = ui.push_id(id, |ui| widgets::dropdown(ui, tr("Pin a property"), w, Some(Icon::Plus))).inner;
+        let resp = ui.push_id(id, |ui| crate::primitives::Select::trigger(ui, tr("Pin a property"), w, Some(Icon::Plus))).inner;
         menu_popup(&resp).show(|ui| {
             for p in PINNABLE {
                 let on = pinned.iter().any(|q| q == p.id);
@@ -825,17 +829,17 @@ pub fn ready_list(app: &mut FigApp, ui: &mut Ui) {
     let doc = ds.doc.clone();
     widgets::separator(ui);
     widgets::section_header(ui, tr("Ready for dev"), &[], app.ui.dev.ready.is_empty());
-    let w = ui.available_width() - PAD * 2.0;
-    row(ui, 32.0, |ui| {
-        let resp = widgets::dropdown(ui, FILTERS.get(filter).map_or("", |f| tr(f.1)), w, Some(Icon::Code));
-        menu_popup(&resp).show(|ui| {
-            for (i, (_, label)) in FILTERS.iter().enumerate() {
-                if menu_check(ui, i == filter, tr(label), "") {
-                    app.ui.dev.filter = i;
-                    ui.close();
-                }
+    let (row_rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+    let field_rect = row_rect.shrink2(vec2(PAD, 4.0));
+    let mut field_ui = ui.new_child(egui::UiBuilder::new().max_rect(field_rect));
+    let resp = crate::primitives::Select::trigger(&mut field_ui, FILTERS.get(filter).map_or("", |f| tr(f.1)), field_rect.width(), Some(Icon::Code));
+    menu_popup(&resp).show(|ui| {
+        for (i, (_, label)) in FILTERS.iter().enumerate() {
+            if menu_check(ui, i == filter, tr(label), "") {
+                app.ui.dev.filter = i;
+                ui.close();
             }
-        });
+        }
     });
     if app.ui.dev.ready.is_empty() {
         widgets::note(ui, tr("Nothing here yet. Set a frame's status to list it."), t.text_secondary);

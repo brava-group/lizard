@@ -304,6 +304,7 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     if sel.is_empty() {
         open_editor(ui.ctx(), None);
         flows_overview(app, ui, &doc, page);
+        ui.add_space(12.0);
         widgets::separator(ui);
         settings(app, ui, &doc, page);
         return;
@@ -318,6 +319,7 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     // Flow starting point (top-level frames).
     if doc.top_level_frame(first) == Some(first) {
         flow_section(app, ui, &doc, page, first);
+        ui.add_space(12.0);
         widgets::separator(ui);
     }
     let mixed = sel.iter().any(|i| doc.node(*i).map(|n| &n.interactions) != Some(&node.interactions));
@@ -326,6 +328,7 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     } else {
         interactions(app, ui, &doc, page, &node);
     }
+    ui.add_space(12.0);
     widgets::separator(ui);
     scroll_section(app, ui, &doc, &sel, &node);
 }
@@ -445,7 +448,7 @@ fn settings(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
         // Device names stay as they are; "None" and the custom size are ours.
         let custom = proto::PrototypeSettings::CUSTOM_DEVICE;
         let shown = if settings.device == "None" || settings.device == custom { tr(&settings.device) } else { settings.device.as_str() };
-        let resp = widgets::dropdown(ui, shown, w, None);
+        let resp = crate::primitives::Select::trigger(ui, shown, w, None);
         menu_popup(&resp).show(|ui| {
             let mut pick = None;
             if crate::right::menu_check(ui, settings.device == "None", tr("None"), "") {
@@ -487,7 +490,8 @@ fn settings(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     widgets::sublabels(ui, tr("Background"), None);
     row(ui, 32.0, |ui| {
         widgets::swatch(ui, &Paint::solid(bg), 16.0);
-        if let Some(h) = widgets::text_field(ui, Id::new("proto_bg"), &bg.to_hex(), 96.0, "")
+        let width = ui.available_width();
+        if let Some(h) = widgets::text_field(ui, Id::new("proto_bg"), &bg.to_hex(), width, "")
             && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
         {
             app.run("proto.settings", json!({"background": c.to_css_hex()}));
@@ -513,7 +517,7 @@ fn device_colors(app: &mut FigApp, ui: &mut Ui, colors: &[proto::DeviceColor], c
             widgets::swatch(ui, &color_paint(c), 16.0);
         }
         let w = ui.available_width();
-        let resp = widgets::dropdown(ui, current.map_or("", |c| c.name), w, None);
+        let resp = crate::primitives::Select::trigger(ui, current.map_or("", |c| c.name), w, None);
         menu_popup(&resp).show(|ui| {
             for c in colors {
                 let on = current.is_some_and(|x| x.name == c.name);
@@ -644,45 +648,36 @@ fn editor_popover(app: &mut FigApp, ctx: &egui::Context, doc: &Document, page: N
     let screen = ctx.content_rect();
     let pos = pos2(at.x - width, at.y.min(screen.max.y - 420.0).max(screen.min.y + 48.0));
     let mut close = false;
-    egui::Area::new(Id::new("proto_editor_area")).fixed_pos(pos).order(egui::Order::Foreground).show(ctx, |ui| {
-        egui::Frame::new()
-            .fill(t.panel)
-            .stroke(Stroke::new(1.0, t.border))
-            .corner_radius(CornerRadius::same(8))
-            .shadow(egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: t.shadow })
-            .show(ui, |ui| {
-                ui.set_width(width);
-                ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
-                // Header.
-                let (hr, _) = ui.allocate_exact_size(vec2(width, 40.0), Sense::hover());
-                ui.painter().text(pos2(hr.min.x + PAD, hr.center().y), Align2::LEFT_CENTER, tr("Interaction"), semibold(11.0), t.text);
-                let x = Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0));
-                let xr = ui.interact(x, ui.id().with("proto_editor_close"), Sense::click()).tip(tr("Close"));
-                if xr.hovered() {
-                    ui.painter().rect_filled(x, CornerRadius::same(5), t.hover);
-                }
-                icons::paint(ui.painter(), x.shrink(6.0), Icon::Close, t.icon);
-                if xr.clicked() {
-                    close = true;
-                }
+    crate::primitives::FloatingPanel::new(Id::new("proto_editor_area"), pos)
+        .width(crate::primitives::FloatingPanelWidth::Fixed(width))
+        .show_with_header(ctx, |ui, hr| {
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+            ui.painter().text(pos2(hr.min.x + PAD, hr.center().y), Align2::LEFT_CENTER, tr("Interaction"), semibold(11.0), t.text);
+            let x = Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0));
+            if crate::primitives::FloatingPanel::close_button(ui, ui.id().with("proto_editor_close"), x, |painter, rect| {
+                icons::paint(painter, rect.shrink(6.0), Icon::Close, t.icon);
+            }) {
+                close = true;
+            }
+            ui.add_space(8.0);
+            widgets::separator(ui);
+            // Long action lists (conditionals) scroll inside the window. (An area's UI is as tall as
+            // it was last frame: the minimum lets the list grow when an action opens.)
+            let max_h = (screen.max.y - pos.y - 64.0).max(160.0);
+            egui::ScrollArea::vertical().auto_shrink([false, true]).max_height(max_h).min_scrolled_height(max_h).show(ui, |ui| {
+                trigger_rows(app, ui, node, k, it);
                 widgets::separator(ui);
-                // Long action lists (conditionals) scroll inside the window. (An area's UI is as tall as
-                // it was last frame: the minimum lets the list grow when an action opens.)
-                let max_h = (screen.max.y - pos.y - 64.0).max(160.0);
-                egui::ScrollArea::vertical().auto_shrink([false, true]).max_height(max_h).min_scrolled_height(max_h).show(ui, |ui| {
-                    trigger_rows(app, ui, node, k, it);
+                widgets::sublabels(ui, if it.actions.len() > 1 { tr("Actions") } else { tr("Action") }, None);
+                let cx = Cx { doc, page, node, k };
+                crate::proto_editor::action_list(app, ui, &cx, &it.actions, &[]);
+                if figcraft_doc::proto::walk(&it.actions).any(animates) {
                     widgets::separator(ui);
-                    widgets::sublabels(ui, if it.actions.len() > 1 { tr("Actions") } else { tr("Action") }, None);
-                    let cx = Cx { doc, page, node, k };
-                    crate::proto_editor::action_list(app, ui, &cx, &it.actions, &[]);
-                    if figcraft_doc::proto::walk(&it.actions).any(animates) {
-                        widgets::separator(ui);
-                        animation_rows(app, ui, node, k, it);
-                    }
-                    ui.add_space(8.0);
-                });
+                    animation_rows(app, ui, node, k, it);
+                }
+                ui.add_space(8.0);
             });
-    });
+        });
     if close {
         open_editor(ctx, None);
     }
@@ -708,7 +703,7 @@ fn trigger_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &Inte
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Trigger"), None);
     row(ui, 32.0, |ui| {
-        let resp = widgets::dropdown(ui, tr(trigger_kind(&it.trigger)), ui.available_width(), None);
+        let resp = crate::primitives::Select::trigger(ui, tr(trigger_kind(&it.trigger)), ui.available_width(), None);
         menu_popup(&resp).show(|ui| {
             for (i, l) in TRIGGERS.iter().enumerate() {
                 if i == 4 || i == 5 || i == 9 {
@@ -796,7 +791,7 @@ fn trigger_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &Inte
                 if resp.clicked() && !cap {
                     ui.ctx().data_mut(|d| d.insert_temp(capture_id(), true));
                 }
-                let pads = widgets::dropdown(ui, tr("Controller"), PAD_MENU_W, None);
+                let pads = crate::primitives::Select::trigger(ui, tr("Controller"), PAD_MENU_W, None);
                 menu_popup(&pads).show(|ui| {
                     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                         for b in GAMEPAD_BUTTONS {
@@ -833,7 +828,7 @@ fn dest_dropdown(
     widgets::sublabels(ui, label, None);
     row(ui, 32.0, |ui| {
         let text = cur.map(|d| name_of(doc, d)).unwrap_or_else(|| tr("None").into());
-        let resp = widgets::dropdown(ui, &text, ui.available_width(), Some(Icon::Frame));
+        let resp = crate::primitives::Select::trigger(ui, &text, ui.available_width(), Some(Icon::Frame));
         menu_popup(&resp).show(|ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 for d in options {
@@ -910,7 +905,7 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
             dest_dropdown(app, ui, doc, &frames, Some(dest), tr("Overlay"), mk, slot);
             widgets::sublabels(ui, tr("Overlay position"), None);
             row(ui, 32.0, |ui| {
-                let resp = widgets::dropdown(ui, tr(position.label()), ui.available_width(), None);
+                let resp = crate::primitives::Select::trigger(ui, tr(position.label()), ui.available_width(), None);
                 menu_popup(&resp).show(|ui| {
                     for p in OverlayPosition::ALL {
                         if menu_item(ui, tr(p.label()), "") {
@@ -968,7 +963,8 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
             if let Some(bg) = background {
                 row(ui, 32.0, |ui| {
                     widgets::swatch(ui, &Paint::solid(bg), 16.0);
-                    if let Some(h) = widgets::text_field(ui, slot.id("proto_ovbg"), &bg.to_hex(), 96.0, "")
+                    let hex_width = (ui.available_width() - 72.0).max(40.0);
+                    if let Some(h) = widgets::text_field(ui, slot.id("proto_ovbg"), &bg.to_hex(), hex_width, "")
                         && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
                     {
                         set_action(app, slot, Action::OpenOverlay { dest, position, close_on_outside, background: Some(c), offset });
@@ -989,7 +985,8 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
             let current = doc.variables.collection(collection);
             widgets::sublabels(ui, tr("Collection"), None);
             row(ui, 32.0, |ui| {
-                let resp = widgets::dropdown(ui, current.map_or(tr("Choose collection"), |c| c.name.as_str()), ui.available_width(), None);
+                let resp =
+                    crate::primitives::Select::trigger(ui, current.map_or(tr("Choose collection"), |c| c.name.as_str()), ui.available_width(), None);
                 menu_popup(&resp).show(|ui| {
                     for c in colls {
                         if menu_item(ui, &c.name, "")
@@ -1005,7 +1002,7 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
             row(ui, 32.0, |ui| {
                 let modes = current.map(|c| c.modes.as_slice()).unwrap_or_default();
                 let name = modes.iter().find(|m| &m.id == mode).map_or(tr("Choose mode"), |m| m.name.as_str());
-                let resp = widgets::dropdown(ui, name, ui.available_width(), None);
+                let resp = crate::primitives::Select::trigger(ui, name, ui.available_width(), None);
                 menu_popup(&resp).show(|ui| {
                     for m in modes {
                         if menu_item(ui, &m.name, "") {
@@ -1025,7 +1022,7 @@ fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &In
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Animation"), None);
     row(ui, 32.0, |ui| {
-        let resp = widgets::dropdown(ui, tr(it.transition.label()), ui.available_width(), None);
+        let resp = crate::primitives::Select::trigger(ui, tr(it.transition.label()), ui.available_width(), None);
         menu_popup(&resp).show(|ui| {
             for (i, l) in TRANSITIONS.iter().enumerate() {
                 if i == 3 {
@@ -1053,7 +1050,7 @@ fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &In
     }
     if !matches!(it.transition, Transition::Instant) {
         row(ui, 32.0, |ui| {
-            let resp = widgets::dropdown(ui, tr(it.easing.label()), ui.available_width() - 80.0, None);
+            let resp = crate::primitives::Select::trigger(ui, tr(it.easing.label()), ui.available_width() - 80.0, None);
             menu_popup(&resp).width(220.0).show(|ui| {
                 let custom = [Easing::CUSTOM_BEZIER, Easing::CUSTOM_SPRING];
                 for (i, e) in Easing::ALL.iter().chain(custom.iter()).enumerate() {
@@ -1226,7 +1223,7 @@ fn scroll_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId],
                 ScrollPosition::Fixed => tr("Fixed"),
                 ScrollPosition::Sticky => tr("Sticky"),
             };
-            let resp = widgets::dropdown(ui, cur, ui.available_width(), None);
+            let resp = crate::primitives::Select::trigger(ui, cur, ui.available_width(), None);
             menu_popup(&resp).show(|ui| {
                 for (l, v) in [(tr("Scroll with parent"), "scrolls"), (tr("Fixed"), "fixed"), (tr("Sticky"), "sticky")] {
                     if menu_item(ui, l, "") {
@@ -1246,7 +1243,7 @@ fn scroll_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId],
                 Overflow::Vertical => tr("Vertical"),
                 Overflow::Both => tr("Both directions"),
             };
-            let resp = widgets::dropdown(ui, cur, ui.available_width(), None);
+            let resp = crate::primitives::Select::trigger(ui, cur, ui.available_width(), None);
             menu_popup(&resp).show(|ui| {
                 for (l, v) in
                     [(tr("No scrolling"), "none"), (tr("Horizontal"), "horizontal"), (tr("Vertical"), "vertical"), (tr("Both directions"), "both")]

@@ -11,14 +11,14 @@ mod agent_markdown;
 pub mod agent_panel;
 pub mod agent_presence;
 pub mod assets_panel;
+#[cfg(not(target_arch = "wasm32"))]
+mod background_removal;
 pub mod bidi;
 pub mod branch_ui;
 pub mod canvas;
 pub mod cjk;
 pub mod colorpicker;
 pub mod comments;
-#[cfg(debug_assertions)]
-mod component_library;
 pub mod component_panel;
 pub mod control;
 pub mod credits;
@@ -38,6 +38,8 @@ pub mod home;
 pub mod home_recents;
 pub mod i18n;
 pub mod icons;
+#[cfg(not(target_arch = "wasm32"))]
+mod image_vectorize;
 pub mod import_report;
 pub mod layers;
 pub mod layout_panel;
@@ -51,6 +53,7 @@ pub mod online;
 pub mod pending_open;
 pub mod plugins_ui;
 pub mod present;
+pub mod primitives;
 pub mod proto_canvas;
 pub mod proto_editor;
 pub mod proto_panel;
@@ -127,6 +130,8 @@ mod home_recents_tests;
 mod home_tests;
 #[cfg(test)]
 mod idle_tests;
+#[cfg(test)]
+mod image_toolbar_tests;
 #[cfg(test)]
 mod ime_tests;
 #[cfg(test)]
@@ -225,6 +230,8 @@ mod variables_export_ui_tests;
 mod variables_rename_tests;
 #[cfg(test)]
 mod variants_discovery_tests;
+#[cfg(test)]
+mod vector_contour_menu_tests;
 #[cfg(test)]
 mod vector_panel_tests;
 #[cfg(test)]
@@ -577,8 +584,6 @@ pub struct UiState {
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
     pub icon_gallery: bool,
-    #[cfg(debug_assertions)]
-    pub component_library: component_library::State,
     /// A message at the bottom of the window and how long it has been showing.
     pub toast: Option<(String, ToastClock)>,
     pub present: Option<present::Presenter>,
@@ -741,8 +746,6 @@ impl Default for UiState {
             home_view: home::Home::default(),
             title_bar: TitleBar::Native,
             icon_gallery: false,
-            #[cfg(debug_assertions)]
-            component_library: component_library::State::default(),
             toast: None,
             present: None,
             paused_present: None,
@@ -817,6 +820,8 @@ pub struct FigApp {
     pub session: Session,
     pub ui: UiState,
     pub canvas: canvas::CanvasState,
+    /// Experimental native atlas, installed by desktop builds that explicitly enable it.
+    pub gpu_canvas: Option<Box<dyn canvas::CanvasGpuBackend>>,
     pub services: Box<dyn Services>,
     worker: Option<render_worker::Worker>,
     fonts_installed: bool,
@@ -846,6 +851,10 @@ pub struct FigApp {
     /// Native dialogs complete asynchronously so their modal event loop never re-enters winit.
     pending_dialog: Option<PendingDialog>,
     pending_design_paste: Option<menus::PendingDesignPaste>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_background_removal: Option<background_removal::Pending>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_image_vectorize: Option<image_vectorize::Pending>,
     /// Read-only Figma Community catalogue response, delivered after the request finishes.
     pub(crate) figma_catalog_rx: Option<std::sync::mpsc::Receiver<Result<Vec<u8>, String>>>,
     /// The latest UI context schedules the first poll and wakes the app when a dialog completes.
@@ -867,6 +876,7 @@ impl FigApp {
             ui: UiState { left_width, right_width, pages_height, ..UiState::default() },
             session,
             canvas: canvas::CanvasState::default(),
+            gpu_canvas: None,
             services,
             worker: None,
             fonts_installed: false,
@@ -883,6 +893,10 @@ impl FigApp {
             waiting: Vec::new(),
             pending_dialog: None,
             pending_design_paste: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_background_removal: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_image_vectorize: None,
             figma_catalog_rx: None,
             ui_context: None,
             automation_roots: None,
@@ -1652,6 +1666,10 @@ impl FigApp {
         // A dialog that closed acts first, in the window it was opened from.
         self.poll_dialog(&ctx);
         menus::poll_design_paste(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        background_removal::poll(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        image_vectorize::poll(self, &ctx);
         // Control requests run first so their results reflect this frame.
         control::drain(self, &ctx);
         windows::requests(self, &ctx);
@@ -1670,8 +1688,6 @@ impl FigApp {
         self.session.tool.redlines = self.ui.right_tab == RightTab::Inspect;
         self.end_pen_outside_design();
         tabs::tab_bar(self, ui);
-        #[cfg(debug_assertions)]
-        component_library::show(&ctx, &mut self.ui.component_library);
         if self.ui.present.is_some() {
             // A close request can arrive while the presenter fills the window. Let its unsaved
             // changes dialog take Escape and draw above the player just as it does in the editor.

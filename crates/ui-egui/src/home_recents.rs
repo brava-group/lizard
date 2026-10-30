@@ -626,7 +626,7 @@ fn toolbar(ui: &mut Ui, t: &Tokens, view: View, sort: Sort, with_created: bool) 
     let w = (ui.painter().layout_no_wrap(label.to_string(), regular(11.0), t.text).size().x + 40.0).max(110.0);
     let menu = Rect::from_min_size(pos2(toggle.min.x - 8.0 - w, row.min.y), vec2(w, widgets::FIELD_H));
     ui.scope_builder(egui::UiBuilder::new().max_rect(menu), |ui| {
-        let resp = widgets::dropdown(ui, label, w, None);
+        let resp = crate::primitives::Select::trigger(ui, label, w, None);
         crate::right::menu_popup(&resp).show(|ui| {
             heading(ui, t, tr("Sort by"));
             for key in SortKey::ALL.into_iter().filter(|k| *k != SortKey::Created || with_created) {

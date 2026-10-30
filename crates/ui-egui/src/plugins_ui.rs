@@ -992,7 +992,7 @@ fn browse_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     }
     let Some(listing) = app.session.plugins.directory.as_ref() else {
         ui.add_space(8.0);
-        widgets::label(ui, tr("Enter the address of a figcraft-server and press Browse to see the plugins it offers."), t.text_secondary);
+        widgets::label(ui, tr("Enter the address of a lizard-server and press Browse to see the plugins it offers."), t.text_secondary);
         return asked;
     };
     ui.add_space(8.0);
@@ -1516,7 +1516,7 @@ fn field(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Used> {
         }
         ParamKind::Select => {
             let value = current.as_str().unwrap_or_default();
-            let resp = widgets::dropdown(ui, value, FIELD_W, None);
+            let resp = crate::primitives::Select::trigger(ui, value, FIELD_W, None);
             crate::a11y::combo(&resp, name, value, crate::a11y::menu_open(&resp));
             let mut picked = None;
             crate::right::menu_popup(&resp).show(|ui| {

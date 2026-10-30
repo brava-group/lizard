@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::FigApp;
 use crate::a11y;
-use crate::icons::{self, AgentIcon};
+use crate::icons::{self, AgentIcon, LayerIcon};
+use crate::primitives::{Menu, MenuItem, ShimmerDirection, ShimmerText};
 use crate::theme::{Tokens, regular, semibold};
 
 const BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF8);
@@ -18,6 +19,15 @@ const CHAT_BUBBLE: Color32 = Color32::from_rgb(0x40, 0x40, 0x40);
 const RECEIPT_BG: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
 const RECEIPT_BORDER: Color32 = Color32::from_rgb(0x3D, 0x3D, 0x42);
 const RECEIPT_GREEN: Color32 = Color32::from_rgb(0x00, 0xD4, 0x82);
+const TRANSCRIPT_SCROLL_GUTTER: f32 = 16.0;
+const WORK_WORDS: [&str; 7] = ["Pensando…", "Trabalhando…", "Desenhando…", "Criando…", "Revisando…", "Validando…", "Testando…"];
+
+#[derive(Clone)]
+struct WorkWordState {
+    index: usize,
+    next_change: f64,
+    seed: u64,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ParallelMode {
@@ -71,11 +81,25 @@ pub enum AgentEvent {
     Models(Vec<(String, String)>),
     Text(String),
     Thinking(String),
-    Tool { id: String, title: String, status: String },
+    Tool {
+        id: String,
+        title: Option<String>,
+        status: Option<String>,
+        input: Option<Option<serde_json::Value>>,
+        output: Option<Option<serde_json::Value>>,
+        content: Option<Vec<serde_json::Value>>,
+    },
     Done(String),
     Error(String),
-    Permission { id: serde_json::Value, title: String, options: Vec<(String, String)> },
-    Scoped { index: usize, event: Box<AgentEvent> },
+    Permission {
+        id: serde_json::Value,
+        title: String,
+        options: Vec<(String, String)>,
+    },
+    Scoped {
+        index: usize,
+        event: Box<AgentEvent>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -204,6 +228,12 @@ pub struct ChatTool {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(default)]
+    pub input: Option<serde_json::Value>,
+    #[serde(default)]
+    pub output: Option<serde_json::Value>,
+    #[serde(default)]
+    pub content: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -225,7 +255,6 @@ pub struct AgentUi {
     pub draft: String,
     pub images: Vec<DraftImage>,
     pub pending_images: Vec<DraftImage>,
-    pub context_menu_open: bool,
     /// IDs hidden from this draft's context, without changing the canvas selection.
     pub excluded_selection: Vec<NodeId>,
     pub observed_selection: Vec<NodeId>,
@@ -242,7 +271,6 @@ pub struct AgentUi {
     pub active_prompt: String,
     pub round_failed: bool,
     pub history_open: bool,
-    pub menu_open: bool,
     pub selected_suggestion: Option<usize>,
     pub agent: AgentKind,
     pub conversations: Vec<Conversation>,
@@ -256,8 +284,6 @@ pub struct AgentUi {
     pub login_pending: bool,
     pub model: Option<String>,
     pub models: Vec<(String, String)>,
-    pub parallel_menu_open: bool,
-    pub variant_menu_open: bool,
     pub agent_count: u8,
     pub parallel_mode: ParallelMode,
     pub variant_count: u8,
@@ -377,13 +403,33 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                     message.thinking.push_str(&chunk);
                 }
             }
-            AgentEvent::Tool { id, title, status } => {
+            AgentEvent::Tool { id, title, status, input, output, content } => {
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
                     if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == id) {
-                        tool.title = title;
-                        tool.status = status;
+                        if let Some(title) = title {
+                            tool.title = title;
+                        }
+                        if let Some(status) = status {
+                            tool.status = status;
+                        }
+                        if let Some(input) = input {
+                            tool.input = input;
+                        }
+                        if let Some(output) = output {
+                            tool.output = output;
+                        }
+                        if let Some(content) = content {
+                            tool.content = content;
+                        }
                     } else if message.tools.len() < 100 {
-                        message.tools.push(ChatTool { id, title, status });
+                        message.tools.push(ChatTool {
+                            id,
+                            title: title.unwrap_or_else(|| "Ação do agente".into()),
+                            status: status.unwrap_or_else(|| "in_progress".into()),
+                            input: input.flatten(),
+                            output: output.flatten(),
+                            content: content.unwrap_or_default(),
+                        });
                     }
                 }
             }
@@ -839,7 +885,6 @@ impl AgentUi {
         self.draft.clear();
         self.images.clear();
         self.pending_images.clear();
-        self.context_menu_open = false;
         self.excluded_selection.clear();
         self.turn_started = None;
         self.remaining_agents = 0;
@@ -848,7 +893,6 @@ impl AgentUi {
         self.active_variant_count = 0;
         self.active_prompt.clear();
         self.history_open = false;
-        self.menu_open = false;
         self.selected_suggestion = None;
         self.active = None;
         self.busy = false;
@@ -908,6 +952,29 @@ fn glyph(ui: &Ui, rect: Rect, icon: AgentIcon, size: egui::Vec2, color: Color32)
     icons::paint_agent(ui.painter(), Rect::from_center_size(rect.center(), size), icon, color);
 }
 
+fn thought_chevron(ui: &mut Ui, openness: f32, response: &egui::Response) {
+    let (icon, size) = if openness >= 0.5 { (LayerIcon::ChevronDown, vec2(5.24, 3.12)) } else { (LayerIcon::ChevronRight, vec2(3.12, 5.24)) };
+    icons::paint_layer(ui.painter(), Rect::from_center_size(response.rect.center(), size), icon, Color32::from_rgb(0xA5, 0xA5, 0xA9));
+}
+
+fn work_word(ui: &Ui, id: Id) -> &'static str {
+    let now = ui.input(|input| input.time);
+    let word_index = ui.ctx().data_mut(|data| {
+        let state =
+            data.get_temp_mut_or_insert_with(id.with("work_word"), || WorkWordState { index: 0, next_change: now + 2.2, seed: id.value() | 1 });
+        if now >= state.next_change {
+            state.seed ^= state.seed << 13;
+            state.seed ^= state.seed >> 7;
+            state.seed ^= state.seed << 17;
+            let offset = 1 + state.seed as usize % (WORK_WORDS.len() - 1);
+            state.index = (state.index + offset) % WORK_WORDS.len();
+            state.next_change = now + 2.0 + ((state.seed >> 16) % 15) as f64 / 10.0;
+        }
+        state.index
+    });
+    WORK_WORDS[word_index]
+}
+
 fn composer_hover(ui: &Ui, id: &'static str, rect: Rect, response: &egui::Response, dark: bool, reduce_motion: bool) -> f32 {
     let duration = if reduce_motion { 0.0 } else { 0.14 };
     let hover = ui.ctx().animate_bool_with_time(ui.id().with((id, "hover")), response.hovered() || response.has_focus(), duration);
@@ -919,33 +986,78 @@ fn composer_hover(ui: &Ui, id: &'static str, rect: Rect, response: &egui::Respon
     hover
 }
 
-fn message_age(created_at: u64) -> String {
+fn message_timestamp(created_at: u64) -> String {
     if created_at == 0 {
         return String::new();
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(created_at, |time| time.as_secs());
     let elapsed = now.saturating_sub(created_at);
     if elapsed < 60 {
-        "agora".into()
+        "há instantes".into()
     } else if elapsed < 3_600 {
-        format!("há {} min", elapsed / 60)
+        let minutes = elapsed / 60;
+        format!("há {minutes} {}", if minutes == 1 { "minuto" } else { "minutos" })
     } else if elapsed < 86_400 {
-        format!("há {} h", elapsed / 3_600)
+        let hours = elapsed / 3_600;
+        format!("há {hours} {}", if hours == 1 { "hora" } else { "horas" })
     } else {
-        format!("há {} d", elapsed / 86_400)
+        let Some(local) = i64::try_from(created_at)
+            .ok()
+            .and_then(|unix| time::OffsetDateTime::from_unix_timestamp(unix).ok())
+            .map(|utc| utc.to_offset(time::UtcOffset::local_offset_at(utc).unwrap_or(time::UtcOffset::UTC)))
+        else {
+            return String::new();
+        };
+        let weekday = match local.weekday() {
+            time::Weekday::Sunday => "DOM",
+            time::Weekday::Monday => "SEG",
+            time::Weekday::Tuesday => "TER",
+            time::Weekday::Wednesday => "QUA",
+            time::Weekday::Thursday => "QUI",
+            time::Weekday::Friday => "SEX",
+            time::Weekday::Saturday => "SÁB",
+        };
+        let month = match local.month() {
+            time::Month::January => "JAN",
+            time::Month::February => "FEV",
+            time::Month::March => "MAR",
+            time::Month::April => "ABR",
+            time::Month::May => "MAI",
+            time::Month::June => "JUN",
+            time::Month::July => "JUL",
+            time::Month::August => "AGO",
+            time::Month::September => "SET",
+            time::Month::October => "OUT",
+            time::Month::November => "NOV",
+            time::Month::December => "DEZ",
+        };
+        format!("{weekday} {} de {month} - {:02}:{:02}", local.day(), local.hour(), local.minute())
     }
 }
 
-fn receipt(ui: &mut Ui, id: Id, title: &str, status: &str, preview: Option<&AgentPreview>, max_width: f32) {
-    let is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(preview.is_some());
-    let width = max_width.max(0.0);
+fn receipt_detail(ui: &mut Ui, label: &str, text: &str) {
+    ui.add_space(10.0);
+    ui.label(egui::RichText::new(label).size(11.0).strong().color(Color32::from_rgb(0xA5, 0xA5, 0xA9)));
+    ui.add_space(5.0);
+    egui::Frame::new().fill(Color32::from_rgb(0x26, 0x26, 0x26)).corner_radius(5).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.add(
+            egui::Label::new(egui::RichText::new(text).monospace().size(11.0).color(Color32::from_rgb(0xC9, 0xC9, 0xCD)))
+                .wrap_mode(egui::TextWrapMode::Extend),
+        );
+    });
+}
+
+fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&AgentPreview>, max_width: f32) {
+    let mut is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(preview.is_some());
+    let width = max_width.min(ui.available_width()).max(1.0);
     egui::Frame::new().fill(RECEIPT_BG).stroke(Stroke::new(1.0, RECEIPT_BORDER)).corner_radius(11).show(ui, |ui| {
         ui.set_width(width);
         let header = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-        a11y::button(&header.1, "Expandir etapa do agente");
         if header.1.clicked() {
-            ui.data_mut(|data| data.insert_temp(id, !is_open));
+            is_open = !is_open;
+            ui.data_mut(|data| data.insert_temp(id, is_open));
         }
+        a11y::disclosure(&header.1, "Detalhes da ferramenta", is_open);
         let rect = header.0;
         let max_chars = ((rect.width() - 62.0) / 7.0).floor().max(0.0) as usize;
         let label = if title.chars().count() > max_chars {
@@ -954,11 +1066,11 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, status: &str, preview: Option<&Agen
             title.to_string()
         };
         ui.painter().text(pos2(rect.min.x + 11.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), Color32::from_rgb(0xB9, 0xB9, 0xBC));
-        let status_color = if status == "completed" { RECEIPT_GREEN } else { Color32::from_rgb(0x94, 0x94, 0x98) };
+        let status_color = if tool.status == "completed" { RECEIPT_GREEN } else { Color32::from_rgb(0x94, 0x94, 0x98) };
         ui.painter().text(
             pos2(rect.max.x - 35.0, rect.center().y),
             Align2::CENTER_CENTER,
-            if status == "completed" { "✓" } else { "◌" },
+            if tool.status == "completed" { "✓" } else { "◌" },
             regular(13.0),
             status_color,
         );
@@ -969,16 +1081,59 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, status: &str, preview: Option<&Agen
             vec2(14.0, 14.0),
             Color32::from_rgb(0x85, 0x85, 0x89),
         );
-        if is_open {
+        let animation_time = if ui.style().animation_time > 0.0 { 0.2 } else { 0.0 };
+        let openness = ui.ctx().animate_bool_with_time_and_easing(id.with("open"), is_open, animation_time, egui::emath::easing::cubic_in_out);
+        if openness > 0.001 {
+            let formatted = |value: &serde_json::Value| match value {
+                serde_json::Value::String(text) => text.clone(),
+                value => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
+            };
+            let input = tool.input.as_ref().map(formatted);
+            let output = tool
+                .output
+                .as_ref()
+                .map(formatted)
+                .or_else(|| (!tool.content.is_empty()).then(|| serde_json::to_string_pretty(&tool.content).unwrap_or_default()));
+            let detail_height = |text: &str| 10.0 + 14.0 + 5.0 + 16.0 + text.lines().count().min(30) as f32 * 14.0;
+            let content_height = (24.0
+                + input.as_deref().map_or(0.0, detail_height)
+                + output.as_deref().map_or(0.0, detail_height)
+                + if input.is_none() && output.is_none() { 28.0 } else { 0.0 }
+                + if preview.and_then(|item| item.texture.as_ref()).is_some() { 196.0 } else { 0.0 })
+            .min(300.0);
             ui.painter()
                 .line_segment([pos2(rect.min.x, rect.max.y), pos2(rect.max.x, rect.max.y)], Stroke::new(1.0, Color32::from_rgb(0x3A, 0x3A, 0x3E)));
-            if let Some(texture) = preview.and_then(|item| item.texture.as_ref()) {
-                ui.add_space(6.0);
-                ui.vertical_centered(|ui| {
-                    ui.add(egui::Image::from_texture(texture).max_width((width - 14.0).max(0.0)).max_height(180.0).corner_radius(4));
+            egui::ScrollArea::both()
+                .id_salt(id.with("details"))
+                .max_width(width)
+                .max_height((content_height * openness).max(1.0))
+                .min_scrolled_width(0.0)
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, true])
+                .content_margin(egui::Margin::same(12))
+                .show(ui, |ui| {
+                    ui.set_min_width((width - 24.0).max(1.0));
+                    if let Some(input) = &input {
+                        receipt_detail(ui, "Parâmetros", input);
+                    }
+                    if let Some(output) = &output {
+                        receipt_detail(ui, "Resposta", output);
+                    } else if input.is_none() {
+                        ui.label(
+                            egui::RichText::new(if tool.status == "in_progress" {
+                                "Aguardando resposta da ferramenta…"
+                            } else {
+                                "Sem detalhes enviados pela ferramenta."
+                            })
+                            .size(11.0)
+                            .color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                        );
+                    }
+                    if let Some(texture) = preview.and_then(|item| item.texture.as_ref()) {
+                        ui.add_space(10.0);
+                        ui.add(egui::Image::from_texture(texture).max_width((width - 24.0).max(1.0)).max_height(180.0).corner_radius(4));
+                    }
                 });
-                ui.add_space(6.0);
-            }
         }
     });
 }
@@ -1058,19 +1213,15 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, "Compartilhado", regular(11.0), secondary);
     let more = Rect::from_min_size(pos2(full.max.x - 38.0, full.min.y + 12.0), vec2(24.0, 24.0));
     let more_resp = hit(ui, "agent_options", more, "Mais opções");
-    if more_resp.hovered() || app.ui.agent.menu_open {
+    if more_resp.hovered() || a11y::menu_open(&more_resp) {
         ui.painter().rect_filled(more, CornerRadius::same(5), t.hover);
     }
     glyph(ui, more, AgentIcon::More, vec2(15.0, 3.0), text);
-    if more_resp.clicked() {
-        app.ui.agent.menu_open = !app.ui.agent.menu_open;
-    }
     let badge = Rect::from_center_size(pos2(full.max.x - 55.5, full.min.y + 24.0), vec2(19.0, 18.0));
     ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
     ui.painter().text(badge.center(), Align2::CENTER_CENTER, "IA", semibold(11.0), secondary);
     if hit(ui, "agent_model_badge", badge, "Selecionar modelo").clicked() {
         egui::Popup::open_id(ui.ctx(), Id::new("agent_footer_model_popup"));
-        app.ui.agent.menu_open = false;
     }
 
     let middle_bottom = (full.max.y - 26.0 - composer_height).max(header_bottom);
@@ -1111,22 +1262,25 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         }
     } else if let Some(chat) = app.ui.agent.active.and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id)).cloned() {
         let transcript = middle.shrink2(vec2(20.0, 12.0));
+        let content_width = (transcript.width() - TRANSCRIPT_SCROLL_GUTTER).max(1.0);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(transcript));
         let mut revert = None;
         let mut locate_node = None;
         egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(&mut child, |ui| {
-            ui.set_width(transcript.width());
+            ui.set_width(content_width);
             for (index, message) in chat.messages.iter().enumerate() {
                 if message.role == "user" {
                     ui.add_space(12.0);
-                    let bubble_width = transcript.width().min(320.0);
+                    let bubble_width = content_width.min(320.0);
                     ui.horizontal(|ui| {
-                        ui.add_space((transcript.width() - bubble_width).max(0.0));
+                        ui.add_space((content_width - bubble_width).max(0.0));
                         ui.vertical(|ui| {
                             ui.set_width(bubble_width);
-                            ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(vec2(bubble_width, 18.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(message_timestamp(message.created_at)).size(12.0).color(Color32::from_rgb(0x92, 0x92, 0x98)),
+                                );
                                 ui.label(egui::RichText::new("Você").size(12.0).strong().color(Color32::from_rgb(0xC9, 0xC9, 0xCD)));
-                                ui.label(egui::RichText::new(message_age(message.created_at)).size(12.0).color(Color32::from_rgb(0x92, 0x92, 0x98)));
                             });
                             ui.add_space(5.0);
                             egui::Frame::new()
@@ -1147,7 +1301,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                                         }
                                     }
                                     if !message.text.is_empty() {
-                                        ui.label(egui::RichText::new(&message.text).size(16.0).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
+                                        ui.label(egui::RichText::new(&message.text).size(14.0).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
                                     }
                                     for image in &message.attached_images {
                                         ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(Color32::from_rgb(0xA8, 0xD9, 0xFC)));
@@ -1180,19 +1334,47 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                         && message.work_seconds.is_none()
                         && !chat.messages.iter().skip(index + 1).any(|later| later.role == "assistant" && later.agent_index == message.agent_index);
                     if working || !message.tools.is_empty() || !message.thinking.is_empty() {
-                        let label = message.work_seconds.map_or_else(|| "Pensando…".to_string(), |s| format!("Thought for {s}s"));
                         ui.horizontal(|ui| {
                             if working {
-                                ui.add(egui::Spinner::new().size(12.0));
-                            }
-                            egui::CollapsingHeader::new(egui::RichText::new(label).size(15.0).color(Color32::from_rgb(0x94, 0x94, 0x98)))
-                                .id_salt(("agent_work", chat.id, index))
-                                .default_open(false)
-                                .show(ui, |ui| {
-                                    if !message.thinking.is_empty() {
-                                        ui.label(egui::RichText::new(&message.thinking).size(12.0).color(secondary));
-                                    }
+                                ui.vertical(|ui| {
+                                    let header_id = ui.make_persistent_id(("agent_work", chat.id, index));
+                                    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), header_id, false);
+                                    let header = ui.horizontal(|ui| {
+                                        let spacing = ui.spacing().item_spacing.x;
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+                                        state.show_toggle_button(ui, thought_chevron);
+                                        ui.spacing_mut().item_spacing.x = spacing;
+                                        let word = work_word(ui, header_id);
+                                        let shimmer = ShimmerText::new(word)
+                                            .direction(ShimmerDirection::Diagonal)
+                                            .duration(0.6)
+                                            .size(12.0)
+                                            .colors(Color32::from_rgb(0x94, 0x94, 0x98), Color32::from_rgb(0xD1, 0xD1, 0xD4))
+                                            .show(ui);
+                                        let click = ui.interact(shimmer.rect, header_id.with("label"), Sense::click());
+                                        if click.clicked() {
+                                            state.toggle(ui);
+                                        }
+                                        a11y::disclosure(&click, word, state.is_open());
+                                    });
+                                    state.show_body_indented(&header.response, ui, |ui| {
+                                        if !message.thinking.is_empty() {
+                                            ui.label(egui::RichText::new(&message.thinking).size(12.0).color(secondary));
+                                        }
+                                    });
                                 });
+                            } else {
+                                let label = message.work_seconds.map_or_else(|| "Pensando…".to_string(), |s| format!("Thought for {s}s"));
+                                egui::CollapsingHeader::new(egui::RichText::new(label).size(12.0).color(Color32::from_rgb(0x94, 0x94, 0x98)))
+                                    .id_salt(("agent_work", chat.id, index))
+                                    .default_open(false)
+                                    .icon(thought_chevron)
+                                    .show(ui, |ui| {
+                                        if !message.thinking.is_empty() {
+                                            ui.label(egui::RichText::new(&message.thinking).size(12.0).color(secondary));
+                                        }
+                                    });
+                            }
                         });
                     }
                     for (tool_index, tool) in message.tools.iter().enumerate() {
@@ -1200,17 +1382,18 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                         let preview = if tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
                         let title =
                             if tool.title.contains("screenshot") || tool.title.contains("execute") { "Designed" } else { tool.title.as_str() };
-                        receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, &tool.status, preview, transcript.width());
+                        receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
                     }
                     if message.tools.is_empty() && !message.previews.is_empty() {
                         ui.add_space(9.0);
+                        let preview_tool = ChatTool { status: "completed".into(), ..Default::default() };
                         receipt(
                             ui,
                             ui.id().with(("agent_receipt", chat.id, index, 0)),
                             "Designed",
-                            "completed",
+                            &preview_tool,
                             message.previews.first(),
-                            transcript.width(),
+                            content_width,
                         );
                     }
                     if !message.text.is_empty() {
@@ -1403,19 +1586,25 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     }
     let input = Rect::from_min_max(
         pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
-        pos2(composer.max.x - 16.0, composer.min.y + 86.0 + context_height + images_height),
+        pos2(composer.max.x - 16.0, composer.min.y + 98.0 + context_height + images_height),
     );
     paste_image_into_composer(app, ui);
-    let input_resp = ui.put(
-        input,
-        egui::TextEdit::multiline(&mut app.ui.agent.draft)
-            .id(Id::new("agent_prompt"))
-            .font(regular(13.0))
-            .hint_text(egui::RichText::new("Solicitar alterações").size(13.0).color(secondary))
-            .frame(egui::Frame::NONE)
-            .desired_width(input.width())
-            .desired_rows(3),
-    );
+    let mut input_ui = ui.new_child(egui::UiBuilder::new().max_rect(input));
+    let input_resp = egui::ScrollArea::vertical()
+        .id_salt("agent_prompt_scroll")
+        .auto_shrink([false, false])
+        .show(&mut input_ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut app.ui.agent.draft)
+                    .id(Id::new("agent_prompt"))
+                    .font(regular(13.0))
+                    .hint_text(egui::RichText::new("Solicitar alterações").size(13.0).color(secondary))
+                    .frame(egui::Frame::NONE)
+                    .desired_width(ui.available_width())
+                    .desired_rows(3),
+            )
+        })
+        .inner;
     let actions_y = composer.max.y - 32.0;
     let attach = Rect::from_min_size(pos2(composer.min.x + 8.0, actions_y), vec2(24.0, 24.0));
     let parallel = Rect::from_min_size(pos2(attach.max.x + 8.0, actions_y), vec2(34.0, 24.0));
@@ -1458,23 +1647,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             Stroke::new(1.0, t.field_hover_border.linear_multiply(model_hover)),
             egui::StrokeKind::Inside,
         );
-    }
-    if attach_resp.clicked() {
-        app.ui.agent.context_menu_open = !app.ui.agent.context_menu_open;
-    }
-    if parallel_resp.clicked() {
-        app.ui.agent.parallel_menu_open = !app.ui.agent.parallel_menu_open;
-        app.ui.agent.variant_menu_open = false;
-        egui::Popup::close_all(ui.ctx());
-    }
-    if variants_resp.clicked() {
-        app.ui.agent.variant_menu_open = !app.ui.agent.variant_menu_open;
-        app.ui.agent.parallel_menu_open = false;
-        egui::Popup::close_all(ui.ctx());
-    }
-    if model_resp.clicked() {
-        app.ui.agent.parallel_menu_open = false;
-        app.ui.agent.variant_menu_open = false;
     }
     glyph(ui, attach, AgentIcon::Paperclip, vec2(14.0, 14.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
     let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
@@ -1538,13 +1710,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         }
     }
 
-    if app.ui.agent.context_menu_open {
-        let menu = Rect::from_min_size(pos2(composer.min.x + 12.0, composer.min.y - 72.0), vec2(176.0, 64.0));
-        ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        let choose = Rect::from_min_size(menu.min, vec2(menu.width(), 32.0));
-        let paste = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 32.0), vec2(menu.width(), 32.0));
-        if hit(ui, "agent_attach_file", choose, "Anexar PNG ou JPEG").clicked() {
-            app.ui.agent.context_menu_open = false;
+    Menu::popup(&attach_resp).width(176.0).align(egui::RectAlign::TOP_START).show(|ui| {
+        if MenuItem::new("Anexar PNG ou JPEG").show(ui).clicked() {
             app.pick_open("Anexar imagem ao agente", &["png", "jpg", "jpeg"], |app, path| {
                 let result = std::fs::metadata(&path)
                     .map_err(|error| error.to_string())
@@ -1562,14 +1729,13 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                     app.toast(error);
                 }
             });
+            ui.close();
         }
-        if hit(ui, "agent_attach_clipboard", paste, "Colar imagem copiada").clicked() {
-            app.ui.agent.context_menu_open = false;
+        if MenuItem::new("Colar imagem").show(ui).clicked() {
             attach_clipboard_image(app);
+            ui.close();
         }
-        ui.painter().text(pos2(choose.min.x + 12.0, choose.center().y), Align2::LEFT_CENTER, "Anexar PNG ou JPEG", regular(12.0), text);
-        ui.painter().text(pos2(paste.min.x + 12.0, paste.center().y), Align2::LEFT_CENTER, "Colar imagem", regular(12.0), text);
-    }
+    });
 
     if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
         egui::Window::new("Permissão do agente").collapsible(false).resizable(false).show(ui.ctx(), |ui| {
@@ -1589,29 +1755,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         });
     }
 
-    if app.ui.agent.menu_open {
-        let menu = Rect::from_min_size(pos2(full.max.x - 180.0, full.min.y + 42.0), vec2(166.0, 180.0));
-        ui.painter().rect(menu, CornerRadius::same(6), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        let new = Rect::from_min_size(menu.min, vec2(menu.width(), 30.0));
-        if hit(ui, "agent_menu_new_chat", new, "Novo chat").clicked() {
+    Menu::popup(&more_resp).width(166.0).show(|ui| {
+        if MenuItem::new("Novo chat").show(ui).clicked() {
             reset_chat(app);
+            ui.close();
         }
-        ui.painter().text(pos2(new.min.x + 12.0, new.center().y), Align2::LEFT_CENTER, "Novo chat", regular(12.0), text);
-        for (index, kind) in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi].into_iter().enumerate() {
-            let row = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 30.0 + index as f32 * 30.0), vec2(menu.width(), 30.0));
-            if hit(
-                ui,
-                match kind {
-                    AgentKind::Codex => "agent_codex",
-                    AgentKind::Claude => "agent_claude",
-                    AgentKind::Gemini => "agent_gemini",
-                    AgentKind::Kimi => "agent_kimi",
-                },
-                row,
-                kind.label(),
-            )
-            .clicked()
-            {
+        Menu::separator(ui, None);
+        for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi] {
+            if MenuItem::new(kind.label()).checked(app.ui.agent.agent == kind).show(ui).clicked() {
                 reset_chat(app);
                 app.ui.agent.agent = kind;
                 app.ui.agent.connection = None;
@@ -1619,20 +1770,12 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                 app.ui.agent.models.clear();
                 app.ui.agent.models_requested = None;
                 app.ui.agent.models_loading_until = None;
-                app.ui.agent.menu_open = false;
+                ui.close();
             }
-            ui.painter().text(
-                pos2(row.min.x + 12.0, row.center().y),
-                Align2::LEFT_CENTER,
-                kind.label(),
-                regular(12.0),
-                if app.ui.agent.agent == kind { BLUE } else { text },
-            );
         }
-        let setup = Rect::from_min_size(pos2(menu.min.x, menu.min.y + 150.0), vec2(menu.width(), 30.0));
+        Menu::separator(ui, None);
         let setup_label = if app.ui.agent.agent == AgentKind::Codex { "Conexão ChatGPT" } else { "Configurar agente" };
-        if hit(ui, "agent_menu_setup", setup, setup_label).clicked() {
-            app.ui.agent.menu_open = false;
+        if MenuItem::new(setup_label).show(ui).clicked() {
             let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
             app.ui.agent.connection = None;
             if app.ui.agent.agent == AgentKind::Codex && !connected && !app.ui.agent.login_pending {
@@ -1649,9 +1792,9 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
                 };
                 app.services.open_url(url);
             }
+            ui.close();
         }
-        ui.painter().text(pos2(setup.min.x + 12.0, setup.center().y), Align2::LEFT_CENTER, setup_label, regular(12.0), text);
-    }
+    });
     let models = app.ui.agent.models.clone();
     crate::right::menu_popup(&model_resp).id(Id::new("agent_footer_model_popup")).width(model.width().max(180.0)).show(|ui| {
         if crate::right::menu_item(ui, "Modelo padrão", "") {
@@ -1667,79 +1810,40 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             }
         });
     });
-    if app.ui.agent.parallel_menu_open {
-        let menu = Rect::from_min_size(pos2(parallel.min.x, composer.min.y - 226.0), vec2(196.0, 218.0));
-        ui.painter().rect(menu, CornerRadius::same(9), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        ui.painter().text(pos2(menu.min.x + 10.0, menu.min.y + 17.0), Align2::LEFT_CENTER, "Agentes em paralelo", semibold(12.0), text);
+    Menu::popup(&parallel_resp).width(196.0).align(egui::RectAlign::TOP_START).show(|ui| {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Agentes em paralelo").size(11.0).color(ui.visuals().text_color()));
+        ui.add_space(4.0);
         for count in 1..=6_u8 {
-            let row = Rect::from_min_size(pos2(menu.min.x + 6.0, menu.min.y + 32.0 + (count - 1) as f32 * 24.0), vec2(menu.width() - 12.0, 24.0));
-            let response = ui.interact(row, ui.id().with(("parallel_count", count)), Sense::click());
-            if response.clicked() {
+            let label = format!("{count}x");
+            if MenuItem::new(&label).checked(app.ui.agent.agent_count.max(1) == count).show(ui).clicked() {
                 app.ui.agent.agent_count = count;
             }
-            if response.hovered() {
-                ui.painter().rect_filled(row, CornerRadius::same(4), t.hover);
-            }
-            ui.painter().text(
-                pos2(row.min.x + 8.0, row.center().y),
-                Align2::LEFT_CENTER,
-                format!("{count}x"),
-                regular(12.0),
-                if app.ui.agent.agent_count.max(1) == count { BLUE } else { text },
-            );
         }
-        for (index, (label, mode)) in [("Dividir trabalho", ParallelMode::Split), ("Lado a lado", ParallelMode::SideBySide)].into_iter().enumerate() {
-            let row = Rect::from_min_size(pos2(menu.min.x + 6.0, menu.min.y + 178.0 + index as f32 * 18.0), vec2(menu.width() - 12.0, 18.0));
-            let response = ui.interact(row, ui.id().with(("parallel_mode", index)), Sense::click());
-            if response.clicked() {
+        Menu::separator(ui, None);
+        for (label, mode) in [("Dividir trabalho", ParallelMode::Split), ("Lado a lado", ParallelMode::SideBySide)] {
+            if MenuItem::new(label).checked(app.ui.agent.parallel_mode == mode).show(ui).clicked() {
                 app.ui.agent.parallel_mode = mode;
             }
-            ui.painter().text(
-                pos2(row.min.x + 8.0, row.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                regular(11.0),
-                if app.ui.agent.parallel_mode == mode { BLUE } else { secondary },
-            );
         }
-    }
-    if app.ui.agent.variant_menu_open {
-        let menu = Rect::from_min_size(pos2(variants.min.x, composer.min.y - 226.0), vec2(192.0, 218.0));
-        ui.painter().rect(menu, CornerRadius::same(9), t.menu, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        ui.painter().text(pos2(menu.min.x + 10.0, menu.min.y + 17.0), Align2::LEFT_CENTER, "Variantes", semibold(12.0), text);
+    });
+    Menu::popup(&variants_resp).width(192.0).align(egui::RectAlign::TOP_START).show(|ui| {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Variantes").size(11.0).color(ui.visuals().text_color()));
+        ui.add_space(4.0);
         for count in 1..=6_u8 {
-            let row = Rect::from_min_size(pos2(menu.min.x + 6.0, menu.min.y + 32.0 + (count - 1) as f32 * 24.0), vec2(menu.width() - 12.0, 24.0));
-            let response = ui.interact(row, ui.id().with(("variant_count", count)), Sense::click());
-            if response.clicked() {
+            let label = if count == 1 { "1x · Sem iteração".to_owned() } else { format!("{count}x") };
+            if MenuItem::new(&label).checked(app.ui.agent.variant_count.max(1) == count).show(ui).clicked() {
                 app.ui.agent.variant_count = count;
             }
-            if response.hovered() {
-                ui.painter().rect_filled(row, CornerRadius::same(4), t.hover);
-            }
-            let label = if count == 1 { "1x · Sem iteração".to_string() } else { format!("{count}x") };
-            ui.painter().text(
-                pos2(row.min.x + 8.0, row.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                regular(12.0),
-                if app.ui.agent.variant_count.max(1) == count { BLUE } else { text },
-            );
         }
-        for (index, (label, mode)) in [("Variar layout", VariantMode::Layout), ("Variar estilo", VariantMode::Style)].into_iter().enumerate() {
-            let row = Rect::from_min_size(pos2(menu.min.x + 6.0, menu.min.y + 178.0 + index as f32 * 18.0), vec2(menu.width() - 12.0, 18.0));
-            let response = ui.interact(row, ui.id().with(("variant_mode", index)), Sense::click());
-            if response.clicked() {
+        Menu::separator(ui, None);
+        for (label, mode) in [("Variar layout", VariantMode::Layout), ("Variar estilo", VariantMode::Style)] {
+            if MenuItem::new(label).checked(app.ui.agent.variant_mode == mode).show(ui).clicked() {
                 app.ui.agent.variant_mode = mode;
             }
-            ui.painter().text(
-                pos2(row.min.x + 8.0, row.center().y),
-                Align2::LEFT_CENTER,
-                label,
-                regular(11.0),
-                if app.ui.agent.variant_mode == mode { BLUE } else { secondary },
-            );
         }
-    }
+    });
 }
 
 #[cfg(test)]

@@ -376,8 +376,14 @@ fn open_files(app: &mut FigApp, ui: &mut Ui, t: &Tokens, query: &str) -> usize {
     let mut switch = None;
     for (i, d) in app.session.docs.iter().enumerate().filter(|(_, d)| hit(d)) {
         let detail = d.path.as_deref().unwrap_or_default();
-        let row =
-            FileRow { mark: Some((Icon::Logo, t.icon_secondary)), name: &d.doc.name, ink: t.text, detail, detail_size: 11.0, detail_ink: t.text_secondary };
+        let row = FileRow {
+            mark: Some((Icon::Logo, t.icon_secondary)),
+            name: &d.doc.name,
+            ink: t.text,
+            detail,
+            detail_size: 11.0,
+            detail_ink: t.text_secondary,
+        };
         if listed(ui, t, ui.id().with(("open", d.uid)), 36.0, &row) {
             switch = Some(i);
         }

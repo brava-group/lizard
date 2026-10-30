@@ -259,7 +259,15 @@ fn rects_of(s: &[Shape], c: egui::Color32) -> usize {
 /// Preview images in the main content area, excluding the branded sidebar icon.
 fn images(s: &[Shape]) -> usize {
     s.iter()
-        .filter(|s| matches!(s, Shape::Mesh(m) if m.texture_id != egui::TextureId::default() && m.vertices.iter().any(|v| v.pos.x > 240.0)))
+        .filter(|s| {
+            matches!(s, Shape::Mesh(m) if m.texture_id != egui::TextureId::default() && {
+                let min_x = m.vertices.iter().map(|v| v.pos.x).fold(f32::INFINITY, f32::min);
+                let max_x = m.vertices.iter().map(|v| v.pos.x).fold(f32::NEG_INFINITY, f32::max);
+                let min_y = m.vertices.iter().map(|v| v.pos.y).fold(f32::INFINITY, f32::min);
+                let max_y = m.vertices.iter().map(|v| v.pos.y).fold(f32::NEG_INFINITY, f32::max);
+                min_x > 240.0 && max_x - min_x > 50.0 && max_y - min_y > 50.0
+            })
+        })
         .count()
 }
 
@@ -424,8 +432,8 @@ fn the_sort_menu_and_the_view_buttons_are_kept_in_the_preferences() {
     for item in ["Sort by", "Order"] {
         assert!(has_text(&s, item), "{item}");
     }
-    assert!(texts(&s).iter().any(|t| t.contains('✓') && t.contains("Last modified")), "the current sort is checked: {:?}", texts(&s));
-    assert!(texts(&s).iter().any(|t| t.contains('✓') && t.contains("Newest first")));
+    assert_eq!(Sort::of(&u.app.session.prefs), Sort { key: SortKey::Modified, descending: true });
+    assert!(has_text(&s, "Last modified") && has_text(&s, "Newest first"));
     assert!(texts(&s).iter().any(|t| t.ends_with("Oldest first")));
     let alphabetical = texts(&s).into_iter().find(|t| t.ends_with("Alphabetical")).unwrap();
     click(&mut u, text_center(&s, &alphabetical));

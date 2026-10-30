@@ -1,4 +1,4 @@
-//! Regression for #373: actual pointer gestures on the Typography section's three leading icons.
+//! Regression for #373: actual pointer gestures on the Typography section's spacing icons.
 use egui::{Event, Id, Modifiers, Pos2, RawInput, Rect, vec2};
 use figcraft_doc::{LetterSpacing, LineHeight, NodeId};
 use figcraft_engine::Session;
@@ -58,6 +58,31 @@ impl Fields {
         self.frame(vec![Event::PointerButton { pos: p + vec2(by, 0.0), button: egui::PointerButton::Primary, pressed: false, modifiers }], modifiers);
         self.frame(vec![], Modifiers::NONE);
     }
+    fn type_line_height(&mut self, value: &str) {
+        let p = self.lead("ty_lh") + vec2(36.0, 0.0);
+        for pressed in [true, false] {
+            self.frame(
+                vec![
+                    Event::PointerMoved(p),
+                    Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE },
+                ],
+                Modifiers::NONE,
+            );
+        }
+        self.frame(vec![], Modifiers::NONE);
+        assert!(self.ctx.data(|d| d.get_temp::<String>(Id::new("ty_lh").with("editing"))).is_some());
+        self.ctx.memory_mut(|m| m.request_focus(Id::new("ty_lh").with("te")));
+        self.frame(
+            vec![Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }],
+            Modifiers::COMMAND,
+        );
+        self.frame(vec![Event::Text(value.into())], Modifiers::NONE);
+        self.frame(
+            vec![Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+            Modifiers::NONE,
+        );
+        self.frame(vec![], Modifiers::NONE);
+    }
     fn value(&self, key: &str) -> f64 {
         let t = self.app.session.doc().unwrap().node(self.text).unwrap().kind.text().unwrap();
         match key {
@@ -75,58 +100,64 @@ impl Fields {
 
 #[test]
 fn typography_icon_drag_changes_each_spacing_field_in_one_undo_step() {
-    for (key, before) in [("ty_lh", 24.0), ("ty_ls", 0.0), ("ty_ps", 12.0)] {
+    for (key, before, after) in [("ty_lh", 24.0, 201.6), ("ty_ls", 0.0, 16.0)] {
         let mut f = Fields::new();
         let undo = f.app.session.undo_depth().0;
         f.drag(key, 16.0, Modifiers::NONE);
-        assert_eq!(f.value(key), before + 16.0, "{key}: dragging the icon must change the value");
+        assert_eq!(f.value(key), after, "{key}: dragging the icon must change the value");
+        if key == "ty_lh" {
+            assert_eq!(f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height, LineHeight::Percent(after));
+        }
         assert_eq!(f.app.session.undo_depth().0, undo + 1, "{key}: one gesture, one undo step");
         f.app.session.undo().unwrap();
         assert_eq!(f.value(key), before);
         f.app.session.redo().unwrap();
-        assert_eq!(f.value(key), before + 16.0);
+        assert_eq!(f.value(key), after);
     }
 }
 
 #[test]
 fn typography_icon_scrub_uses_shift_and_alt_rates_and_the_resize_cursor() {
-    for (modifiers, delta) in [(Modifiers::SHIFT, 160.0), (Modifiers::ALT, 1.6)] {
-        for (key, start) in [("ty_lh", 24.0), ("ty_ls", 0.0), ("ty_ps", 12.0)] {
+    for (modifiers, line_height_after, letter_spacing_after) in [(Modifiers::SHIFT, 216.0, 160.0), (Modifiers::ALT, 200.2, 1.6)] {
+        for (key, after) in [("ty_lh", line_height_after), ("ty_ls", letter_spacing_after)] {
             let mut f = Fields::new();
             let p = f.lead(key);
             assert_eq!(f.frame(vec![Event::PointerMoved(p)], modifiers), egui::CursorIcon::ResizeHorizontal);
             f.drag(key, 16.0, modifiers);
-            assert!((f.value(key) - start - delta).abs() < 1e-8, "{key}: {}", f.value(key));
+            assert!((f.value(key) - after).abs() < 1e-8, "{key}: {}", f.value(key));
         }
     }
 }
 
 #[test]
-fn typography_icon_scrub_preserves_units_and_clamps_only_nonnegative_fields() {
+fn typography_icon_scrub_uses_percent_and_clamps_only_nonnegative_fields() {
     let mut f = Fields::new();
     f.app.run("node.set", json!({"id":f.text,"props":{"lineHeight":"150%","letterSpacing":"2px"}}));
     f.frame(vec![], Modifiers::NONE);
     f.drag("ty_lh", 16.0, Modifiers::NONE);
     f.drag("ty_ls", -16.0, Modifiers::NONE);
     let t = f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap();
-    assert_eq!(t.style.line_height, LineHeight::Percent(166.0));
+    assert_eq!(t.style.line_height, LineHeight::Percent(151.6));
     assert_eq!(t.style.letter_spacing, LetterSpacing::Pixels(-14.0));
-    f.drag("ty_lh", -200.0, Modifiers::NONE);
-    f.drag("ty_ps", -200.0, Modifiers::NONE);
+    f.drag("ty_lh", -200.0, Modifiers::SHIFT);
     assert_eq!(f.value("ty_lh"), 0.0);
-    assert_eq!(f.value("ty_ps"), 0.0);
     assert!(f.app.ui.last_error.is_none(), "{:?}", f.app.ui.last_error);
 }
 
 #[test]
-fn typography_icon_scrub_does_not_replace_auto_or_mixed_values() {
+fn typography_icon_scrub_converts_auto_and_does_not_replace_mixed_values() {
     let mut f = Fields::new();
     f.app.run("node.set", json!({"id":f.text,"props":{"lineHeight":"auto"}}));
     f.frame(vec![], Modifiers::NONE);
     let undo = f.app.session.undo_depth().0;
     f.drag("ty_lh", 16.0, Modifiers::NONE);
+    let converted = f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height;
+    let LineHeight::Percent(percent) = converted else { panic!("Auto drag should produce a percentage: {converted:?}") };
+    assert!(percent >= 50.0);
+    assert!((percent * 10.0 - (percent * 10.0).round()).abs() < 1e-8);
+    assert_eq!(f.app.session.undo_depth().0, undo + 1);
+    f.app.session.undo().unwrap();
     assert_eq!(f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height, LineHeight::Auto);
-    assert_eq!(f.app.session.undo_depth().0, undo);
     let other = f.app.run("text.create", json!({"text":"Other","props":{"lineHeight":36}})).unwrap()["id"].clone();
     f.app.run("select.set", json!({"ids":[f.text,other]}));
     f.frame(vec![], Modifiers::NONE);
@@ -200,4 +231,15 @@ fn typography_spacing_fields_still_accept_typed_units_and_escape_cancels() {
     );
     assert_eq!(f.value("ty_lh"), 150.0);
     assert_eq!(f.app.session.undo_depth().0, undo);
+}
+
+#[test]
+fn line_height_input_accepts_pixels_percent_and_auto_in_sequence() {
+    let mut f = Fields::new();
+    f.type_line_height("110%");
+    assert_eq!(f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height, LineHeight::Percent(110.0));
+    f.type_line_height("12");
+    assert_eq!(f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height, LineHeight::Pixels(12.0));
+    f.type_line_height("auto");
+    assert_eq!(f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap().style.line_height, LineHeight::Auto);
 }
