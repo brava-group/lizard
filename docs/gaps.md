@@ -81,9 +81,8 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   Cmd/Ctrl+V when the clipboard's HTML holds a `.fig` canvas): read like a `.fig` file, with its
   warnings, size-checked (256 MB) before decoding.
 - **Missing:** elbowed or curved connectors without a saved path (drawn straight), labels of
-  connectors without a saved snapshot, table cells beyond their own layers, filled areas of a
-  vector with their own fills (#634, held for an owner decision on the document model), variables
-  bound to fields the editor can't bind and video fills aren't read; text lays out again with
+  connectors without a saved snapshot, table cells beyond their own layers, variables
+  bound to fields the editor can't bind, image paints on individual vector faces, and video fills aren't read; text lays out again with
   local fonts. Nothing has been checked against real-world files yet (gap 3): the 2026-10-17
   changes were tested on files built in code, and paste from another design app on clipboard HTML
   made from our own export, never on a real clipboard. The export was checked in other software
