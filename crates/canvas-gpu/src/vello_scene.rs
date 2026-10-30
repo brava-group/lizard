@@ -1777,6 +1777,34 @@ mod effect_capability_tests {
             }
         }
         doc.node_mut(group).ok_or("group missing")?.transform = Affine::translate((65.0, 45.0)) * Affine::rotate(0.35);
+        for spread in [-8.0, 0.0, 8.0] {
+            if let Some(EffectKind::InnerShadow(shadow)) =
+                doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind)
+            {
+                shadow.spread = spread;
+            }
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (256.0 * scale) as u32, height: (256.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                assert!(
+                    changed * 100 < view.width as usize * view.height as usize,
+                    "rotated group inner shadow spread={spread} scale={scale} differs: {changed} pixels"
+                );
+            }
+        }
+        if let Some(EffectKind::InnerShadow(shadow)) = doc.node_mut(group).and_then(|node| node.effects.first_mut()).map(|effect| &mut effect.kind) {
+            shadow.spread = 16.0;
+        }
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 };
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         Ok(())
@@ -3536,7 +3564,7 @@ fn gpu_translucent_vector_shadow_supported(node: &Node, shadow: &Shadow) -> bool
 fn gpu_cached_inner_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
     (matches!(node.kind, NodeKind::Rectangle | NodeKind::Frame) && node.corners.uniform().is_some()
         || gpu_path_inner_shadow_supported(doc, node, shadow)
-        || matches!(node.kind, NodeKind::Group) && gpu_axis_aligned(doc, node) && gpu_simple_group_shadow_supported(doc, node, shadow))
+        || matches!(node.kind, NodeKind::Group) && gpu_simple_group_shadow_supported(doc, node, shadow))
         && shadow.radius.is_finite()
         && shadow.radius >= 0.0
         && shadow.spread.is_finite()
@@ -4128,6 +4156,7 @@ impl GpuCanvas {
                     return None;
                 }
                 let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
                 if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
                     return None;
                 }
