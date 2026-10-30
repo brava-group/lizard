@@ -581,6 +581,52 @@ mod tests {
     }
 
     #[test]
+    fn uniform_text_pattern_source_uses_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU text pattern");
+        let page = doc.current_page.ok_or("page missing")?;
+        let mut text = figcraft_doc::TextData::new("L");
+        text.style.font_size = 15.0;
+        let source = doc.create(page, NodeKind::Text(text), "Letter tile", 300.0, 300.0, 16.0, 18.0)?;
+        doc.node_mut(source).ok_or("source missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        let target = doc.create(page, NodeKind::Rectangle, "Pattern", 0.0, 0.0, 64.0, 48.0)?;
+        let mut paint = Paint::solid(Color::WHITE);
+        paint.kind = PaintKind::Pattern(PatternPaint::new(source.0));
+        doc.node_mut(target).ok_or("target missing")?.fills = vec![paint];
+        let area = Rect::new(0.0, 0.0, 64.0, 48.0);
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("GPU text pattern export unavailable")?;
+            let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("CPU text pattern export unavailable")?;
+            let painted = cpu.data().chunks_exact(4).filter(|pixel| pixel[3] > 128).count();
+            if painted == 0 {
+                return Ok(());
+            }
+            let gpu_painted = gpu.data().chunks_exact(4).filter(|pixel| pixel[3] > 128).count();
+            let changed = gpu
+                .data()
+                .chunks_exact(4)
+                .zip(cpu.data().chunks_exact(4))
+                .filter(|(actual, expected)| actual.iter().zip(*expected).any(|(a, b)| a.abs_diff(*b) > 16))
+                .count();
+            let severe = gpu
+                .data()
+                .chunks_exact(4)
+                .zip(cpu.data().chunks_exact(4))
+                .filter(|(actual, expected)| actual.iter().zip(*expected).any(|(a, b)| a.abs_diff(*b) > 32))
+                .count();
+            eprintln!("text pattern scale={scale} CPU painted={painted} GPU painted={gpu_painted} changed={changed} severe={severe}");
+            assert!(gpu_painted.abs_diff(painted) * 100 < painted * 15, "text pattern lost glyph coverage at {scale}x");
+            assert!(changed * 100 < view.width as usize * view.height as usize * 5, "text pattern changed {changed} pixels at {scale}x");
+            assert_eq!(severe, 0, "text pattern has strong differences at {scale}x");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn gpu_pattern_group_source_matches_cpu() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());

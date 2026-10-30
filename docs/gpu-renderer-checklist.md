@@ -82,6 +82,8 @@ the migration concerns rasterization and pixel effects.
     fallback for nested patterns, unsupported masks, effects, and complex text sources.
   - [x] Render a clipped rounded frame used as a pattern source on the GPU; sampled corner and
     center pixels and visually compared the repeated tile against the CPU reference.
+  - [x] Render a uniform-style text node as a repeating pattern source on GPU at 1× and 2×;
+    rich text runs remain guarded.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -450,4 +452,11 @@ the migration concerns rasterization and pixel effects.
   and differed from CPU by more than 16/255 at 43 pixels; the gradient revealed 1873 and
   differed at 41. Text with per-run styles still uses the guarded CPU fallback. All 94
   canvas-GPU tests passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
+  passed across native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: a uniform-style letter tile now renders through the GPU pattern cache. CPU and GPU
+  both covered 264 opaque pixels at 1×; at 2× they covered 656 and 736. Visual inspection showed
+  the same glyph grid with softer GPU edges; no channel differed by more than 32/255. The
+  16/255 difference counts were 132/3072 pixels at 1× and 584/12288 at 2×. Rich text runs
+  still use fallback because separate glyph styles are not yet represented in the cache. All
+  95 canvas-GPU tests passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
   passed across native/WASM, plugins, Clippy, formatting, and layer checks.
