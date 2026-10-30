@@ -11,6 +11,8 @@ pub mod geometry_atlas;
 pub mod gpu_blur;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_glass;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_image_filter;
 pub mod gpu_morph;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_noise;

@@ -23,6 +23,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 - [ ] Support image filters, diamond gradients, pattern fills, shader fills, per-paint blend modes,
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
+  - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
@@ -96,3 +97,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` passed with the drag and GIF work: 59 GPU
   tests and 712 UI tests passed, along with the remaining workspace, WASM, plugin, Clippy,
   format, and layer checks.
+- 2026-10-30: the seven image adjustments now run in a WGSL compute pass; all built-in presets
+  and a combined-control fixture matched CPU samples within 3/255, including semitransparent
+  pixels. An adjusted GIF frame also matched the CPU reference. PNG/GIF decoding still uses the
+  CPU image codec before texture upload. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 60 GPU
+  tests and 712 UI tests, along with native workspace, WASM, plugin, format, Clippy, and layers.

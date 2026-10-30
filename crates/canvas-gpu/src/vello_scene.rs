@@ -18,6 +18,7 @@ use vello_gpu::{RenderSize, RenderTargetConfig, Scene, TargetInit, TextureBindin
 
 use crate::gpu_blur::GpuBlur;
 use crate::gpu_glass::GpuGlass;
+use crate::gpu_image_filter::GpuImageFilter;
 use crate::gpu_morph::GpuMorph;
 use crate::gpu_noise::GpuNoise;
 use crate::gpu_progressive_blur::GpuProgressiveBlur;
@@ -2936,7 +2937,7 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
                 && ((paint.blend != BlendMode::Normal && !gpu_simple_paint_blend_supported(node, paint))
                     || match &paint.kind {
                         PaintKind::Gradient(gradient) => gradient.kind == GradientKind::Diamond,
-                        PaintKind::Image(image) => !image.filters.is_identity(),
+                        PaintKind::Image(_) => false,
                         PaintKind::Pattern(_) | PaintKind::Shader(_) => true,
                         PaintKind::Solid { .. } => false,
                     })
@@ -3497,6 +3498,7 @@ pub struct GpuCanvas {
     gpu_blur: Option<GpuBlur>,
     gpu_morph: Option<GpuMorph>,
     gpu_glass: Option<GpuGlass>,
+    gpu_image_filter: Option<GpuImageFilter>,
     gpu_progressive_blur: Option<GpuProgressiveBlur>,
     gpu_noise: Option<GpuNoise>,
     gpu_texture: Option<GpuTexture>,
@@ -4318,6 +4320,7 @@ impl GpuCanvas {
             gpu_blur: None,
             gpu_morph: None,
             gpu_glass: None,
+            gpu_image_filter: None,
             gpu_progressive_blur: None,
             gpu_noise: None,
             gpu_texture: None,
@@ -4866,8 +4869,9 @@ impl GpuCanvas {
                     continue;
                 }
                 let data = doc.images.get(&img.image);
-                let Some(pm) = figcraft_render::images::frame_at(&img.image, data, &img.filters, doc.color_profile, time)
-                    .or_else(|| figcraft_render::images::get(&img.image, data, &img.filters, doc.color_profile))
+                let raw_filters = figcraft_color::ImageFilters::NONE;
+                let Some(pm) = figcraft_render::images::frame_at(&img.image, data, &raw_filters, doc.color_profile, time)
+                    .or_else(|| figcraft_render::images::get(&img.image, data, &raw_filters, doc.color_profile))
                 else {
                     continue;
                 };
@@ -4889,9 +4893,18 @@ impl GpuCanvas {
                     wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(pm.width() * 4), rows_per_image: Some(pm.height()) },
                     texture.size(),
                 );
-                self.image_bindings.insert(id, texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                let filtered = if img.filters.is_identity() {
+                    None
+                } else {
+                    let filter = self.gpu_image_filter.get_or_insert_with(|| GpuImageFilter::new(&self.device));
+                    Some(filter.submit(&self.device, &self.queue, &texture, &img.filters))
+                };
+                self.image_bindings.insert(id, filtered.as_ref().unwrap_or(&texture).create_view(&wgpu::TextureViewDescriptor::default()));
                 self.image_info.insert(key, ImageInfo { id, width, height, region: None });
                 self.image_textures.push(texture);
+                if let Some(filtered) = filtered {
+                    self.image_textures.push(filtered);
+                }
                 count += 1;
             }
         }

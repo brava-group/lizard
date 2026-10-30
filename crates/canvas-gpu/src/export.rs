@@ -138,7 +138,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_color::{Color, Paint};
+    use figcraft_color::{Color, ImageFilters, ImageScaleMode, Paint, PaintKind};
     use figcraft_doc::{ImageData, NodeKind};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
@@ -195,6 +195,68 @@ mod tests {
             let gpu = render_area_gpu_at(&doc, &[id], Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, time).ok_or("animated GPU export unavailable")?;
             let pixel = gpu.pixel(2, 2).ok_or("GIF sample missing")?;
             assert_eq!([pixel.red(), pixel.green(), pixel.blue()], expected, "time={time}");
+        }
+        if let Some(Paint { kind: PaintKind::Image(image), .. }) = doc.node_mut(id).and_then(|node| node.fills.first_mut()) {
+            image.filters.saturation = -1.0;
+        }
+        let gpu = render_area_gpu_at(&doc, &[id], Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, 0.15).ok_or("adjusted animated GPU export unavailable")?;
+        let cpu = figcraft_render::render_node_at(&doc, id, 1.0, 0.15).ok_or("animated CPU reference unavailable")?;
+        let actual = gpu.pixel(2, 2).ok_or("adjusted GIF sample missing")?;
+        let expected = cpu.pixel(2, 2).ok_or("adjusted CPU GIF sample missing")?;
+        for (actual, expected) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
+            assert!(actual.abs_diff(expected) <= 3, "adjusted animated frame differs from CPU reference");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn image_adjustments_match_cpu_reference_on_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut image = RgbaImage::new(8, 8);
+        for y in 0..8 {
+            for x in 0..8 {
+                let color = match (x >= 4, y >= 4) {
+                    (false, false) => [180, 90, 40, 255],
+                    (true, false) => [45, 170, 210, 255],
+                    (false, true) => [225, 205, 70, 255],
+                    (true, true) => [110, 35, 175, 128],
+                };
+                image.put_pixel(x, y, image::Rgba(color));
+            }
+        }
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+        let mut doc = Document::new("GPU image adjustments");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Image", 0.0, 0.0, 8.0, 8.0)?;
+        let hash = "adjusted-image-test".to_string();
+        doc.images.insert(hash.clone(), ImageData { bytes: Arc::new(bytes), width: 8, height: 8 });
+        doc.node_mut(id).ok_or("image node missing")?.fills = vec![Paint::image(hash, ImageScaleMode::Fill)];
+        let area = Rect::new(0.0, 0.0, 8.0, 8.0);
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 8, height: 8 };
+        let all_controls =
+            ImageFilters { exposure: 0.3, contrast: -0.25, saturation: 0.4, temperature: -0.3, tint: 0.2, highlights: -0.4, shadows: 0.25 };
+        for (name, filters) in ImageFilters::PRESETS.iter().map(|(name, _, filters)| (*name, *filters)).chain([("all", all_controls)]) {
+            if let Some(Paint { kind: PaintKind::Image(image), .. }) = doc.node_mut(id).and_then(|node| node.fills.first_mut()) {
+                image.filters = filters;
+            }
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected");
+            let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("adjusted GPU image unavailable")?;
+            let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("adjusted CPU image unavailable")?;
+            for (x, y) in [(1, 1), (6, 1), (1, 6), (6, 6)] {
+                let actual = gpu.pixel(x, y).ok_or("GPU image sample missing")?;
+                let expected = cpu.pixel(x, y).ok_or("CPU image sample missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 3, "{name} at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
         }
         Ok(())
     }
