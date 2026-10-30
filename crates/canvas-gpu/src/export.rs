@@ -1,13 +1,14 @@
 //! Native raster exports use the same Vello scene and ordered backdrop compositor as the editor
 //! when its effects are supported. Other exports use the CPU renderer.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use figcraft_doc::{Document, EffectKind, NodeId};
 use figcraft_geom::Rect;
 use figcraft_render::{Pixmap, View};
 
-use crate::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
+use crate::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_on_page_in_view, has_unhandled_effects_with_cached_noise_in_view};
 
 type DevicePair = (wgpu::Device, wgpu::Queue);
 
@@ -128,19 +129,16 @@ fn render_area_gpu_internal(doc: &Document, ids: &[NodeId], area: Rect, scale: f
         return None;
     }
     let view = View { origin: (x0, y0), scale, width: width as u32, height: height as u32 };
-    if view.width > 4096 || view.height > 4096 {
-        let halo = effect_tile_halo(doc, scale)?;
-        return render_tiled(&view, halo, |tile| render_area_gpu_internal(doc, ids, tile.page_rect(), scale, time, screen));
-    }
     let page = doc.page_of(*ids.first()?)?;
     if ids.iter().any(|id| *id == page || doc.page_of(*id) != Some(page)) {
         return None;
     }
-    let unsupported_subtree = doc.nodes().any(|node| {
-        ids.iter().any(|id| *id == node.id || doc.is_ancestor(*id, node.id))
-            && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_)))
-    });
-    if unsupported_subtree || has_unhandled_effects_with_cached_noise_in_view(doc, &view, true) {
+    let selected = selected_export_document(doc, page, ids)?;
+    if view.width > 4096 || view.height > 4096 {
+        let halo = effect_tile_halo(&selected, scale)?;
+        return render_tiled(&view, halo, |tile| render_area_gpu_internal(doc, ids, tile.page_rect(), scale, time, screen));
+    }
+    if has_unhandled_effects_with_cached_noise_in_view(&selected, &view, true) {
         return None;
     }
     let (device, queue) = DEVICE.get_or_init(|| GpuCanvas::new(1, 1).ok().map(|canvas| canvas.device_queue())).as_ref()?;
@@ -148,9 +146,14 @@ fn render_area_gpu_internal(doc: &Document, ids: &[NodeId], area: Rect, scale: f
         return None;
     }
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native raster export".into(), view.width, view.height);
-    canvas.register_images_at_scale(doc, time, view.scale).ok()?;
-    canvas.prepare_static_effects(doc).ok()?;
-    canvas.render_export_roots(doc, ids, &view).ok()?;
+    canvas.register_images_at_scale(&selected, time, view.scale).ok()?;
+    canvas.prepare_static_effects(&selected).ok()?;
+    let backdrops = BackdropIndex::new(&selected, page);
+    if backdrops.visible_ids(&view).is_empty() {
+        canvas.render_export_roots(&selected, &selected.node(page)?.children, &view).ok()?;
+    } else {
+        canvas.render_with_backdrop_blurs_indexed_rgba(&selected, page, &view, [0.0; 4], &backdrops).ok()?;
+    }
     if screen {
         canvas.convert_for_presentation(doc.color_profile);
     }
@@ -158,6 +161,41 @@ fn render_area_gpu_internal(doc: &Document, ids: &[NodeId], area: Rect, scale: f
     let mut pixmap = Pixmap::new(view.width, view.height)?;
     pixmap.data_mut().copy_from_slice(&pixels);
     Some(pixmap)
+}
+
+fn selected_export_document(doc: &Document, page: NodeId, ids: &[NodeId]) -> Option<Document> {
+    let roots = ids.iter().copied().filter(|id| !ids.iter().any(|other| other != id && doc.is_ancestor(*other, *id))).collect::<Vec<_>>();
+    let mut kept: HashSet<_> = roots.iter().flat_map(|id| doc.subtree(*id)).collect();
+    let pattern_sources = kept
+        .iter()
+        .filter_map(|id| doc.node(*id))
+        .flat_map(|node| {
+            let regions = match &node.kind {
+                figcraft_doc::NodeKind::Vector { network } => {
+                    network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>()
+                }
+                _ => Vec::new(),
+            };
+            node.fills.iter().chain(&node.strokes).chain(regions).filter_map(|paint| match &paint.kind {
+                figcraft_color::PaintKind::Pattern(fill) => Some(NodeId(fill.source)),
+                _ => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    for source in pattern_sources {
+        kept.extend(doc.subtree(source));
+    }
+    let mut selected = doc.clone();
+    for id in selected.ids().collect::<Vec<_>>() {
+        if id != page
+            && !kept.contains(&id)
+            && let Some(node) = selected.node_mut(id)
+        {
+            node.visible = false;
+        }
+    }
+    selected.node_mut(page)?.children = roots;
+    Some(selected)
 }
 
 /// Render a page for CLI PNG/JPEG/WebP exports, retaining its background alpha and effect order.
@@ -177,7 +215,7 @@ fn render_page_gpu_internal(doc: &Document, page: NodeId, view: &View, screen: b
         figcraft_doc::NodeKind::Page { .. } => [0.0; 4],
         _ => return None,
     };
-    if view.width == 0 || view.height == 0 || has_unhandled_effects_with_cached_noise_in_view(doc, view, true) {
+    if view.width == 0 || view.height == 0 || has_unhandled_effects_on_page_in_view(doc, page, view, true) {
         return None;
     }
     if view.width > 4096 || view.height > 4096 {
@@ -212,7 +250,7 @@ fn render_page_gpu_internal(doc: &Document, page: NodeId, view: &View, screen: b
 mod tests {
     use super::*;
     use figcraft_color::{
-        Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
+        BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
     };
     use figcraft_doc::{Blur, BlurType, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use image::codecs::gif::{GifEncoder, Repeat};
@@ -424,6 +462,36 @@ mod tests {
                 let b = expected.pixel(x - 1968, y).ok_or("crop sample missing")?;
                 for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
                     assert!(one.abs_diff(two) <= 8, "glass seam at ({x},{y}): wide={a:?} crop={b:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_selected_backdrops_keep_gpu_tile_seam() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide selected backdrop export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let dark = doc.create(page, NodeKind::Rectangle, "Dark selected backdrop", 0.0, 0.0, 2048.0, 128.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Selected pane", 2016.0, 24.0, 80.0, 80.0)?;
+        doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(1.0, 1.0, 1.0, 0.1))];
+        for effect in [EffectKind::BackgroundBlur(Blur::uniform(8.0)), EffectKind::Glass(Glass::default())] {
+            doc.node_mut(pane).ok_or("pane missing")?.effects = vec![Effect { kind: effect, visible: true }];
+            let wide = Rect::new(0.0, 0.0, 4200.0, 128.0);
+            let actual = render_area_gpu(&doc, &[dark, pane], wide, 1.0).ok_or("wide selected GPU backdrop unavailable")?;
+            let crop = Rect::new(1872.0, 0.0, 2256.0, 128.0);
+            let expected = render_area_gpu(&doc, &[dark, pane], crop, 1.0).ok_or("selected GPU crop unavailable")?;
+            for y in [36, 48, 64, 80, 92] {
+                for x in 2024..2080 {
+                    let a = actual.pixel(x, y).ok_or("wide sample missing")?;
+                    let b = expected.pixel(x - 1872, y).ok_or("crop sample missing")?;
+                    for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                        assert!(one.abs_diff(two) <= 8, "selected backdrop seam at ({x},{y}): wide={a:?} crop={b:?}");
+                    }
                 }
             }
         }
@@ -1028,15 +1096,35 @@ mod tests {
     }
 
     #[test]
-    fn backdrop_effects_keep_cpu_export() -> Result<(), Box<dyn std::error::Error>> {
-        let mut doc = Document::new("backdrop export");
+    fn selected_backdrop_exports_use_gpu_and_ignore_outside_layers() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("selected backdrop export");
         let page = doc.current_page.ok_or("page missing")?;
-        let id = doc.create(page, NodeKind::Rectangle, "Glass", 8.0, 8.0, 40.0, 40.0)?;
-        doc.node_mut(id)
-            .ok_or("glass node missing")?
-            .effects
-            .push(figcraft_doc::Effect { kind: EffectKind::Glass(Default::default()), visible: true });
-        assert!(render_area_gpu(&doc, &[id], Rect::new(0.0, 0.0, 64.0, 64.0), 1.0).is_none());
+        let outside = doc.create(page, NodeKind::Rectangle, "Outside selection", 0.0, 0.0, 100.0, 100.0)?;
+        let node = doc.node_mut(outside).ok_or("outside missing")?;
+        node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        node.blend = BlendMode::PlusDarker;
+        let dark = doc.create(page, NodeKind::Rectangle, "Selected backdrop", 0.0, 0.0, 50.0, 100.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Selected blur", 20.0, 20.0, 60.0, 60.0)?;
+        let node = doc.node_mut(pane).ok_or("blur pane missing")?;
+        node.fills.clear();
+        node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let area = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let selected = render_area_gpu(&doc, &[dark, pane], area, 1.0).ok_or("selected GPU backdrop unavailable")?;
+        let reference = figcraft_render::render_area(&doc, &[dark, pane], area, 1.0).ok_or("selected CPU backdrop unavailable")?;
+        for x in [10, 35, 47, 53, 65, 90] {
+            let a = selected.pixel(x, 50).ok_or("GPU sample missing")?;
+            let b = reference.pixel(x, 50).ok_or("CPU sample missing")?;
+            for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                assert!(one.abs_diff(two) <= 24, "selected blur at x={x}: GPU={a:?} CPU={b:?}");
+            }
+        }
+        let glass = doc.create(page, NodeKind::Rectangle, "Selected glass", 8.0, 8.0, 40.0, 40.0)?;
+        doc.node_mut(glass).ok_or("glass missing")?.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        assert!(render_area_gpu(&doc, &[glass], area, 1.0).is_some());
         Ok(())
     }
 

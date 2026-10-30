@@ -44,6 +44,8 @@ the migration concerns rasterization and pixel effects.
     browser WebGPU; keep unsupported siblings and their backdrop effects guarded.
   - [x] Route Focus/solo groups with a supported backdrop blur or glass through the ordered GPU
     compositor; sibling layers outside the focused subtree no longer force its CPU fallback.
+  - [x] Scope the normal native/browser GPU capability check to the displayed page. An
+    unsupported blend at the same coordinates on another page no longer forces CPU rendering.
   - [ ] Move selected outlines combined with sibling backdrop effects and remaining mixed view
     modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
@@ -114,10 +116,12 @@ the migration concerns rasterization and pixel effects.
   - [x] Tile wide page and selection exports containing GPU noise or texture scatter. Cropped
     GPU renders matched every pixel across both 2048 px tile boundaries in a 4200 px fixture.
   - [x] Tile wide pages with uniform background blur or glass using a conservative backdrop
-    margin. GPU crop comparisons across the seam stayed within 8/255; selected-layer exports
-    with backdrop effects still need the ordered page context.
+    margin. GPU crop comparisons across the seam stayed within 8/255.
   - [x] Tile wide page and selection exports with progressive layer blur, plus wide pages with
     progressive background blur. GPU crop comparisons across the seam stayed within 8/255.
+  - [x] Export a selected subtree with supported background blur or glass through an isolated
+    GPU page, preserving its transparent background and selected paint order. The wide selected
+    export matched GPU crops across the tile seam for both effects.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
@@ -387,3 +391,17 @@ the migration concerns rasterization and pixel effects.
   maximum radius supplies the conservative halo. Selected-layer backdrop exports remain open.
   `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 88 canvas-GPU tests and 718 UI tests, plus
   native workspace, WASM, plugin, Clippy, formatting and layer checks.
+- 2026-10-30: selected-layer exports now build a temporary page containing just the selected
+  roots and send any supported backdrop effect to the ordered GPU compositor over transparent
+  clear. A selected blur matched sampled CPU pixels within 24/255 despite an unsupported sibling
+  elsewhere on the page; selected glass also rendered on GPU. A 4200 × 128 selection with blur
+  and glass matched direct GPU crops around the 2048 px seam within 8/255. Pattern sources
+  referenced by selected layers remain visible to their GPU paint even when outside the selected
+  roots; all four pattern export tests passed after that correction. Complex backdrop stacks
+  still need broader coverage.
+- 2026-10-30: native, browser WebGPU, and page export capability checks now ignore nodes on
+  other pages. A two-page fixture with an unsupported blend on the hidden page passed, as did
+  the selected backdrop and pattern export tests. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0
+  cargo xtask ci` passed with 90 canvas-GPU tests, 721 UI tests, native/WASM, plugins, Clippy,
+  formatting, and layer checks. A parallel run had one unrelated timing-sensitive UI test
+  failure; the test passed in isolation and in the serial full run.

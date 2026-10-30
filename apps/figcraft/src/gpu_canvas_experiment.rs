@@ -8,7 +8,7 @@ use std::time::Duration;
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene, make_scene_with_images,
+    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene, make_scene_with_images,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -88,7 +88,7 @@ impl GpuCanvasExperiment {
         gesture_active: bool,
         proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
-        if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur) {
+        if self.direct_force || !has_unhandled_effects_on_page_in_view(&doc, page, view, self.direct_cached_blur) {
             return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb, false, None, None);
         }
         if !self.direct_fallback_logged {
@@ -411,7 +411,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || (!self.direct_force && has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur)) {
+        if self.disabled || (!self.direct_force && has_unhandled_effects_on_page_in_view(&doc, page, view, self.direct_cached_blur)) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, true, None, None) {

@@ -3461,6 +3461,38 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
     has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &HashSet::new())
 }
 
+/// Only the rendered page can require a fallback. Other pages may occupy the same document
+/// coordinates, but none of their paints or effects enter this scene.
+pub fn has_unhandled_effects_on_page_in_view(doc: &Document, page: NodeId, view: &View, cached_noise: bool) -> bool {
+    if doc.pages.len() <= 1 {
+        return has_unhandled_effects_with_cached_noise_in_view(doc, view, cached_noise);
+    }
+    let kept: HashSet<_> = doc.subtree(page).into_iter().collect();
+    let excluded = doc.ids().filter(|id| !kept.contains(id)).collect();
+    has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
+}
+
+#[cfg(test)]
+mod page_capability_tests {
+    use super::*;
+
+    #[test]
+    fn another_page_does_not_force_cpu_for_the_visible_page() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("independent GPU pages");
+        let first = doc.current_page.ok_or("first page missing")?;
+        let second = doc.add_page("Other page");
+        let unsupported = doc.create(second, NodeKind::Rectangle, "Unsupported blend", 0.0, 0.0, 64.0, 64.0)?;
+        doc.node_mut(unsupported).ok_or("blend node missing")?.blend = BlendMode::PlusDarker;
+        let visible = doc.create(first, NodeKind::Rectangle, "Visible GPU shape", 0.0, 0.0, 64.0, 64.0)?;
+        doc.node_mut(visible).ok_or("visible shape missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.7, 0.3, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 64 };
+        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        assert!(!has_unhandled_effects_on_page_in_view(&doc, first, &view, true));
+        assert!(has_unhandled_effects_on_page_in_view(&doc, second, &view, true));
+        Ok(())
+    }
+}
+
 /// Selected outline roots replace their entire subtrees, so those paints and effects cannot
 /// require a CPU fallback. All other visible nodes keep the normal capability check.
 pub fn has_unhandled_effects_except_outlined_in_view(doc: &Document, view: &View, cached_noise: bool, outlined: &[NodeId]) -> bool {

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_view,
-    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene,
+    has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -97,7 +97,7 @@ impl WebGpuCanvas {
         } else if let Some(id) = focus {
             has_unhandled_effects_in_focused_subtree(&doc, view, true, id)
         } else {
-            has_unhandled_effects_with_cached_noise_in_view(render_doc, view, true)
+            has_unhandled_effects_on_page_in_view(render_doc, page, view, true)
         };
         if view.width == 0
             || view.height == 0
