@@ -56,6 +56,20 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Render only the focused subtree at its document-space position.
+    fn focus_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _focus: NodeId,
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1126,7 +1140,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
         && !ds.view.outlines_selection
-        && ds.focused().is_none()
+        && !(ds.focused().is_some() && (ds.view.outlines || ds.view.pixel_preview_scale().is_some()))
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
     {
@@ -1134,7 +1148,9 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         // that document on the GPU as well, keeping the visible caret/underline as egui overlays.
         let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
-        let texture = if ds.view.outlines {
+        let texture = if let Some(focus) = ds.focused() {
+            backend.focus_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
+        } else if ds.view.outlines {
             let options = figcraft_render::Outline {
                 hidden: ds.view.outline_hidden,
                 bounds: ds.view.outline_bounds,
@@ -2872,6 +2888,53 @@ mod stale_render_tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn focus_view_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::Mutex;
+
+        struct Capture(Arc<Mutex<Vec<NodeId>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn focus_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                focus: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push(focus);
+                None
+            }
+        }
+
+        let mut session = Session::new();
+        let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
+        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let mut ui = Ui::new(session);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        ui.app.session.ds_mut()?.focus = Some(id);
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "focus capture lock poisoned")?;
+        assert!(captured.contains(&id));
+        Ok(())
+    }
 
     #[test]
     fn pixel_preview_offers_a_low_resolution_view_to_the_gpu() -> Result<(), Box<dyn std::error::Error>> {

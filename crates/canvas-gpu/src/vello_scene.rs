@@ -3122,6 +3122,38 @@ mod outline_gpu_tests {
     }
 }
 
+#[cfg(test)]
+mod focus_gpu_tests {
+    use super::*;
+
+    #[test]
+    fn focused_root_keeps_its_world_position_and_hides_siblings() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 50) else { return Ok(()) };
+        let mut doc = Document::new("GPU focus");
+        let page = doc.current_page.ok_or("page missing")?;
+        let first = doc.create(page, NodeKind::Rectangle, "first", 10.0, 10.0, 20.0, 20.0)?;
+        let second = doc.create(page, NodeKind::Rectangle, "second", 60.0, 10.0, 20.0, 20.0)?;
+        doc.node_mut(first).ok_or("first missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        doc.node_mut(second).ok_or("second missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 50 };
+        let scene = gpu.make_scene_roots(&doc, &[second], &view);
+        let background = Color::DEFAULT_PAGE;
+        gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
+        let pixels = gpu.pixels()?;
+        fn pixel(source: &[u8], x: usize, y: usize) -> &[u8] {
+            &source[(y * 100 + x) * 4..(y * 100 + x) * 4 + 4]
+        }
+        assert!(pixel(&pixels, 20, 20)[..3].iter().all(|channel| *channel > 200), "sibling leaked into focus view");
+        assert!(pixel(&pixels, 70, 20)[2] > 240 && pixel(&pixels, 70, 20)[0] < 20, "focused root moved or disappeared");
+        let reference =
+            render_view(&doc, page, &view, &Options { solo: Some(second), ..Default::default() }).ok_or("CPU focus reference unavailable")?;
+        for (x, y) in [(20, 20), (70, 20)] {
+            assert!(pixel(&pixels, x, y)[..3].iter().zip(&pixel(reference.data(), x, y)[..3]).all(|(a, b)| a.abs_diff(*b) < 8));
+        }
+        Ok(())
+    }
+}
+
 fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Affine, scale: f64, options: figcraft_render::Outline, depth: usize) {
     if depth > 64 {
         return;
@@ -4427,9 +4459,9 @@ impl GpuCanvas {
         self.make_scene_document_with_backdrops(doc, page, view, None)
     }
 
-    /// Render selected page roots to a transparent target for raster export. The caller checks
-    /// that the selected subtree has no backdrop dependency or unsupported paint operation.
-    pub fn render_export_roots(&mut self, doc: &Document, roots: &[NodeId], view: &View) -> Result<(), Box<dyn Error>> {
+    /// Build a scene for selected roots, preserving their world transforms and descendants.
+    /// Callers must check any backdrop dependency before using this outside export.
+    pub fn make_scene_roots(&self, doc: &Document, roots: &[NodeId], view: &View) -> Scene {
         let mut scene = Scene::new(view.width as u16, view.height as u16);
         let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
         let world = Rect::new(
@@ -4448,6 +4480,13 @@ impl GpuCanvas {
         for id in roots {
             draw_node(&mut scene, doc, *id, camera, world, 0, Some(&self.image_info), None, cached, (view.width as u16, view.height as u16));
         }
+        scene
+    }
+
+    /// Render selected page roots to a transparent target for raster export. The caller checks
+    /// that the selected subtree has no backdrop dependency or unsupported paint operation.
+    pub fn render_export_roots(&mut self, doc: &Document, roots: &[NodeId], view: &View) -> Result<(), Box<dyn Error>> {
+        let scene = self.make_scene_roots(doc, roots, view);
         self.render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
         self.wait()
     }

@@ -22,6 +22,7 @@ pub struct GpuCanvasExperiment {
     direct_pixel_preview: bool,
     direct_proof: bool,
     direct_outline: Option<figcraft_render::Outline>,
+    direct_focus: Option<NodeId>,
     direct_size: (u32, u32),
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
@@ -45,6 +46,7 @@ impl GpuCanvasExperiment {
             direct_pixel_preview: false,
             direct_proof: false,
             direct_outline: None,
+            direct_focus: None,
             direct_size: (0, 0),
             direct_document: None,
             direct_page: None,
@@ -83,7 +85,7 @@ impl GpuCanvasExperiment {
         proof_srgb: bool,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.direct_force || !has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur) {
-            return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb, false);
+            return self.update_direct(doc, page, view, clear, gesture_active, proof_srgb, false, None);
         }
         if !self.direct_fallback_logged {
             eprintln!("Lizard direct Vello GPU: view contains unsupported effects; using the CPU canvas");
@@ -101,6 +103,7 @@ impl GpuCanvasExperiment {
         gesture_active: bool,
         proof_srgb: bool,
         pixel_preview: bool,
+        focus: Option<NodeId>,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.direct_outline.take().is_some() {
             self.direct_document = None;
@@ -145,8 +148,10 @@ impl GpuCanvasExperiment {
             self.register_direct_view(profile, pixel_preview)?;
         }
         let changed_doc = !self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc));
+        let changed_focus = self.direct_focus != focus;
         let camera = (view.origin.0, view.origin.1, view.scale);
         if !changed_doc
+            && !changed_focus
             && self.direct_page == Some(page)
             && self.direct_camera == Some(camera)
             && self.direct_proof != proof_srgb
@@ -162,7 +167,7 @@ impl GpuCanvasExperiment {
         }
         let finish_preview = self.direct_provisional_effects && !gesture_active;
         let backdrops = BackdropIndex::new(&doc, page);
-        if !backdrops.visible_ids(view).is_empty() {
+        if focus.is_none() && !backdrops.visible_ids(view).is_empty() {
             if changed_doc {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
@@ -170,7 +175,7 @@ impl GpuCanvasExperiment {
                     canvas.prepare_static_effects(&doc)?;
                 }
             }
-            if changed_doc || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
+            if changed_doc || changed_focus || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 canvas.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
                 canvas.convert_for_presentation_with_proof(profile, proof_srgb);
@@ -178,11 +183,12 @@ impl GpuCanvasExperiment {
                 self.direct_page = Some(page);
                 self.direct_camera = Some(camera);
                 self.direct_proof = proof_srgb;
+                self.direct_focus = None;
                 self.direct_provisional_effects = false;
             }
             return Ok(self.direct_texture_id);
         }
-        if changed_doc || self.direct_page != Some(page) || self.direct_camera != Some(camera) || finish_preview {
+        if changed_doc || changed_focus || self.direct_page != Some(page) || self.direct_camera != Some(camera) || finish_preview {
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing after creation")?;
             if changed_doc {
                 let translated = self.direct_cached_blur
@@ -235,7 +241,9 @@ impl GpuCanvasExperiment {
                 canvas.prepare_static_effects(&doc)?;
                 self.direct_provisional_effects = false;
             }
-            let scene = if self.direct_cached_blur {
+            let scene = if let Some(focus) = focus {
+                canvas.make_scene_roots(&doc, &[focus], view)
+            } else if self.direct_cached_blur {
                 canvas.make_scene_document(&doc, page, view)
             } else {
                 make_scene_with_images(&doc, page, view, Some(canvas.image_info()))
@@ -249,6 +257,7 @@ impl GpuCanvasExperiment {
             self.direct_page = Some(page);
             self.direct_camera = Some(camera);
             self.direct_proof = proof_srgb;
+            self.direct_focus = focus;
         }
         Ok(self.direct_texture_id)
     }
@@ -310,11 +319,42 @@ impl GpuCanvasExperiment {
         self.direct_page = Some(page);
         self.direct_camera = Some(camera);
         self.direct_outline = Some(options);
+        self.direct_focus = None;
         Ok(self.direct_texture_id)
     }
 }
 
 impl CanvasGpuBackend for GpuCanvasExperiment {
+    fn focus_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled
+            || has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur)
+            || !BackdropIndex::new(&doc, page).visible_ids(view).is_empty()
+        {
+            return None;
+        }
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, false, Some(focus)) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU focus view failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
     fn pixel_texture(
         &mut self,
         doc: Arc<Document>,
@@ -327,7 +367,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         if self.disabled || (!self.direct_force && has_unhandled_effects_with_cached_noise_in_view(&doc, view, self.direct_cached_blur)) {
             return None;
         }
-        match self.update_direct(doc, page, view, clear, false, proof_srgb, true) {
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, true, None) {
             Ok(texture) => {
                 self.direct_current = texture.is_some();
                 texture

@@ -10,7 +10,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 | Entry point | Current CPU work | GPU completion condition |
 | --- | --- | --- |
-| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for selected outlines, pixel preview, focus view, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
+| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for selected outlines, combined view modes, focus with backdrop effects, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
 | `crates/ui-egui/src/canvas.rs` | Cropped creation preview and eyedropper when GPU cannot present | Current GPU scene covers supported interactions; no CPU scene raster on a working GPU |
 | `crates/canvas-gpu/src/vello_scene.rs` | CPU effect tile fallback in the GPU compositor | GPU passes support every effect stack and region, including large surfaces |
 | `crates/engine/src/cmd/file.rs` | WASM export and unsupported native export fallback | Browser asynchronous WebGPU readback and complete GPU export coverage |
@@ -35,7 +35,8 @@ the migration concerns rasterization and pixel effects.
     hidden-layer contours, group bounds, and light strokes over a dark background.
   - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
     with nearest-neighbor sampling on native and browser WebGPU.
-  - [ ] Move selected-only outlines and focus/solo rendering to the GPU path.
+  - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
+  - [ ] Move selected-only outlines and Focus combined with backdrop effects or other view modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -126,6 +127,13 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: Focus/solo for a supported subtree now builds the native and browser WebGPU
+  scene from that root while preserving its document-space transform. A pixel fixture matched
+  the CPU Focus reference at both the focused shape and an omitted sibling. The UI dispatch
+  test confirmed that it forwards the focused node ID. Native and WASM checks and
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed. Focus with backdrop effects and combined
+  outline/Pixel Preview modes remain guarded.
 
 - 2026-10-30: Pixel Preview now asks the GPU backend for a low-resolution view and presents it
   with nearest-neighbor sampling; the mode switch re-registers the texture with the appropriate

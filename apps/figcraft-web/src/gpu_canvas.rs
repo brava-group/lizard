@@ -22,6 +22,7 @@ pub struct WebGpuCanvas {
     pixel_preview: bool,
     proof_srgb: bool,
     outline: Option<figcraft_render::Outline>,
+    focus: Option<NodeId>,
     document: Option<Arc<Document>>,
     page: Option<NodeId>,
     camera: Option<(f64, f64, f64)>,
@@ -41,6 +42,7 @@ impl WebGpuCanvas {
             pixel_preview: false,
             proof_srgb: false,
             outline: None,
+            focus: None,
             document: None,
             page: None,
             camera: None,
@@ -72,6 +74,7 @@ impl WebGpuCanvas {
         gesture_active: bool,
         proof_srgb: bool,
         pixel_preview: bool,
+        focus: Option<NodeId>,
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         if self.outline.take().is_some() {
             self.document = None;
@@ -110,12 +113,13 @@ impl WebGpuCanvas {
             self.register_view(profile, pixel_preview)?;
         }
         let changed_doc = !self.document.as_ref().is_some_and(|old| Arc::ptr_eq(old, &doc));
+        let changed_focus = self.focus != focus;
         let camera = (view.origin.0, view.origin.1, view.scale);
-        if !changed_doc && self.page == Some(page) && self.camera == Some(camera) && self.proof_srgb == proof_srgb {
+        if !changed_doc && !changed_focus && self.page == Some(page) && self.camera == Some(camera) && self.proof_srgb == proof_srgb {
             return Ok(self.texture);
         }
         let canvas = self.canvas.as_mut().ok_or("WebGPU canvas missing before render")?;
-        if !changed_doc && self.page == Some(page) && self.camera == Some(camera) {
+        if !changed_doc && !changed_focus && self.page == Some(page) && self.camera == Some(camera) {
             canvas.convert_for_presentation_with_proof(profile, proof_srgb);
             self.proof_srgb = proof_srgb;
             return Ok(self.texture);
@@ -138,8 +142,9 @@ impl WebGpuCanvas {
             }
         }
         let backdrops = BackdropIndex::new(&doc, page);
-        if backdrops.visible_ids(view).is_empty() {
-            let scene = canvas.make_scene_document(&doc, page, view);
+        if focus.is_some() || backdrops.visible_ids(view).is_empty() {
+            let scene =
+                if let Some(focus) = focus { canvas.make_scene_roots(&doc, &[focus], view) } else { canvas.make_scene_document(&doc, page, view) };
             canvas.render_submit_with_clear(&scene, clear)?;
         } else {
             if changed_doc {
@@ -153,6 +158,7 @@ impl WebGpuCanvas {
         self.page = Some(page);
         self.camera = Some(camera);
         self.proof_srgb = proof_srgb;
+        self.focus = focus;
         Ok(self.texture)
     }
 
@@ -212,11 +218,42 @@ impl WebGpuCanvas {
         self.page = Some(page);
         self.camera = Some(camera);
         self.outline = Some(options);
+        self.focus = None;
         Ok(self.texture)
     }
 }
 
 impl CanvasGpuBackend for WebGpuCanvas {
+    fn focus_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        focus: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled
+            || has_unhandled_effects_with_cached_noise_in_view(&doc, view, true)
+            || !BackdropIndex::new(&doc, page).visible_ids(view).is_empty()
+        {
+            return None;
+        }
+        match self.update(doc, page, view, clear, false, proof_srgb, false, Some(focus)) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU focus view failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
     fn pixel_texture(
         &mut self,
         doc: Arc<Document>,
@@ -229,7 +266,7 @@ impl CanvasGpuBackend for WebGpuCanvas {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, false, proof_srgb, true) {
+        match self.update(doc, page, view, clear, false, proof_srgb, true, None) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture
@@ -282,7 +319,7 @@ impl CanvasGpuBackend for WebGpuCanvas {
         if self.disabled {
             return None;
         }
-        match self.update(doc, page, view, clear, gesture_active, proof_srgb, false) {
+        match self.update(doc, page, view, clear, gesture_active, proof_srgb, false, None) {
             Ok(texture) => {
                 self.current_gpu_rendered = texture.is_some();
                 texture
