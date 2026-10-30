@@ -46,8 +46,9 @@ the migration concerns rasterization and pixel effects.
     compositor; sibling layers outside the focused subtree no longer force its CPU fallback.
   - [x] Scope the normal native/browser GPU capability check to the displayed page. An
     unsupported blend at the same coordinates on another page no longer forces CPU rendering.
-  - [ ] Move selected outlines combined with sibling backdrop effects and remaining mixed view
-    modes to GPU.
+  - [x] Combine selected outlines with supported sibling backdrop blur or glass on native and
+    browser WebGPU, preserving paint order even when the selected contour is behind the pane.
+  - [ ] Move the remaining mixed view modes and unsupported backdrop stacks to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -405,3 +406,10 @@ the migration concerns rasterization and pixel effects.
   cargo xtask ci` passed with 90 canvas-GPU tests, 721 UI tests, native/WASM, plugins, Clippy,
   formatting, and layer checks. A parallel run had one unrelated timing-sensitive UI test
   failure; the test passed in isolation and in the serial full run.
+- 2026-10-30: the ordered GPU backdrop compositor now accepts selected outlines for both its
+  prefix and final scene. A fixture selecting either the shape below a blur pane or the pane
+  itself matched the CPU reference at the sampled pixels within 24/255; selected outlines under
+  glass matched within 40/255. Native and browser selected-outline routes use that compositor
+  when a supported sibling backdrop is visible. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0
+  cargo xtask ci` passed with 91 canvas-GPU tests and 721 UI tests, plus native/WASM, plugins,
+  Clippy, formatting, and layer checks.

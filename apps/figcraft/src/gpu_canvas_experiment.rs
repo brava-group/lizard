@@ -1,13 +1,12 @@
 //! Native GPU canvas. Unsupported content falls back to the ordinary CPU canvas.
 
-use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_view,
+    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
     has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene, make_scene_with_images,
 };
 use figcraft_color::{Color, ColorProfile};
@@ -179,7 +178,7 @@ impl GpuCanvasExperiment {
         let focused = focus.filter(|_| focus_has_backdrop).and_then(|id| focused_document(&doc, page, id));
         let render_doc = focused.as_ref().unwrap_or(&doc);
         let backdrops = if focused.is_some() { BackdropIndex::new(render_doc, page) } else { page_backdrops };
-        if selected_outlines.is_none() && (focus.is_none() || focus_has_backdrop) && !backdrops.visible_ids(view).is_empty() {
+        if (focus.is_none() || focus_has_backdrop) && !backdrops.visible_ids(view).is_empty() {
             if changed_doc {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
@@ -189,14 +188,18 @@ impl GpuCanvasExperiment {
             }
             if changed_doc || changed_focus || changed_selection || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
-                canvas.render_with_backdrop_blurs_indexed(render_doc, page, view, clear, &backdrops)?;
+                if let Some((selected, options)) = selected_outlines {
+                    canvas.render_with_backdrop_blurs_indexed_outlined(render_doc, page, view, clear, &backdrops, selected, options)?;
+                } else {
+                    canvas.render_with_backdrop_blurs_indexed(render_doc, page, view, clear, &backdrops)?;
+                }
                 canvas.convert_for_presentation_with_proof(profile, proof_srgb);
                 self.direct_document = Some(doc);
                 self.direct_page = Some(page);
                 self.direct_camera = Some(camera);
                 self.direct_proof = proof_srgb;
                 self.direct_focus = focus;
-                self.direct_selected_outlines = None;
+                self.direct_selected_outlines = selected_outlines.map(|(ids, options)| (ids.to_vec(), options));
                 self.direct_provisional_effects = false;
             }
             return Ok(self.direct_texture_id);
@@ -354,11 +357,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        let outlined_ids: HashSet<_> = selected.iter().flat_map(|id| doc.subtree(*id)).collect();
-        if self.disabled
-            || has_unhandled_effects_except_outlined_in_view(&doc, view, self.direct_cached_blur, selected)
-            || BackdropIndex::new(&doc, page).visible_ids(view).iter().any(|id| !outlined_ids.contains(id))
-        {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, self.direct_cached_blur, selected) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, false, None, Some((selected, options))) {

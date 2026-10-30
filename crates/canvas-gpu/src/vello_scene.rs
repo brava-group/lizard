@@ -3331,6 +3331,52 @@ mod selected_outline_gpu_tests {
     use super::*;
 
     #[test]
+    fn selected_outline_and_sibling_backdrop_keep_paint_order_on_gpu() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 80) else { return Ok(()) };
+        let mut doc = Document::new("outlined GPU backdrop");
+        let page = doc.current_page.ok_or("page missing")?;
+        let base = doc.create(page, NodeKind::Rectangle, "dark base", 0.0, 0.0, 50.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let selected = doc.create(page, NodeKind::Rectangle, "selected red shape", 22.0, 20.0, 30.0, 40.0)?;
+        doc.node_mut(selected).ok_or("selection missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        let pane = doc.create(page, NodeKind::Rectangle, "background blur", 40.0, 10.0, 40.0, 60.0)?;
+        let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
+        pane_node.fills.clear();
+        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 80 };
+        let clear = [245.0 / 255.0; 3];
+        let index = BackdropIndex::new(&doc, page);
+        for outlined in [[selected], [pane]] {
+            assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &outlined));
+            gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &index, &outlined, figcraft_render::Outline::default())?;
+            let actual = gpu.pixels()?;
+            let reference = render_view(&doc, page, &view, &Options { outlined: outlined.to_vec(), ..Default::default() })
+                .ok_or("CPU outline backdrop reference unavailable")?;
+            for (x, y) in [(35, 30), (45, 30), (55, 40), (75, 40), (90, 40)] {
+                let offset = ((y * view.width + x) * 4) as usize;
+                for channel in 0..3 {
+                    assert!(actual[offset + channel].abs_diff(reference.data()[offset + channel]) <= 24, "outline={outlined:?} at ({x},{y})");
+                }
+            }
+        }
+        doc.node_mut(pane).ok_or("pane missing for glass")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        let glass_index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[selected]));
+        gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &glass_index, &[selected], figcraft_render::Outline::default())?;
+        let glass_actual = gpu.pixels()?;
+        let glass_reference = render_view(&doc, page, &view, &Options { outlined: vec![selected], ..Default::default() })
+            .ok_or("CPU outlined glass reference unavailable")?;
+        for (x, y) in [(35, 30), (45, 30), (55, 40), (75, 40), (90, 40)] {
+            let offset = ((y * view.width + x) * 4) as usize;
+            for channel in 0..3 {
+                assert!(glass_actual[offset + channel].abs_diff(glass_reference.data()[offset + channel]) <= 40, "outlined glass at ({x},{y})");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn selected_outline_excludes_only_its_replaced_subtree_from_gpu_capability() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU selected outline capability");
         let page = doc.current_page.ok_or("page missing")?;
@@ -3489,6 +3535,7 @@ mod page_capability_tests {
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         assert!(!has_unhandled_effects_on_page_in_view(&doc, first, &view, true));
         assert!(has_unhandled_effects_on_page_in_view(&doc, second, &view, true));
+        assert!(!has_unhandled_effects_except_outlined_on_page_in_view(&doc, first, &view, true, &[visible]));
         Ok(())
     }
 }
@@ -3497,6 +3544,21 @@ mod page_capability_tests {
 /// require a CPU fallback. All other visible nodes keep the normal capability check.
 pub fn has_unhandled_effects_except_outlined_in_view(doc: &Document, view: &View, cached_noise: bool, outlined: &[NodeId]) -> bool {
     let excluded = outlined.iter().flat_map(|id| doc.subtree(*id)).collect();
+    has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
+}
+
+pub fn has_unhandled_effects_except_outlined_on_page_in_view(
+    doc: &Document,
+    page: NodeId,
+    view: &View,
+    cached_noise: bool,
+    outlined: &[NodeId],
+) -> bool {
+    let mut excluded: HashSet<_> = outlined.iter().flat_map(|id| doc.subtree(*id)).collect();
+    if doc.pages.len() > 1 {
+        let kept: HashSet<_> = doc.subtree(page).into_iter().collect();
+        excluded.extend(doc.ids().filter(|id| !kept.contains(id)));
+    }
     has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
 }
 
@@ -4803,6 +4865,18 @@ impl GpuCanvas {
     }
 
     fn make_scene_document_with_backdrops(&self, doc: &Document, page: NodeId, view: &View, backdrops: Option<&HashMap<NodeId, ImageInfo>>) -> Scene {
+        self.make_scene_document_with_backdrops_and_outlines(doc, page, view, backdrops, &[], figcraft_render::Outline::default())
+    }
+
+    fn make_scene_document_with_backdrops_and_outlines(
+        &self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        backdrops: Option<&HashMap<NodeId, ImageInfo>>,
+        outlined: &[NodeId],
+        outline_options: figcraft_render::Outline,
+    ) -> Scene {
         make_scene_with_cached_layers(
             doc,
             page,
@@ -4815,8 +4889,8 @@ impl GpuCanvas {
                 inner_shadows: Some(&self.inner_shadows),
                 noise: Some(&self.noise_effects),
                 texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
-                outlined: &[],
-                outline_options: figcraft_render::Outline::default(),
+                outlined,
+                outline_options,
             },
         )
     }
@@ -5141,6 +5215,33 @@ impl GpuCanvas {
         clear: [f32; 4],
         index: &BackdropIndex,
     ) -> Result<(f64, usize), Box<dyn Error>> {
+        self.render_with_backdrop_blurs_indexed_outlined_rgba(doc, page, view, clear, index, &[], figcraft_render::Outline::default())
+    }
+
+    /// Draw selected roots as contours while other roots retain their ordered GPU backdrops.
+    pub fn render_with_backdrop_blurs_indexed_outlined(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 3],
+        index: &BackdropIndex,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Result<(f64, usize), Box<dyn Error>> {
+        self.render_with_backdrop_blurs_indexed_outlined_rgba(doc, page, view, [clear[0], clear[1], clear[2], 1.0], index, outlined, options)
+    }
+
+    fn render_with_backdrop_blurs_indexed_outlined_rgba(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 4],
+        index: &BackdropIndex,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let world = Rect::new(
             view.origin.0,
@@ -5149,7 +5250,9 @@ impl GpuCanvas {
             view.origin.1 + f64::from(view.height) / view.scale,
         );
         let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing")?;
-        let matching: Vec<_> = index.candidates.iter().filter(|(_, _, bounds, _)| bounds.intersect(world).area() > 0.0).collect();
+        let outlined_ids: HashSet<_> = outlined.iter().flat_map(|id| doc.subtree(*id)).collect();
+        let matching: Vec<_> =
+            index.candidates.iter().filter(|(id, _, bounds, _)| !outlined_ids.contains(id) && bounds.intersect(world).area() > 0.0).collect();
         let candidates: Vec<_> = matching.iter().map(|(id, radius, _, _)| (*id, *radius)).collect();
         let has_custom_backdrop = candidates.iter().any(|(id, _)| {
             doc.node(*id).is_some_and(|node| {
@@ -5161,12 +5264,17 @@ impl GpuCanvas {
             })
         });
         if candidates.is_empty() {
-            let scene = make_scene_with_images(doc, page, view, Some(&self.image_info));
+            let scene = if outlined.is_empty() {
+                make_scene_with_images(doc, page, view, Some(&self.image_info))
+            } else {
+                self.make_scene_document_with_backdrops_and_outlines(doc, page, view, None, outlined, options)
+            };
             self.render_with_clear_rgba(&scene, clear)?;
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
-        if std::env::var_os("LIZARD_GPU_GROUP_ISOLATION").is_some()
+        if outlined.is_empty()
+            && std::env::var_os("LIZARD_GPU_GROUP_ISOLATION").is_some()
             && !has_custom_backdrop
             && candidates.len() == 1
             && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
@@ -5176,12 +5284,15 @@ impl GpuCanvas {
             return result;
         }
         if matching.iter().any(|(_, _, _, requires_cpu)| *requires_cpu) {
+            if !outlined.is_empty() {
+                return Err("selected outline contains an unsupported backdrop".into());
+            }
             let tile = render_view(doc, page, view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect fallback failed")?;
             self.upload_premul(tile.data())?;
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()));
         }
-        if std::env::var_os("LIZARD_GPU_SEGMENT").is_some() && !has_custom_backdrop && !candidates.is_empty() {
+        if outlined.is_empty() && std::env::var_os("LIZARD_GPU_SEGMENT").is_some() && !has_custom_backdrop && !candidates.is_empty() {
             let result = self.render_segmented_backdrops(doc, page, view, clear, &candidates);
             self.release_temporary_textures();
             return result;
@@ -5209,7 +5320,7 @@ impl GpuCanvas {
                     width: u32::from(width),
                     height: u32::from(height),
                 };
-                let prefix = self.make_scene_document_with_backdrops(&beneath, page, &cropped_view, None);
+                let prefix = self.make_scene_document_with_backdrops_and_outlines(&beneath, page, &cropped_view, None, outlined, options);
                 let mut surface =
                     self.glass_prefix_canvas.take().unwrap_or_else(|| Box::new(Self::shared_with(self, u32::from(width), u32::from(height))));
                 if surface.texture.width() != u32::from(width) || surface.texture.height() != u32::from(height) {
@@ -5227,7 +5338,7 @@ impl GpuCanvas {
                 self.glass_prefix_canvas = Some(surface);
                 texture
             } else {
-                let prefix = self.make_scene_document_with_backdrops(&beneath, page, view, Some(&backdrops));
+                let prefix = self.make_scene_document_with_backdrops_and_outlines(&beneath, page, view, Some(&backdrops), outlined, options);
                 self.render_submit_with_clear_rgba(&prefix, clear)?;
                 if let Some(node) = doc.node(id).filter(|node| gpu_glass_shadow_supported(doc, node)) {
                     let mut shadow_scene = Scene::new(view.width as u16, view.height as u16);
@@ -5358,7 +5469,7 @@ impl GpuCanvas {
             blur_ms += stage.elapsed().as_secs_f64() * 1000.0;
         }
         let stage = Instant::now();
-        let scene = self.make_scene_document_with_backdrops(doc, page, view, Some(&backdrops));
+        let scene = self.make_scene_document_with_backdrops_and_outlines(doc, page, view, Some(&backdrops), outlined, options);
         let final_result = self.render_with_clear_rgba(&scene, clear);
         for id in dynamic_glass_layers {
             self.layer_blurs.remove(&id);

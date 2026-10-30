@@ -1,12 +1,11 @@
 //! Browser WebGPU canvas. The WebGL2 runner keeps the ordinary CPU fallback.
 
-use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_view,
+    BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_on_page_in_view,
     has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view, make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
@@ -93,7 +92,7 @@ impl WebGpuCanvas {
         let focused = focus.filter(|_| focus_has_backdrop).and_then(|id| focused_document(&doc, page, id));
         let render_doc = focused.as_ref().unwrap_or(&doc);
         let unsupported = if let Some((selected, _)) = selected_outlines {
-            has_unhandled_effects_except_outlined_in_view(&doc, view, true, selected)
+            has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected)
         } else if let Some(id) = focus {
             has_unhandled_effects_in_focused_subtree(&doc, view, true, id)
         } else {
@@ -169,7 +168,7 @@ impl WebGpuCanvas {
             }
         }
         let backdrops = if focused.is_some() { BackdropIndex::new(render_doc, page) } else { page_backdrops };
-        if selected_outlines.is_some() || focus.is_some() && !focus_has_backdrop || backdrops.visible_ids(view).is_empty() {
+        if focus.is_some() && !focus_has_backdrop || backdrops.visible_ids(view).is_empty() {
             let scene = if let Some((selected, options)) = selected_outlines {
                 canvas.make_scene_selected_outlines(&doc, page, view, selected, options)
             } else if let Some(focus) = focus {
@@ -183,7 +182,11 @@ impl WebGpuCanvas {
                 canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
                 canvas.prepare_static_effects(&doc)?;
             }
-            canvas.render_with_backdrop_blurs_indexed(render_doc, page, view, clear, &backdrops)?;
+            if let Some((selected, options)) = selected_outlines {
+                canvas.render_with_backdrop_blurs_indexed_outlined(render_doc, page, view, clear, &backdrops, selected, options)?;
+            } else {
+                canvas.render_with_backdrop_blurs_indexed(render_doc, page, view, clear, &backdrops)?;
+            }
         }
         canvas.convert_for_presentation_with_proof(profile, proof_srgb);
         self.document = Some(doc);
@@ -269,11 +272,7 @@ impl CanvasGpuBackend for WebGpuCanvas {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        let outlined_ids: HashSet<_> = selected.iter().flat_map(|id| doc.subtree(*id)).collect();
-        if self.disabled
-            || has_unhandled_effects_except_outlined_in_view(&doc, view, true, selected)
-            || BackdropIndex::new(&doc, page).visible_ids(view).iter().any(|id| !outlined_ids.contains(id))
-        {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected) {
             return None;
         }
         match self.update(doc, page, view, clear, false, proof_srgb, false, None, Some((selected, options))) {
