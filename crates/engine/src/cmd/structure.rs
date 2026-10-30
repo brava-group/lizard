@@ -747,7 +747,7 @@ fn rasterize(s: &mut Session, p: &Value) -> Result<Value> {
     let mut out = Vec::new();
     for i in ids {
         let doc = s.doc()?;
-        let Some(pix) = figcraft_render::render_node(doc, i, scale) else { continue };
+        let Some(pix) = super::file::render_node_pixels(doc, i, scale) else { continue };
         let png = figcraft_render::encode_png(&pix).map_err(EngineError::Other)?;
         let b = figcraft_render::export_bounds(doc, i).unwrap_or_default();
         let parent = doc.get(i)?.parent.ok_or_else(|| bad("object.rasterize", "page"))?;

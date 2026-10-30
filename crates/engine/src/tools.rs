@@ -2068,7 +2068,7 @@ impl Session {
         let ds = self.ds()?;
         let doc = ds.doc.clone();
         let view = figcraft_render::View { origin: (ev.x, ev.y), scale: ev.zoom.max(0.01), width: 1, height: 1 };
-        let Some(pix) = figcraft_render::render_view(&doc, ds.page, &view, &Default::default()) else { return Ok(()) };
+        let Some(pix) = crate::cmd::file::render_page_pixels(&doc, ds.page, &view) else { return Ok(()) };
         let rgba = figcraft_render::to_rgba8(&pix);
         let c = figcraft_color::Color::from_rgba8(
             rgba.first().copied().unwrap_or(0),

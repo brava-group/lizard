@@ -364,8 +364,9 @@ fn confirm(app: &mut FigApp) {
 fn render_background(doc: &Document, page: NodeId, id: NodeId, bounds: Rect, size: [usize; 2]) -> Option<egui::ColorImage> {
     let (width, height) = (u32::try_from(size[0]).ok()?, u32::try_from(size[1]).ok()?);
     let view = figcraft_render::View { origin: (bounds.x0, bounds.y0), scale: f64::from(width) / bounds.width(), width, height };
-    let opts = figcraft_render::Options { skip: vec![id], ..Default::default() };
-    let pixels = figcraft_render::render_view(doc, page, &view, &opts)?;
+    let mut background = doc.clone();
+    background.node_mut(id)?.visible = false;
+    let pixels = figcraft_engine::cmd::file::render_page_pixels(&background, page, &view)?;
     Some(crate::render_worker::screen_image(&pixels, doc.color_profile))
 }
 
@@ -464,32 +465,8 @@ fn quantize_palette(image: &image::RgbaImage, count: usize) -> Vec<[u8; 3]> {
 }
 
 fn raster_svg(svg: &str, width: u32, height: u32) -> Result<egui::ColorImage, String> {
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|error| error.to_string())?;
-    let mut pixels = tiny_skia::Pixmap::new(width, height).ok_or("cannot allocate vector preview")?;
-    fn paths(nodes: &[usvg::Node], pixels: &mut tiny_skia::Pixmap) {
-        for node in nodes {
-            match node {
-                usvg::Node::Group(group) => paths(group.children(), pixels),
-                usvg::Node::Path(path) => {
-                    let Some(fill) = path.fill() else { continue };
-                    let usvg::Paint::Color(color) = fill.paint() else { continue };
-                    let mut paint = tiny_skia::Paint::default();
-                    paint.set_color_rgba8(color.red, color.green, color.blue, (fill.opacity().get() * 255.0).round() as u8);
-                    paint.anti_alias = true;
-                    if let Some(data) = path.data().clone().transform(path.abs_transform()) {
-                        let rule = match fill.rule() {
-                            usvg::FillRule::EvenOdd => tiny_skia::FillRule::EvenOdd,
-                            usvg::FillRule::NonZero => tiny_skia::FillRule::Winding,
-                        };
-                        pixels.fill_path(&data, &paint, rule, tiny_skia::Transform::identity(), None);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    paths(tree.root().children(), &mut pixels);
-    Ok(egui::ColorImage::from_rgba_premultiplied([width as usize, height as usize], pixels.data()))
+    let pixels = figcraft_engine::cmd::file::render_svg_preview_pixels(svg, width, height)?;
+    Ok(crate::render_worker::screen_image(&pixels, figcraft_color::ColorProfile::Srgb))
 }
 
 #[cfg(test)]

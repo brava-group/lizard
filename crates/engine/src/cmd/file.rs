@@ -936,6 +936,15 @@ pub fn render_node_pixels(doc: &Document, id: NodeId, scale: f64) -> Option<figc
     render_export_area(doc, &[id], figcraft_render::export_bounds(doc, id)?, scale)
 }
 
+/// Preview a traced SVG through the same vector importer and raster path as document content.
+pub fn render_svg_preview_pixels(svg: &str, width: u32, height: u32) -> std::result::Result<figcraft_render::Pixmap, String> {
+    let mut doc = Document::new("Vector preview");
+    let page = doc.current_page.ok_or("preview page missing")?;
+    let vector = figcraft_svg::import_svg(&mut doc, svg.as_bytes(), page, 0.0, 0.0, "Vector preview").map_err(|error| error.to_string())?;
+    let area = figcraft_geom::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+    render_export_area(&doc, &[vector], area, 1.0).ok_or_else(|| "cannot render vector preview".into())
+}
+
 /// The page area exporting `ids` with `setting` covers: what they paint (a clipping frame's own
 /// area), or their boxes with "include bounding box" and for slices. Hidden layers paint nothing,
 /// so they take no room next to visible ones (a hidden-only export keeps its own area).

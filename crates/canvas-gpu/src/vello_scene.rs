@@ -669,6 +669,9 @@ mod effect_capability_tests {
 
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = false;
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Multiply;
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+
+        doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::PlusDarker;
         assert!(has_unhandled_effects_in_view(&doc, &view));
 
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Normal;

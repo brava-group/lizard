@@ -14,6 +14,39 @@ type DevicePair = (wgpu::Device, wgpu::Queue);
 
 static DEVICE: OnceLock<Option<DevicePair>> = OnceLock::new();
 
+const EXPORT_TILE_SIDE: u32 = 2048;
+const MAX_EXPORT_PIXELS: u64 = 64_000_000;
+
+fn render_tiled(view: &View, mut render: impl FnMut(&View) -> Option<Pixmap>) -> Option<Pixmap> {
+    if u64::from(view.width) * u64::from(view.height) > MAX_EXPORT_PIXELS {
+        return None;
+    }
+    let mut result = Pixmap::new(view.width, view.height)?;
+    let output_stride = usize::try_from(view.width).ok()?.checked_mul(4)?;
+    for y in (0..view.height).step_by(EXPORT_TILE_SIDE as usize) {
+        for x in (0..view.width).step_by(EXPORT_TILE_SIDE as usize) {
+            let tile_view = View {
+                origin: (view.origin.0 + f64::from(x) / view.scale, view.origin.1 + f64::from(y) / view.scale),
+                scale: view.scale,
+                width: (view.width - x).min(EXPORT_TILE_SIDE),
+                height: (view.height - y).min(EXPORT_TILE_SIDE),
+            };
+            let tile = render(&tile_view)?;
+            let tile_stride = usize::try_from(tile_view.width).ok()?.checked_mul(4)?;
+            for row in 0..tile_view.height {
+                let source = usize::try_from(row).ok()?.checked_mul(tile_stride)?;
+                let target = usize::try_from(y + row).ok()?.checked_mul(output_stride)?.checked_add(usize::try_from(x).ok()?.checked_mul(4)?)?;
+                result.data_mut().get_mut(target..target + tile_stride)?.copy_from_slice(tile.data().get(source..source + tile_stride)?);
+            }
+        }
+    }
+    Some(result)
+}
+
+fn simple_tiling_supported(doc: &Document) -> bool {
+    doc.nodes().all(|node| !node.visible || node.effects.iter().all(|effect| !effect.visible))
+}
+
 /// Rasterize selected page roots at export resolution on the native GPU. `None` means that the
 /// faithful CPU renderer should handle this export instead.
 pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -> Option<Pixmap> {
@@ -26,11 +59,13 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
     }
     let width = ((area.width() * scale - 1e-6).ceil()).max(1.0);
     let height = ((area.height() * scale - 1e-6).ceil()).max(1.0);
-    // This ceiling bounds transient render targets and keeps the legacy large-export path intact.
-    if !width.is_finite() || !height.is_finite() || width > 4096.0 || height > 4096.0 {
+    if !width.is_finite() || !height.is_finite() || width > f64::from(u32::MAX) || height > f64::from(u32::MAX) {
         return None;
     }
     let view = View { origin: (x0, y0), scale, width: width as u32, height: height as u32 };
+    if view.width > 4096 || view.height > 4096 {
+        return simple_tiling_supported(doc).then(|| render_tiled(&view, |tile| render_area_gpu(doc, ids, tile.page_rect(), scale)))?;
+    }
     let page = doc.page_of(*ids.first()?)?;
     if ids.iter().any(|id| *id == page || doc.page_of(*id) != Some(page)) {
         return None;
@@ -67,11 +102,12 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
     if doc.color_profile != ColorProfile::Srgb
         || view.width == 0
         || view.height == 0
-        || view.width > 4096
-        || view.height > 4096
         || has_unhandled_effects_with_cached_noise_in_view(doc, view, true)
     {
         return None;
+    }
+    if view.width > 4096 || view.height > 4096 {
+        return simple_tiling_supported(doc).then(|| render_tiled(view, |tile| render_page_gpu(doc, page, tile)))?;
     }
     let (device, queue) = DEVICE.get_or_init(|| GpuCanvas::new(1, 1).ok().map(|canvas| canvas.device_queue())).as_ref()?;
     if view.width.max(view.height) > device.limits().max_texture_dimension_2d {
@@ -169,6 +205,27 @@ mod tests {
             for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
                 assert!(a.abs_diff(b) <= 2);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_gpu_exports_keep_pixels_at_tile_edges() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Wide", 0.0, 0.0, 4104.0, 24.0)?;
+        doc.node_mut(id).ok_or("shape missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.6, 0.9, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4104, height: 24 };
+        let gpu_page = render_page_gpu(&doc, page, &view).ok_or("wide GPU page unavailable")?;
+        let cpu_page = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU page unavailable")?;
+        let gpu_area = render_area_gpu(&doc, &[id], Rect::new(0.0, 0.0, 4104.0, 24.0), 1.0).ok_or("wide GPU selection unavailable")?;
+        let cpu_area = figcraft_render::render_area(&doc, &[id], Rect::new(0.0, 0.0, 4104.0, 24.0), 1.0).ok_or("wide CPU selection unavailable")?;
+        for x in [0, 2047, 2048, 4095, 4096, 4103] {
+            assert_eq!(gpu_page.pixel(x, 12), cpu_page.pixel(x, 12), "page x={x}");
+            assert_eq!(gpu_area.pixel(x, 12), cpu_area.pixel(x, 12), "area x={x}");
         }
         Ok(())
     }

@@ -20,6 +20,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 - [ ] Support image filters, diamond gradients, pattern fills, shader fills, per-paint blend modes,
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
+  - [x] Render the Vello-supported blend modes on simple leaf nodes and individual paints.
+  - [ ] Implement Plus Darker and blends on complex groups/effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
   and glass on rotated/skewed shapes and groups, including multiple shadows.
@@ -33,8 +35,14 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [x] Use GPU by default for compatible native PNG/JPEG/WebP and clipboard raster exports.
 - [ ] Export all page and layer selections, including masks, backdrop effects, P3, and surfaces
   larger than 4096 px, through the GPU with correct alpha, clipping, and effect order.
+  - [x] Tile wide or tall effect-free page and selection exports, retaining alpha and seam pixels.
+  - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
+  - [x] Route static previews, vectorization backgrounds, static presentation textures,
+    rasterize, eyedropper, and MCP renders through the shared GPU-first renderer.
+  - [x] Render the vectorization SVG preview through imported vectors and GPU-first export.
+  - [ ] Render animated presentation textures on GPU.
 - [ ] Use the same GPU effect path when SVG/PDF must embed rasterized effects or masks; keep
   their ordinary vector drawing as vector output.
 
@@ -66,3 +74,11 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   Sampled GPU/CPU pixels passed for every supported mode; Plus Darker remains guarded because
   Peniko has no corresponding operator. Seven GPU export tests passed. Complex groups and
   effect stacks with blends still need coverage.
+- 2026-10-30: effect-free exports wider than 4096 px now render in GPU tiles; a 4104 px page
+  and selection passed CPU comparisons at both sides of each tile seam. Static presentation,
+  vectorization background and SVG preview, rasterize, and eyedropper now call the shared GPU-first
+  path. All three image-vectorization tests passed after switching the preview to the document's
+  SVG importer.
+- 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` passed after updating the blend capability
+  regression to expect GPU Multiply and a guarded Plus Darker fallback. Native workspace tests,
+  711 UI tests, WASM checks, plugin checks, Clippy, formatting, and crate layers all passed.

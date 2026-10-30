@@ -970,7 +970,12 @@ impl Presenter {
             return Some(t.clone());
         }
         let bounds = figcraft_render::export_bounds(doc, id)?;
-        let pix = figcraft_render::render_node_at(doc, id, texture_scale(ctx, bounds, px_scale), t)?;
+        let scale = texture_scale(ctx, bounds, px_scale);
+        let pix = if clock.is_none() {
+            figcraft_engine::cmd::file::render_node_pixels(doc, id, scale)?
+        } else {
+            figcraft_render::render_node_at(doc, id, scale, t)?
+        };
         let img = crate::render_worker::screen_image(&pix, doc.color_profile);
         let tex = ctx.load_texture(format!("present-{}", id.0), img, egui::TextureOptions::LINEAR);
         let ft = FrameTex { key, tex, bounds };
@@ -2826,7 +2831,7 @@ fn draw(p: &mut Presenter, painter: &egui::Painter, ctx: &egui::Context, l: &Lay
                 let tmp = smart_interpolate(&a.from_doc, a.from_frame, &l.disp, p.current, e);
                 let bounds = figcraft_render::export_bounds(&tmp, p.current);
                 if let Some(b) = bounds
-                    && let Some(pix) = figcraft_render::render_node(&tmp, p.current, texture_scale(ctx, b, px))
+                    && let Some(pix) = figcraft_engine::cmd::file::render_node_pixels(&tmp, p.current, texture_scale(ctx, b, px))
                 {
                     let img = crate::render_worker::screen_image(&pix, tmp.color_profile);
                     let tex = match &mut p.anim_tex {
