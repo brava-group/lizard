@@ -5285,7 +5285,6 @@ impl GpuCanvas {
         self.texture_pixels(&self.texture)
     }
 
-    #[cfg(test)]
     pub fn presented_pixels(&self) -> Result<Vec<u8>, Box<dyn Error>> {
         let texture = self.gpu_color_profile.as_ref().map_or(&self.texture, GpuColorProfile::texture);
         self.texture_pixels(texture)

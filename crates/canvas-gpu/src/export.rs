@@ -96,6 +96,20 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
 
 /// Render a selected subtree using animated image frames at `time` seconds.
 pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64, time: f64) -> Option<Pixmap> {
+    render_area_gpu_internal(doc, ids, area, scale, time, false)
+}
+
+/// GPU-rendered selected layers converted to sRGB for native screen textures.
+pub fn render_area_gpu_screen(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -> Option<Pixmap> {
+    render_area_gpu_internal(doc, ids, area, scale, 0.0, true)
+}
+
+/// Screen-ready animated selection at `time` seconds.
+pub fn render_area_gpu_screen_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64, time: f64) -> Option<Pixmap> {
+    render_area_gpu_internal(doc, ids, area, scale, time, true)
+}
+
+fn render_area_gpu_internal(doc: &Document, ids: &[NodeId], area: Rect, scale: f64, time: f64, screen: bool) -> Option<Pixmap> {
     if ids.is_empty() || !scale.is_finite() || scale <= 0.0 {
         return None;
     }
@@ -111,7 +125,7 @@ pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64
     let view = View { origin: (x0, y0), scale, width: width as u32, height: height as u32 };
     if view.width > 4096 || view.height > 4096 {
         let halo = effect_tile_halo(doc, scale)?;
-        return render_tiled(&view, halo, |tile| render_area_gpu_at(doc, ids, tile.page_rect(), scale, time));
+        return render_tiled(&view, halo, |tile| render_area_gpu_internal(doc, ids, tile.page_rect(), scale, time, screen));
     }
     let page = doc.page_of(*ids.first()?)?;
     if ids.iter().any(|id| *id == page || doc.page_of(*id) != Some(page)) {
@@ -132,7 +146,10 @@ pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64
     canvas.register_images_at_scale(doc, time, view.scale).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
     canvas.render_export_roots(doc, ids, &view).ok()?;
-    let pixels = canvas.pixels().ok()?;
+    if screen {
+        canvas.convert_for_presentation(doc.color_profile);
+    }
+    let pixels = if screen { canvas.presented_pixels().ok()? } else { canvas.pixels().ok()? };
     let mut pixmap = Pixmap::new(view.width, view.height)?;
     pixmap.data_mut().copy_from_slice(&pixels);
     Some(pixmap)
@@ -140,6 +157,15 @@ pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64
 
 /// Render a page for CLI PNG/JPEG/WebP exports, retaining its background alpha and effect order.
 pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixmap> {
+    render_page_gpu_internal(doc, page, view, false)
+}
+
+/// GPU-rendered page converted to sRGB for native screen textures.
+pub fn render_page_gpu_screen(doc: &Document, page: NodeId, view: &View) -> Option<Pixmap> {
+    render_page_gpu_internal(doc, page, view, true)
+}
+
+fn render_page_gpu_internal(doc: &Document, page: NodeId, view: &View, screen: bool) -> Option<Pixmap> {
     let page_node = doc.node(page)?;
     let clear = match &page_node.kind {
         figcraft_doc::NodeKind::Page { background, background_visible: true, .. } => [background.r, background.g, background.b, background.a],
@@ -151,7 +177,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
     }
     if view.width > 4096 || view.height > 4096 {
         let halo = effect_tile_halo(doc, view.scale)?;
-        return render_tiled(view, halo, |tile| render_page_gpu(doc, page, tile));
+        return render_tiled(view, halo, |tile| render_page_gpu_internal(doc, page, tile, screen));
     }
     let (device, queue) = DEVICE.get_or_init(|| GpuCanvas::new(1, 1).ok().map(|canvas| canvas.device_queue())).as_ref()?;
     if view.width.max(view.height) > device.limits().max_texture_dimension_2d {
@@ -168,7 +194,10 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
         // capability check above excludes its CPU-only cases before this call.
         canvas.render_with_backdrop_blurs_indexed_rgba(doc, page, view, clear, &backdrops).ok()?;
     }
-    let pixels = canvas.pixels().ok()?;
+    if screen {
+        canvas.convert_for_presentation(doc.color_profile);
+    }
+    let pixels = if screen { canvas.presented_pixels().ok()? } else { canvas.pixels().ok()? };
     let mut pixmap = Pixmap::new(view.width, view.height)?;
     pixmap.data_mut().copy_from_slice(&pixels);
     Some(pixmap)
@@ -608,6 +637,21 @@ mod tests {
                 assert!(a.abs_diff(b) <= 3, "P3 page ({x},{y}): GPU={actual:?}, CPU={expected:?}");
             }
         }
+        let gpu_screen = render_page_gpu_screen(&doc, page, &view).ok_or("P3 GPU screen page unavailable")?;
+        let mut cpu_screen = cpu;
+        figcraft_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
+        for (x, y) in [(2, 2), (16, 16), (36, 16)] {
+            let actual = gpu_screen.pixel(x, y).ok_or("P3 GPU screen pixel missing")?;
+            let expected = cpu_screen.pixel(x, y).ok_or("P3 CPU screen pixel missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 4, "P3 screen page ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+            }
+        }
         let area = Rect::new(8.0, 8.0, 24.0, 24.0);
         let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("P3 GPU selection unavailable")?;
         let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("P3 CPU selection unavailable")?;
@@ -620,6 +664,19 @@ mod tests {
             expected.alpha(),
         ]) {
             assert!(a.abs_diff(b) <= 3, "P3 selection: GPU={actual:?}, CPU={expected:?}");
+        }
+        let gpu_screen = render_area_gpu_screen(&doc, &[id], area, 1.0).ok_or("P3 GPU screen selection unavailable")?;
+        let mut cpu_screen = cpu;
+        figcraft_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
+        let actual = gpu_screen.pixel(8, 8).ok_or("P3 GPU screen selection pixel missing")?;
+        let expected = cpu_screen.pixel(8, 8).ok_or("P3 CPU screen selection pixel missing")?;
+        for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+            expected.red(),
+            expected.green(),
+            expected.blue(),
+            expected.alpha(),
+        ]) {
+            assert!(a.abs_diff(b) <= 4, "P3 screen selection: GPU={actual:?}, CPU={expected:?}");
         }
         Ok(())
     }

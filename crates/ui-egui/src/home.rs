@@ -591,8 +591,8 @@ fn thumbnail(ctx: &egui::Context, template: &Template, background: figcraft_colo
     let (w, h) = (f64::from(CARD_W - 22.0), f64::from(THUMB_H - 22.0));
     let area = figcraft_geom::Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1.min(bounds.y0 + bounds.width() * h / w * 1.5));
     let scale = (w / area.width()).min(h / area.height()) * f64::from(ctx.pixels_per_point());
-    let pix = figcraft_engine::cmd::file::render_export_area(&doc, &frames, area, scale.min(1.0))?;
-    let image = crate::render_worker::screen_image(&pix, doc.color_profile);
+    let pix = figcraft_engine::cmd::file::render_export_area_screen(&doc, &frames, area, scale.min(1.0))?;
+    let image = crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb);
     let texture = ctx.load_texture(format!("template-thumb-{}", template.id), image, egui::TextureOptions::LINEAR);
     Some(Thumb { texture, page: crate::theme::c32(background) })
 }

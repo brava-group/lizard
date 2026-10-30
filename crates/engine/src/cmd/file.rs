@@ -920,6 +920,19 @@ pub fn render_page_pixels(doc: &Document, page: NodeId, view: &figcraft_render::
     figcraft_render::render_view(doc, page, view, &Default::default())
 }
 
+/// Screen-ready sRGB pixels. The native GPU path performs profile conversion before readback.
+pub fn render_page_screen_pixels(doc: &Document, page: NodeId, view: &figcraft_render::View) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_page_gpu_screen(doc, page, view)
+    {
+        return Some(pixmap);
+    }
+    let mut pixmap = figcraft_render::render_view(doc, page, view, &Default::default())?;
+    figcraft_render::to_srgb(&mut pixmap, doc.color_profile);
+    Some(pixmap)
+}
+
 /// Render selected layers at export resolution, retaining a CPU fallback for unhandled content.
 pub fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect, scale: f64) -> Option<figcraft_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -931,9 +944,27 @@ pub fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::R
     figcraft_render::render_area(doc, ids, area, scale)
 }
 
+/// Screen-ready sRGB pixels for a selected subtree, converted on the native GPU when possible.
+pub fn render_export_area_screen(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect, scale: f64) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_area_gpu_screen(doc, ids, area, scale)
+    {
+        return Some(pixmap);
+    }
+    let mut pixmap = figcraft_render::render_area(doc, ids, area, scale)?;
+    figcraft_render::to_srgb(&mut pixmap, doc.color_profile);
+    Some(pixmap)
+}
+
 /// Render one static layer at its export bounds for thumbnails and previews.
 pub fn render_node_pixels(doc: &Document, id: NodeId, scale: f64) -> Option<figcraft_render::Pixmap> {
     render_export_area(doc, &[id], figcraft_render::export_bounds(doc, id)?, scale)
+}
+
+/// Screen-ready static layer pixels; Display P3 conversion stays on the native GPU.
+pub fn render_node_screen_pixels(doc: &Document, id: NodeId, scale: f64) -> Option<figcraft_render::Pixmap> {
+    render_export_area_screen(doc, &[id], figcraft_render::export_bounds(doc, id)?, scale)
 }
 
 /// Render an animated layer at presentation time, using the GPU for supported content.
@@ -946,6 +977,20 @@ pub fn render_node_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) 
         return Some(pixmap);
     }
     figcraft_render::render_node_at(doc, id, scale, time)
+}
+
+/// Screen-ready animated layer at presentation time.
+pub fn render_node_screen_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(area) = figcraft_render::export_bounds(doc, id)
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_area_gpu_screen_at(doc, &[id], area, scale, time)
+    {
+        return Some(pixmap);
+    }
+    let mut pixmap = figcraft_render::render_node_at(doc, id, scale, time)?;
+    figcraft_render::to_srgb(&mut pixmap, doc.color_profile);
+    Some(pixmap)
 }
 
 /// Preview a traced SVG through the same vector importer and raster path as document content.

@@ -366,8 +366,8 @@ fn render_background(doc: &Document, page: NodeId, id: NodeId, bounds: Rect, siz
     let view = figcraft_render::View { origin: (bounds.x0, bounds.y0), scale: f64::from(width) / bounds.width(), width, height };
     let mut background = doc.clone();
     background.node_mut(id)?.visible = false;
-    let pixels = figcraft_engine::cmd::file::render_page_pixels(&background, page, &view)?;
-    Some(crate::render_worker::screen_image(&pixels, doc.color_profile))
+    let pixels = figcraft_engine::cmd::file::render_page_screen_pixels(&background, page, &view)?;
+    Some(crate::render_worker::screen_image(&pixels, figcraft_color::ColorProfile::Srgb))
 }
 
 fn trace(png: &[u8], settings: Settings) -> Result<(String, egui::ColorImage), String> {

@@ -75,7 +75,7 @@ fn render(ctx: &egui::Context, style: &TextStyle, text: &str, ppp: f64) -> Optio
     n.width = w.min(400.0);
     n.height = h.min(60.0);
     doc.insert(n, page, None).ok()?;
-    let pix = figcraft_engine::cmd::file::render_node_pixels(&doc, id, ppp.clamp(1.0, 3.0))?;
+    let pix = figcraft_engine::cmd::file::render_node_screen_pixels(&doc, id, ppp.clamp(1.0, 3.0))?;
     let (pw, ph) = (pix.width() as usize, pix.height() as usize);
     let rgba = figcraft_render::to_rgba8(&pix);
     if rgba.len() != pw * ph * 4 || pw == 0 || ph == 0 {

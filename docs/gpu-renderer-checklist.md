@@ -31,7 +31,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
     to sRGB in a GPU pass.
-  - [ ] Check Display P3 conversion in every secondary preview and browser presentation path.
+  - [x] Convert native secondary previews and presentation textures from Display P3 on GPU
+    before readback, retaining CPU conversion only for the fallback.
+  - [ ] Check Display P3 conversion in the browser presentation path.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
@@ -141,3 +143,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   transform scale. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 70 GPU tests and 712 UI
   tests. An unrelated local-code network test failed once under workspace load and passed both
   alone and on the full retry. Backdrop, progressive, grain, and unbounded effects remain open.
+- 2026-10-30: native screen-ready GPU exports now convert Display P3 before readback. Drag
+  previews, presentation textures, thumbnails, home cards, vectorization backgrounds, and font
+  previews use that path. A P3 page and selected-layer fixture matched CPU screen colors within
+  4/255, including translucent pixels. Browser presentation remains open.

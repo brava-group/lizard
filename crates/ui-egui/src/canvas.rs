@@ -411,15 +411,17 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
             let mut background = (*job_doc).clone();
             let Some(node) = background.node_mut(root) else { return };
             node.visible = false;
-            let Some(pix) = figcraft_engine::cmd::file::render_page_pixels(&background, page, view) else { return };
-            Some(crate::render_worker::screen_image(&pix, background.color_profile))
+            let Some(pix) = figcraft_engine::cmd::file::render_page_screen_pixels(&background, page, view) else { return };
+            Some(crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb))
         } else {
             None
         };
-        let Some(moving) = figcraft_engine::cmd::file::render_export_area(&job_doc, &[root], root_for_job.page_rect(), root_for_job.scale) else {
+        let Some(moving) = figcraft_engine::cmd::file::render_export_area_screen(&job_doc, &[root], root_for_job.page_rect(), root_for_job.scale)
+        else {
             return;
         };
-        let images = (base, crate::render_worker::screen_image(&moving, job_doc.color_profile), started.elapsed().as_secs_f64() * 1000.0);
+        let images =
+            (base, crate::render_worker::screen_image(&moving, figcraft_color::ColorProfile::Srgb), started.elapsed().as_secs_f64() * 1000.0);
         if tx.send(images).is_ok() {
             repaint.request_repaint_of(viewport);
         }
@@ -514,8 +516,8 @@ fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
     let viewport = ctx.viewport_id();
     let (tx, rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new().name("figcraft-drag-detail".into()).spawn(move || {
-        let Some(pix) = figcraft_engine::cmd::file::render_export_area(&source, &[root], view.page_rect(), view.scale) else { return };
-        let image = crate::render_worker::screen_image(&pix, source.color_profile);
+        let Some(pix) = figcraft_engine::cmd::file::render_export_area_screen(&source, &[root], view.page_rect(), view.scale) else { return };
+        let image = crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb);
         if tx.send((view, image)).is_ok() {
             repaint.request_repaint_of(viewport);
         }
