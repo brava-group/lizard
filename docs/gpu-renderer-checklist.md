@@ -81,6 +81,9 @@ the migration concerns rasterization and pixel effects.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
   and glass on rotated/skewed shapes and groups, including multiple shadows.
+  - [x] Support `Noise → Layer Blur` on rotated shapes at 1× and 2× zoom with GPU-only passes.
+  - [ ] Correct `Layer Blur → Noise` on rotated shapes; it remains guarded because the GPU
+    sampling diverges from the CPU reference after the blur pass.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure parity and latency on the icon, a complex multi-frame document, UltraWide/Retina,
@@ -131,6 +134,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: an ordered-stack probe found zero RGB pixels differing by more than 8/255 for
+  rotated `Noise → Layer Blur` at 1× and 2×. Rotated `Layer Blur → Noise` differed in 3,868
+  pixels at 1× and 12,950 at 2×, so its CPU fallback remains active while the matching order
+  enters the GPU path. The existing axis-aligned stack checks still pass.
 
 - 2026-10-30: removed the orthogonal-axis restriction for isolated noise. The existing GPU
   compute pass already maps surface pixels back to local coordinates, and a skewed rectangle at

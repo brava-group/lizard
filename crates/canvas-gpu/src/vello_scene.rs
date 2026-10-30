@@ -974,7 +974,7 @@ mod effect_capability_tests {
                 for scale in [1.0, 2.0] {
                     let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
                     assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
-                    if angle != 0.0 {
+                    if angle != 0.0 && blur_first {
                         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
                         continue;
                     }
@@ -3354,7 +3354,18 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
                 | NodeKind::Vector { .. }
                 | NodeKind::Group
         )
-        && (gpu_axis_aligned(doc, node) || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_))))
+        && (gpu_axis_aligned(doc, node) || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_))) || {
+            let mut blur_seen = false;
+            visible.iter().all(|effect| match &effect.kind {
+                EffectKind::LayerBlur(_) => {
+                    blur_seen = true;
+                    true
+                }
+                EffectKind::Noise(_) => !blur_seen,
+                EffectKind::DropShadow(_) => false,
+                _ => true,
+            })
+        })
         && gpu_isolated_grain_supported(doc, node)
 }
 
