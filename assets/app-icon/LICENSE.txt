@@ -1,8 +1,6 @@
-Lizard app icon (figcraft.svg, figcraft-small.svg and every file derived from them in this
-directory: figcraft-<size>.png, figcraft.ico, hicolor/).
+Lizard app icon (Lizard-new-icon.figcraft and its generated PNG, ICO and hicolor files).
 
-The icon uses the original Lizard navigation logo supplied by the project owner, with a white
-background and black mark. No third-party material. Licensed under either of
+This is original artwork drawn by the project owner in Lizard. Licensed under either of
 
   * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
   * MIT license (https://opensource.org/licenses/MIT)

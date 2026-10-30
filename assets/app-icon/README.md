@@ -1,20 +1,14 @@
 # Lizard app icon
 
-The app icon uses the exact vector mark in `crates/ui-egui/assets/nav-logo.svg`, supplied for
-Lizard's navigation panel by the project owner. It is black on a white background.
+`Lizard-new-icon.figcraft` is the editable source drawn by the project owner in Lizard. Its
+`Lizard New Icon` frame is the finished 1024 × 1024 macOS artwork. It contains the 824 px icon
+body, its transparent margins, gradients, and shadows.
 
-`cargo xtask icon` composes the mark on a 512-unit canvas and renders committed PNGs from 16 to
-1024 px. The macOS `.icns` source has an 824 px rounded tile centred in a transparent 1024 px
-canvas, matching the native Dock icon grid. The Windows and Linux fallback fills its canvas.
-No shadow, highlight or glass effect is baked into either source.
+Run `cargo xtask icon` to render that frame at its native size on a transparent canvas. The command makes
+the committed PNG sizes, Windows ICO and Linux hicolor icons. macOS packaging builds `Lizard.icns`
+from the PNGs. The rendered artwork is used directly, without an additional Icon Composer
+background or glass treatment.
 
-`Lizard.icon/` holds the same black mark as a separate vector layer over a white Icon Composer
-background. macOS packaging compiles it with Xcode's `actool` into `Assets.car` for the native
-Liquid Glass appearance on macOS 26 and newer. The `.icns` stays available for older systems and
-for local builds without `actool`.
-
-The legacy `figcraft-*` asset filenames remain until the remaining packaging paths are migrated.
-`figcraft.svg` is the padded macOS source; `figcraft-small.svg` is the full-size fallback. Both are
-generated from the navigation logo by `cargo xtask icon`.
-
-The icon is original project artwork, licensed under MIT OR Apache-2.0; see `LICENSE.txt`.
+The `figcraft-*` filenames and Linux icon id remain for compatibility with existing packaging.
+`lizard.svg` is the separate README logo. The app icon is original project artwork licensed
+under MIT OR Apache-2.0; see `LICENSE.txt`.

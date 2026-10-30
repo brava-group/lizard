@@ -8,3 +8,7 @@ publish = false
 [dependencies]
 serde_json = { workspace = true }
 figcraft-engine = { workspace = true }
+figcraft-doc = { workspace = true }
+figcraft-format = { workspace = true }
+figcraft-render = { workspace = true }
+image = { workspace = true }

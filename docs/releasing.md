@@ -57,19 +57,15 @@ environment refuses them (0 steps) and no release is created. The `version` inpu
 
 ## The default server
 
-Share ▸ Online uses the server in Preferences, which starts as the public one built into the app
-(`figcraft_engine::live::DEFAULT_SERVER`). Distributions that would rather not ship that default
-set `FIGCRAFT_DEFAULT_SERVER` when building: to their own server's address (`wss://host/`), or to
-nothing for a build with no default, where online sharing stays off until the user enters a
-server (sharing on the local network works either way):
+Share ▸ Online uses the server in Preferences. Lizard builds have no default online server, so
+online sharing stays off until the user enters one (local network sharing still works). A
+distribution can embed its own server address at build time with `LIZARD_DEFAULT_SERVER`:
 
 ```sh
-FIGCRAFT_DEFAULT_SERVER= cargo build --release -p figcraft          # no default server
-FIGCRAFT_DEFAULT_SERVER=wss://design.example.org/ cargo build --release -p figcraft
+LIZARD_DEFAULT_SERVER=wss://design.example.org/ cargo build --release -p figcraft
 ```
 
-The release workflow leaves it unset. The public server's terms are in
-[`online-sharing-terms.md`](online-sharing-terms.md).
+The release workflow leaves it unset. See [online sharing and privacy](online-sharing-terms.md).
 
 ## What gets built
 
@@ -81,7 +77,7 @@ The release workflow leaves it unset. The public server's terms are in
 | Linux riscv64 | `figcraft-<v>-linux-riscv64.tar.gz` (CLI smoke-tested under QEMU; needs glibc ≥ 2.39) | cross-compiled on `ubuntu-24.04` against ports.ubuntu.com riscv64 libraries |
 | FreeBSD 14 x86_64 | `figcraft-<v>-freebsd-x86_64.tar.gz` | FreeBSD 14.3 VM on `ubuntu-latest` |
 | Web | `figcraft-web-<v>.zip` (static site; [`packaging/web/README.md`](../packaging/web/README.md)) | `ubuntu-latest` |
-| Server, Linux x86_64 / aarch64 | `figcraft-server-<v>-linux-<arch>.tar.gz` (the collaboration server; [`server.md`](server.md)) | `ubuntu-22.04` / `ubuntu-22.04-arm` |
+| Server, Linux x86_64 / aarch64 | `lizard-server-<v>-linux-<arch>.tar.gz` (the collaboration server; [`server.md`](server.md)) | `ubuntu-22.04` / `ubuntu-22.04-arm` |
 
 `figcraft-cli` ships in every desktop package (and its own macOS zip) when `apps/figcraft-cli`
 is in the workspace: `packaging/env.sh` sets `BINS`/`HAS_CLI` from that, and `package.ps1`,
@@ -90,7 +86,7 @@ is in the workspace: `packaging/env.sh` sets `BINS`/`HAS_CLI` from that, and `pa
 `figcraft --version` prints the version and, in CI builds, the commit (`FIGCRAFT_BUILD_SHA`,
 read by `apps/figcraft/build.rs`).
 
-**The collaboration server** (`apps/figcraft-server`, binary `figcraft-server`, see
+**The collaboration server** (`apps/figcraft-server`, binary `lizard-server`, see
 [`server.md`](server.md)) is built by the `server` job with `packaging/server/package.sh`: a
 headless binary, so not part of `BINS` (which every desktop package installs) and no installer,
 desktop file or fonts. Its archive holds the binary, the licences, `server.md` and the deployment

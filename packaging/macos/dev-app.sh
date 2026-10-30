@@ -17,18 +17,6 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns -o "$APP/Contents/Resources/Lizard.icns" "$ICONSET"
 rm -f "$APP/Contents/Resources/Assets.car"
-if xcrun --find actool >/dev/null 2>&1; then
-  APPLE_ICON="$ROOT/target/icon/apple"
-  mkdir -p "$APPLE_ICON"
-  if xcrun actool "$ICONS/Lizard.icon" --app-icon Lizard --compile "$APPLE_ICON" \
-    --output-partial-info-plist "$APPLE_ICON/partial.plist" \
-    --minimum-deployment-target 11.0 --platform macosx --target-device mac \
-    >"$APPLE_ICON/actool-output.plist" && [ -s "$APPLE_ICON/Assets.car" ]; then
-    cp "$APPLE_ICON/Assets.car" "$APP/Contents/Resources/Assets.car"
-  else
-    echo "warning: Icon Composer compilation failed; using the .icns fallback" >&2
-  fi
-fi
 cp "$ROOT/target/debug/lizard" "$APP/Contents/MacOS/Lizard"
 SHORT_VERSION="${VERSION%%-*}"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \

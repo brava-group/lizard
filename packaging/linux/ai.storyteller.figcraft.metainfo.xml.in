@@ -29,8 +29,8 @@
   <icon type="stock">ai.storyteller.figcraft</icon>
   <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
   <url type="homepage">https://getartcraft.com/apps/figcraft</url>
-  <url type="bugtracker">https://github.com/storytold/figcraft/issues</url>
-  <url type="help">https://github.com/storytold/figcraft</url>
+  <url type="bugtracker">https://github.com/brava-group/lizard/issues</url>
+  <url type="help">https://github.com/brava-group/lizard</url>
   <url type="contact">https://discord.gg/artcraft</url>
   <categories>
     <!-- Freedesktop registered categories only ("Design" isn't one; the .desktop file says X-Design). -->
