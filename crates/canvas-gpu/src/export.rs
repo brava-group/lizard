@@ -409,6 +409,47 @@ mod tests {
     }
 
     #[test]
+    fn gpu_pattern_clipped_frame_source_matches_cpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU clipped pattern frame");
+        let page = doc.current_page.ok_or("page missing")?;
+        let source = doc.create(page, NodeKind::Frame, "Rounded tile", 300.0, 300.0, 8.0, 8.0)?;
+        let frame = doc.node_mut(source).ok_or("source frame missing")?;
+        frame.clip = true;
+        frame.corners.radii = [4.0; 4];
+        let child = doc.create(source, NodeKind::Rectangle, "Full tile", 0.0, 0.0, 8.0, 8.0)?;
+        doc.node_mut(child).ok_or("source child missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))];
+        let target = doc.create(page, NodeKind::Rectangle, "Pattern", 0.0, 0.0, 32.0, 16.0)?;
+        let mut paint = Paint::solid(Color::WHITE);
+        paint.kind = PaintKind::Pattern(PatternPaint::new(source.0));
+        doc.node_mut(target).ok_or("pattern target missing")?.fills = vec![paint];
+        let area = Rect::new(0.0, 0.0, 32.0, 16.0);
+        let view = View { origin: (0.0, 0.0), scale: 2.0, width: 64, height: 32 };
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let gpu = render_area_gpu(&doc, &[target], area, 2.0).ok_or("clipped pattern GPU export unavailable")?;
+        let cpu = figcraft_render::render_area(&doc, &[target], area, 2.0).ok_or("clipped pattern CPU export unavailable")?;
+        assert!(gpu.pixel(0, 0).ok_or("GPU rounded corner missing")?.alpha() <= 16);
+        assert!(gpu.pixel(8, 8).ok_or("GPU rounded center missing")?.alpha() >= 240);
+        for y in [0, 1, 2, 4, 6, 7, 8, 9, 12, 15] {
+            for x in [0, 1, 2, 4, 6, 7, 8, 9, 12, 15, 16, 17, 20, 23, 31] {
+                let actual = gpu.pixel(x * 2, y * 2).ok_or("clipped pattern GPU pixel missing")?;
+                let expected = cpu.pixel(x * 2, y * 2).ok_or("clipped pattern CPU pixel missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 48, "clipped pattern at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn gpu_pattern_masked_group_source_matches_cpu() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());

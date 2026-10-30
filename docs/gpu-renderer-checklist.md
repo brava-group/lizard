@@ -30,6 +30,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
     fallback for nested patterns, unsupported masks, effects, and complex text sources.
+  - [x] Render a clipped rounded frame used as a pattern source on the GPU; sampled corner and
+    center pixels and visually compared the repeated tile against the CPU reference.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -195,3 +197,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - 2026-10-30: `CARGO_INCREMENTAL=0 cargo xtask ci` completed with exit code 0 after the browser
   canvas and compatible clock changes. Browser startup and pixel checks were run separately in
   Chrome because the workspace gate does not execute a real browser.
+- 2026-10-30: a rounded frame with clipped children now renders in the GPU pattern cell. The
+  8 px repeated-cell fixture passed sampled GPU/CPU comparisons and visual inspection. Edge
+  antialiasing differed by up to 48/255 in premultiplied channels at 2×; broader clipping and
+  pattern combinations remain open. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with this change.
