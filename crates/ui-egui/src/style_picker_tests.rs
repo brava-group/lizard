@@ -9,6 +9,18 @@ use super::*;
 use crate::{FigApp, NoServices};
 
 #[test]
+fn effect_style_preview_renders_visible_effects_and_ignores_hidden_ones() {
+    let shadow = figcraft_doc::Effect::drop_shadow();
+    let plain = effect_style_sample(&[]).expect("plain preview");
+    let with_shadow = effect_style_sample(std::slice::from_ref(&shadow)).expect("shadow preview");
+    assert_ne!(plain.data(), with_shadow.data(), "the saved shadow must affect the sample");
+    let mut hidden = shadow;
+    hidden.visible = false;
+    let with_hidden_shadow = effect_style_sample(&[hidden]).expect("hidden shadow preview");
+    assert_eq!(plain.data(), with_hidden_shadow.data(), "hidden effects must not affect the sample");
+}
+
+#[test]
 fn names_split_into_folders() {
     assert_eq!((folder("Brand/Blue/500"), leaf("Brand/Blue/500")), ("Brand/Blue", "500"));
     assert_eq!((folder("Danger"), leaf("Danger")), ("", "Danger"));
@@ -216,6 +228,7 @@ fn edit_local_for_test(app: &mut FigApp, ctx: &egui::Context) {
 /// returns the redefined style, if any.
 fn commit_text_field(def: &TextStyle, field: &str, typed: &str) -> Option<TextStyle> {
     let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx, false, 0);
     ctx.data_mut(|d| d.insert_temp(Id::new((field, "S")).with("editing"), typed.to_string()));
     let enter = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
     let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), events: vec![enter], ..Default::default() };
@@ -223,7 +236,7 @@ fn commit_text_field(def: &TextStyle, field: &str, typed: &str) -> Option<TextSt
     let mut out = ctx.run_ui(input, |ui| text_properties(ui, "S", def, &mut f));
     out.textures_delta.clear();
     match f.act {
-        Some(Act::SetText(id, d)) if id == "S" => Some(d),
+        Some(Act::SetText(id, d, _)) if id == "S" => Some(d),
         _ => None,
     }
 }
@@ -238,7 +251,7 @@ fn text_style_editor_commits_line_height_and_letter_spacing() {
     assert_eq!(lh(&def, "24px"), Some(LineHeight::Pixels(24.0)));
     assert_eq!(lh(&def, "24"), Some(LineHeight::Pixels(24.0)));
     let pct = TextStyle { line_height: LineHeight::Percent(120.0), ..def.clone() };
-    assert_eq!(lh(&pct, "130"), Some(LineHeight::Percent(130.0)), "a bare number keeps percent");
+    assert_eq!(lh(&pct, "130"), Some(LineHeight::Pixels(130.0)), "a bare number means pixels");
     assert_eq!(lh(&pct, "Auto"), Some(LineHeight::Auto));
     assert_eq!(ls(&def, "2%"), Some(LetterSpacing::Percent(2.0)));
     assert_eq!(ls(&def, "1.5px"), Some(LetterSpacing::Pixels(1.5)));

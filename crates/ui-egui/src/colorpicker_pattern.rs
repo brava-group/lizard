@@ -69,33 +69,19 @@ fn value_field(
 
 pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
     let PaintKind::Pattern(mut pattern) = paint.kind.clone() else { return };
-    let screen = ctx.content_rect();
-    let beside = match target {
-        PickerTarget::PluginField { plugin, .. } => {
-            crate::plugins_ui::field_window(app, ctx, plugin).map(|rect| pos2(rect.min.x - 248.0, rect.min.y))
-        }
-        _ => None,
-    };
-    let pos = beside.unwrap_or(pos2(screen.max.x - app.ui.right_width - 260.0, 140.0));
+    let pos = super::initial_position(app, ctx, target);
     let mut open = true;
     let mut close_now = false;
     let mut switched_mode = false;
-    egui::Window::new("color_picker")
-        .title_bar(false)
-        .fixed_pos(pos)
-        .fixed_size(vec2(WIDTH, HEIGHT))
-        .resizable(false)
-        .frame(
-            egui::Frame::window(&ctx.global_style())
-                .fill(PANEL)
-                .corner_radius(CornerRadius::same(13))
-                .shadow(egui::Shadow { offset: [0, 10], blur: 14, spread: 0, color: Color32::from_black_alpha(89) })
-                .inner_margin(egui::Margin::ZERO),
-        )
+    crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
+        .width(crate::primitives::FloatingPanelWidth::Compact)
+        .height(crate::primitives::FloatingPanelHeight::Fixed(HEIGHT))
+        .fill(PANEL)
         .open(&mut open)
-        .show(ctx, |ui| {
+        .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            let (dialog, _) = ui.allocate_exact_size(vec2(WIDTH, HEIGHT), Sense::hover());
+            let dialog = Rect::from_min_size(header.min, vec2(WIDTH, HEIGHT));
+            ui.allocate_exact_size(vec2(WIDTH, HEIGHT - 40.0), Sense::hover());
             let origin = dialog.min;
             let mut changed = false;
             label_tab(ui, at(origin, 8.0, 8.0, 91.609, 24.0), "cp_custom_tab", "Custom", true);
@@ -112,6 +98,14 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
 
             for index in 0..6 {
                 let Some(response) = paint_kind_button(ui, origin, index, index == 2) else { continue };
+                if index == 5 && response.clicked() {
+                    if super::shader_tab::supports(target) {
+                        super::shader_tab::activate(ctx);
+                    } else {
+                        app.toast("Shaders are available for fills");
+                    }
+                    continue;
+                }
                 if response.clicked() && index != 2 {
                     custom::pick_kind(app, target, &mut paint, index);
                     switched_mode = true;
@@ -121,7 +115,7 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
             let blend_rect = at(origin, 208.0, 48.0, 24.0, 24.0);
             let blend = ui.interact(blend_rect, Id::new("cp_pattern_blend_menu"), Sense::click()).tip("Blend mode");
             ui.painter().rect_filled(blend_rect, CornerRadius::same(5), if blend.hovered() { FIELD } else { Color32::TRANSPARENT });
-            icons::paint_appearance(ui.painter(), blend_rect, icons::AppearanceIcon::Blend, Color32::WHITE);
+            custom::paint_blend_icon(ui, blend_rect);
             crate::right::menu_popup(&blend).show(|ui| {
                 if let Some(mode) = crate::right::blend_menu(ui, false) {
                     paint.blend = mode;

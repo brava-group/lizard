@@ -17,6 +17,10 @@ pub(super) fn at(origin: Pos2, x: f32, y: f32, w: f32, h: f32) -> Rect {
     Rect::from_min_size(origin + vec2(x, y), vec2(w, h))
 }
 
+pub(super) fn paint_blend_icon(ui: &Ui, button: Rect) {
+    icons::paint_appearance(ui.painter(), Rect::from_center_size(button.center(), vec2(16.0, 16.0)), icons::AppearanceIcon::Blend, Color32::WHITE);
+}
+
 pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: usize, selected: bool, hint: &str) -> egui::Response {
     let response = ui.interact(rect, Id::new(id), Sense::click()).tip(hint);
     let bg = if selected {
@@ -49,7 +53,7 @@ pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: us
 
 pub(super) fn paint_kind_button(ui: &mut Ui, origin: Pos2, index: usize, selected: bool) -> Option<egui::Response> {
     let rect = at(origin, 8.0 + index as f32 * 28.0, 48.0, 24.0, 24.0);
-    if index >= 4 {
+    if index == 4 {
         ui.interact(rect, Id::new(PAINT_KIND_IDS[index]), Sense::click()).tip(format!("{} is not available yet", PAINT_KIND_HINTS[index]));
         icons::paint_colorpicker(ui.painter(), Rect::from_center_size(rect.center(), vec2(12.0, 12.0)), index, Color32::from_white_alpha(102));
         None
@@ -194,39 +198,30 @@ pub(super) fn show_stop(app: &mut FigApp, ctx: &egui::Context, target: &PickerTa
 }
 
 fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
-    let screen = ctx.content_rect();
-    let beside = match target {
-        PickerTarget::PluginField { plugin, .. } => crate::plugins_ui::field_window(app, ctx, plugin).map(|r| pos2(r.min.x - 248.0, r.min.y)),
-        _ => None,
-    };
-    let pos = stop.map_or_else(
-        || beside.unwrap_or(pos2(screen.max.x - app.ui.right_width - 260.0, 140.0)),
-        |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)),
-    );
+    let pos =
+        stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)));
     let height = if stop.is_some() { HEIGHT - 40.0 } else { HEIGHT };
     let mut open = true;
     let mut close_now = false;
-    egui::Window::new(if stop.is_some() { "color_stop_picker" } else { "color_picker" })
-        .title_bar(false)
-        .fixed_pos(pos)
-        .fixed_size(vec2(WIDTH, height))
-        .resizable(false)
-        .frame(
-            egui::Frame::window(&ctx.global_style())
-                .fill(PANEL)
-                .corner_radius(CornerRadius::same(13))
-                .shadow(egui::Shadow { offset: [0, 10], blur: 14, spread: 0, color: Color32::from_black_alpha(89) })
-                .inner_margin(egui::Margin::ZERO),
-        )
+    crate::primitives::FloatingPanel::new(Id::new(if stop.is_some() { "color_stop_picker" } else { "color_picker" }), pos)
+        .width(crate::primitives::FloatingPanelWidth::Compact)
+        .height(crate::primitives::FloatingPanelHeight::Fixed(height))
+        .fill(PANEL)
         .open(&mut open)
-        .show(ctx, |ui| {
+        .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            let (dialog, _) = ui.allocate_exact_size(vec2(WIDTH, height), Sense::hover());
+            let dialog = Rect::from_min_size(header.min, vec2(WIDTH, height));
+            ui.allocate_exact_size(vec2(WIDTH, height - 40.0), Sense::hover());
             let header_origin = dialog.min;
             let origin = if stop.is_some() { dialog.min - vec2(0.0, 40.0) } else { dialog.min };
             let paint_types_allowed = !matches!(
                 target,
-                PickerTarget::Effect { .. } | PickerTarget::PageBackground | PickerTarget::Variable { .. } | PickerTarget::PluginField { .. }
+                PickerTarget::Effect { .. }
+                    | PickerTarget::StyleEffect { .. }
+                    | PickerTarget::PageBackground
+                    | PickerTarget::Variable { .. }
+                    | PickerTarget::DraftVariable
+                    | PickerTarget::PluginField { .. }
             );
 
             // 40 pt header: tabs, new style, close.
@@ -267,6 +262,14 @@ fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut 
             if stop.is_none() {
                 for i in 0..6 {
                     let Some(response) = paint_kind_button(ui, origin, i, i == 0) else { continue };
+                    if i == 5 && response.clicked() && paint_types_allowed {
+                        if super::shader_tab::supports(target) {
+                            super::shader_tab::activate(ctx);
+                        } else {
+                            app.toast("Shaders are available for fills");
+                        }
+                        continue;
+                    }
                     if i == 1 && paint_types_allowed {
                         response.context_menu(|ui| {
                             for (label, kind) in [
@@ -290,7 +293,7 @@ fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut 
                 let blend_rect = at(origin, 180.0, 48.0, 24.0, 24.0);
                 let blend_response = ui.interact(blend_rect, Id::new("cp_blend"), Sense::click()).tip(tr("Blend mode"));
                 ui.painter().rect_filled(blend_rect, CornerRadius::same(5), if blend_response.hovered() { FIELD } else { Color32::TRANSPARENT });
-                icons::paint_appearance(ui.painter(), blend_rect, icons::AppearanceIcon::Blend, Color32::WHITE);
+                paint_blend_icon(ui, blend_rect);
                 if paint_types_allowed {
                     crate::right::menu_popup(&blend_response).show(|ui| {
                         if let Some(mode) = crate::right::blend_menu(ui, false) {

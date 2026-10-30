@@ -8,6 +8,9 @@ description = "Lizard egui frontend (the Figma-style UI: canvas, toolbar, layers
 [lints]
 workspace = true
 
+[features]
+catalog = []
+
 [dependencies]
 figcraft-geom = { workspace = true }
 figcraft-color = { workspace = true }
@@ -15,6 +18,7 @@ figcraft-doc = { workspace = true }
 figcraft-text = { workspace = true }
 figcraft-layout = { workspace = true }
 figcraft-render = { workspace = true }
+figcraft-shader = { workspace = true }
 figcraft-pathops = { workspace = true }
 figcraft-engine = { workspace = true }
 figcraft-figma-plugin = { workspace = true }
@@ -29,12 +33,14 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 ehttp = { version = "0.7.1", default-features = false }
 egui_extras = { workspace = true }
 web-time = "1.1.0"
+time = { version = "0.3.55", features = ["local-offset"] }
 lyon_tessellation = "1.0"
 usvg = "0.48"
 tiny-skia = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = "1"
+vtracer = "0.6.5"
 
 [build-dependencies]
 serde_json = { workspace = true }

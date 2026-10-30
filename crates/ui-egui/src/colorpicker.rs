@@ -20,6 +20,16 @@ mod custom;
 #[path = "colorpicker_library.rs"]
 mod library_tab;
 
+#[cfg(feature = "catalog")]
+pub fn open_library_preview(ctx: &egui::Context) {
+    library_tab::activate(ctx);
+}
+
+#[cfg(feature = "catalog")]
+pub fn close_library_preview(ctx: &egui::Context) {
+    library_tab::deactivate(ctx);
+}
+
 pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
     library_tab::create_variable(ctx, color);
 }
@@ -33,6 +43,8 @@ mod gradient;
 mod image_tab;
 #[path = "colorpicker_pattern.rs"]
 mod pattern;
+#[path = "colorpicker_shader.rs"]
+mod shader_tab;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PickerTarget {
@@ -46,6 +58,12 @@ pub enum PickerTarget {
         fills: bool,
         index: usize,
         ids: Vec<NodeId>,
+    },
+    /// A fill on the selected faces of a vector being edited.
+    VectorRegion {
+        id: NodeId,
+        regions: Vec<usize>,
+        index: usize,
     },
     Effect {
         ids: Vec<NodeId>,
@@ -68,6 +86,18 @@ pub enum PickerTarget {
     Style {
         id: String,
         index: usize,
+    },
+    /// A paint in the unsaved style being composed beside the colour library.
+    DraftStyle {
+        index: usize,
+    },
+    /// The colour variable being composed beside the colour library.
+    DraftVariable,
+    /// The colour of one effect in an effect style.
+    StyleEffect {
+        id: String,
+        index: usize,
+        secondary: bool,
     },
     /// A colour field of a plugin's panel or parameters form. A drag only shows `pending`; the
     /// plugin hears of the colour when the drag ends.
@@ -112,6 +142,11 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
             let list = if *fills { &n.fills } else { &n.strokes };
             list.get(*index).cloned()
         }
+        PickerTarget::VectorRegion { id, regions, index } => {
+            let n = doc.node(*id)?;
+            let NodeKind::Vector { network } = &n.kind else { return None };
+            network.regions.get(*regions.first()?)?.fills.as_ref().unwrap_or(&n.fills).get(*index).cloned()
+        }
         PickerTarget::Effect { ids, index, secondary } => doc.node(*ids.first()?)?.effects.get(*index)?.color(*secondary).map(Paint::solid),
         PickerTarget::TextRange { id, start, .. } => range_fills(doc, *id, *start)?.into_iter().next(),
         PickerTarget::Variable { id, mode } => match doc.variables.get(id)?.values.get(mode)? {
@@ -123,6 +158,12 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
             _ => None,
         },
         PickerTarget::Style { id, index } => style_paints(doc, id)?.get(*index).cloned(),
+        PickerTarget::DraftStyle { index } => app.ui_context.as_ref().and_then(|ctx| library_tab::draft_paint(ctx, *index)),
+        PickerTarget::DraftVariable => app.ui_context.as_ref().and_then(library_tab::draft_variable_paint),
+        PickerTarget::StyleEffect { id, index, secondary } => match &doc.style(id)?.kind {
+            figcraft_doc::StyleKind::Effect { effects } => effects.get(*index)?.color(*secondary).map(Paint::solid),
+            _ => None,
+        },
         PickerTarget::PluginField { plugin, control, pending } => {
             let hex = match pending {
                 Some(hex) => hex.clone(),
@@ -138,6 +179,24 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
 
 /// Write `paint` to the target. `live` edits are part of an ongoing drag.
 fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
+    if let PickerTarget::DraftStyle { index } = target {
+        if let Some(ctx) = &app.ui_context {
+            library_tab::set_draft_paint(ctx, *index, paint.clone());
+        }
+        if !live && let Some(color) = paint.solid_color() {
+            remember_recent(app, color);
+        }
+        return;
+    }
+    if matches!(target, PickerTarget::DraftVariable) {
+        if let Some(ctx) = &app.ui_context {
+            library_tab::set_draft_variable_paint(ctx, paint);
+        }
+        if !live && let Some(color) = paint.solid_color() {
+            remember_recent(app, color);
+        }
+        return;
+    }
     if let PickerTarget::PluginField { plugin, control, .. } = target {
         let hex = paint.solid_color().unwrap_or(Color::BLACK).to_css_hex();
         let (plugin, control) = (plugin.clone(), control.clone());
@@ -158,6 +217,9 @@ fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
         }
         PickerTarget::Paint { fills, index, ids } => {
             app.session.execute(if *fills { "fill.set" } else { "stroke.set" }, &json!({"ids": ids, "index": index, "paint": paint}))
+        }
+        PickerTarget::VectorRegion { id, regions, index } => {
+            app.session.execute("vector.region.fill.set", &json!({"id": id, "regions": regions, "index": index, "paint": paint}))
         }
         PickerTarget::Effect { ids, index, secondary } => {
             let Some(mut e) = ids.first().and_then(|i| app.session.doc().ok()?.node(*i)?.effects.get(*index).cloned()) else { return };
@@ -180,6 +242,19 @@ fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
                 *slot = paint.clone();
             }
             app.session.execute("style.update", &json!({"style": id, "value": paints}))
+        }
+        PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable => return,
+        PickerTarget::StyleEffect { id, index, secondary } => {
+            let Some(mut effects) = app.session.doc().ok().and_then(|doc| match &doc.style(id)?.kind {
+                figcraft_doc::StyleKind::Effect { effects } => Some(effects.clone()),
+                _ => None,
+            }) else {
+                return;
+            };
+            if let Some(color) = effects.get_mut(*index).and_then(|effect| effect.color_mut(*secondary)) {
+                *color = paint.solid_color().unwrap_or(Color::BLACK);
+            }
+            app.session.execute("style.update", &json!({"style": id, "value": effects}))
         }
     };
     if let Err(e) = r {
@@ -234,7 +309,7 @@ fn set_color(app: &mut FigApp, target: &PickerTarget, paint: &mut Paint, c: Colo
                 s.color = c;
             }
         }
-        PaintKind::Image(_) | PaintKind::Pattern(_) => return,
+        PaintKind::Image(_) | PaintKind::Pattern(_) | PaintKind::Shader(_) => return,
     }
     write(app, target, paint, false);
 }
@@ -267,7 +342,7 @@ fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
     ui.horizontal(|ui| {
         ui.add_space(16.0);
         ui.spacing_mut().item_spacing.x = 4.0;
-        let resp = widgets::dropdown(ui, MODELS.get(model).copied().unwrap_or("Hex"), 52.0, None);
+        let resp = crate::primitives::Select::trigger(ui, MODELS.get(model).copied().unwrap_or("Hex"), 52.0, None);
         crate::right::menu_popup(&resp).show(|ui| {
             for (i, m) in MODELS.iter().enumerate() {
                 if crate::right::menu_item(ui, m, "") {
@@ -276,79 +351,32 @@ fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
                 }
             }
         });
-        let num = |ui: &mut Ui, id: &str, v: f64, w: f32| match widgets::number_field(
-            ui,
-            Id::new(("cp_f", id)),
-            widgets::Lead::None,
-            Some(v.round()),
-            "",
-            w,
-            1.0,
-        ) {
-            Some(widgets::FieldEdit::Set(x)) => Some((x, true)),
-            Some(widgets::FieldEdit::Scrub(x, end)) => Some((x, end)),
-            None => None,
+        let selected_model = match model {
+            1 => crate::primitives::ColorModel::Rgb,
+            2 => crate::primitives::ColorModel::Hsl,
+            3 => crate::primitives::ColorModel::Hsb,
+            4 => crate::primitives::ColorModel::Css,
+            _ => crate::primitives::ColorModel::Hex,
         };
-        match MODELS.get(model).copied().unwrap_or("Hex") {
-            "RGB" => {
-                let [r, g, b, _] = c.to_rgba8();
-                let vals = [f64::from(r), f64::from(g), f64::from(b)];
-                for (k, v) in vals.iter().enumerate() {
-                    if let Some((x, end)) = num(ui, ["r", "g", "b"][k.min(2)], *v, 31.0) {
-                        done = end;
-                        let mut rgb = vals;
-                        if let Some(slot) = rgb.get_mut(k) {
-                            *slot = x.clamp(0.0, 255.0);
-                        }
-                        out = Some(Color::new(rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0, c.a));
-                    }
-                }
-            }
-            "HSL" | "HSB" => {
-                let hsl = model == 2;
-                let (h, s2, l2) = if hsl {
-                    let x = figcraft_color::Hsl::from_color(c);
-                    (x.h, x.s, x.l)
-                } else {
-                    let x = Hsb::from_color(c);
-                    (x.h, x.s, x.b)
-                };
-                let vals = [f64::from(h), f64::from(s2) * 100.0, f64::from(l2) * 100.0];
-                for (k, v) in vals.iter().enumerate() {
-                    if let Some((x, end)) = num(ui, ["h", "s", "l"][k.min(2)], *v, 31.0) {
-                        done = end;
-                        let mut v3 = vals;
-                        if let Some(slot) = v3.get_mut(k) {
-                            *slot = if k == 0 { x.rem_euclid(360.0) } else { x.clamp(0.0, 100.0) };
-                        }
-                        let (h, a, b) = (v3[0] as f32, v3[1] as f32 / 100.0, v3[2] as f32 / 100.0);
-                        let col = if hsl { figcraft_color::Hsl { h, s: a, l: b }.to_color() } else { Hsb { h, s: a, b }.to_color() };
-                        out = Some(col.with_alpha(c.a));
-                    }
-                }
-            }
-            "CSS" => {
-                if let Some(text) = widgets::text_field(ui, Id::new("cp_css"), &c.to_css(), 152.0, "") {
-                    out = Color::parse_css(&text);
-                }
-            }
-            _ => {
-                if let Some(h) = widgets::text_field(ui, Id::new("cp_hex"), &c.to_hex(), 101.0, "") {
-                    out = Color::from_hex_or_name(&h).map(|h| h.with_alpha(if h.a < 1.0 { h.a } else { c.a }));
-                }
-            }
+        let paint = Paint::solid(c.with_alpha(1.0));
+        let change = crate::primitives::ColorControl::new(
+            Id::new("cp_model_fields"),
+            &paint,
+            crate::primitives::ColorValue::Model(selected_model),
+            f64::from(c.a) * 100.0,
+        )
+        .show(ui, 144.0);
+        if let Some((next, finished)) = change.edited_color {
+            out = Some(next);
+            done = finished;
         }
-        if MODELS.get(model) != Some(&"CSS") {
-            let alpha = Some((f64::from(out.unwrap_or(c).a) * 100.0).round());
-            let edit = match widgets::number_field(ui, Id::new("cp_a"), widgets::Lead::None, alpha, "%", 44.0, 1.0) {
-                Some(widgets::FieldEdit::Set(v)) => Some((v, true)),
-                Some(widgets::FieldEdit::Scrub(v, end)) => Some((v, end)),
-                None => None,
+        if let Some(edit) = change.opacity_edit {
+            let (value, finished) = match edit {
+                widgets::FieldEdit::Set(value) => (value, true),
+                widgets::FieldEdit::Scrub(value, finished) => (value, finished),
             };
-            if let Some((v, end)) = edit {
-                done = end;
-                out = Some(out.unwrap_or(c).with_alpha((v / 100.0).clamp(0.0, 1.0) as f32));
-            }
+            out = Some(out.unwrap_or(c).with_alpha((value / 100.0).clamp(0.0, 1.0) as f32));
+            done = finished;
         }
     });
     out.map(|c| (c, done))
@@ -503,17 +531,44 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
     slider_knob(ui, rect, color.a, Id::new("cp_alpha"), opaque)
 }
 
+/// Keep a style's colour picker beside its editor. Other targets retain their usual position.
+fn initial_position(app: &FigApp, ctx: &egui::Context, target: &PickerTarget) -> Pos2 {
+    let beside = match target {
+        PickerTarget::Style { .. } => {
+            ctx.memory(|memory| memory.area_rect(Id::new("color_style_editor_area"))).map(|rect| pos2(rect.left() - 248.0, rect.top()))
+        }
+        PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable => {
+            ctx.memory(|memory| memory.area_rect(Id::new("color_library_create"))).map(|rect| pos2(rect.left() - 248.0, rect.top()))
+        }
+        PickerTarget::StyleEffect { id, .. } => ctx
+            .memory(|memory| {
+                memory.area_rect(Id::new(("effect_style_settings", id))).or_else(|| memory.area_rect(Id::new("effect_style_editor_area")))
+            })
+            .map(|rect| pos2(rect.left() - 248.0, rect.top())),
+        PickerTarget::PluginField { plugin, .. } => {
+            crate::plugins_ui::field_window(app, ctx, plugin).map(|rect| pos2(rect.left() - 248.0, rect.top()))
+        }
+        _ => None,
+    };
+    beside.unwrap_or_else(|| pos2(ctx.content_rect().right() - app.ui.right_width - 260.0, 140.0))
+}
+
 pub fn show(app: &mut FigApp, ctx: &egui::Context) {
     let Some(target) = app.ui.picker.clone() else {
         if library_tab::active(ctx) {
             library_tab::deactivate(ctx);
         }
+        shader_tab::deactivate(ctx);
         return;
     };
     // A layer's picker belongs to the selection it was opened for: once that changes, close it
     // rather than keep editing layers that are no longer selected.
     let stale = match &target {
         PickerTarget::Paint { ids, .. } | PickerTarget::Effect { ids, .. } => *ids != app.session.selection(),
+        PickerTarget::VectorRegion { id, regions, .. } => {
+            !app.session.selection().contains(id)
+                || app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).is_none_or(|ve| ve.id != *id || ve.regions != *regions)
+        }
         PickerTarget::TextRange { id, .. } => !app.session.selection().contains(id),
         _ => false,
     };
@@ -524,6 +579,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
         }
         app.ui.picker = None;
         library_tab::deactivate(ctx);
+        shader_tab::deactivate(ctx);
         return;
     };
     if library_tab::active(ctx) {
@@ -531,52 +587,67 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
         return;
     }
     if matches!(paint.kind, PaintKind::Solid { .. }) {
-        custom::show(app, ctx, &target, paint);
+        custom::show(app, ctx, &target, paint.clone());
+        if shader_tab::active(ctx) {
+            shader_tab::show_browser(app, ctx, &target, paint);
+        }
         return;
     }
     if matches!(paint.kind, PaintKind::Gradient(_)) {
-        gradient::show(app, ctx, &target, paint);
+        gradient::show(app, ctx, &target, paint.clone());
+        if shader_tab::active(ctx) {
+            shader_tab::show_browser(app, ctx, &target, paint);
+        }
         return;
     }
     if matches!(paint.kind, PaintKind::Pattern(_)) {
-        pattern::show(app, ctx, &target, paint);
+        pattern::show(app, ctx, &target, paint.clone());
+        if shader_tab::active(ctx) {
+            shader_tab::show_browser(app, ctx, &target, paint);
+        }
         return;
     }
     if matches!(paint.kind, PaintKind::Image(_)) {
-        image_tab::show(app, ctx, &target, paint);
+        image_tab::show(app, ctx, &target, paint.clone());
+        if shader_tab::active(ctx) {
+            shader_tab::show_browser(app, ctx, &target, paint);
+        }
+        return;
+    }
+    if matches!(paint.kind, PaintKind::Shader(_)) {
+        shader_tab::show_editor(app, ctx, &target, paint.clone());
+        if shader_tab::active(ctx) {
+            shader_tab::show_browser(app, ctx, &target, paint);
+        }
         return;
     }
     let t = Tokens::get(ctx);
-    let screen = ctx.content_rect();
-    // A plugin's colour field: beside its window, which sits where the picker otherwise would.
-    let beside = match &target {
-        PickerTarget::PluginField { plugin, .. } => crate::plugins_ui::field_window(app, ctx, plugin).map(|r| pos2(r.min.x - 248.0, r.min.y)),
-        _ => None,
-    };
-    let pos = beside.unwrap_or(pos2(screen.max.x - app.ui.right_width - 260.0, 140.0));
+    let pos = initial_position(app, ctx, &target);
     let mut open = true;
     let mut close_now = false;
-    egui::Window::new("color_picker")
-        .title_bar(false)
-        .fixed_pos(pos)
-        .fixed_size(vec2(240.0, 0.0))
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.panel).inner_margin(egui::Margin::same(0)))
+    crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
+        .height(crate::primitives::FloatingPanelHeight::Hug)
+        .fill(t.panel)
         .open(&mut open)
-        .show(ctx, |ui| {
+        .show_with_header(ctx, |ui, hr| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            // Header.
-            let (hr, _) = ui.allocate_exact_size(vec2(240.0, 40.0), Sense::hover());
             ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Custom"), semibold(11.0), t.text);
             let cr = Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0));
-            let cresp = ui.interact(cr, Id::new("cp_close"), Sense::click());
-            icons::paint(ui.painter(), cr.shrink(6.0), Icon::Close, t.icon);
-            if cresp.clicked() {
+            if crate::primitives::FloatingPanel::close_button(ui, Id::new("cp_close"), cr, |painter, rect| {
+                icons::paint(painter, rect.shrink(6.0), Icon::Close, t.icon);
+            }) {
                 close_now = true;
             }
+            ui.add_space(8.0);
             // Paint type.
             if !matches!(
                 target,
-                PickerTarget::Effect { .. } | PickerTarget::PageBackground | PickerTarget::Variable { .. } | PickerTarget::PluginField { .. }
+                PickerTarget::Effect { .. }
+                    | PickerTarget::StyleEffect { .. }
+                    | PickerTarget::PageBackground
+                    | PickerTarget::Variable { .. }
+                    | PickerTarget::DraftVariable
+                    | PickerTarget::PluginField { .. }
             ) {
                 ui.allocate_exact_size(vec2(240.0, 40.0), Sense::hover());
                 for index in 0..6 {
@@ -588,11 +659,17 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
             // The paint's own blend mode, with the paints and layers under it.
             if !matches!(
                 target,
-                PickerTarget::Effect { .. } | PickerTarget::PageBackground | PickerTarget::Variable { .. } | PickerTarget::PluginField { .. }
+                PickerTarget::Effect { .. }
+                    | PickerTarget::StyleEffect { .. }
+                    | PickerTarget::PageBackground
+                    | PickerTarget::Variable { .. }
+                    | PickerTarget::DraftVariable
+                    | PickerTarget::PluginField { .. }
             ) {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
-                    let resp = widgets::dropdown(ui, tr(paint.blend.label()), 208.0, Some(Icon::Blend)).on_hover_text(tr("Blend mode"));
+                    let resp =
+                        crate::primitives::Select::trigger(ui, tr(paint.blend.label()), 208.0, Some(Icon::Blend)).on_hover_text(tr("Blend mode"));
                     crate::right::menu_popup(&resp).width(200.0).show(|ui| {
                         if let Some(b) = crate::right::blend_menu(ui, false) {
                             paint.blend = b;
@@ -715,7 +792,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 let mut img = img.clone();
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
-                    let resp = widgets::dropdown(ui, tr(&format!("{:?}", img.scale_mode)), 100.0, None);
+                    let resp = crate::primitives::Select::trigger(ui, tr(&format!("{:?}", img.scale_mode)), 100.0, None);
                     crate::right::menu_popup(&resp).show(|ui| {
                         for (l, m) in [
                             (tr("Fill"), ImageScaleMode::Fill),
@@ -765,7 +842,14 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                         let (lr, _) = ui.allocate_exact_size(vec2(72.0, 18.0), Sense::hover());
                         ui.painter().text(lr.left_center(), Align2::LEFT_CENTER, tr(label), regular(11.0), t.text);
                         let mut v = val;
-                        let r = ui.add(egui::Slider::new(&mut v, -1.0..=1.0).show_value(false));
+                        // egui borrows the text-selection fill for its slider track. Keep the
+                        // existing accent here without changing selection in actual text fields.
+                        let r = ui
+                            .scope(|ui| {
+                                ui.visuals_mut().selection.bg_fill = t.accent.gamma_multiply(0.3);
+                                ui.add(egui::Slider::new(&mut v, -1.0..=1.0).show_value(false))
+                            })
+                            .inner;
                         if r.changed() {
                             let f = &mut img.filters;
                             match label {
@@ -853,7 +937,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                                 s.color = nc;
                             }
                         }
-                        PaintKind::Image(_) | PaintKind::Pattern(_) => {}
+                        PaintKind::Image(_) | PaintKind::Pattern(_) | PaintKind::Shader(_) => {}
                     }
                     write(app, &target, &paint, !done);
                 }
@@ -925,6 +1009,7 @@ fn pattern_sources(app: &FigApp, target: &PickerTarget) -> Vec<(NodeId, String)>
     let Ok(doc) = app.session.doc() else { return Vec::new() };
     let painted = match target {
         PickerTarget::Paint { ids, .. } => ids.clone(),
+        PickerTarget::VectorRegion { id, .. } => vec![*id],
         PickerTarget::SelectionColor { targets, .. } => targets.iter().map(|t| t.id).collect(),
         PickerTarget::TextRange { id, .. } => vec![*id],
         _ => Vec::new(),
@@ -956,7 +1041,7 @@ fn pattern_controls(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint:
     let sources = pattern_sources(app, target);
     ui.horizontal(|ui| {
         ui.add_space(16.0);
-        let resp = widgets::dropdown(ui, &name, 208.0, None);
+        let resp = crate::primitives::Select::trigger(ui, &name, 208.0, None);
         crate::a11y::combo(&resp, tr("Pattern source"), &name, crate::a11y::menu_open(&resp));
         crate::right::menu_popup(&resp).show(|ui| {
             for (id, label) in &sources {
@@ -973,7 +1058,7 @@ fn pattern_controls(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint:
         let tiles =
             [(tr("Grid"), PatternTile::Grid), (tr("Horizontal hex"), PatternTile::HorizontalHex), (tr("Vertical hex"), PatternTile::VerticalHex)];
         let label = tiles.iter().find(|t| t.1 == pt.tile).map_or(tr("Grid"), |t| t.0);
-        let resp = widgets::dropdown(ui, label, 120.0, Some(Icon::ViewGrid));
+        let resp = crate::primitives::Select::trigger(ui, label, 120.0, Some(Icon::ViewGrid));
         crate::a11y::combo(&resp, tr("Tile type"), label, crate::a11y::menu_open(&resp));
         crate::right::menu_popup(&resp).show(|ui| {
             for (l, v) in tiles {
@@ -986,7 +1071,7 @@ fn pattern_controls(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint:
         });
         let aligns = [(tr("Start"), PatternAlign::Start), (tr("Center"), PatternAlign::Center), (tr("End"), PatternAlign::End)];
         let label = aligns.iter().find(|a| a.1 == pt.align).map_or(tr("Start"), |a| a.0);
-        let resp = widgets::dropdown(ui, label, 80.0, None);
+        let resp = crate::primitives::Select::trigger(ui, label, 80.0, None);
         crate::a11y::combo(&resp, tr("Pattern alignment"), label, crate::a11y::menu_open(&resp));
         crate::right::menu_popup(&resp).show(|ui| {
             for (l, v) in aligns {
@@ -1085,7 +1170,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
     let mut action = None;
     ui.horizontal(|ui| {
         ui.add_space(16.0);
-        let resp = widgets::dropdown(ui, &current, 152.0, None).on_hover_text(tr("Adjustment presets"));
+        let resp = crate::primitives::Select::trigger(ui, &current, 152.0, None).on_hover_text(tr("Adjustment presets"));
         crate::right::menu_popup(&resp).show(|ui| {
             for (id, label, _) in built_in {
                 if crate::right::menu_item(ui, tr(label), "") {
@@ -1093,7 +1178,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
                     ui.close();
                 }
             }
-            ui.separator();
+            crate::primitives::Menu::separator(ui, None);
             for (name, _) in &saved {
                 if let Some(a) = saved_preset_row(ui, name) {
                     action = Some(a);
@@ -1101,7 +1186,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
                 }
             }
             if !saved.is_empty() {
-                ui.separator();
+                crate::primitives::Menu::separator(ui, None);
             }
             if crate::right::menu_item(ui, tr("Save as preset…"), "") {
                 naming = Some(format!("Preset {}", saved.len() + 1));
@@ -1219,6 +1304,46 @@ mod selection_color_tests {
         }
         let c = current_paint(&app, &target).unwrap().solid_color().unwrap();
         assert_eq!(c.to_css_hex().to_uppercase(), "#0D6EFD80");
+    }
+
+    #[test]
+    fn draft_style_picker_updates_the_unsaved_paint_without_document_commands() {
+        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let ctx = egui::Context::default();
+        app.ui_context = Some(ctx.clone());
+        library_tab::create(&ctx, Paint::solid(Color::BLACK));
+        let target = PickerTarget::DraftStyle { index: 0 };
+        let before = app.session.undo_depth();
+        let mut paint = Paint::solid(Color::from_hex("#E32636").unwrap());
+        paint.opacity = 0.4;
+        write(&mut app, &target, &paint, true);
+        let draft = current_paint(&app, &target).unwrap();
+        assert_eq!(draft.solid_color().unwrap().to_hex(), "E32636");
+        assert_eq!(draft.opacity, 0.4);
+        assert_eq!(app.session.undo_depth(), before);
+        write(&mut app, &target, &paint, false);
+        assert_eq!(app.session.recent_colors.len(), 1);
+    }
+
+    #[test]
+    fn draft_variable_picker_preserves_color_and_opacity_without_document_commands() {
+        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let ctx = egui::Context::default();
+        app.ui_context = Some(ctx.clone());
+        library_tab::create_variable(&ctx, Color::from_hex("#1E1E1E").unwrap());
+        let target = PickerTarget::DraftVariable;
+        let before = app.session.undo_depth();
+        let mut paint = Paint::solid(Color::from_hex("#E32636").unwrap());
+        paint.opacity = 0.4;
+        write(&mut app, &target, &paint, true);
+        let draft = current_paint(&app, &target).unwrap();
+        assert_eq!(draft.solid_color().unwrap().to_hex(), "E32636");
+        assert!((draft.opacity - 0.4).abs() < 0.0001);
+        assert_eq!(app.session.undo_depth(), before);
+        write(&mut app, &target, &paint, false);
+        assert_eq!(app.session.recent_colors.len(), 1);
+        assert_eq!(app.session.recent_colors[0].to_css_hex(), "#E3263666");
+        assert_eq!(app.session.undo_depth(), before);
     }
 
     #[test]

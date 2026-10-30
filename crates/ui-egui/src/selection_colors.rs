@@ -75,7 +75,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
                             .and_then(|id| doc.style(id).map(|s| s.name.as_str()))
                             .or_else(|| group.variable.as_ref().and_then(|id| doc.variables.get(id).map(|v| v.name.as_str())));
                         if let Some(name) = linked_name {
-                            if widgets::dropdown(ui, name, width, None).clicked() {
+                            if crate::primitives::Select::trigger(ui, name, width, None).clicked() {
                                 open_picker(app, group.targets.clone());
                             }
                         } else if let Some(color) = group.paint.solid_color() {
@@ -92,7 +92,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
                                 }
                             }
                         } else {
-                            let response = widgets::dropdown(ui, &widgets::paint_name(&group.paint), width, None);
+                            let response = crate::primitives::Select::trigger(ui, &widgets::paint_name(&group.paint), width, None);
                             if response.clicked() {
                                 open_picker(app, group.targets.clone());
                             }
@@ -132,7 +132,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
             }
         });
     });
-    ui.add_space(8.0);
+    ui.add_space(12.0);
     widgets::separator(ui);
 }
 
@@ -257,7 +257,7 @@ mod tests {
     fn select_color_button_selects_only_the_matching_layers() {
         let (mut p, a, _) = Panel::new();
         let red = p.frame(vec![]).into_iter().find(|(s, _)| s == "FF0000").unwrap().1;
-        p.click(Pos2::new(252.0, red.y));
+        p.click(Pos2::new(220.0, red.y));
         assert_eq!(p.app.session.selection(), [a]);
         assert!(p.app.ui.last_error.is_none());
     }

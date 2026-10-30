@@ -23,8 +23,6 @@ struct State {
     color: String,
     opacity: String,
     paints: Vec<Paint>,
-    paint_hex: Vec<String>,
-    paint_opacity: Vec<String>,
     collection: String,
 }
 
@@ -33,6 +31,43 @@ fn state(ctx: &egui::Context) -> State {
 }
 fn save(ctx: &egui::Context, state: State) {
     ctx.data_mut(|d| d.insert_temp(Id::new(STATE), state));
+}
+pub(super) fn draft_paint(ctx: &egui::Context, index: usize) -> Option<Paint> {
+    let s = state(ctx);
+    (s.create == Some(CreateKind::Style)).then(|| s.paints.get(index).cloned()).flatten()
+}
+pub(super) fn set_draft_paint(ctx: &egui::Context, index: usize, paint: Paint) {
+    let mut s = state(ctx);
+    if s.create == Some(CreateKind::Style)
+        && let Some(slot) = s.paints.get_mut(index)
+    {
+        if index == 0 {
+            s.color = paint.preview_color().to_css_hex();
+        }
+        *slot = paint;
+        save(ctx, s);
+    }
+}
+pub(super) fn draft_variable_paint(ctx: &egui::Context) -> Option<Paint> {
+    let s = state(ctx);
+    if s.create != Some(CreateKind::Variable) {
+        return None;
+    }
+    let color = Color::from_hex_or_name(&s.color)?;
+    let opacity = s.opacity.parse::<f32>().ok()?;
+    let mut paint = Paint::solid(color.with_alpha(1.0));
+    paint.opacity = (opacity / 100.0).clamp(0.0, 1.0);
+    Some(paint)
+}
+pub(super) fn set_draft_variable_paint(ctx: &egui::Context, paint: &Paint) {
+    let mut s = state(ctx);
+    if s.create == Some(CreateKind::Variable)
+        && let Some(color) = paint.solid_color()
+    {
+        s.color = color.with_alpha(1.0).to_css_hex();
+        s.opacity = format!("{:.2}", paint.opacity * 100.0);
+        save(ctx, s);
+    }
 }
 pub(super) fn active(ctx: &egui::Context) -> bool {
     state(ctx).active
@@ -55,8 +90,6 @@ pub(super) fn create(ctx: &egui::Context, paint: Paint) {
     s.color = color.to_css_hex();
     s.opacity = format!("{:.0}", color.a * 100.0);
     s.paints = vec![paint];
-    s.paint_hex = s.paints.iter().map(|p| p.preview_color().to_hex()).collect();
-    s.paint_opacity = s.paints.iter().map(|p| format!("{:.0}", p.opacity * 100.0)).collect();
     s.name.clear();
     s.description.clear();
     save(ctx, s);
@@ -69,15 +102,18 @@ pub(super) fn create_variable(ctx: &egui::Context, color: Color) {
     s.opacity = format!("{:.0}", color.a * 100.0);
     s.paints.clear();
     s.collection.clear();
-    s.paint_hex.clear();
-    s.paint_opacity.clear();
     s.name.clear();
     s.description.clear();
     save(ctx, s);
 }
 
+/// The creation panel lists the topmost fill first. Documents store paint stacks bottom first.
+fn creation_style_paints(s: &State) -> Vec<Paint> {
+    s.paints.iter().rev().cloned().collect()
+}
+
 pub(super) fn show_standalone(app: &mut FigApp, ctx: &egui::Context) {
-    if app.ui.picker.is_some() {
+    if app.ui.picker.is_some() && !matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable)) {
         return;
     }
     let mut s = state(ctx);
@@ -178,15 +214,14 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
     let mut picked: Option<Swatch> = None;
     let mut close = false;
     let mut custom = false;
-    egui::Window::new("color_picker_libraries")
-        .title_bar(false)
-        .fixed_pos(pos)
-        .fixed_size(vec2(240.0, 427.0))
-        .resizable(false)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(custom::PANEL).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::ZERO))
-        .show(ctx, |ui| {
+    crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
+        .height(crate::primitives::FloatingPanelHeight::Fixed(427.0))
+        .fill(custom::PANEL)
+        .corner_radius(8)
+        .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            let (panel, _) = ui.allocate_exact_size(vec2(240.0, 427.0), Sense::hover());
+            let panel = Rect::from_min_size(header.min, vec2(240.0, 427.0));
+            ui.allocate_exact_size(vec2(240.0, 387.0), Sense::hover());
             ui.painter().rect_filled(panel, CornerRadius::same(8), custom::PANEL);
             let o = panel.min;
             if custom::label_tab(ui, custom::at(o, 8.0, 8.0, 91.609, 24.0), "cpl_custom", "Custom", false) {
@@ -198,8 +233,6 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
                 s.color = paint.preview_color().to_css_hex();
                 s.opacity = format!("{:.0}", paint.preview_color().a * 100.0);
                 s.paints = vec![paint.clone()];
-                s.paint_hex = vec![paint.preview_color().to_hex()];
-                s.paint_opacity = vec![format!("{:.0}", paint.opacity * 100.0)];
                 s.name.clear();
                 s.description.clear();
             }
@@ -357,7 +390,8 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
         s.create = None;
     }
     if let Some(kind) = s.create {
-        creation_panel(app, ctx, &doc, pos, &mut s, kind);
+        let library_pos = crate::primitives::FloatingPanel::position(ctx, Id::new("color_picker"), pos);
+        creation_panel(app, ctx, &doc, library_pos, &mut s, kind);
     }
     save(ctx, s);
 }
@@ -369,173 +403,151 @@ fn creation_panel(app: &mut FigApp, ctx: &egui::Context, doc: &figcraft_doc::Doc
     let mut cancel = false;
     let mut submit = false;
     let mut remove = None;
-    egui::Window::new("color_library_create")
-        .title_bar(false)
-        .fixed_pos(pos2(x, library_pos.y))
-        .fixed_size(vec2(304.0, height))
-        .resizable(false)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(custom::PANEL).corner_radius(CornerRadius::same(13)).inner_margin(egui::Margin::ZERO))
-        .show(ctx, |ui| {
-            let (panel, _) = ui.allocate_exact_size(vec2(304.0, height), Sense::hover());
+    crate::primitives::FloatingPanel::new(Id::new("color_library_create"), pos2(x, library_pos.y))
+        .width(crate::primitives::FloatingPanelWidth::Regular)
+        .height(crate::primitives::FloatingPanelHeight::Fixed(height))
+        .fill(custom::PANEL)
+        .show_with_header(ctx, |ui, header| {
+            let panel = Rect::from_min_size(header.min, vec2(304.0, height));
+            ui.allocate_exact_size(vec2(304.0, height - 40.0), Sense::hover());
             ui.painter().rect_filled(panel, CornerRadius::same(13), custom::PANEL);
             let o = panel.min;
             let at = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(o + vec2(x, y), vec2(w, h));
             ui.painter().hline(o.x..=o.x + 304.0, o.y + 39.5, Stroke::new(1.0, custom::BORDER));
             if custom::label_tab(ui, at(8.0, 8.0, 45.35, 24.0), "color_create_style_tab", tr("Style"), kind == CreateKind::Style) {
                 s.create = Some(CreateKind::Style);
+                if matches!(app.ui.picker, Some(PickerTarget::DraftVariable)) {
+                    app.ui.picker = None;
+                }
                 if s.paints.is_empty() {
                     let color = Color::from_hex_or_name(&s.color).unwrap_or(Color::BLACK);
                     s.paints.push(Paint::solid(color));
-                    s.paint_hex.push(color.to_hex());
-                    s.paint_opacity.push(s.opacity.clone());
                 }
             }
             if custom::label_tab(ui, at(57.35, 8.0, 58.5, 24.0), "color_create_variable_tab", tr("Variable"), kind == CreateKind::Variable) {
                 s.create = Some(CreateKind::Variable);
+                if matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. })) {
+                    app.ui.picker = None;
+                }
             }
             let close = at(272.0, 8.0, 24.0, 24.0);
             if icon_button(ui, close, "color_create_close", if kind == CreateKind::Style { 45 } else { 44 }, vec2(10.0, 10.0), tr("Close")) {
                 cancel = true;
             }
             if kind == CreateKind::Style {
-                let current = s.paints.iter().find(|p| p.visible).map_or(Color::TRANSPARENT, Paint::preview_color);
                 let preview = at(16.0, 56.0, 272.0, 106.0);
-                ui.painter().rect_filled(preview, CornerRadius::same(2), doc_c32(ctx, current));
-                ui.painter().rect_stroke(preview, CornerRadius::same(2), Stroke::new(1.0, custom::BORDER), egui::StrokeKind::Inside);
+                crate::style_picker::style_paint_preview(ui, preview, &creation_style_paints(s));
             }
             let name_y = if kind == CreateKind::Style { 178.0 } else { 56.0 };
             let input_x = if kind == CreateKind::Style { 112.0 } else { 125.0 };
             let input_w = if kind == CreateKind::Style { 176.0 } else { 163.0 };
             ui.painter().text(at(16.0, name_y, 88.0, 24.0).left_center(), Align2::LEFT_CENTER, tr("Name"), regular(11.0), custom::MUTED);
             let name_rect = at(input_x, name_y, input_w, 24.0);
-            custom::field(ui, name_rect, CornerRadius::same(5), false);
-            ui.put(
-                name_rect.shrink2(vec2(7.0, 2.0)),
-                egui::TextEdit::singleline(&mut s.name)
-                    .id(Id::new("color_create_name"))
-                    .hint_text(if kind == CreateKind::Style { tr("New color style") } else { tr("Color") })
-                    .font(regular(11.0))
-                    .text_color(Color32::WHITE)
-                    .frame(egui::Frame::NONE),
+            let mut name_ui = ui.new_child(egui::UiBuilder::new().max_rect(name_rect));
+            widgets::text_input(
+                &mut name_ui,
+                Id::new("color_create_name"),
+                &mut s.name,
+                input_w,
+                if kind == CreateKind::Style { tr("New color style") } else { tr("Color") },
             );
             if kind == CreateKind::Style {
                 ui.painter().text(at(16.0, 210.0, 88.0, 24.0).left_center(), Align2::LEFT_CENTER, tr("Description"), regular(11.0), custom::MUTED);
                 let description = at(112.0, 210.0, 176.0, 24.0);
-                custom::field(ui, description, CornerRadius::same(5), false);
-                ui.put(
-                    description.shrink2(vec2(7.0, 2.0)),
-                    egui::TextEdit::singleline(&mut s.description)
-                        .id(Id::new("color_create_description"))
-                        .hint_text(tr("What is it for?"))
-                        .font(regular(11.0))
-                        .text_color(Color32::WHITE)
-                        .frame(egui::Frame::NONE),
-                );
+                let mut description_ui = ui.new_child(egui::UiBuilder::new().max_rect(description));
+                widgets::text_input(&mut description_ui, Id::new("color_create_description"), &mut s.description, 176.0, tr("What is it for?"));
                 ui.painter().text(at(16.0, 250.0, 180.0, 40.0).left_center(), Align2::LEFT_CENTER, tr("Properties"), semibold(11.0), Color32::WHITE);
-                if icon_button(ui, at(272.0, 258.0, 24.0, 24.0), "color_create_add_fill", 46, vec2(12.0, 12.0), tr("Add fill")) {
+                if crate::primitives::Button::icon(Icon::Plus, tr("Add fill"))
+                    .icon_size(14.0)
+                    .show_at(ui, Id::new("color_create_add_fill"), at(272.0, 258.0, 24.0, 24.0))
+                    .clicked()
+                {
                     let color = Color::from_hex_or_name(&s.color).unwrap_or(Color::BLACK);
                     s.paints.push(Paint::solid(color));
-                    s.paint_hex.push(color.to_hex());
-                    s.paint_opacity.push(format!("{:.0}", color.a * 100.0));
                 }
                 for index in 0..s.paints.len() {
                     let row_y = 290.0 + index as f32 * 32.0;
-                    let row = at(0.0, row_y, 304.0, 32.0);
-                    ui.painter().rect_filled(row, 0.0, Color32::from_rgb(68, 68, 68));
                     let fill = at(16.0, row_y + 4.0, 220.0, 24.0);
-                    ui.painter().rect_stroke(fill, CornerRadius::same(5), Stroke::new(1.0, Color32::from_rgb(56, 56, 56)), egui::StrokeKind::Inside);
                     let paint = &s.paints[index];
-                    let swatch_color = paint.preview_color();
-                    ui.painter().rect_filled(at(21.0, row_y + 9.0, 14.0, 14.0), CornerRadius::same(2), doc_c32(ctx, swatch_color));
-                    if let Some(hex) = s.paint_hex.get_mut(index) {
-                        let r = at(41.0, row_y + 5.0, 142.0, 22.0);
-                        let changed = ui
-                            .put(
-                                r,
-                                egui::TextEdit::singleline(hex)
-                                    .id(Id::new(("create_paint_hex", index)))
-                                    .font(regular(11.0))
-                                    .text_color(Color32::WHITE)
-                                    .frame(egui::Frame::NONE),
-                            )
-                            .changed();
-                        if changed && let Some(color) = Color::from_hex_or_name(hex) {
-                            let visible = s.paints[index].visible;
-                            s.paints[index] = Paint::solid(color.with_alpha(s.paints[index].opacity));
-                            s.paints[index].visible = visible;
-                            if index == 0 {
-                                s.color = color.to_hex();
-                            }
+                    let hex = paint.solid_color().map(Color::to_hex).unwrap_or_default();
+                    let label = paint.label();
+                    let value = if paint.solid_color().is_some() {
+                        crate::primitives::ColorValue::EditableHex(&hex)
+                    } else {
+                        crate::primitives::ColorValue::Label(&label)
+                    };
+                    let change =
+                        crate::primitives::ColorControl::new(Id::new(("color_create_paint", index)), paint, value, f64::from(paint.opacity) * 100.0)
+                            .show_at(ui, fill);
+                    if change.open_picker {
+                        app.ui.picker = Some(PickerTarget::DraftStyle { index });
+                        s.active = false;
+                    }
+                    if let Some(hex) = change.edited_hex
+                        && let Some(color) = Color::from_hex_or_name(&hex)
+                    {
+                        s.paints[index].kind = PaintKind::Solid { color: color.with_alpha(1.0) };
+                        if index == 0 {
+                            s.color = color.to_hex();
                         }
                     }
-                    ui.painter().vline(o.x + 183.0, row_y + o.y + 4.0..=row_y + o.y + 28.0, Stroke::new(1.0, custom::PANEL));
-                    if let Some(opacity) = s.paint_opacity.get_mut(index) {
-                        let r = at(188.0, row_y + 5.0, 39.0, 22.0);
-                        if ui
-                            .put(
-                                r,
-                                egui::TextEdit::singleline(opacity)
-                                    .id(Id::new(("create_paint_opacity", index)))
-                                    .font(regular(11.0))
-                                    .text_color(Color32::WHITE)
-                                    .frame(egui::Frame::NONE),
-                            )
-                            .changed()
-                            && let Ok(value) = opacity.parse::<f32>()
-                        {
-                            s.paints[index].opacity = (value / 100.0).clamp(0.0, 1.0);
-                        }
+                    if let Some(edit) = change.opacity_edit {
+                        let value = match edit {
+                            widgets::FieldEdit::Set(value) | widgets::FieldEdit::Scrub(value, _) => value,
+                        };
+                        s.paints[index].opacity = (value / 100.0).clamp(0.0, 1.0) as f32;
                     }
-                    ui.painter().text(at(226.0, row_y + 4.0, 10.0, 24.0).center(), Align2::CENTER_CENTER, "%", regular(11.0), custom::MUTED);
-                    if icon_button(
-                        ui,
-                        at(244.0, row_y + 4.0, 24.0, 24.0),
-                        ("color_create_visibility", index),
-                        47,
-                        vec2(14.0, 14.0),
-                        tr("Toggle visibility"),
-                    ) {
+                    if crate::primitives::Button::icon(if s.paints[index].visible { Icon::Eye } else { Icon::EyeOff }, tr("Toggle visibility"))
+                        .icon_size(14.0)
+                        .show_at(ui, Id::new(("color_create_visibility", index)), at(244.0, row_y + 4.0, 24.0, 24.0))
+                        .clicked()
+                    {
                         s.paints[index].visible = !s.paints[index].visible;
                     }
-                    if icon_button(
-                        ui,
-                        at(272.0, row_y + 4.0, 24.0, 24.0),
-                        ("color_create_remove_fill", index),
-                        48,
-                        vec2(12.0, 1.0),
-                        tr("Remove fill"),
-                    ) {
+                    if crate::primitives::Button::icon(Icon::Minus, tr("Remove fill"))
+                        .icon_size(14.0)
+                        .show_at(ui, Id::new(("color_create_remove_fill", index)), at(272.0, row_y + 4.0, 24.0, 24.0))
+                        .clicked()
+                    {
                         remove = Some(index);
                     }
                 }
             } else {
                 ui.painter().text(at(16.0, 88.0, 88.0, 24.0).left_center(), Align2::LEFT_CENTER, tr("Value"), regular(11.0), custom::MUTED);
                 let value = at(125.0, 90.0, 163.0, 24.0);
-                custom::field(ui, value, CornerRadius::same(5), false);
                 let color = Color::from_hex_or_name(&s.color).unwrap_or(Color::BLACK);
-                ui.painter().rect_filled(at(129.0, 94.0, 16.0, 16.0), CornerRadius::same(3), doc_c32(ctx, color));
-                let color_field = at(149.0, 92.0, 82.0, 20.0);
-                ui.put(
-                    color_field,
-                    egui::TextEdit::singleline(&mut s.color)
-                        .id(Id::new("create_var_color"))
-                        .font(regular(11.0))
-                        .text_color(Color32::WHITE)
-                        .frame(egui::Frame::NONE),
-                );
-                ui.painter().vline(o.x + 235.0, o.y + 90.0..=o.y + 114.0, Stroke::new(1.0, custom::BORDER));
-                ui.put(
-                    at(239.0, 92.0, 31.0, 20.0),
-                    egui::TextEdit::singleline(&mut s.opacity)
-                        .id(Id::new("create_var_opacity"))
-                        .font(regular(11.0))
-                        .text_color(Color32::WHITE)
-                        .frame(egui::Frame::NONE),
-                );
-                ui.painter().text(at(273.0, 90.0, 15.0, 24.0).center(), Align2::CENTER_CENTER, "%", regular(11.0), custom::MUTED);
+                let opacity = s.opacity.parse::<f64>().unwrap_or(100.0).clamp(0.0, 100.0);
+                let mut paint = Paint::solid(color.with_alpha(1.0));
+                paint.opacity = (opacity / 100.0) as f32;
+                let hex = color.to_hex();
+                let change = crate::primitives::ColorControl::new(
+                    Id::new("color_create_variable_value"),
+                    &paint,
+                    crate::primitives::ColorValue::EditableHex(&hex),
+                    opacity,
+                )
+                .show_at(ui, value);
+                if change.open_picker {
+                    app.ui.picker = Some(PickerTarget::DraftVariable);
+                    s.active = false;
+                }
+                if let Some(hex) = change.edited_hex
+                    && let Some(next) = Color::from_hex_or_name(&hex)
+                {
+                    s.color = next.with_alpha(1.0).to_css_hex();
+                    if next.a < 1.0 {
+                        s.opacity = format!("{:.2}", next.a * 100.0);
+                    }
+                }
+                if let Some(edit) = change.opacity_edit {
+                    let percent = match edit {
+                        widgets::FieldEdit::Set(value) | widgets::FieldEdit::Scrub(value, _) => value,
+                    };
+                    s.opacity = format!("{:.2}", percent.clamp(0.0, 100.0));
+                }
             }
             let footer_y = height - 56.0;
-            let button_w = if kind == CreateKind::Style { 73.0 } else { 85.0 };
+            let button_w = if kind == CreateKind::Style { 94.0 } else { 112.0 };
             let create = at(304.0 - 16.0 - button_w, footer_y + 16.0, button_w, 24.0);
             let enabled = !s.name.trim().is_empty()
                 && if kind == CreateKind::Style {
@@ -543,42 +555,34 @@ fn creation_panel(app: &mut FigApp, ctx: &egui::Context, doc: &figcraft_doc::Doc
                 } else {
                     Color::from_hex_or_name(&s.color).is_some() && s.opacity.parse::<f32>().is_ok()
                 };
-            let response = ui.interact(create, Id::new("color_create_submit"), Sense::click());
-            ui.painter().rect_filled(
-                create,
-                CornerRadius::same(5),
-                if enabled { Color32::from_rgb(12, 140, 233) } else { Color32::from_rgb(80, 80, 80) },
-            );
-            ui.painter().text(
-                create.center(),
-                Align2::CENTER_CENTER,
-                if kind == CreateKind::Style { tr("Create style") } else { tr("Create variable") },
-                regular(11.0),
-                Color32::WHITE,
-            );
-            if enabled && response.clicked() {
+            if crate::primitives::Button::new(if kind == CreateKind::Style { tr("Create style") } else { tr("Create variable") })
+                .enabled(enabled)
+                .show_at(ui, Id::new("color_create_submit"), create)
+                .clicked()
+            {
                 submit = true;
             }
         });
-    if let Some(index) = remove {
-        if index < s.paints.len() {
-            s.paints.remove(index);
-        }
-        if index < s.paint_hex.len() {
-            s.paint_hex.remove(index);
-        }
-        if index < s.paint_opacity.len() {
-            s.paint_opacity.remove(index);
+    if let Some(index) = remove
+        && index < s.paints.len()
+    {
+        s.paints.remove(index);
+        if matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. })) {
+            app.ui.picker = None;
         }
     }
     if cancel {
         s.create = None;
+        if matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable)) {
+            app.ui.picker = None;
+        }
     }
     if submit {
         let result = match kind {
-            CreateKind::Style => {
-                app.run("style.create", json!({"type":"paint", "name": s.name.trim(), "description": s.description.trim(), "value": s.paints}))
-            }
+            CreateKind::Style => app.run(
+                "style.create",
+                json!({"type":"paint", "name": s.name.trim(), "description": s.description.trim(), "value": creation_style_paints(s)}),
+            ),
             CreateKind::Variable => {
                 let color = Color::from_hex_or_name(&s.color).unwrap_or(Color::BLACK);
                 let opacity = s.opacity.parse::<f32>().unwrap_or(100.0);
@@ -597,6 +601,25 @@ fn creation_panel(app: &mut FigApp, ctx: &egui::Context, doc: &figcraft_doc::Doc
         };
         if result.is_some() {
             s.create = None;
+            if matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable)) {
+                app.ui.picker = None;
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creation_rows_save_as_bottom_first_without_losing_fill_properties() {
+        let mut top = Paint::solid(Color::from_hex("#FFFFFF").unwrap());
+        top.opacity = 0.62;
+        let bottom = Paint::solid(Color::from_hex("#A22B2B").unwrap());
+        let state = State { paints: vec![top.clone(), bottom.clone()], ..State::default() };
+        let stored = creation_style_paints(&state);
+        assert_eq!(stored, vec![bottom, top]);
+        assert_eq!(stored[1].opacity, 0.62);
     }
 }
