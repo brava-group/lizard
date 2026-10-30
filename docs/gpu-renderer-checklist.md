@@ -70,6 +70,8 @@ the migration concerns rasterization and pixel effects.
     rendering, retaining the existing GPU texture composition on screen.
   - [x] Suppress the CPU creation preview when the current GPU texture already contains the new
     shape, avoiding a stale second raster over the scene.
+  - [x] Skip the drag path's optional 10 ms CPU-worker wait when the current frame already has a
+    GPU texture; keep the wait for scenes that still need the CPU fallback.
   - [ ] Remove CPU rendering from unsupported drag scenes and measure latency on mixed effects.
 - [x] Remove the CPU atlas path from production after direct GPU covers its use cases. The
   reference implementation remains compiled only in native tests.
@@ -531,3 +533,8 @@ the migration concerns rasterization and pixel effects.
   with 107.83 ms and 311.57 ms for full CPU reference renders. Submission time does not include
   presentation latency, and this icon has no glass effect. The cold preparation cost needs its
   own interaction measurement before declaring the complete canvas fast.
+- 2026-10-30: when a drag frame already has a GPU texture, the editor no longer waits up to 10 ms
+  for a pending CPU-worker frame. The GPU-first drag and resize tests passed. The full
+  `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` gate passed with 99 canvas-GPU tests
+  and 722 UI tests passing (3 ignored). This removes a possible main-thread wait; end-to-end
+  drag latency still needs a mixed-effects measurement.

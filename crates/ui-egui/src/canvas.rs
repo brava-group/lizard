@@ -1282,6 +1282,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         request_render(app, worker, &ctx, ppp, max_texture_side);
     }
     if fast_drag
+        && gpu_texture.is_none()
         && worker.in_flight()
         && let Some(done) = worker.poll_for(std::time::Duration::from_millis(10))
     {
