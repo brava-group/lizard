@@ -113,6 +113,21 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Draw selected contours at document pixel scale with nearest-neighbor sampling.
+    fn selected_outline_pixel_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _selected: &[NodeId],
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _options: figcraft_render::Outline,
+        _proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1183,7 +1198,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
         && !(ds.focused().is_some() && ds.view.outlines_selection)
-        && !(ds.view.outlines_selection && ds.view.pixel_preview_scale().is_some())
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
     {
@@ -1218,7 +1232,11 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
             backend.outline_texture(gpu_doc, ds.page, &view, clear, options, &ctx)
         } else if ds.view.outlines_selection {
             let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
-            backend.selected_outline_texture(gpu_doc, ds.page, &ds.selection, &view, clear, options, ds.view.proof_srgb, &ctx)
+            if ds.view.pixel_preview_scale().is_some() {
+                backend.selected_outline_pixel_texture(gpu_doc, ds.page, &ds.selection, &view, clear, options, ds.view.proof_srgb, &ctx)
+            } else {
+                backend.selected_outline_texture(gpu_doc, ds.page, &ds.selection, &view, clear, options, ds.view.proof_srgb, &ctx)
+            }
         } else if ds.view.pixel_preview_scale().is_some() {
             backend.pixel_texture(gpu_doc, ds.page, &view, clear, ds.view.proof_srgb, &ctx)
         } else {
@@ -3234,6 +3252,58 @@ mod stale_render_tests {
         ui.frame(vec![]);
         let captured = seen.lock().map_err(|_| "focused pixel capture lock poisoned")?;
         assert!(captured.contains(&(focus, 1.0)), "focused Pixel Preview should use the GPU at document pixel scale");
+        Ok(())
+    }
+
+    #[test]
+    fn selected_outline_pixel_preview_uses_the_gpu_pixel_scale() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<(NodeId, f64)>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn selected_outline_pixel_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                selected: &[NodeId],
+                view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _options: figcraft_render::Outline,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.push((*selected.first()?, view.scale));
+                None
+            }
+        }
+
+        let mut ui = Ui::new(Session::new());
+        let result = ui.app.session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 30, "height": 20}))?;
+        let selected = NodeId(result["id"].as_u64().ok_or("created shape id missing")?);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        let ds = ui.app.session.ds_mut()?;
+        ds.selection = vec![selected];
+        ds.view.zoom = 8.0;
+        ds.view.outlines_selection = true;
+        ds.view.pixel_preview = true;
+        ds.view.pixel_scale = 1;
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "selected pixel capture lock poisoned")?;
+        assert!(captured.contains(&(selected, 1.0)), "selected Outline Pixel Preview should use GPU");
         Ok(())
     }
 

@@ -381,6 +381,34 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         }
     }
 
+    fn selected_outline_pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        selected: &[NodeId],
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, self.direct_cached_blur, selected) {
+            return None;
+        }
+        match self.update_direct(doc, page, view, clear, false, proof_srgb, true, None, Some((selected, options))) {
+            Ok(texture) => {
+                self.direct_current = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                eprintln!("Lizard GPU selected-outline pixel preview failed: {error}");
+                self.disabled = true;
+                self.direct_current = false;
+                None
+            }
+        }
+    }
+
     fn focus_texture(
         &mut self,
         doc: Arc<Document>,

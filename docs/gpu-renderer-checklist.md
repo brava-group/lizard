@@ -41,6 +41,8 @@ the migration concerns rasterization and pixel effects.
     with nearest-neighbor sampling on native and browser WebGPU.
   - [x] Combine Pixel Preview with a focused subtree on native and browser WebGPU; the focused
     scene keeps document-pixel resolution and nearest-neighbor sampling.
+  - [x] Combine Pixel Preview with selected outlines on native and browser WebGPU, retaining
+    the document-pixel scale and selected contours in paint order.
   - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
   - [x] Replace selected subtrees with outlines in the GPU scene while preserving sibling paints
     and paint order on native and browser canvas.
@@ -479,3 +481,8 @@ the migration concerns rasterization and pixel effects.
   while the editor view was zoomed to 8×. All 96 canvas-GPU tests passed; 720 UI tests passed
   and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across
   native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: Selected Outline plus Pixel Preview now shares the GPU selected-contour scene and
+  nearest-neighbor presentation. The UI dispatch fixture confirmed a selected rectangle reached
+  the GPU backend at 1× document scale while the editor view was zoomed to 8×. All 96 canvas-GPU
+  tests passed; 721 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0
+  cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting, and layer checks.

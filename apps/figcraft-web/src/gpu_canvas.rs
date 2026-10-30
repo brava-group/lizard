@@ -295,6 +295,34 @@ impl CanvasGpuBackend for WebGpuCanvas {
         }
     }
 
+    fn selected_outline_pixel_texture(
+        &mut self,
+        doc: Arc<Document>,
+        page: NodeId,
+        selected: &[NodeId],
+        view: &View,
+        clear: [f32; 3],
+        options: figcraft_render::Outline,
+        proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected) {
+            return None;
+        }
+        match self.update(doc, page, view, clear, false, proof_srgb, true, None, Some((selected, options))) {
+            Ok(texture) => {
+                self.current_gpu_rendered = texture.is_some();
+                texture
+            }
+            Err(error) => {
+                log::error!("browser WebGPU selected-outline pixel preview failed: {error}");
+                self.disabled = true;
+                self.current_gpu_rendered = false;
+                None
+            }
+        }
+    }
+
     fn focus_texture(
         &mut self,
         doc: Arc<Document>,
