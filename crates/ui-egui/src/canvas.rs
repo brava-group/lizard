@@ -70,6 +70,21 @@ pub trait CanvasGpuBackend {
         None
     }
 
+    /// Replace selected subtrees with outlines in their normal paint order.
+    fn selected_outline_texture(
+        &mut self,
+        _doc: Arc<Document>,
+        _page: NodeId,
+        _selected: &[NodeId],
+        _view: &figcraft_render::View,
+        _clear: [f32; 3],
+        _options: figcraft_render::Outline,
+        _proof_srgb: bool,
+        _ctx: &egui::Context,
+    ) -> Option<egui::TextureId> {
+        None
+    }
+
     /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
     /// the CPU fallback handle scenes the GPU backend did not draw.
     fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
@@ -1139,8 +1154,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
-        && !ds.view.outlines_selection
-        && !(ds.focused().is_some() && (ds.view.outlines || ds.view.pixel_preview_scale().is_some()))
+        && !(ds.focused().is_some() && (ds.view.outlines || ds.view.outlines_selection || ds.view.pixel_preview_scale().is_some()))
+        && !(ds.view.outlines_selection && ds.view.pixel_preview_scale().is_some())
         && let Some(view) = app.canvas.visible_view.clone()
         && let Some(mut backend) = app.gpu_canvas.take()
     {
@@ -1160,6 +1175,9 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                     .is_some_and(|node| matches!(&node.kind, NodeKind::Page { background, background_visible: true, .. } if background.is_dark())),
             };
             backend.outline_texture(gpu_doc, ds.page, &view, clear, options, &ctx)
+        } else if ds.view.outlines_selection {
+            let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
+            backend.selected_outline_texture(gpu_doc, ds.page, &ds.selection, &view, clear, options, ds.view.proof_srgb, &ctx)
         } else if ds.view.pixel_preview_scale().is_some() {
             backend.pixel_texture(gpu_doc, ds.page, &view, clear, ds.view.proof_srgb, &ctx)
         } else {
@@ -2888,6 +2906,58 @@ mod stale_render_tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn selected_outline_view_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::Mutex;
+
+        struct Capture(Arc<Mutex<Vec<NodeId>>>);
+        impl super::CanvasGpuBackend for Capture {
+            fn texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _gesture_active: bool,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                None
+            }
+
+            fn selected_outline_texture(
+                &mut self,
+                _doc: Arc<Document>,
+                _page: NodeId,
+                selected: &[NodeId],
+                _view: &figcraft_render::View,
+                _clear: [f32; 3],
+                _options: figcraft_render::Outline,
+                _proof_srgb: bool,
+                _ctx: &egui::Context,
+            ) -> Option<egui::TextureId> {
+                self.0.lock().ok()?.extend_from_slice(selected);
+                None
+            }
+        }
+
+        let mut session = Session::new();
+        let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
+        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let mut ui = Ui::new(session);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
+        {
+            let ds = ui.app.session.ds_mut()?;
+            ds.view.outlines_selection = true;
+            ds.selection = vec![id];
+        }
+        ui.frame(vec![]);
+        let captured = seen.lock().map_err(|_| "selected outline capture lock poisoned")?;
+        assert!(captured.contains(&id));
+        Ok(())
+    }
 
     #[test]
     fn focus_view_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {

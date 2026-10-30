@@ -10,7 +10,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 
 | Entry point | Current CPU work | GPU completion condition |
 | --- | --- | --- |
-| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for selected outlines, combined view modes, focus with backdrop effects, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
+| `crates/ui-egui/src/render_worker.rs` | Canvas fallback for combined view modes, focus/selected outlines with backdrop effects, and unsupported scenes | GPU scene handles each view mode and paint/effect combination; worker runs only without GPU |
 | `crates/ui-egui/src/canvas.rs` | Cropped creation preview and eyedropper when GPU cannot present | Current GPU scene covers supported interactions; no CPU scene raster on a working GPU |
 | `crates/canvas-gpu/src/vello_scene.rs` | CPU effect tile fallback in the GPU compositor | GPU passes support every effect stack and region, including large surfaces |
 | `crates/engine/src/cmd/file.rs` | WASM export and unsupported native export fallback | Browser asynchronous WebGPU readback and complete GPU export coverage |
@@ -36,7 +36,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Draw Pixel Preview at the document pixel scale on GPU and register the presented texture
     with nearest-neighbor sampling on native and browser WebGPU.
   - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
-  - [ ] Move selected-only outlines and Focus combined with backdrop effects or other view modes to GPU.
+  - [x] Replace selected subtrees with outlines in the GPU scene while preserving sibling paints
+    and paint order on native and browser canvas.
+  - [ ] Move Focus/selected outlines combined with backdrop effects or other view modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
@@ -127,6 +129,14 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: selected-only outlines now replace the selected subtree inside the Vello scene in
+  paint order on native and browser WebGPU. A fixture matched CPU pixels at an outline edge,
+  its empty center, and a normally filled sibling; the hidden-selected variant also matched.
+  The UI dispatch test confirmed selected IDs reach the GPU backend. Native and WASM checks and
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed. An isolated native app accepted the mode command,
+  but macOS did not deliver an app screenshot while its window was not presented in the capture
+  session. Focus/selected outlines with backdrop effects and combined view modes remain guarded.
 
 - 2026-10-30: Focus/solo for a supported subtree now builds the native and browser WebGPU
   scene from that root while preserving its document-space transform. A pixel fixture matched

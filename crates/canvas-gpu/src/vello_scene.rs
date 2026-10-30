@@ -2650,11 +2650,21 @@ struct CachedEffects<'a> {
     inner_shadows: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     noise: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     texture: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
+    outlined: &'a [NodeId],
+    outline_options: figcraft_render::Outline,
 }
 
 impl CachedEffects<'_> {
     fn empty() -> Self {
-        Self { layer_blurs: None, drop_shadows: None, inner_shadows: None, noise: None, texture: None }
+        Self {
+            layer_blurs: None,
+            drop_shadows: None,
+            inner_shadows: None,
+            noise: None,
+            texture: None,
+            outlined: &[],
+            outline_options: figcraft_render::Outline::default(),
+        }
     }
 }
 
@@ -2806,11 +2816,19 @@ fn draw_node(
     cached: CachedEffects<'_>,
     size: (u16, u16),
 ) {
-    if depth > 64 || !figcraft_render::raster_bounds(doc, id).is_some_and(|bounds| bounds.intersect(view).area() > 0.0) {
+    let selected = cached.outlined.contains(&id);
+    if depth > 64 || !selected && !figcraft_render::raster_bounds(doc, id).is_some_and(|bounds| bounds.intersect(view).area() > 0.0) {
         return;
     }
     let Some(node) = doc.node(id) else { return };
-    if !node.visible || node.is_mask {
+    if node.is_mask {
+        return;
+    }
+    if selected {
+        stroke_outline_node(scene, doc, id, camera, camera.as_coeffs()[0].hypot(camera.as_coeffs()[1]), cached.outline_options, depth);
+        return;
+    }
+    if !node.visible {
         return;
     }
     if let Some(effect) = cached
@@ -3150,6 +3168,46 @@ mod focus_gpu_tests {
         for (x, y) in [(20, 20), (70, 20)] {
             assert!(pixel(&pixels, x, y)[..3].iter().zip(&pixel(reference.data(), x, y)[..3]).all(|(a, b)| a.abs_diff(*b) < 8));
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod selected_outline_gpu_tests {
+    use super::*;
+
+    #[test]
+    fn selected_shape_is_an_outline_while_its_sibling_stays_filled() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(100, 50) else { return Ok(()) };
+        let mut doc = Document::new("GPU selected outlines");
+        let page = doc.current_page.ok_or("page missing")?;
+        let first = doc.create(page, NodeKind::Rectangle, "first", 10.0, 10.0, 20.0, 20.0)?;
+        let second = doc.create(page, NodeKind::Rectangle, "second", 60.0, 10.0, 20.0, 20.0)?;
+        doc.node_mut(first).ok_or("first missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        doc.node_mut(second).ok_or("second missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 50 };
+        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[first], figcraft_render::Outline::default());
+        let background = Color::DEFAULT_PAGE;
+        gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
+        let pixels = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options { outlined: vec![first], ..Default::default() })
+            .ok_or("CPU selected outline reference unavailable")?;
+        for (x, y) in [(10, 20), (20, 20), (70, 20)] {
+            let index = (y * 100 + x) * 4;
+            assert!(
+                pixels[index..index + 3].iter().zip(&reference.data()[index..index + 3]).all(|(a, b)| a.abs_diff(*b) < 12),
+                "GPU and CPU differ at {x},{y}"
+            );
+        }
+        doc.node_mut(first).ok_or("first missing")?.visible = false;
+        let options = figcraft_render::Outline { hidden: true, ..Default::default() };
+        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[first], options);
+        gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
+        let pixels = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options { outlined: vec![first], outline: options, ..Default::default() })
+            .ok_or("CPU hidden selected outline unavailable")?;
+        let index = (20 * 100 + 10) * 4;
+        assert!(pixels[index..index + 3].iter().zip(&reference.data()[index..index + 3]).all(|(a, b)| a.abs_diff(*b) < 12));
         Ok(())
     }
 }
@@ -3703,7 +3761,7 @@ pub fn make_scene_with_backdrops(
     images: Option<&HashMap<String, ImageInfo>>,
     backdrops: Option<&HashMap<NodeId, ImageInfo>>,
 ) -> Scene {
-    make_scene_with_cached_layers(doc, page, view, images, backdrops, None, None, None, None, None)
+    make_scene_with_cached_layers(doc, page, view, images, backdrops, CachedEffects::empty())
 }
 
 fn make_scene_with_cached_layers(
@@ -3712,11 +3770,7 @@ fn make_scene_with_cached_layers(
     view: &View,
     images: Option<&HashMap<String, ImageInfo>>,
     backdrops: Option<&HashMap<NodeId, ImageInfo>>,
-    layer_blurs: Option<&HashMap<NodeId, CachedLayerBlur>>,
-    drop_shadows: Option<&HashMap<NodeId, CachedLayerBlur>>,
-    inner_shadows: Option<&HashMap<NodeId, CachedLayerBlur>>,
-    noise: Option<&HashMap<NodeId, CachedLayerBlur>>,
-    texture: Option<&HashMap<NodeId, CachedLayerBlur>>,
+    cached: CachedEffects<'_>,
 ) -> Scene {
     let mut scene = Scene::new(view.width as u16, view.height as u16);
     let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
@@ -3727,18 +3781,7 @@ fn make_scene_with_cached_layers(
         view.origin.1 + f64::from(view.height) / view.scale,
     );
     if let Some(page_node) = doc.node(page) {
-        draw_paint_runs(
-            &mut scene,
-            doc,
-            page_node,
-            camera,
-            world,
-            0,
-            images,
-            backdrops,
-            CachedEffects { layer_blurs, drop_shadows, inner_shadows, noise, texture },
-            (view.width as u16, view.height as u16),
-        );
+        draw_paint_runs(&mut scene, doc, page_node, camera, world, 0, images, backdrops, cached, (view.width as u16, view.height as u16));
     }
     scene
 }
@@ -4476,6 +4519,8 @@ impl GpuCanvas {
             inner_shadows: Some(&self.inner_shadows),
             noise: Some(&self.noise_effects),
             texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+            outlined: &[],
+            outline_options: figcraft_render::Outline::default(),
         };
         for id in roots {
             draw_node(&mut scene, doc, *id, camera, world, 0, Some(&self.image_info), None, cached, (view.width as u16, view.height as u16));
@@ -4498,11 +4543,36 @@ impl GpuCanvas {
             view,
             Some(&self.image_info),
             backdrops,
-            Some(&self.layer_blurs),
-            Some(&self.drop_shadows),
-            Some(&self.inner_shadows),
-            Some(&self.noise_effects),
-            if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+            CachedEffects {
+                layer_blurs: Some(&self.layer_blurs),
+                drop_shadows: Some(&self.drop_shadows),
+                inner_shadows: Some(&self.inner_shadows),
+                noise: Some(&self.noise_effects),
+                texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+                outlined: &[],
+                outline_options: figcraft_render::Outline::default(),
+            },
+        )
+    }
+
+    /// Replace selected subtrees with their outlines while keeping normal paint order.
+    pub fn make_scene_selected_outlines(
+        &self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Scene {
+        // Cached effects include the original subtree pixels and could restore a fill that
+        // outline mode replaced. Draw the live scene for this view instead.
+        make_scene_with_cached_layers(
+            doc,
+            page,
+            view,
+            Some(&self.image_info),
+            None,
+            CachedEffects { outlined, outline_options: options, ..CachedEffects::empty() },
         )
     }
 
