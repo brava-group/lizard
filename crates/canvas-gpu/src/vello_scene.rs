@@ -3249,6 +3249,41 @@ mod selected_outline_gpu_tests {
     use super::*;
 
     #[test]
+    fn selected_outline_keeps_a_siblings_cached_blur() -> Result<(), Box<dyn Error>> {
+        let Ok(mut gpu) = GpuCanvas::new(120, 80) else { return Ok(()) };
+        let mut doc = Document::new("GPU selected outline with sibling blur");
+        let page = doc.current_page.ok_or("page missing")?;
+        let selected = doc.create(page, NodeKind::Rectangle, "selected", 5.0, 20.0, 20.0, 20.0)?;
+        let sibling = doc.create(page, NodeKind::Rectangle, "blurred sibling", 55.0, 20.0, 25.0, 25.0)?;
+        let outlined = doc.node_mut(selected).ok_or("selected shape missing")?;
+        outlined.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        outlined.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
+        let other = doc.node_mut(sibling).ok_or("sibling missing")?;
+        other.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
+        other.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 80 };
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        gpu.prepare_static_effects(&doc)?;
+        assert!(gpu.layer_blurs.contains_key(&selected));
+        assert!(gpu.layer_blurs.contains_key(&sibling));
+        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[selected], figcraft_render::Outline::default());
+        let background = Color::DEFAULT_PAGE;
+        gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
+        let actual = gpu.pixels()?;
+        let reference = render_view(&doc, page, &view, &Options { outlined: vec![selected], ..Default::default() })
+            .ok_or("CPU selected outline reference unavailable")?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+            .count();
+        assert!(changed * 100 < view.width as usize * view.height as usize, "selected outline lost sibling blur: {changed} pixels");
+        let center = ((30 * view.width + 15) * 4) as usize;
+        assert!(actual[center..center + 3].iter().all(|channel| *channel > 200), "selected fill was restored from a cache");
+        Ok(())
+    }
+
+    #[test]
     fn selected_shape_is_an_outline_while_its_sibling_stays_filled() -> Result<(), Box<dyn Error>> {
         let Ok(mut gpu) = GpuCanvas::new(100, 50) else { return Ok(()) };
         let mut doc = Document::new("GPU selected outlines");
@@ -4641,15 +4676,23 @@ impl GpuCanvas {
         outlined: &[NodeId],
         options: figcraft_render::Outline,
     ) -> Scene {
-        // Cached effects include the original subtree pixels and could restore a fill that
-        // outline mode replaced. Draw the live scene for this view instead.
+        // A selected subtree is outlined before draw_node checks its effect cache. Keep the
+        // caches available for siblings so their blur, grain and shadow survive this view.
         make_scene_with_cached_layers(
             doc,
             page,
             view,
             Some(&self.image_info),
             None,
-            CachedEffects { outlined, outline_options: options, ..CachedEffects::empty() },
+            CachedEffects {
+                layer_blurs: Some(&self.layer_blurs),
+                drop_shadows: Some(&self.drop_shadows),
+                inner_shadows: Some(&self.inner_shadows),
+                noise: Some(&self.noise_effects),
+                texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+                outlined,
+                outline_options: options,
+            },
         )
     }
 

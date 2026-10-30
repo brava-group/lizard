@@ -38,6 +38,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Draw a supported Focus/solo subtree on GPU at its document-space position in native and browser canvas.
   - [x] Replace selected subtrees with outlines in the GPU scene while preserving sibling paints
     and paint order on native and browser canvas.
+  - [x] Preserve GPU effect caches for unselected siblings in selected-outline mode while a
+    selected shape's own cached fill remains replaced by its outline.
   - [ ] Move Focus/selected outlines combined with backdrop effects or other view modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
@@ -138,6 +140,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: selected-outline scene composition now keeps cached GPU layer effects for siblings.
+  A pixel fixture with blur on both the selected rectangle and its sibling matched the CPU
+  reference within the existing 8/255 threshold: the selected center stayed empty while the
+  sibling blur remained visible. This does not enable combined backdrop modes yet.
 
 - 2026-10-30: aligning GPU shadow cache bounds to document pixels reduced the rotated group
   inner-shadow difference below 1% of pixels at 1× and 2×. The fixture includes nested content,
