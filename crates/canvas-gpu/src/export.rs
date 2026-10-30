@@ -1,5 +1,5 @@
-//! Native raster exports use the same Vello scene as the editor when its pixels can be rendered
-//! without a backdrop or unsupported compositing operation. Other exports use the CPU renderer.
+//! Native raster exports use the same Vello scene and ordered backdrop compositor as the editor
+//! when its effects are supported. Other exports use the CPU renderer.
 
 use std::sync::OnceLock;
 
@@ -50,8 +50,8 @@ fn render_tiled(view: &View, halo: u32, mut render: impl FnMut(&View) -> Option<
     Some(result)
 }
 
-/// Conservative blur/shadow footprint in device pixels. Large or backdrop-dependent effects
-/// still use the fallback until they can be tiled without breaking compositing order.
+/// Conservative effect footprint in device pixels. Progressive or unbounded effects still use
+/// the fallback until they can be tiled without breaking compositing order.
 fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
     let mut reach = 0.0f64;
     for node in doc.nodes().filter(|node| node.visible) {
@@ -73,6 +73,13 @@ fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
                 }
                 EffectKind::InnerShadow(shadow) => shadow.radius.abs() * 6.0 + shadow.spread.abs() * 4.0,
                 EffectKind::LayerBlur(blur) if !blur.is_progressive() => blur.max_radius() * 6.0,
+                EffectKind::BackgroundBlur(blur) if !blur.is_progressive() => blur.max_radius() * 6.0,
+                EffectKind::Glass(glass) => {
+                    let glass = glass.sanitized();
+                    glass.frost * 6.0 + glass.max_bend() + glass.depth
+                }
+                EffectKind::Noise(_) => 0.0,
+                EffectKind::Texture(texture) => texture.radius.abs() + 2.0,
                 _ => return None,
             };
             if !local.is_finite() {
@@ -209,7 +216,7 @@ mod tests {
     use figcraft_color::{
         Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
     };
-    use figcraft_doc::{Blur, Effect, EffectKind, ImageData, NodeKind, Shadow};
+    use figcraft_doc::{Blur, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
@@ -282,6 +289,98 @@ mod tests {
                     expected.alpha(),
                 ]) {
                     assert!(a.abs_diff(b) <= 12, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_noise_and_texture_exports_match_gpu_across_tile_seams() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide grain export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let noise_id = doc.create(page, NodeKind::Rectangle, "Noise at first seam", 2020.0, 24.0, 64.0, 80.0)?;
+        let node = doc.node_mut(noise_id).ok_or("noise node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        let texture_id = doc.create(page, NodeKind::Rectangle, "Texture at second seam", 4070.0, 24.0, 64.0, 80.0)?;
+        let node = doc.node_mut(texture_id).ok_or("texture node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.5, 0.2, 1.0))];
+        node.effects =
+            vec![Effect { kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 4.0, clip_to_shape: false }), visible: true }];
+        let ids = [noise_id, texture_id];
+        let wide_view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let wide_page = render_page_gpu(&doc, page, &wide_view).ok_or("wide GPU page unavailable")?;
+        let wide_area = render_area_gpu(&doc, &ids, wide_view.page_rect(), 1.0).ok_or("wide GPU selection unavailable")?;
+        for left in [1984, 4032] {
+            let view = View { origin: (f64::from(left), 0.0), scale: 1.0, width: 160, height: 128 };
+            let page_crop = render_page_gpu(&doc, page, &view).ok_or("GPU page crop unavailable")?;
+            let area_crop = render_area_gpu(&doc, &ids, view.page_rect(), 1.0).ok_or("GPU selection crop unavailable")?;
+            for y in 0..view.height {
+                for x in 0..view.width {
+                    assert_eq!(wide_page.pixel(left + x, y), page_crop.pixel(x, y), "page seam at ({},{y})", left + x);
+                    assert_eq!(wide_area.pixel(left + x, y), area_crop.pixel(x, y), "selection seam at ({},{y})", left + x);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_backdrop_blur_page_keeps_gpu_tile_seam() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide backdrop export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let dark = doc.create(page, NodeKind::Rectangle, "Dark backdrop", 0.0, 0.0, 2048.0, 128.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 2016.0, 24.0, 80.0, 80.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let actual = render_page_gpu(&doc, page, &wide).ok_or("wide GPU backdrop unavailable")?;
+        let crop = View { origin: (1968.0, 0.0), scale: 1.0, width: 192, height: 128 };
+        let expected = render_page_gpu(&doc, page, &crop).ok_or("GPU backdrop crop unavailable")?;
+        for y in [36, 48, 64, 80, 92] {
+            for x in 2024..2080 {
+                let a = actual.pixel(x, y).ok_or("wide sample missing")?;
+                let b = expected.pixel(x - 1968, y).ok_or("crop sample missing")?;
+                for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                    assert!(one.abs_diff(two) <= 8, "backdrop seam at ({x},{y}): wide={a:?} crop={b:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_glass_page_keeps_gpu_tile_seam() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide glass export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let dark = doc.create(page, NodeKind::Rectangle, "Dark backdrop", 0.0, 0.0, 2048.0, 128.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Glass pane", 2016.0, 24.0, 80.0, 80.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills = vec![Paint::solid(Color::new(1.0, 1.0, 1.0, 0.1))];
+        node.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let actual = render_page_gpu(&doc, page, &wide).ok_or("wide GPU glass unavailable")?;
+        let crop = View { origin: (1968.0, 0.0), scale: 1.0, width: 192, height: 128 };
+        let expected = render_page_gpu(&doc, page, &crop).ok_or("GPU glass crop unavailable")?;
+        for y in [36, 48, 64, 80, 92] {
+            for x in 2024..2080 {
+                let a = actual.pixel(x, y).ok_or("wide sample missing")?;
+                let b = expected.pixel(x - 1968, y).ok_or("crop sample missing")?;
+                for (one, two) in [a.red(), a.green(), a.blue(), a.alpha()].into_iter().zip([b.red(), b.green(), b.blue(), b.alpha()]) {
+                    assert!(one.abs_diff(two) <= 8, "glass seam at ({x},{y}): wide={a:?} crop={b:?}");
                 }
             }
         }

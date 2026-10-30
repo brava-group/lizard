@@ -111,6 +111,11 @@ the migration concerns rasterization and pixel effects.
   - [x] Tile wide or tall effect-free page and selection exports, retaining alpha and seam pixels.
   - [x] Tile wide page and selection exports with bounded drop/inner shadows and uniform layer
     blur, including an effect halo around every tile.
+  - [x] Tile wide page and selection exports containing GPU noise or texture scatter. Cropped
+    GPU renders matched every pixel across both 2048 px tile boundaries in a 4200 px fixture.
+  - [x] Tile wide pages with uniform background blur or glass using a conservative backdrop
+    margin. GPU crop comparisons across the seam stayed within 8/255; selected-layer exports
+    with backdrop effects still need the ordered page context.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
@@ -364,3 +369,13 @@ the migration concerns rasterization and pixel effects.
   when painting outlines, rather than the ordinary full-document check. This allows unsupported
   effects in the outlined subtree to disappear with its fill without rejecting the GPU scene;
   unsupported painted siblings and backdrop effects remain guarded.
+- 2026-10-30: native 4200 × 128 page and selected-layer exports with noise at the first tile seam
+  and texture scatter at the second now remain on GPU. The wide result matched independent
+  GPU crop renders at every pixel of two 160 × 128 windows spanning the seams. Other effect
+  classes still need tile-specific bounds and remain guarded.
+- 2026-10-30: native 4200 × 128 page exports with a backdrop blur and with glass now use the
+  ordered GPU compositor in overlapping tiles. Pixel comparisons against a direct GPU crop
+  around the 2048 px seam stayed within 8/255 for both effects. Progressive background blur,
+  complex backdrop stacks, and selected-layer backdrop exports remain open. `CARGO_INCREMENTAL=0
+  cargo xtask ci` passed with 87 canvas-GPU tests and 718 UI tests, plus native workspace, WASM,
+  plugin, Clippy, formatting and layer checks.
