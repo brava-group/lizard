@@ -125,6 +125,10 @@ the migration concerns rasterization and pixel effects.
   - [x] Support `Noise → Layer Blur` on rotated shapes at 1× and 2× zoom with GPU-only passes.
   - [x] Keep `Layer Blur → Noise` on rotated shapes on GPU. Its grain samples differ from CPU,
     but the contour, blur, and effect order remain intact at 1× and 2×.
+  - [x] Keep longer ordered Layer Blur/Noise stacks on rotated shapes on GPU. `Blur → Noise →
+    Blur`, `Noise → Blur → Noise`, and `Blur → Noise → Blur → Noise` retain the contour and order
+    at 1× and 2×; the first matched the CPU fixture exactly and the others had only a few
+    severe pixel differences.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
@@ -506,3 +510,24 @@ the migration concerns rasterization and pixel effects.
   normal scale and 1× document pixel scale under 8× editor zoom. All 98 canvas-GPU tests passed;
   722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci`
   passed across native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: a rotated 120 × 96 rectangle with longer Blur/Noise stacks now uses the ordered
+  GPU effect cache at 1× and 2×. For `Blur → Noise → Blur`, CPU/GPU RGB samples were identical
+  across 78,000 and 312,000 pixels. The two other tested orders differed above 8/255 at
+  4,369–4,404 pixels of 78,000 at 1× and 14,725–14,814 of 312,000 at 2×; at most five pixels
+  differed above 48/255. I inspected the GPU and CPU images; both retained the same rotated
+  contour, blur, and visible grain. In two local 30-position pans at 600 × 520, 2×, the cached
+  GPU path prepared once in 12.9–14.7 ms, then rendered at 1.08–1.48 ms p50 and 7.00–8.44 ms
+  p95. A full CPU `render_view` measured 4.43–4.46 ms p50 and 5.10–5.39 ms p95. This is a
+  small-scene comparison against full CPU rendering, not the editor's retained CPU worker. All
+  99 canvas-GPU tests passed; 722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1
+  CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting,
+  and layer checks.
+- 2026-10-30: the saved `Lizard-new-icon.figcraft` renders through GPU at 1× and 2×, including
+  its drop shadow, inner shadow, and layer blur. I inspected the GPU and CPU images; the icon,
+  hole, gradient, edges, and shadow remain visually intact. Mean RGB difference was 0.798/255
+  at 1× and 0.764/255 at 2×; 0.601% and 0.401% of pixels differed above 8/255. The 1× first
+  preparation took 826.82 ms, while the subsequent 2× preparation took 29.44 ms. GPU first
+  submissions took 4.89 ms and 1.55 ms; warm submissions took 0.94 ms and 1.29 ms, compared
+  with 107.83 ms and 311.57 ms for full CPU reference renders. Submission time does not include
+  presentation latency, and this icon has no glass effect. The cold preparation cost needs its
+  own interaction measurement before declaring the complete canvas fast.

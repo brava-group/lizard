@@ -1110,7 +1110,7 @@ mod effect_capability_tests {
             figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
         ];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 300, height: 260 };
-        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "untested rotated stacks remain guarded");
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "rotated blur/noise stacks should use the GPU cache");
         Ok(())
     }
 
@@ -1142,6 +1142,58 @@ mod effect_capability_tests {
                     .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
                     .count();
                 assert!(changed * 100 < view.width as usize * view.height as usize, "{name} at {scale}x changed {changed} pixels");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rotated_longer_blur_noise_stacks_keep_contour_and_order() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU rotated effect graph");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Effects", 0.0, 0.0, 120.0, 96.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((100.0, 80.0)) * Affine::rotate(0.4);
+        node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        for (name, effects) in [
+            ("blur-noise-blur", vec![blur(), noise(), blur()]),
+            ("noise-blur-noise", vec![noise(), blur(), noise()]),
+            ("blur-noise-blur-noise", vec![blur(), noise(), blur(), noise()]),
+        ] {
+            doc.node_mut(id).ok_or("shape missing")?.effects = effects;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} GPU capability");
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                if let Ok(prefix) = std::env::var("LIZARD_GPU_ROTATED_STACK_SCREENSHOT") {
+                    image::save_buffer(format!("{prefix}-{name}-{scale}-gpu.png"), &actual, view.width, view.height, image::ColorType::Rgba8)?;
+                    image::save_buffer(
+                        format!("{prefix}-{name}-{scale}-cpu.png"),
+                        reference.data(),
+                        view.width,
+                        view.height,
+                        image::ColorType::Rgba8,
+                    )?;
+                }
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("{name} {scale}x: changed={changed} severe={severe} pixels={}", view.width * view.height);
+                assert!(changed * 100 < view.width as usize * view.height as usize * 8, "{name} at {scale}x changed {changed} pixels");
+                assert!(severe * 100 < view.width as usize * view.height as usize, "{name} at {scale}x severe {severe} pixels");
             }
         }
         Ok(())
@@ -3917,19 +3969,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
         )
         && (gpu_axis_aligned(doc, node)
             || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_)))
-            || visible.len() == 2 && matches!(visible[0].kind, EffectKind::LayerBlur(_)) && matches!(visible[1].kind, EffectKind::Noise(_))
-            || {
-                let mut blur_seen = false;
-                visible.iter().all(|effect| match &effect.kind {
-                    EffectKind::LayerBlur(_) => {
-                        blur_seen = true;
-                        true
-                    }
-                    EffectKind::Noise(_) => !blur_seen,
-                    EffectKind::DropShadow(_) => false,
-                    _ => true,
-                })
-            })
+            || visible.iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_))))
         && gpu_isolated_grain_supported(doc, node)
 }
 
