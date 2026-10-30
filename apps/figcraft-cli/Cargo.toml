@@ -15,7 +15,6 @@ workspace = true
 
 [dependencies]
 figcraft-engine = { workspace = true }
-figcraft-canvas-gpu = { workspace = true }
 figcraft-figma-plugin = { workspace = true }
 figcraft-doc = { workspace = true }
 figcraft-render = { workspace = true }

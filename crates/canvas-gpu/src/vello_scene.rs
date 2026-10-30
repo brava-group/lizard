@@ -4116,8 +4116,12 @@ impl GpuCanvas {
     }
 
     pub fn render_submit_document(&mut self, doc: &Document, page: NodeId, view: &View, clear: [f32; 3]) -> Result<f64, Box<dyn Error>> {
+        self.render_submit_document_rgba(doc, page, view, [clear[0], clear[1], clear[2], 1.0])
+    }
+
+    pub fn render_submit_document_rgba(&mut self, doc: &Document, page: NodeId, view: &View, clear: [f32; 4]) -> Result<f64, Box<dyn Error>> {
         let scene = self.make_scene_document(doc, page, view);
-        self.render_submit_with_clear(&scene, clear)
+        self.render_submit_with_clear_rgba(&scene, clear)
     }
 
     pub fn make_scene_document(&self, doc: &Document, page: NodeId, view: &View) -> Scene {
@@ -4413,6 +4417,17 @@ impl GpuCanvas {
         clear: [f32; 3],
         index: &BackdropIndex,
     ) -> Result<(f64, usize), Box<dyn Error>> {
+        self.render_with_backdrop_blurs_indexed_rgba(doc, page, view, [clear[0], clear[1], clear[2], 1.0], index)
+    }
+
+    pub fn render_with_backdrop_blurs_indexed_rgba(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 4],
+        index: &BackdropIndex,
+    ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let world = Rect::new(
             view.origin.0,
@@ -4434,7 +4449,7 @@ impl GpuCanvas {
         });
         if candidates.is_empty() {
             let scene = make_scene_with_images(doc, page, view, Some(&self.image_info));
-            self.render_with_clear(&scene, clear)?;
+            self.render_with_clear_rgba(&scene, clear)?;
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
@@ -4488,7 +4503,7 @@ impl GpuCanvas {
                     surface.resize(u32::from(width), u32::from(height));
                 }
                 surface.image_bindings = self.image_bindings.clone();
-                surface.render_submit_with_clear(&prefix, clear)?;
+                surface.render_submit_with_clear_rgba(&prefix, clear)?;
                 if let Some(node) = doc.node(id).filter(|node| gpu_glass_shadow_supported(doc, node)) {
                     let mut shadow_scene = Scene::new(width, height);
                     let camera = Affine::scale(view.scale) * Affine::translate((-cropped_view.origin.0, -cropped_view.origin.1));
@@ -4500,7 +4515,7 @@ impl GpuCanvas {
                 texture
             } else {
                 let prefix = self.make_scene_document_with_backdrops(&beneath, page, view, Some(&backdrops));
-                self.render_submit_with_clear(&prefix, clear)?;
+                self.render_submit_with_clear_rgba(&prefix, clear)?;
                 if let Some(node) = doc.node(id).filter(|node| gpu_glass_shadow_supported(doc, node)) {
                     let mut shadow_scene = Scene::new(view.width as u16, view.height as u16);
                     let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
@@ -4621,7 +4636,7 @@ impl GpuCanvas {
                 });
                 blur_scene.fill_rect(&Rect::new(0.0, 0.0, f64::from(view.width), f64::from(view.height)));
                 blur_scene.pop_layer();
-                self.render_submit_with_clear(&blur_scene, clear)?;
+                self.render_submit_with_clear_rgba(&blur_scene, clear)?;
                 self.snapshot_submit()
             };
             let (Ok(width), Ok(height)) = (u16::try_from(blurred.width()), u16::try_from(blurred.height())) else { continue };
@@ -4631,7 +4646,7 @@ impl GpuCanvas {
         }
         let stage = Instant::now();
         let scene = self.make_scene_document_with_backdrops(doc, page, view, Some(&backdrops));
-        let final_result = self.render_with_clear(&scene, clear);
+        let final_result = self.render_with_clear_rgba(&scene, clear);
         for id in dynamic_glass_layers {
             self.layer_blurs.remove(&id);
         }
@@ -4647,7 +4662,7 @@ impl GpuCanvas {
         doc: &Document,
         page: NodeId,
         view: &View,
-        clear: [f32; 3],
+        clear: [f32; 4],
         candidates: &[(NodeId, f64)],
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
@@ -4671,7 +4686,7 @@ impl GpuCanvas {
             if previous.is_some() {
                 self.render_submit_with_target(&scene, TargetInit::SrcOver)?;
             } else {
-                self.render_submit_with_clear(&scene, clear)?;
+                self.render_submit_with_clear_rgba(&scene, clear)?;
             }
             let source = self.snapshot_submit();
             prefix_submit_ms += stage.elapsed().as_secs_f64() * 1000.0;
@@ -4709,7 +4724,7 @@ impl GpuCanvas {
         doc: &Document,
         page: NodeId,
         view: &View,
-        clear: [f32; 3],
+        clear: [f32; 4],
         candidate: (NodeId, f64),
         group: NodeId,
         opacity: f32,
@@ -4721,13 +4736,13 @@ impl GpuCanvas {
         let mut base_doc = doc.clone();
         figcraft_render::backdrop::hide_above(&mut base_doc, group, roots);
         let base_scene = make_scene_with_images(&base_doc, page, view, Some(&self.image_info));
-        self.render_submit_with_clear(&base_scene, clear)?;
+        self.render_submit_with_clear_rgba(&base_scene, clear)?;
         let base = self.snapshot_submit();
 
         let mut prefix_doc = doc.clone();
         figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
         let prefix_scene = make_scene_with_images(&prefix_doc, page, view, Some(&self.image_info));
-        self.render_submit_with_clear(&prefix_scene, clear)?;
+        self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
         let source = self.snapshot_submit();
         let scale = std::env::var("LIZARD_GPU_BLUR_SCALE").ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(4).clamp(1, 4);
         let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
@@ -4743,7 +4758,7 @@ impl GpuCanvas {
         }
         figcraft_render::backdrop::hide_above(&mut full_prefix_doc, id, roots);
         let full_prefix_scene = make_scene_with_images(&full_prefix_doc, page, view, Some(&self.image_info));
-        self.render_submit_with_clear(&full_prefix_scene, clear)?;
+        self.render_submit_with_clear_rgba(&full_prefix_scene, clear)?;
 
         let mut group_suffix = doc.clone();
         hide_below(doc, &mut group_suffix, id, page);
@@ -4767,7 +4782,7 @@ impl GpuCanvas {
             });
             blend.fill_rect(&Rect::new(0.0, 0.0, f64::from(view.width), f64::from(view.height)));
         }
-        self.render_submit_with_clear(&blend, clear)?;
+        self.render_submit_with_clear_rgba(&blend, clear)?;
 
         let mut after_doc = doc.clone();
         hide_below(doc, &mut after_doc, group, page);
@@ -4884,6 +4899,12 @@ impl GpuCanvas {
         Ok(ms)
     }
 
+    fn render_with_clear_rgba(&mut self, scene: &Scene, clear: [f32; 4]) -> Result<f64, Box<dyn Error>> {
+        let ms = self.render_submit_with_clear_rgba(scene, clear)?;
+        self.wait()?;
+        Ok(ms)
+    }
+
     pub fn render_with_load(&mut self, scene: &Scene) -> Result<f64, Box<dyn Error>> {
         let ms = self.render_submit_with_target(scene, TargetInit::SrcOver)?;
         self.wait()?;
@@ -4896,10 +4917,11 @@ impl GpuCanvas {
     }
 
     pub fn render_submit_with_clear(&mut self, scene: &Scene, clear: [f32; 3]) -> Result<f64, Box<dyn Error>> {
-        self.render_submit_with_target(
-            scene,
-            TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([clear[0], clear[1], clear[2], 1.0]) }),
-        )
+        self.render_submit_with_clear_rgba(scene, [clear[0], clear[1], clear[2], 1.0])
+    }
+
+    fn render_submit_with_clear_rgba(&mut self, scene: &Scene, clear: [f32; 4]) -> Result<f64, Box<dyn Error>> {
+        self.render_submit_with_target(scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new(clear) }))
     }
 
     fn render_submit_with_target(&mut self, scene: &Scene, init: TargetInit) -> Result<f64, Box<dyn Error>> {

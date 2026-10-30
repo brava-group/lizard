@@ -753,7 +753,7 @@ pub fn thumbnail(doc: &Document) -> Option<Vec<u8>> {
         width: (b.width() * scale).ceil().max(1.0) as u32,
         height: (b.height() * scale).ceil().max(1.0) as u32,
     };
-    let pix = figcraft_render::render_view(doc, page, &view, &Default::default())?;
+    let pix = render_page_pixels(doc, page, &view)?;
     figcraft_render::encode_png(&pix).ok()
 }
 
@@ -909,7 +909,19 @@ pub fn export_bytes(doc: &Document, ids: &[NodeId], format: ExportFormat, scale:
     export_bytes_with(doc, ids, &ExportSetting { format, ..Default::default() }, scale)
 }
 
-fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect, scale: f64) -> Option<figcraft_render::Pixmap> {
+/// Render a page at a requested view, using the GPU for supported native content.
+pub fn render_page_pixels(doc: &Document, page: NodeId, view: &figcraft_render::View) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_page_gpu(doc, page, view)
+    {
+        return Some(pixmap);
+    }
+    figcraft_render::render_view(doc, page, view, &Default::default())
+}
+
+/// Render selected layers at export resolution, retaining a CPU fallback for unhandled content.
+pub fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect, scale: f64) -> Option<figcraft_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
     if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
         && let Some(pixmap) = figcraft_canvas_gpu::export::render_area_gpu(doc, ids, area, scale)
@@ -917,6 +929,11 @@ fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect,
         return Some(pixmap);
     }
     figcraft_render::render_area(doc, ids, area, scale)
+}
+
+/// Render one static layer at its export bounds for thumbnails and previews.
+pub fn render_node_pixels(doc: &Document, id: NodeId, scale: f64) -> Option<figcraft_render::Pixmap> {
+    render_export_area(doc, &[id], figcraft_render::export_bounds(doc, id)?, scale)
 }
 
 /// The page area exporting `ids` with `setting` covers: what they paint (a clipping frame's own

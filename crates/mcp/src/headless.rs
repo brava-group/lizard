@@ -319,7 +319,7 @@ impl Backend for Headless {
             width: (bounds.width() * scale).ceil().max(1.0) as u32,
             height: (bounds.height() * scale).ceil().max(1.0) as u32,
         };
-        let pix = figcraft_render::render_view(doc, page, &view, &Default::default()).ok_or("render failed")?;
+        let pix = figcraft_engine::cmd::file::render_page_pixels(doc, page, &view).ok_or("render failed")?;
         figcraft_render::encode_png(&pix)
     }
 
@@ -336,7 +336,7 @@ impl Backend for Headless {
             width: (b.width() * scale).ceil().max(1.0) as u32,
             height: (b.height() * scale).ceil().max(1.0) as u32,
         };
-        let pix = figcraft_render::render_view(doc, page, &view, &Default::default()).ok_or("render failed")?;
+        let pix = figcraft_engine::cmd::file::render_page_pixels(doc, page, &view).ok_or("render failed")?;
         figcraft_render::encode_png(&pix)
     }
 }

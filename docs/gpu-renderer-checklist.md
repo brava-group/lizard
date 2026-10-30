@@ -57,3 +57,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   supported alpha/vector masks. A fixture combining a mask and background blur passed sampled
   pixel comparisons against the CPU reference. Selected-layer exports still need their own
   backdrop semantics, and transparent pages need a transparent GPU backdrop target.
+- 2026-10-30: the ordered page pass now accepts a transparent clear color; the mask/backdrop
+  fixture passed on opaque and transparent pages. A selected masked group also passed export
+  pixel samples. The engine now shares native GPU-first page and area rendering with saved-file
+  thumbnails, CLI, headless MCP, asset/style/font previews, and home cards. All 711 UI library
+  tests passed; presentation animation, vectorization, and rasterized SVG/PDF content remain open.

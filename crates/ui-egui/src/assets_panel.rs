@@ -208,9 +208,9 @@ pub(crate) fn thumbnail_pixmap(doc: &Document, id: NodeId, px: f32) -> Option<fi
     let scale = (f64::from(px) / side).min(2.0);
     if slice {
         let layers = doc.page_of(id).and_then(|p| doc.node(p)).map(|p| p.children.clone()).unwrap_or_default();
-        return figcraft_render::render_area(doc, &layers, b, scale);
+        return figcraft_engine::cmd::file::render_export_area(doc, &layers, b, scale);
     }
-    figcraft_render::render_node(doc, id, scale)
+    figcraft_engine::cmd::file::render_node_pixels(doc, id, scale)
 }
 
 fn matches(name: &str, q: &str) -> bool {

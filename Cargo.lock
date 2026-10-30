@@ -2000,7 +2000,6 @@ dependencies = [
 name = "figcraft-cli"
 version = "0.9.0"
 dependencies = [
- "figcraft-canvas-gpu",
  "figcraft-doc",
  "figcraft-engine",
  "figcraft-figma-plugin",

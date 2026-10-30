@@ -37,8 +37,7 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
     }
     let unsupported_subtree = doc.nodes().any(|node| {
         ids.iter().any(|id| *id == node.id || doc.is_ancestor(*id, node.id))
-            && (node.is_mask
-                || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+            && (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
                 || node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_))))
     });
     if unsupported_subtree || has_unhandled_effects_with_cached_noise_in_view(doc, &view, true) {
@@ -58,15 +57,15 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
     Some(pixmap)
 }
 
-/// Render an opaque page for CLI PNG/JPEG/WebP exports. Transparent pages continue through the
-/// selected-roots export path so their alpha is retained.
+/// Render a page for CLI PNG/JPEG/WebP exports, retaining its background alpha and effect order.
 pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixmap> {
     let page_node = doc.node(page)?;
-    let figcraft_doc::NodeKind::Page { background, background_visible: true, .. } = &page_node.kind else {
-        return render_area_gpu(doc, &page_node.children, view.page_rect(), view.scale);
+    let clear = match &page_node.kind {
+        figcraft_doc::NodeKind::Page { background, background_visible: true, .. } => [background.r, background.g, background.b, background.a],
+        figcraft_doc::NodeKind::Page { .. } => [0.0; 4],
+        _ => return None,
     };
-    if background.a < 0.999
-        || doc.color_profile != ColorProfile::Srgb
+    if doc.color_profile != ColorProfile::Srgb
         || view.width == 0
         || view.height == 0
         || view.width > 4096
@@ -82,14 +81,13 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native page export".into(), view.width, view.height);
     canvas.register_images(doc).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
-    let clear = [background.r, background.g, background.b];
     let backdrops = BackdropIndex::new(doc, page);
     if backdrops.visible_ids(view).is_empty() {
-        canvas.render_submit_document(doc, page, view, clear).ok()?;
+        canvas.render_submit_document_rgba(doc, page, view, clear).ok()?;
     } else {
         // The same ordered backdrop pass used by the native editor is required here. The
         // capability check above excludes its CPU-only cases before this call.
-        canvas.render_with_backdrop_blurs_indexed(doc, page, view, clear, &backdrops).ok()?;
+        canvas.render_with_backdrop_blurs_indexed_rgba(doc, page, view, clear, &backdrops).ok()?;
     }
     let pixels = canvas.pixels().ok()?;
     let mut pixmap = Pixmap::new(view.width, view.height)?;
@@ -177,6 +175,30 @@ mod tests {
     }
 
     #[test]
+    fn gpu_selected_group_export_keeps_its_alpha_mask() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("masked selection");
+        let page = doc.current_page.ok_or("page missing")?;
+        let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 80.0, 80.0)?;
+        let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 0.0, 40.0, 80.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let shape = doc.create(group, NodeKind::Rectangle, "Shape", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(shape).ok_or("shape missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.2, 0.1, 1.0))];
+        let area = Rect::new(0.0, 0.0, 80.0, 80.0);
+        let gpu = render_area_gpu(&doc, &[group], area, 1.0).ok_or("masked GPU selection unavailable")?;
+        let cpu = figcraft_render::render_area(&doc, &[group], area, 1.0).ok_or("masked CPU selection unavailable")?;
+        for x in [20, 60] {
+            let actual = gpu.pixel(x, 40).ok_or("GPU sample missing")?;
+            let expected = cpu.pixel(x, 40).ok_or("CPU sample missing")?;
+            assert!(actual.alpha().abs_diff(expected.alpha()) <= 2);
+            assert!(actual.red().abs_diff(expected.red()) <= 2);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn gpu_page_export_keeps_mask_and_ordered_backdrop() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());
@@ -205,6 +227,16 @@ mod tests {
             let gpu = actual.pixel(x, y).ok_or("GPU sample missing")?;
             let cpu = reference.pixel(x, y).ok_or("CPU sample missing")?;
             assert!(gpu.red().abs_diff(cpu.red()) <= 20, "x={x}, y={y}: GPU={gpu:?}, CPU={cpu:?}");
+        }
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let transparent_gpu = render_page_gpu(&doc, page, &view).ok_or("transparent GPU page export unavailable")?;
+        let transparent_cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("transparent reference unavailable")?;
+        for (x, y) in [(5, 10), (15, 10), (35, 50), (47, 50), (53, 50), (65, 50), (95, 95)] {
+            let gpu = transparent_gpu.pixel(x, y).ok_or("transparent GPU sample missing")?;
+            let cpu = transparent_cpu.pixel(x, y).ok_or("transparent CPU sample missing")?;
+            assert!(gpu.alpha().abs_diff(cpu.alpha()) <= 20, "x={x}, y={y}: GPU alpha={gpu:?}, CPU alpha={cpu:?}");
         }
         Ok(())
     }

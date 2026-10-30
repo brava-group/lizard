@@ -1335,7 +1335,7 @@ fn effect_style_sample(effects: &[Effect]) -> Option<figcraft_render::Pixmap> {
     let node = sample.node_mut(image)?;
     node.fills = vec![Paint::solid(figcraft_color::Color::WHITE)];
     node.effects = effects.to_vec();
-    figcraft_render::render_area(&sample, &[image], figcraft_geom::Rect::new(0.0, 0.0, 304.0, 152.0), 2.0)
+    figcraft_engine::cmd::file::render_export_area(&sample, &[image], figcraft_geom::Rect::new(0.0, 0.0, 304.0, 152.0), 2.0)
 }
 
 fn effect_style_preview(ui: &mut Ui, rect: Rect, effects: &[Effect]) {
