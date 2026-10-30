@@ -2376,6 +2376,17 @@ fn set_rule(scene: &mut Scene, rule: FillRule) {
     scene.set_fill_rule(if rule == FillRule::EvenOdd { Fill::EvenOdd } else { Fill::NonZero });
 }
 
+fn fill_paint_path(scene: &mut Scene, path: &peniko::kurbo::BezPath, paint: &Paint) {
+    let blend = gpu_blend_mode(paint.blend);
+    if let Some(blend) = blend {
+        scene.push_blend_layer(blend);
+    }
+    scene.fill_path(path);
+    if blend.is_some() {
+        scene.pop_layer();
+    }
+}
+
 fn draw_content(
     scene: &mut Scene,
     doc: &Document,
@@ -2418,7 +2429,7 @@ fn draw_content(
             for paint in &node.fills {
                 scene.reset_paint_transform();
                 if set_paint(scene, paint, node, images) {
-                    scene.fill_path(&open);
+                    fill_paint_path(scene, &open, paint);
                 }
             }
         }
@@ -2428,7 +2439,7 @@ fn draw_content(
             for paint in region.fills.as_ref().unwrap_or(&node.fills) {
                 scene.reset_paint_transform();
                 if set_paint(scene, paint, node, images) {
-                    scene.fill_path(&path);
+                    fill_paint_path(scene, &path, paint);
                 }
             }
         }
@@ -2438,7 +2449,7 @@ fn draw_content(
         for paint in &node.fills {
             scene.reset_paint_transform();
             if set_paint(scene, paint, node, images) {
-                scene.fill_path(&path);
+                fill_paint_path(scene, &path, paint);
             }
         }
     }
@@ -2453,7 +2464,7 @@ fn draw_content(
         for paint in &node.strokes {
             scene.reset_paint_transform();
             if set_paint(scene, paint, node, images) {
-                scene.fill_path(&path);
+                fill_paint_path(scene, &path, paint);
             }
         }
     }
@@ -2685,6 +2696,10 @@ fn draw_node(
         return;
     }
     let transform = camera * doc.world_transform(id);
+    let blend = gpu_node_blend(node);
+    if let Some(blend) = blend {
+        scene.push_blend_layer(blend);
+    }
     let opacity_layer = node.opacity < 0.999;
     if opacity_layer {
         scene.push_opacity_layer(node.opacity);
@@ -2732,6 +2747,45 @@ fn draw_node(
     if opacity_layer {
         scene.pop_layer();
     }
+    if blend.is_some() {
+        scene.pop_layer();
+    }
+}
+
+fn gpu_node_blend(node: &Node) -> Option<peniko::BlendMode> {
+    gpu_blend_mode(node.blend)
+}
+
+fn gpu_blend_mode(mode: BlendMode) -> Option<peniko::BlendMode> {
+    use peniko::{Compose, Mix};
+    let mix = match mode {
+        BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker => return None,
+        BlendMode::Darken => Mix::Darken,
+        BlendMode::Multiply => Mix::Multiply,
+        BlendMode::ColorBurn => Mix::ColorBurn,
+        BlendMode::Lighten => Mix::Lighten,
+        BlendMode::Screen => Mix::Screen,
+        BlendMode::PlusLighter => return Some(Compose::Plus.into()),
+        BlendMode::ColorDodge => Mix::ColorDodge,
+        BlendMode::Overlay => Mix::Overlay,
+        BlendMode::SoftLight => Mix::SoftLight,
+        BlendMode::HardLight => Mix::HardLight,
+        BlendMode::Difference => Mix::Difference,
+        BlendMode::Exclusion => Mix::Exclusion,
+        BlendMode::Hue => Mix::Hue,
+        BlendMode::Saturation => Mix::Saturation,
+        BlendMode::Color => Mix::Color,
+        BlendMode::Luminosity => Mix::Luminosity,
+    };
+    Some(mix.into())
+}
+
+fn gpu_simple_node_blend_supported(node: &Node) -> bool {
+    gpu_node_blend(node).is_some() && node.children.is_empty() && node.effects.iter().all(|effect| !effect.visible)
+}
+
+fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
+    gpu_blend_mode(paint.blend).is_some() && node.children.is_empty() && node.effects.iter().all(|effect| !effect.visible)
 }
 
 fn draw_paint_runs(
@@ -2876,7 +2930,7 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
         let unsupported_paint = |paint: &Paint| {
             paint.visible
                 && paint.opacity > 0.0
-                && (paint.blend != BlendMode::Normal
+                && ((paint.blend != BlendMode::Normal && !gpu_simple_paint_blend_supported(node, paint))
                     || match &paint.kind {
                         PaintKind::Gradient(gradient) => gradient.kind == GradientKind::Diamond,
                         PaintKind::Image(image) => !image.filters.is_identity(),
@@ -2885,7 +2939,7 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
                     })
         };
         let unsupported = (node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node))
-            || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+            || (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough) && !gpu_simple_node_blend_supported(node))
             || node.fills.iter().chain(&node.strokes).any(unsupported_paint)
             || matches!(&node.kind, NodeKind::Vector { network }
                 if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(unsupported_paint));

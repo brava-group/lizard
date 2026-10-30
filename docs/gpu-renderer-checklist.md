@@ -62,3 +62,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   pixel samples. The engine now shares native GPU-first page and area rendering with saved-file
   thumbnails, CLI, headless MCP, asset/style/font previews, and home cards. All 711 UI library
   tests passed; presentation animation, vectorization, and rasterized SVG/PDF content remain open.
+- 2026-10-30: simple leaf node and individual paint blend modes now use Vello blend layers.
+  Sampled GPU/CPU pixels passed for every supported mode; Plus Darker remains guarded because
+  Peniko has no corresponding operator. Seven GPU export tests passed. Complex groups and
+  effect stacks with blends still need coverage.

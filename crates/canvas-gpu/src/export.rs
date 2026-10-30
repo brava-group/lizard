@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use figcraft_color::{BlendMode, ColorProfile};
+use figcraft_color::ColorProfile;
 use figcraft_doc::{Document, EffectKind, NodeId};
 use figcraft_geom::Rect;
 use figcraft_render::{Pixmap, View};
@@ -37,8 +37,7 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
     }
     let unsupported_subtree = doc.nodes().any(|node| {
         ids.iter().any(|id| *id == node.id || doc.is_ancestor(*id, node.id))
-            && (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
-                || node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_))))
+            && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_)))
     });
     if unsupported_subtree || has_unhandled_effects_with_cached_noise_in_view(doc, &view, true) {
         return None;
@@ -194,6 +193,68 @@ mod tests {
             let expected = cpu.pixel(x, 40).ok_or("CPU sample missing")?;
             assert!(actual.alpha().abs_diff(expected.alpha()) <= 2);
             assert!(actual.red().abs_diff(expected.red()) <= 2);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn simple_leaf_blend_modes_match_cpu_samples() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("blend export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background, background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background = Color::WHITE;
+            *background_visible = true;
+        }
+        let base = doc.create(page, NodeKind::Rectangle, "Base", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.5, 0.8, 1.0))];
+        let top = doc.create(page, NodeKind::Rectangle, "Top", 10.0, 10.0, 60.0, 60.0)?;
+        doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
+        for blend in figcraft_color::BlendMode::ALL {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+                continue;
+            }
+            doc.node_mut(top).ok_or("top missing")?.blend = blend;
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
+            let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU blend export unavailable")?;
+            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend reference unavailable")?;
+            let actual = gpu.pixel(40, 40).ok_or("GPU sample missing")?;
+            let expected = cpu.pixel(40, 40).ok_or("CPU sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
+                assert!(a.abs_diff(b) <= 10, "{blend:?}: GPU={actual:?}, CPU={expected:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn simple_paint_blend_modes_match_cpu_samples() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("paint blend export");
+        let page = doc.current_page.ok_or("page missing")?;
+        let base = doc.create(page, NodeKind::Rectangle, "Base", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.5, 0.8, 1.0))];
+        let top = doc.create(page, NodeKind::Rectangle, "Top", 10.0, 10.0, 60.0, 60.0)?;
+        doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
+        for blend in figcraft_color::BlendMode::ALL {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+                continue;
+            }
+            doc.node_mut(top).ok_or("top missing")?.fills[0].blend = blend;
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
+            let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU paint blend export unavailable")?;
+            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU paint blend reference unavailable")?;
+            let actual = gpu.pixel(40, 40).ok_or("GPU sample missing")?;
+            let expected = cpu.pixel(40, 40).ok_or("CPU sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
+                assert!(a.abs_diff(b) <= 10, "{blend:?}: GPU={actual:?}, CPU={expected:?}");
+            }
         }
         Ok(())
     }
