@@ -25,6 +25,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
+  - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
+    live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
     to sRGB in a GPU pass.
   - [ ] Check Display P3 conversion in every secondary preview and browser presentation path.
@@ -119,3 +121,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   was visually inspected. The native window screenshot timed out because the test window was
   covered. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 64 GPU tests and 712 UI tests.
   Browser/WASM GPU coverage remains open.
+- 2026-10-30: native shader fills now render on the canvas device and stay GPU-resident through
+  Vello composition. GPU/CPU samples passed at 1× and 2× zoom with partial opacity; editing a
+  uniform replaces its cached texture without retaining every previous value. The CPU shader
+  raster remains a fallback and the browser GPU path is still open. `CARGO_INCREMENTAL=0 cargo
+  xtask ci` passed with 66 GPU tests and 712 UI tests after extending the high-zoom drag test's
+  deadline for parallel workspace load; that test passed alone in 0.25 s.

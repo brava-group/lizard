@@ -86,7 +86,7 @@ pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64
         return None;
     }
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native raster export".into(), view.width, view.height);
-    canvas.register_images_at(doc, time).ok()?;
+    canvas.register_images_at_scale(doc, time, view.scale).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
     canvas.render_export_roots(doc, ids, &view).ok()?;
     let pixels = canvas.pixels().ok()?;
@@ -114,7 +114,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
         return None;
     }
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native page export".into(), view.width, view.height);
-    canvas.register_images(doc).ok()?;
+    canvas.register_images_at_scale(doc, 0.0, view.scale).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
     let backdrops = BackdropIndex::new(doc, page);
     if backdrops.visible_ids(view).is_empty() {
@@ -138,6 +138,45 @@ mod tests {
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
+
+    #[test]
+    fn shader_fill_stays_on_gpu_and_matches_cpu_at_zoom() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU shader fill");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Shader", 8.0, 6.0, 64.0, 40.0)?;
+        let definition = figcraft_shader::demo();
+        doc.shaders.insert(definition.id.clone(), definition);
+        let mut paint = Paint::solid(Color::WHITE);
+        paint.kind =
+            PaintKind::Shader(figcraft_color::ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: [("frequency".into(), 4.0)].into() });
+        paint.opacity = 0.7;
+        doc.node_mut(id).ok_or("shader node missing")?.fills = vec![paint];
+        let area = Rect::new(0.0, 0.0, 80.0, 56.0);
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (80.0 * scale) as u32, height: (56.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let gpu = render_area_gpu(&doc, &[id], area, scale).ok_or("shader GPU export unavailable")?;
+            let cpu = figcraft_render::render_area(&doc, &[id], area, scale).ok_or("shader CPU export unavailable")?;
+            for (x, y) in [(20, 20), (40, 24), (60, 28), (70, 40)] {
+                let px = (f64::from(x) * scale) as u32;
+                let py = (f64::from(y) * scale) as u32;
+                let actual = gpu.pixel(px, py).ok_or("GPU shader sample missing")?;
+                let expected = cpu.pixel(px, py).ok_or("CPU shader sample missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    expected.red(),
+                    expected.green(),
+                    expected.blue(),
+                    expected.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "scale={scale}, at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn gpu_export_keeps_alpha_and_only_draws_selected_roots() -> Result<(), Box<dyn std::error::Error>> {

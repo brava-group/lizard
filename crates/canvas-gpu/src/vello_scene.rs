@@ -5,7 +5,7 @@ use std::error::Error;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use figcraft_color::{BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
+use figcraft_color::{BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, ShaderFill};
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
 use figcraft_geom::{Affine, Point, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
@@ -24,6 +24,7 @@ use crate::gpu_image_filter::GpuImageFilter;
 use crate::gpu_morph::GpuMorph;
 use crate::gpu_noise::GpuNoise;
 use crate::gpu_progressive_blur::GpuProgressiveBlur;
+use crate::gpu_shader::GpuShader;
 use crate::gpu_shadow_clip::GpuShadowClip;
 use crate::gpu_silhouette_shadow::GpuSilhouetteShadow;
 use crate::gpu_texture::GpuTexture;
@@ -33,6 +34,36 @@ pub const HEIGHT: u32 = 600;
 
 fn color(c: Color, opacity: f32) -> peniko::Color {
     peniko::Color::new([c.r, c.g, c.b, c.a * opacity])
+}
+
+#[cfg(test)]
+mod shader_cache_tests {
+    use super::*;
+
+    #[test]
+    fn shader_uniform_edits_replace_the_gpu_texture() -> Result<(), Box<dyn Error>> {
+        let Ok(mut canvas) = GpuCanvas::new(64, 64) else { return Ok(()) };
+        let mut doc = Document::new("shader cache");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Shader", 0.0, 0.0, 32.0, 32.0)?;
+        let definition = figcraft_shader::demo();
+        doc.shaders.insert(definition.id.clone(), definition);
+        doc.node_mut(id).ok_or("shader node missing")?.fills = vec![Paint {
+            kind: PaintKind::Shader(ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: Default::default() }),
+            ..Paint::solid(Color::WHITE)
+        }];
+        assert_eq!(canvas.register_images_at_scale(&doc, 0.0, 1.0)?, 1);
+        assert_eq!(canvas.register_images_at_scale(&doc, 0.0, 1.5)?, 1);
+        assert_eq!(canvas.shader_textures.len(), 1);
+        let node = doc.node_mut(id).ok_or("shader node missing after registration")?;
+        if let Some(Paint { kind: PaintKind::Shader(fill), .. }) = node.fills.first_mut() {
+            fill.values.insert("frequency".into(), 8.0);
+        }
+        assert_eq!(canvas.register_images_at_scale(&doc, 0.0, 1.5)?, 1);
+        assert_eq!(canvas.shader_textures.len(), 1);
+        assert_eq!(canvas.shader_info.len(), 1);
+        Ok(())
+    }
 }
 
 fn same_global_inputs(before: &Document, after: &Document) -> bool {
@@ -2286,6 +2317,10 @@ fn diamond_key(gradient: &Gradient, opacity: f32) -> String {
     format!("diamond:{gradient:?}:{}", opacity.to_bits())
 }
 
+fn shader_key(node: &Node, fill: &ShaderFill) -> String {
+    format!("shader:{:?}:{}:{:?}", node.id, fill.shader_id, fill.values)
+}
+
 fn collect_paint_order(doc: &Document, id: NodeId, output: &mut Vec<NodeId>) {
     let mut pending = vec![id];
     while let Some(id) = pending.pop() {
@@ -2391,6 +2426,14 @@ fn set_paint(scene: &mut Scene, paint: &Paint, node: &Node, images: Option<&Hash
             scene.set_paint(Image {
                 image: ImageSource::external_texture(info.id, RectU16::new(0, 0, info.width, info.height), true),
                 sampler: peniko::ImageSampler::default().with_extend(extend).with_alpha(paint.opacity.clamp(0.0, 1.0)),
+            });
+        }
+        PaintKind::Shader(fill) => {
+            let Some(info) = images.and_then(|entries| entries.get(&shader_key(node, fill))) else { return false };
+            scene.set_paint_transform(Affine::scale_non_uniform(node.width / f64::from(info.width), node.height / f64::from(info.height)));
+            scene.set_paint(Image {
+                image: ImageSource::external_texture(info.id, RectU16::new(0, 0, info.width, info.height), true),
+                sampler: peniko::ImageSampler::default().with_alpha(paint.opacity.clamp(0.0, 1.0)),
             });
         }
         _ => return false,
@@ -2960,7 +3003,10 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
                     || match &paint.kind {
                         PaintKind::Gradient(_) => false,
                         PaintKind::Image(_) => false,
-                        PaintKind::Pattern(_) | PaintKind::Shader(_) => true,
+                        PaintKind::Pattern(_) => true,
+                        // Registration validates once; parsing WGSL in this per-frame scan
+                        // would repeat for every node during every pan and zoom update.
+                        PaintKind::Shader(fill) => !doc.shaders.contains_key(&fill.shader_id),
                         PaintKind::Solid { .. } => false,
                     })
         };
@@ -3500,6 +3546,8 @@ pub struct GpuCanvas {
     view: wgpu::TextureView,
     depth: wgpu::TextureView,
     image_textures: Vec<wgpu::Texture>,
+    shader_textures: HashMap<String, wgpu::Texture>,
+    shader_info: HashMap<String, (u16, u16, String, u32)>,
     temporary_textures: Vec<wgpu::Texture>,
     temporary_ids: Vec<TextureId>,
     cached_textures: Vec<wgpu::Texture>,
@@ -3517,6 +3565,7 @@ pub struct GpuCanvas {
     gpu_noise: Option<GpuNoise>,
     gpu_texture: Option<GpuTexture>,
     gpu_shadow_clip: Option<GpuShadowClip>,
+    gpu_shader: Option<GpuShader>,
     gpu_silhouette_shadow: Option<GpuSilhouetteShadow>,
     glass_prefix_canvas: Option<Box<GpuCanvas>>,
     glass_mask_canvas: Option<Box<GpuCanvas>>,
@@ -4341,6 +4390,8 @@ impl GpuCanvas {
             view,
             depth,
             image_textures: Vec::new(),
+            shader_textures: HashMap::new(),
+            shader_info: HashMap::new(),
             temporary_textures: Vec::new(),
             temporary_ids: Vec::new(),
             cached_textures: Vec::new(),
@@ -4358,6 +4409,7 @@ impl GpuCanvas {
             gpu_noise: None,
             gpu_texture: None,
             gpu_shadow_clip: None,
+            gpu_shader: None,
             gpu_silhouette_shadow: None,
             glass_prefix_canvas: None,
             glass_mask_canvas: None,
@@ -4888,18 +4940,53 @@ impl GpuCanvas {
     }
 
     pub fn register_images(&mut self, doc: &Document) -> Result<usize, Box<dyn Error>> {
-        self.register_images_at(doc, 0.0)
+        self.register_images_at_scale(doc, 0.0, 1.0)
     }
 
     /// Upload the image frame visible at `time`; static renders use the first frame.
     pub fn register_images_at(&mut self, doc: &Document, time: f64) -> Result<usize, Box<dyn Error>> {
+        self.register_images_at_scale(doc, time, 1.0)
+    }
+
+    /// Register image and shader paints at the current device scale. Shader resolution changes
+    /// only at powers of two, avoiding texture churn on every zoom tick.
+    pub fn register_images_at_scale(&mut self, doc: &Document, time: f64, scale: f64) -> Result<usize, Box<dyn Error>> {
         let mut count = 0;
+        let mut active_shader_keys = HashSet::new();
         for node in doc.nodes() {
             let region_paints = match &node.kind {
                 NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
                 _ => Vec::new(),
             };
             for paint in node.fills.iter().chain(&node.strokes).chain(region_paints) {
+                if let PaintKind::Shader(fill) = &paint.kind {
+                    let Some(definition) = doc.shaders.get(&fill.shader_id) else { continue };
+                    let key = shader_key(node, fill);
+                    active_shader_keys.insert(key.clone());
+                    let scale = if scale.is_finite() { scale.clamp(1.0, 64.0) } else { 1.0 };
+                    let texture_scale = scale.log2().ceil().exp2();
+                    let width = (node.width.abs() * texture_scale).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u16;
+                    let height = (node.height.abs() * texture_scale).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u16;
+                    let signature = format!("{:?}", definition);
+                    let frame_time = if definition.features.animated && time.is_finite() { time.max(0.0) as f32 } else { 0.0 };
+                    let state = (width, height, signature, frame_time.to_bits());
+                    if self.shader_info.get(&key) == Some(&state) {
+                        continue;
+                    }
+                    let generator = self.gpu_shader.get_or_insert_with(GpuShader::new);
+                    let texture =
+                        generator.render(&self.device, &self.queue, definition, &fill.values, u32::from(width), u32::from(height), frame_time)?;
+                    let id = self.image_info.get(&key).map_or_else(|| TextureId(self.next_external_id), |info| info.id);
+                    if !self.image_info.contains_key(&key) {
+                        self.next_external_id += 1;
+                    }
+                    self.image_bindings.insert(id, texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                    self.image_info.insert(key.clone(), ImageInfo { id, width, height, region: None });
+                    self.shader_textures.insert(key.clone(), texture);
+                    self.shader_info.insert(key, state);
+                    count += 1;
+                    continue;
+                }
                 if let PaintKind::Gradient(gradient) = &paint.kind
                     && gradient.kind == GradientKind::Diamond
                 {
@@ -4960,6 +5047,14 @@ impl GpuCanvas {
                 }
                 count += 1;
             }
+        }
+        let stale: Vec<_> = self.shader_info.keys().filter(|key| !active_shader_keys.contains(*key)).cloned().collect();
+        for key in stale {
+            if let Some(info) = self.image_info.remove(&key) {
+                self.image_bindings.remove(info.id);
+            }
+            self.shader_info.remove(&key);
+            self.shader_textures.remove(&key);
         }
         Ok(count)
     }

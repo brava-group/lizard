@@ -22,6 +22,8 @@ pub mod gpu_morph;
 pub mod gpu_noise;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_progressive_blur;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_shader;
 pub mod gpu_shadow_clip;
 pub mod gpu_silhouette_shadow;
 #[cfg(not(target_arch = "wasm32"))]

@@ -118,7 +118,7 @@ fn zoomed_into_a_frame_corner_drag_stays_composited() {
         ds.revision += 1;
     }
     ui.frame(vec![]);
-    for _ in 0..300 {
+    for _ in 0..600 {
         ui.frame(vec![]);
         if ui.app.canvas.refine_latency_ms.is_some() && ui.app.session.ds().ok().is_some_and(|ds| ui.app.canvas.texture_current(ds)) {
             break;
@@ -130,7 +130,7 @@ fn zoomed_into_a_frame_corner_drag_stays_composited() {
     assert!(ui.app.canvas.rect.contains(start));
     ui.button(start, true);
     ui.frame(vec![Event::PointerMoved(start + vec2(24.0, 20.0))]);
-    for _ in 0..300 {
+    for _ in 0..600 {
         ui.frame(vec![]);
         if crate::canvas::drag_mode(&ui.app) == "composited" {
             break;

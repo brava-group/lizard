@@ -284,12 +284,16 @@ impl GpuCanvasExperiment {
         }
         let changed_doc = !self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
+        if !doc.shaders.is_empty() && (changed_doc || self.direct_camera.is_none_or(|previous| previous.2 != view.scale)) {
+            let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during shader zoom")?;
+            canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+        }
         let finish_preview = self.direct_provisional_effects && !gesture_active;
         let backdrops = BackdropIndex::new(&doc, page);
         if !backdrops.visible_ids(view).is_empty() {
             if changed_doc {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
-                canvas.register_images(&doc)?;
+                canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
                 if self.direct_cached_blur {
                     canvas.prepare_static_effects(&doc)?;
                 }
@@ -343,7 +347,7 @@ impl GpuCanvasExperiment {
                     self.direct_provisional_effects = true;
                 }
                 if !translated && !duplicated && !unaffected && !rotated && !scaled && !resized {
-                    canvas.register_images(&doc)?;
+                    canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
                 }
                 if self.direct_cached_blur && ((!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) || finish_preview) {
                     let (blur, drop, inner) = canvas.prepare_static_effects(&doc)?;

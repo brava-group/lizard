@@ -14,6 +14,7 @@ figcraft-doc = { workspace = true }
 figcraft-color = { workspace = true }
 figcraft-geom = { workspace = true }
 figcraft-render = { workspace = true }
+figcraft-shader = { workspace = true }
 wgpu = "30.0.1"
 rayon = "1"
 pollster = "0.4"
