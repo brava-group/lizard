@@ -25,6 +25,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
+  - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
+    to sRGB in a GPU pass.
+  - [ ] Check Display P3 conversion in every secondary preview and browser presentation path.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
@@ -109,3 +112,10 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 62 GPU tests and 712 UI tests. An unrelated
   zoom preview test needed a longer worker deadline under parallel workspace load; its isolated
   run completed in 60 ms and the full gate passed after the test timing adjustment.
+- 2026-10-30: native GPU page and selected-layer exports now accept Display P3. A fixture with
+  a managed image and gradient matched the CPU document-space pixels within 3/255. A GPU
+  P3-to-sRGB presentation pass matched the CPU screen conversion within 4/255 on opaque and
+  translucent pixels and after a viewport resize. An app PNG export with overlapping P3 shapes
+  was visually inspected. The native window screenshot timed out because the test window was
+  covered. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 64 GPU tests and 712 UI tests.
+  Browser/WASM GPU coverage remains open.

@@ -5,7 +5,7 @@ use std::error::Error;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use figcraft_color::{BlendMode, Color, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
+use figcraft_color::{BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
 use figcraft_geom::{Affine, Point, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
@@ -17,6 +17,7 @@ use vello_common::peniko::{self, Fill};
 use vello_gpu::{RenderSize, RenderTargetConfig, Scene, TargetInit, TextureBindings};
 
 use crate::gpu_blur::GpuBlur;
+use crate::gpu_color_profile::GpuColorProfile;
 use crate::gpu_diamond::GpuDiamond;
 use crate::gpu_glass::GpuGlass;
 use crate::gpu_image_filter::GpuImageFilter;
@@ -3511,6 +3512,7 @@ pub struct GpuCanvas {
     gpu_glass: Option<GpuGlass>,
     gpu_image_filter: Option<GpuImageFilter>,
     gpu_diamond: Option<GpuDiamond>,
+    gpu_color_profile: Option<GpuColorProfile>,
     gpu_progressive_blur: Option<GpuProgressiveBlur>,
     gpu_noise: Option<GpuNoise>,
     gpu_texture: Option<GpuTexture>,
@@ -4251,6 +4253,22 @@ impl GpuCanvas {
         &self.view
     }
 
+    /// Stable sRGB texture view for presenting a Display P3 document in an sRGB native window.
+    pub fn srgb_output_view(&mut self) -> &wgpu::TextureView {
+        let pass = self.gpu_color_profile.get_or_insert_with(|| GpuColorProfile::new(&self.device, self.texture.size()));
+        pass.view()
+    }
+
+    /// Convert the finished Display P3 canvas on the GPU without changing document-space pixels.
+    pub fn convert_for_presentation(&mut self, profile: ColorProfile) {
+        if profile == ColorProfile::DisplayP3 {
+            let pass = self.gpu_color_profile.get_or_insert_with(|| GpuColorProfile::new(&self.device, self.texture.size()));
+            if let Some(matrix) = profile.conversion_to(ColorProfile::Srgb).linear_matrix() {
+                pass.submit(&self.device, &self.queue, &self.texture, matrix);
+            }
+        }
+    }
+
     pub fn new(width: u32, height: u32) -> Result<Self, Box<dyn Error>> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -4292,6 +4310,7 @@ impl GpuCanvas {
         self.renderer = renderer;
         self.resources = resources;
         self.depth = depth;
+        self.gpu_color_profile = None;
     }
 
     fn with_device(device: wgpu::Device, queue: wgpu::Queue, adapter_name: String, width: u32, height: u32) -> Self {
@@ -4334,6 +4353,7 @@ impl GpuCanvas {
             gpu_glass: None,
             gpu_image_filter: None,
             gpu_diamond: None,
+            gpu_color_profile: None,
             gpu_progressive_blur: None,
             gpu_noise: None,
             gpu_texture: None,
@@ -5061,7 +5081,17 @@ impl GpuCanvas {
     }
 
     pub fn pixels(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        let size = self.texture.size();
+        self.texture_pixels(&self.texture)
+    }
+
+    #[cfg(test)]
+    pub fn presented_pixels(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+        let texture = self.gpu_color_profile.as_ref().map_or(&self.texture, GpuColorProfile::texture);
+        self.texture_pixels(texture)
+    }
+
+    fn texture_pixels(&self, texture: &wgpu::Texture) -> Result<Vec<u8>, Box<dyn Error>> {
+        let size = texture.size();
         let stride = size.width.saturating_mul(4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let output = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lizard GPU benchmark readback"),
@@ -5072,7 +5102,7 @@ impl GpuCanvas {
         let mut encoder =
             self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard GPU benchmark readback encoder") });
         encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo {
                 buffer: &output,
                 layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(size.height) },

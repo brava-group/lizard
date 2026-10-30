@@ -3,7 +3,6 @@
 
 use std::sync::OnceLock;
 
-use figcraft_color::ColorProfile;
 use figcraft_doc::{Document, EffectKind, NodeId};
 use figcraft_geom::Rect;
 use figcraft_render::{Pixmap, View};
@@ -55,7 +54,7 @@ pub fn render_area_gpu(doc: &Document, ids: &[NodeId], area: Rect, scale: f64) -
 
 /// Render a selected subtree using animated image frames at `time` seconds.
 pub fn render_area_gpu_at(doc: &Document, ids: &[NodeId], area: Rect, scale: f64, time: f64) -> Option<Pixmap> {
-    if ids.is_empty() || !scale.is_finite() || scale <= 0.0 || doc.color_profile != ColorProfile::Srgb {
+    if ids.is_empty() || !scale.is_finite() || scale <= 0.0 {
         return None;
     }
     let [x0, y0, x1, y1] = [area.x0, area.y0, area.x1, area.y1];
@@ -104,11 +103,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
         figcraft_doc::NodeKind::Page { .. } => [0.0; 4],
         _ => return None,
     };
-    if doc.color_profile != ColorProfile::Srgb
-        || view.width == 0
-        || view.height == 0
-        || has_unhandled_effects_with_cached_noise_in_view(doc, view, true)
-    {
+    if view.width == 0 || view.height == 0 || has_unhandled_effects_with_cached_noise_in_view(doc, view, true) {
         return None;
     }
     if view.width > 4096 || view.height > 4096 {
@@ -138,7 +133,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_color::{Color, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind};
+    use figcraft_color::{Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind};
     use figcraft_doc::{ImageData, NodeKind};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
@@ -334,6 +329,91 @@ mod tests {
                 expected.alpha(),
             ]) {
                 assert!(a.abs_diff(b) <= 6, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn display_p3_page_and_selection_keep_document_rgb_values() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU Display P3");
+        doc.color_profile = ColorProfile::DisplayP3;
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Managed image", 8.0, 8.0, 16.0, 16.0)?;
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+        let hash = "display-p3-image".to_string();
+        doc.images.insert(hash.clone(), ImageData { bytes: Arc::new(bytes), width: 4, height: 4 });
+        doc.node_mut(id).ok_or("P3 image node missing")?.fills = vec![Paint::image(hash, ImageScaleMode::Fill)];
+        let gradient_id = doc.create(page, NodeKind::Rectangle, "P3 gradient", 28.0, 8.0, 16.0, 16.0)?;
+        doc.node_mut(gradient_id).ok_or("P3 gradient node missing")?.fills =
+            vec![Paint::gradient(Gradient::default_for(GradientKind::Linear, Color::new(0.1, 0.8, 0.3, 1.0)))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 32 };
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("P3 GPU page unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU page unavailable")?;
+        for (x, y) in [(2, 2), (16, 16), (36, 16)] {
+            let actual = gpu.pixel(x, y).ok_or("P3 GPU sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("P3 CPU sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 3, "P3 page ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+            }
+        }
+        let area = Rect::new(8.0, 8.0, 24.0, 24.0);
+        let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("P3 GPU selection unavailable")?;
+        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("P3 CPU selection unavailable")?;
+        let actual = gpu.pixel(8, 8).ok_or("P3 GPU selection pixel missing")?;
+        let expected = cpu.pixel(8, 8).ok_or("P3 CPU selection pixel missing")?;
+        for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+            expected.red(),
+            expected.green(),
+            expected.blue(),
+            expected.alpha(),
+        ]) {
+            assert!(a.abs_diff(b) <= 3, "P3 selection: GPU={actual:?}, CPU={expected:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn display_p3_presentation_converts_to_srgb_on_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(mut canvas) = GpuCanvas::new(32, 32) else { return Ok(()) };
+        let mut doc = Document::new("GPU Display P3 presentation");
+        doc.color_profile = ColorProfile::DisplayP3;
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "P3 color", 0.0, 0.0, 32.0, 32.0)?;
+        doc.node_mut(id).ok_or("P3 color node missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.25, 0.1, 0.6))];
+        for size in [32, 48] {
+            if size != 32 {
+                canvas.resize(size, size);
+            }
+            let view = View { origin: (0.0, 0.0), scale: 1.0, width: size, height: size };
+            canvas.render_submit_document_rgba(&doc, page, &view, [0.0; 4])?;
+            canvas.convert_for_presentation(ColorProfile::DisplayP3);
+            let actual = canvas.presented_pixels()?;
+            let mut expected = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU presentation unavailable")?;
+            figcraft_render::to_srgb(&mut expected, ColorProfile::DisplayP3);
+            for (x, y) in [(2usize, 2usize), (16, 16), (30, 30)] {
+                let offset = (y * size as usize + x) * 4;
+                for (gpu, cpu) in actual[offset..offset + 4].iter().zip(&expected.data()[offset..offset + 4]) {
+                    assert!(
+                        gpu.abs_diff(*cpu) <= 4,
+                        "P3 presentation {size}x{size} ({x},{y}): GPU={:?}, CPU={:?}",
+                        &actual[offset..offset + 4],
+                        &expected.data()[offset..offset + 4]
+                    );
+                }
             }
         }
         Ok(())

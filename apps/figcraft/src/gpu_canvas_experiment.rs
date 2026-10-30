@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::geometry_atlas::{GeometryAtlas, required_slots};
 use figcraft_canvas_gpu::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_with_cached_noise_in_view, make_scene_with_images};
+use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
 use figcraft_render::View;
 use figcraft_ui_egui::canvas::CanvasGpuBackend;
@@ -17,6 +18,7 @@ pub struct GpuCanvasExperiment {
     atlas: Option<GeometryAtlas>,
     direct: Option<GpuCanvas>,
     direct_texture_id: Option<egui::TextureId>,
+    direct_profile: Option<ColorProfile>,
     direct_size: (u32, u32),
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
@@ -47,6 +49,7 @@ impl GpuCanvasExperiment {
             atlas: None,
             direct: None,
             direct_texture_id: None,
+            direct_profile: None,
             direct_size: (0, 0),
             direct_document: None,
             direct_page: None,
@@ -69,6 +72,18 @@ impl GpuCanvasExperiment {
             camera_states: 0,
             covered_states: 0,
         }
+    }
+
+    fn register_direct_view(&mut self, profile: ColorProfile) -> Result<(), Box<dyn Error>> {
+        if let Some(id) = self.direct_texture_id.take() {
+            self.state.renderer.write().free_texture(&id);
+        }
+        let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing for texture registration")?;
+        let view = if profile == ColorProfile::DisplayP3 { canvas.srgb_output_view() } else { canvas.output_view() };
+        let id = self.state.renderer.write().register_native_texture(&self.state.device, view, wgpu::FilterMode::Linear);
+        self.direct_texture_id = Some(id);
+        self.direct_profile = Some(profile);
+        Ok(())
     }
 
     fn update(
@@ -239,31 +254,33 @@ impl GpuCanvasExperiment {
             return Ok(None);
         }
         let size = (view.width, view.height);
+        let profile = doc.color_profile;
+        let clear = if profile == ColorProfile::DisplayP3 {
+            let converted = ColorProfile::Srgb.conversion_to(profile).apply(Color::new(clear[0], clear[1], clear[2], 1.0));
+            [converted.r, converted.g, converted.b]
+        } else {
+            clear
+        };
         if self.direct.is_none() {
-            if let Some(id) = self.direct_texture_id.take() {
-                self.state.renderer.write().free_texture(&id);
-            }
             let canvas =
                 GpuCanvas::from_device(self.state.device.clone(), self.state.queue.clone(), "eframe shared device".to_owned(), size.0, size.1);
-            let id = self.state.renderer.write().register_native_texture(&self.state.device, canvas.output_view(), wgpu::FilterMode::Linear);
             self.direct = Some(canvas);
-            self.direct_texture_id = Some(id);
+            self.register_direct_view(profile)?;
             self.direct_size = size;
             self.direct_document = None;
             self.direct_camera = None;
             self.direct_provisional_effects = false;
             eprintln!("Lizard direct Vello GPU canvas: viewport={}x{}", size.0, size.1);
         } else if self.direct_size != size {
-            if let Some(id) = self.direct_texture_id.take() {
-                self.state.renderer.write().free_texture(&id);
-            }
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during resize")?;
             canvas.resize(size.0, size.1);
-            let id = self.state.renderer.write().register_native_texture(&self.state.device, canvas.output_view(), wgpu::FilterMode::Linear);
-            self.direct_texture_id = Some(id);
+            self.register_direct_view(profile)?;
             self.direct_size = size;
             self.direct_camera = None;
             eprintln!("Lizard direct Vello GPU canvas: resized viewport={}x{}; retained effect textures", size.0, size.1);
+        }
+        if self.direct_profile != Some(profile) {
+            self.register_direct_view(profile)?;
         }
         let changed_doc = !self.direct_document.as_ref().is_some_and(|current| Arc::ptr_eq(current, &doc));
         let camera = (view.origin.0, view.origin.1, view.scale);
@@ -278,7 +295,9 @@ impl GpuCanvasExperiment {
                 }
             }
             if changed_doc || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
-                self.direct.as_mut().ok_or("direct GPU canvas missing")?.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
+                let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
+                canvas.render_with_backdrop_blurs_indexed(&doc, page, view, clear, &backdrops)?;
+                canvas.convert_for_presentation(profile);
                 self.direct_document = Some(doc);
                 self.direct_page = Some(page);
                 self.direct_camera = Some(camera);
@@ -345,6 +364,7 @@ impl GpuCanvasExperiment {
                 make_scene_with_images(&doc, page, view, Some(canvas.image_info()))
             };
             let ms = canvas.render_submit_with_clear(&scene, clear)?;
+            canvas.convert_for_presentation(profile);
             if ms > 16.0 {
                 eprintln!("Lizard direct Vello GPU frame: {ms:.1} ms at {:.2}x", view.scale);
             }

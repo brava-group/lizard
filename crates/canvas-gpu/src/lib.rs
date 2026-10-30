@@ -10,6 +10,8 @@ pub mod geometry_atlas;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_blur;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_color_profile;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_diamond;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_glass;

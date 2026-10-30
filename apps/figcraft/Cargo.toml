@@ -16,13 +16,14 @@ workspace = true
 
 [features]
 default = ["gpu-canvas-experiment"]
-gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-doc", "dep:figcraft-render"]
+gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-color", "dep:figcraft-doc", "dep:figcraft-render"]
 
 [dependencies]
 figcraft-engine = { workspace = true }
 figcraft-figma-plugin = { workspace = true }
 figcraft-ui-egui = { workspace = true }
 figcraft-canvas-gpu = { workspace = true, optional = true }
+figcraft-color = { workspace = true, optional = true }
 figcraft-doc = { workspace = true, optional = true }
 figcraft-render = { workspace = true, optional = true }
 figcraft-collab-net = { workspace = true }

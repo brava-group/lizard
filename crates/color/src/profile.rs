@@ -108,6 +108,11 @@ impl ProfileConversion {
         self.m.is_none()
     }
 
+    /// Linear-light RGB matrix for GPU colour conversion; rows map source channels to target channels.
+    pub fn linear_matrix(&self) -> Option<[[f32; 3]; 3]> {
+        self.m.map(|matrix| matrix.map(|row| row.map(|value| value as f32)))
+    }
+
     /// `c` in the target space (alpha unchanged; out-of-gamut channels clip).
     pub fn apply(&self, c: Color) -> Color {
         let Some(m) = &self.m else { return c };

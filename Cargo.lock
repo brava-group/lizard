@@ -1957,6 +1957,7 @@ dependencies = [
  "env_logger",
  "figcraft-canvas-gpu",
  "figcraft-collab-net",
+ "figcraft-color",
  "figcraft-doc",
  "figcraft-engine",
  "figcraft-figma-plugin",
