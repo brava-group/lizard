@@ -67,6 +67,19 @@ fn plugins_are_kept_when_the_app_is_killed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn inherited_online_server_is_removed_from_saved_preferences() {
+    let dir = root("inherited-server");
+    std::fs::write(dir.join("state.json"), r#"{"prefs":{"publish_server":"wss://collab.craftapps.dev/"}}"#).unwrap();
+    let service = Desktop::load_from(Some(dir.clone()), Arc::new(Mutex::new(None)));
+    assert_eq!(service.prefs.unwrap().publish_server, "");
+
+    std::fs::write(dir.join("state.json"), r#"{"prefs":{"publish_server":"wss://team.example/"}}"#).unwrap();
+    let service = Desktop::load_from(Some(dir.clone()), Arc::new(Mutex::new(None)));
+    assert_eq!(service.prefs.unwrap().publish_server, "wss://team.example/");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn preferences_are_readable_by_their_owner_only() {

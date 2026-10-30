@@ -391,8 +391,18 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                                     "fileChange" => "Alteração de arquivo".into(),
                                     _ => "Busca na web".into(),
                                 };
-                                let status = if method == "item/completed" { "completed" } else { "in_progress" }.into();
-                                let _ = output.send(AgentEvent::Tool { id, title, status });
+                                let status = Some(if method == "item/completed" { "completed" } else { "in_progress" }.into());
+                                let input = match item_type {
+                                    "mcpToolCall" => item.get("arguments"),
+                                    "commandExecution" => item.get("command"),
+                                    "fileChange" => item.get("changes"),
+                                    _ => item.get("query"),
+                                }
+                                .map(|value| (!value.is_null()).then(|| value.clone()));
+                                let result = item.get("result").or_else(|| item.get("error")).or_else(|| item.get("aggregatedOutput"));
+                                let output_value =
+                                    if method == "item/completed" { result.map(|value| (!value.is_null()).then(|| value.clone())) } else { None };
+                                let _ = output.send(AgentEvent::Tool { id, title: Some(title), status, input, output: output_value, content: None });
                             }
                         }
                         "turn/completed" => {
@@ -729,7 +739,7 @@ for line in sys.stdin:
                         AgentEvent::Session(id) => got_session |= id == "saved-thread",
                         AgentEvent::Models(models) => got_model |= models.first().is_some_and(|(id, _)| id == "test-model"),
                         AgentEvent::Text(text) => got_text |= text == "Created frame",
-                        AgentEvent::Tool { status, .. } => got_tool |= status == "completed",
+                        AgentEvent::Tool { status, .. } => got_tool |= status.as_deref() == Some("completed"),
                         AgentEvent::Done(reason) => got_done = reason == "end_turn",
                         AgentEvent::Error(error) => panic!("{error}"),
                         _ => {}
@@ -802,7 +812,7 @@ for line in sys.stdin:
             for event in agent.poll() {
                 match event {
                     AgentEvent::Text(text) => got_text |= text == "Working",
-                    AgentEvent::Tool { status, .. } => got_tool |= status == "completed",
+                    AgentEvent::Tool { status, .. } => got_tool |= status.as_deref() == Some("completed"),
                     AgentEvent::Permission { id, options, .. } => {
                         assert_eq!(options[0].0, "allow");
                         agent.permission(id, Some("allow".into()));
@@ -863,8 +873,11 @@ fn update(message: &Value) -> Option<AgentEvent> {
         "agent_thought_chunk" => value["content"]["text"].as_str().map(|text| AgentEvent::Thinking(text.chars().take(16_384).collect())),
         "tool_call" | "tool_call_update" => Some(AgentEvent::Tool {
             id: value["toolCallId"].as_str()?.to_string(),
-            title: value["title"].as_str().unwrap_or("Ação do agente").to_string(),
-            status: value["status"].as_str().unwrap_or("in_progress").to_string(),
+            title: value.get("title").and_then(Value::as_str).map(str::to_owned),
+            status: value.get("status").and_then(Value::as_str).map(str::to_owned),
+            input: value.get("rawInput").map(|entry| (!entry.is_null()).then(|| entry.clone())),
+            output: value.get("rawOutput").map(|entry| (!entry.is_null()).then(|| entry.clone())),
+            content: value.get("content").map(|entry| entry.as_array().cloned().unwrap_or_default()),
         }),
         _ => None,
     }

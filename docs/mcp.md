@@ -466,7 +466,7 @@ are edited at once, the first active; `key` Enter with shapes selected does the 
 mirroring, the width points, `layers` (every edited layer, the active first), `others` (the other
 layers' selected points and segments) and `handles` (the selected Bezier handles as
 `[segment, start]`)), `vector.edit.tool {tool: move|pen|bend|paint|lasso|cut|eraser|width}`,
-`vector.edit.select {vertices?, segments?, handles?: [[segment, start], ...], id? (an edited layer,
+`vector.edit.select {vertices?, segments?, handles?: [[segment, start], ...], regions?: [i, ...], id? (an edited layer,
 made active), add?}`, `vector.edit.selectAll` (every edited layer's points), `vector.edit.moveVertices`,
 `vector.edit.nudge`, `vector.edit.position {x?, y?}`, `vector.edit.setHandle`, `vector.edit.mirroring
 {mode: none|angle|angleAndLength}`, `vector.edit.smooth {smooth?}`, `vector.edit.bend`,
@@ -474,6 +474,9 @@ made active), add?}`, `vector.edit.selectAll` (every edited layer's points), `ve
 from the pen's open end; clicking a point connects or branches), `vector.edit.penEnd`,
 `vector.edit.paint {x, y} | {points}` (paint bucket: fills or unfills the closed area under a page
 point; with `points`, the areas under the rest go the way the first went, like a drag),
+`vector.region.fill.add|set|remove|move {id?, regions?, index?, paint?, color?, opacity?, visible?, blend?, from?, to?}`
+(defaults to the selected filled regions; each region inherits the layer's paints until its first
+edit, then stores its own paint stack; `regions` uses indices from `vector.edit.state`),
 `vector.edit.cut {segment, t} | {vertex} | {from: [x, y], to: [x, y]}` (the last cuts every path the
 page line crosses; parts that come apart move to layers of their own above, listed in `layers`),
 `vector.edit.erase {points, radius?}` (the eraser),
@@ -487,6 +490,18 @@ its join where it turns there, `null` for the layer's; drawn, exported and outli
 `vector.edit.moveHandles {dx, dy, handles?}` (moves the selected handles by a page offset),
 `vector.edit.end`. Point indices refer to `network.vertices` in `vector.edit.state`; local
 coordinates are the layer's own.
+
+In the Move tool, double-click a segment to select every segment connected through shared points.
+Alt-double-click selects only the closed contour containing that segment; Shift+Alt-double-click
+adds that contour to the current selection. The vector context menu offers **Select outer contour**
+and **Select inner contours**. Outer contours have no other closed contour around them; inner
+contours are nested inside another. The same actions are available to agents as
+`vector.edit.selectSubpath {segment, id?, add?}`,
+`vector.edit.selectLoop {segment, id?, add?}`,
+`vector.edit.selectOuterContour {id?, add?}` and
+`vector.edit.selectInnerContours {id?, add?}`. They change only the edit selection and create no
+undo step. A segment shared by several closed boundaries selects the smallest boundary with
+`selectLoop`.
 
 Several layers at once: with more than one layer in edit mode, a press on another layer's point,
 handle or segment makes it the active layer; Shift-click and marquee or lasso select points in any of
