@@ -1192,7 +1192,7 @@ mod effect_capability_tests {
     }
 
     #[test]
-    fn texture_scatter_uses_native_cache_at_one_and_two_times_zoom() -> Result<(), Box<dyn Error>> {
+    fn texture_scatter_uses_native_cache_at_one_and_two_times_zoom_including_rotation() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU texture levels");
         let page = doc.current_page.ok_or("new document has no page")?;
         let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 25.0, 22.0, 118.0, 97.0)?;
@@ -1218,6 +1218,30 @@ mod effect_capability_tests {
                 .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
                 .count();
             assert_eq!(changed, 0, "texture differs at {scale}x");
+        }
+        for (angle, clipped) in [(0.4, false), (-0.7, true)] {
+            let node = doc.node_mut(id).ok_or("shape missing")?;
+            node.transform = Affine::translate((170.0, 170.0)) * Affine::rotate(angle);
+            if let EffectKind::Texture(texture) = &mut node.effects[0].kind {
+                texture.clip_to_shape = clipped;
+            }
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (384.0 * scale) as u32, height: (384.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let painted = reference.data().chunks_exact(4).filter(|pixel| pixel[..3] != [245, 245, 245]).count();
+                assert!(painted > 1000, "rotated texture fixture must be visible");
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                assert_eq!(changed, 0, "rotated texture differs at {scale}x, angle {angle}, clipped {clipped}");
+            }
         }
         let fractional_view = View { origin: (0.25, 0.0), scale: 1.0, width: 256, height: 256 };
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &fractional_view, true));
@@ -3408,7 +3432,7 @@ fn gpu_multiple_drop_shadows_supported(doc: &Document, node: &Node) -> bool {
 }
 
 fn gpu_texture_cache_supported(doc: &Document, node: &Node, texture: &Texture) -> bool {
-    texture.radius.is_finite() && texture.radius >= 0.5 && gpu_axis_aligned(doc, node) && gpu_isolated_grain_supported(doc, node)
+    texture.radius.is_finite() && texture.radius >= 0.5 && gpu_isolated_grain_supported(doc, node)
 }
 
 fn gpu_axis_aligned(doc: &Document, node: &Node) -> bool {
@@ -3424,6 +3448,7 @@ fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture:
         return false;
     }
     let Some(bounds) = figcraft_render::raster_bounds(doc, node.id) else { return false };
+    let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
     let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
     let aligned = |coordinate: f64, origin: f64| {
         let pixel = (coordinate - origin) * view.scale;
@@ -4314,6 +4339,7 @@ impl GpuCanvas {
                     return None;
                 }
                 let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
                 let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
                 let width = (bounds.width() * scale).ceil() as u32;
                 let height = (bounds.height() * scale).ceil() as u32;

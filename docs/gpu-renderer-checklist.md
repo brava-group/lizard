@@ -58,6 +58,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Render isolated noise on skewed shapes through the GPU local-coordinate pass; a skewed
     rectangle matched the CPU reference within the existing pixel tolerance.
+  - [x] Render texture scatter on rotated shapes at 1× and 2× by aligning GPU cache bounds to
+    document pixels; clipped and unclipped rotated fixtures match the CPU reference.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
@@ -134,6 +136,12 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: the texture scatter cache now expands rotated effect bounds to integral document
+  pixels before GPU rasterization and presentation. Two rotation angles, clipped and unclipped
+  scatter, and 1×/2× zoom had zero pixels differing by more than 8/255 from the CPU reference;
+  each fixture had over 1,000 painted pixels. Fractional viewport origins and other zoom scales
+  remain guarded until a view-aligned GPU pass is available.
 
 - 2026-10-30: an ordered-stack probe found zero RGB pixels differing by more than 8/255 for
   rotated `Noise → Layer Blur` at 1× and 2×. Rotated `Layer Blur → Noise` differed in 3,868
