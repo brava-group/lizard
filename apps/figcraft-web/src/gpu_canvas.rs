@@ -92,6 +92,13 @@ impl WebGpuCanvas {
             focus.is_some_and(|id| page_backdrops.visible_ids(view).iter().any(|candidate| *candidate == id || doc.is_ancestor(id, *candidate)));
         let focused = focus.filter(|_| focus_has_backdrop).and_then(|id| focused_document(&doc, page, id));
         let render_doc = focused.as_ref().unwrap_or(&doc);
+        let unsupported = if let Some((selected, _)) = selected_outlines {
+            has_unhandled_effects_except_outlined_in_view(&doc, view, true, selected)
+        } else if let Some(id) = focus {
+            has_unhandled_effects_in_focused_subtree(&doc, view, true, id)
+        } else {
+            has_unhandled_effects_with_cached_noise_in_view(render_doc, view, true)
+        };
         if view.width == 0
             || view.height == 0
             || view.width.max(view.height) > self.state.device.limits().max_texture_dimension_2d
@@ -99,10 +106,7 @@ impl WebGpuCanvas {
             || view.height > u16::MAX.into()
             || !view.scale.is_finite()
             || view.scale <= 0.0
-            || focus.map_or_else(
-                || has_unhandled_effects_with_cached_noise_in_view(render_doc, view, true),
-                |id| has_unhandled_effects_in_focused_subtree(&doc, view, true, id),
-            )
+            || unsupported
         {
             return Ok(None);
         }

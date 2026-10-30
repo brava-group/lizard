@@ -360,3 +360,7 @@ the migration concerns rasterization and pixel effects.
   pixels by more than 8/255. The acceptance criterion here is visual stability rather than an
   exact CPU raster match. `CARGO_INCREMENTAL=0 cargo xtask ci` passed, including 84 canvas-GPU
   tests, 718 UI tests, native workspace checks, WASM checks, plugins, formatting, Clippy and layers.
+- 2026-10-30: the browser WebGPU update gate now uses the selected-outline capability check
+  when painting outlines, rather than the ordinary full-document check. This allows unsupported
+  effects in the outlined subtree to disappear with its fill without rejecting the GPU scene;
+  unsupported painted siblings and backdrop effects remain guarded.
