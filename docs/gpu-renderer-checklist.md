@@ -24,6 +24,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
 - [ ] Support image filters, diamond gradients, pattern fills, shader fills, per-paint blend modes,
   non-normal node blends, complex text style runs, and Display P3 without CPU rasterization.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
+  - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
@@ -102,3 +103,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   pixels. An adjusted GIF frame also matched the CPU reference. PNG/GIF decoding still uses the
   CPU image codec before texture upload. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 60 GPU
   tests and 712 UI tests, along with native workspace, WASM, plugin, format, Clippy, and layers.
+- 2026-10-30: diamond gradient textures now come from a WGSL compute pass. Sampled pixels of a
+  three-stop translucent rectangle and an individually painted vector region matched the CPU
+  reference within 6/255. The GPU renderer's prior diamond fallback guards were removed.
+  `CARGO_INCREMENTAL=0 cargo xtask ci` passed with 62 GPU tests and 712 UI tests. An unrelated
+  zoom preview test needed a longer worker deadline under parallel workspace load; its isolated
+  run completed in 60 ms and the full gate passed after the test timing adjustment.

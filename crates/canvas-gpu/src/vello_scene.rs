@@ -1,11 +1,11 @@
-//! An experimental GPU renderer for the icon benchmark, with explicit unsupported content.
+//! GPU scene renderer with explicit capability checks for unsupported content.
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use figcraft_color::{BlendMode, Color, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
+use figcraft_color::{BlendMode, Color, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
 use figcraft_geom::{Affine, Point, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
@@ -17,6 +17,7 @@ use vello_common::peniko::{self, Fill};
 use vello_gpu::{RenderSize, RenderTargetConfig, Scene, TargetInit, TextureBindings};
 
 use crate::gpu_blur::GpuBlur;
+use crate::gpu_diamond::GpuDiamond;
 use crate::gpu_glass::GpuGlass;
 use crate::gpu_image_filter::GpuImageFilter;
 use crate::gpu_morph::GpuMorph;
@@ -678,7 +679,7 @@ mod effect_capability_tests {
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Normal;
         doc.node_mut(content).ok_or("content missing")?.fills =
             vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))];
-        assert!(has_unhandled_effects_in_view(&doc, &view));
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
         Ok(())
     }
 
@@ -2121,7 +2122,7 @@ mod effect_capability_tests {
             region.fills = Some(vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))]);
         }
         doc.node_mut(id).ok_or("vector node missing")?.kind = NodeKind::Vector { network };
-        assert!(has_unhandled_effects_in_view(&doc, &view));
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
         Ok(())
     }
 
@@ -2280,6 +2281,10 @@ fn image_key(img: &ImagePaint) -> String {
     format!("{}:{:?}", img.image, img.filters)
 }
 
+fn diamond_key(gradient: &Gradient, opacity: f32) -> String {
+    format!("diamond:{gradient:?}:{}", opacity.to_bits())
+}
+
 fn collect_paint_order(doc: &Document, id: NodeId, output: &mut Vec<NodeId>) {
     let mut pending = vec![id];
     while let Some(id) = pending.pop() {
@@ -2351,8 +2356,24 @@ fn set_paint(scene: &mut Scene, paint: &Paint, node: &Node, images: Option<&Hash
             scene.set_paint(gradient.with_stops(stops.as_slice()));
         }
         PaintKind::Gradient(g) => {
-            let Some(stop) = g.stops.first() else { return false };
-            scene.set_paint(color(stop.color, paint.opacity));
+            let Some(info) = images.and_then(|entries| entries.get(&diamond_key(g, paint.opacity))) else { return false };
+            let w = node.width.max(1e-6);
+            let h = node.height.max(1e-6);
+            let from = (g.from.0 * w, g.from.1 * h);
+            let axis = ((g.to.0 - g.from.0) * w, (g.to.1 - g.from.1) * h);
+            let width = ((g.width.0 - g.from.0) * w, (g.width.1 - g.from.1) * h);
+            scene.set_paint_transform(Affine::new([
+                axis.0 / 128.0,
+                axis.1 / 128.0,
+                width.0 / 128.0,
+                width.1 / 128.0,
+                from.0 - axis.0 - width.0,
+                from.1 - axis.1 - width.1,
+            ]));
+            scene.set_paint(Image {
+                image: ImageSource::external_texture(info.id, RectU16::new(0, 0, info.width, info.height), true),
+                sampler: peniko::ImageSampler::default().with_extend(peniko::Extend::Pad),
+            });
         }
         PaintKind::Image(img) => {
             let Some(info) = images.and_then(|entries| entries.get(&image_key(img))) else { return false };
@@ -2936,7 +2957,7 @@ pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &Vi
                 && paint.opacity > 0.0
                 && ((paint.blend != BlendMode::Normal && !gpu_simple_paint_blend_supported(node, paint))
                     || match &paint.kind {
-                        PaintKind::Gradient(gradient) => gradient.kind == GradientKind::Diamond,
+                        PaintKind::Gradient(_) => false,
                         PaintKind::Image(_) => false,
                         PaintKind::Pattern(_) | PaintKind::Shader(_) => true,
                         PaintKind::Solid { .. } => false,
@@ -3238,15 +3259,11 @@ fn gpu_simple_group_child_supported(doc: &Document, child: &Node, depth: usize) 
         )
         && child.fills.len() <= 1
         && !(child.fills.is_empty() && child.strokes.is_empty())
-        && child.fills.iter().chain(&child.strokes).all(|paint| {
-            paint.visible
-                && paint.blend == BlendMode::Normal
-                && match &paint.kind {
-                    PaintKind::Solid { .. } => true,
-                    PaintKind::Gradient(gradient) => gradient.kind != GradientKind::Diamond,
-                    _ => false,
-                }
-        })
+        && child
+            .fills
+            .iter()
+            .chain(&child.strokes)
+            .all(|paint| paint.visible && paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
         && draw::node_outline(doc, child).is_some()
 }
 
@@ -3254,13 +3271,7 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
     let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
     let bounds = figcraft_render::raster_bounds(doc, node.id);
     let paint_supported = |paint: &Paint| {
-        !paint.visible
-            || (paint.blend == BlendMode::Normal
-                && match &paint.kind {
-                    PaintKind::Solid { .. } => true,
-                    PaintKind::Gradient(gradient) => gradient.kind != GradientKind::Diamond,
-                    _ => false,
-                })
+        !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
     };
     node.visible
         && !node.is_mask
@@ -3499,6 +3510,7 @@ pub struct GpuCanvas {
     gpu_morph: Option<GpuMorph>,
     gpu_glass: Option<GpuGlass>,
     gpu_image_filter: Option<GpuImageFilter>,
+    gpu_diamond: Option<GpuDiamond>,
     gpu_progressive_blur: Option<GpuProgressiveBlur>,
     gpu_noise: Option<GpuNoise>,
     gpu_texture: Option<GpuTexture>,
@@ -4321,6 +4333,7 @@ impl GpuCanvas {
             gpu_morph: None,
             gpu_glass: None,
             gpu_image_filter: None,
+            gpu_diamond: None,
             gpu_progressive_blur: None,
             gpu_noise: None,
             gpu_texture: None,
@@ -4862,7 +4875,27 @@ impl GpuCanvas {
     pub fn register_images_at(&mut self, doc: &Document, time: f64) -> Result<usize, Box<dyn Error>> {
         let mut count = 0;
         for node in doc.nodes() {
-            for paint in node.fills.iter().chain(&node.strokes) {
+            let region_paints = match &node.kind {
+                NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints) {
+                if let PaintKind::Gradient(gradient) = &paint.kind
+                    && gradient.kind == GradientKind::Diamond
+                {
+                    let key = diamond_key(gradient, paint.opacity);
+                    if self.image_info.contains_key(&key) {
+                        continue;
+                    }
+                    let generator = self.gpu_diamond.get_or_insert_with(|| GpuDiamond::new(&self.device));
+                    let texture = generator.submit(&self.device, &self.queue, gradient, paint.opacity);
+                    let id = TextureId(self.image_info.len() as u64 + 1);
+                    self.image_bindings.insert(id, texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                    self.image_info.insert(key, ImageInfo { id, width: 256, height: 256, region: None });
+                    self.image_textures.push(texture);
+                    count += 1;
+                    continue;
+                }
                 let PaintKind::Image(img) = &paint.kind else { continue };
                 let key = image_key(img);
                 if self.image_info.contains_key(&key) {

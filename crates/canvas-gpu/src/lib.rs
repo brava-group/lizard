@@ -1,4 +1,4 @@
-//! Bounded retained tiles and GPU composition for Lizard's opt-in canvas experiment.
+//! Bounded retained tiles and GPU composition for Lizard's canvas.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -9,6 +9,8 @@ pub mod export;
 pub mod geometry_atlas;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_blur;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_diamond;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_glass;
 #[cfg(not(target_arch = "wasm32"))]

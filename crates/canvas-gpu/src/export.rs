@@ -138,7 +138,7 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_color::{Color, ImageFilters, ImageScaleMode, Paint, PaintKind};
+    use figcraft_color::{Color, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind};
     use figcraft_doc::{ImageData, NodeKind};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
@@ -256,6 +256,84 @@ mod tests {
                 ]) {
                     assert!(a.abs_diff(b) <= 3, "{name} at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
                 }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn diamond_gradient_matches_cpu_reference_on_gpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU diamond gradient");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Diamond", 0.0, 0.0, 128.0, 128.0)?;
+        let mut gradient = Gradient::default_for(GradientKind::Diamond, Color::new(0.9, 0.1, 0.2, 1.0));
+        gradient.stops = vec![
+            ColorStop { position: 0.0, color: Color::new(0.9, 0.1, 0.2, 1.0) },
+            ColorStop { position: 0.5, color: Color::new(0.2, 0.8, 0.3, 0.6) },
+            ColorStop { position: 1.0, color: Color::new(0.1, 0.2, 0.9, 1.0) },
+        ];
+        let mut paint = Paint::gradient(gradient);
+        paint.opacity = 0.75;
+        doc.node_mut(id).ok_or("diamond node missing")?.fills = vec![paint];
+        let area = Rect::new(0.0, 0.0, 128.0, 128.0);
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 128, height: 128 };
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("diamond GPU image unavailable")?;
+        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("diamond CPU image unavailable")?;
+        for (x, y) in [(64, 64), (64, 32), (96, 64), (82, 82), (3, 64), (64, 3)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU diamond sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU diamond sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 6, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn diamond_gradient_in_vector_region_matches_cpu() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU diamond region");
+        let page = doc.current_page.ok_or("page missing")?;
+        let network = figcraft_doc::VectorNetwork::from_points(
+            &[
+                figcraft_geom::Point::new(0.0, 0.0),
+                figcraft_geom::Point::new(64.0, 0.0),
+                figcraft_geom::Point::new(64.0, 64.0),
+                figcraft_geom::Point::new(0.0, 64.0),
+            ],
+            true,
+        );
+        let id = doc.create(page, NodeKind::Vector { network }, "Diamond region", 8.0, 8.0, 64.0, 64.0)?;
+        let gradient = Gradient::default_for(GradientKind::Diamond, Color::new(0.8, 0.1, 0.1, 1.0));
+        let node = doc.node_mut(id).ok_or("vector missing")?;
+        node.fills.clear();
+        if let NodeKind::Vector { network } = &mut node.kind {
+            network.regions.first_mut().ok_or("vector has no region")?.fills = Some(vec![Paint::gradient(gradient)]);
+        }
+        let area = Rect::new(0.0, 0.0, 80.0, 80.0);
+        let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("region GPU render unavailable")?;
+        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("region CPU render unavailable")?;
+        for (x, y) in [(40, 40), (40, 20), (55, 40), (20, 55)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU region sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU region sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 6, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
             }
         }
         Ok(())
