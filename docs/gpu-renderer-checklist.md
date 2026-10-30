@@ -53,3 +53,7 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   `48a7977e`; `cargo xtask ci` passed. The saved icon's 1024 px GPU export differed from the CPU
   reference by about 0.8/255 per RGB channel on average. The default GPU canvas was inspected
   in a native screenshot. This does not establish coverage for the open boxes above.
+- 2026-10-30: opaque page raster exports now use the editor's ordered GPU backdrop pass and
+  supported alpha/vector masks. A fixture combining a mask and background blur passed sampled
+  pixel comparisons against the CPU reference. Selected-layer exports still need their own
+  backdrop semantics, and transparent pages need a transparent GPU backdrop target.

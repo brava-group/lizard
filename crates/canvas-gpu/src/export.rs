@@ -8,7 +8,7 @@ use figcraft_doc::{Document, EffectKind, NodeId};
 use figcraft_geom::Rect;
 use figcraft_render::{Pixmap, View};
 
-use crate::vello_scene::{GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
+use crate::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
 
 type DevicePair = (wgpu::Device, wgpu::Queue);
 
@@ -72,15 +72,6 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
         || view.width > 4096
         || view.height > 4096
         || has_unhandled_effects_with_cached_noise_in_view(doc, view, true)
-        || doc.nodes().any(|node| {
-            doc.page_of(node.id) == Some(page)
-                && (node.is_mask
-                    || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
-                    || node
-                        .effects
-                        .iter()
-                        .any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_))))
-        })
     {
         return None;
     }
@@ -91,7 +82,15 @@ pub fn render_page_gpu(doc: &Document, page: NodeId, view: &View) -> Option<Pixm
     let mut canvas = GpuCanvas::from_device(device.clone(), queue.clone(), "native page export".into(), view.width, view.height);
     canvas.register_images(doc).ok()?;
     canvas.prepare_static_effects(doc).ok()?;
-    canvas.render_submit_document(doc, page, view, [background.r, background.g, background.b]).ok()?;
+    let clear = [background.r, background.g, background.b];
+    let backdrops = BackdropIndex::new(doc, page);
+    if backdrops.visible_ids(view).is_empty() {
+        canvas.render_submit_document(doc, page, view, clear).ok()?;
+    } else {
+        // The same ordered backdrop pass used by the native editor is required here. The
+        // capability check above excludes its CPU-only cases before this call.
+        canvas.render_with_backdrop_blurs_indexed(doc, page, view, clear, &backdrops).ok()?;
+    }
     let pixels = canvas.pixels().ok()?;
     let mut pixmap = Pixmap::new(view.width, view.height)?;
     pixmap.data_mut().copy_from_slice(&pixels);
@@ -173,6 +172,39 @@ mod tests {
             for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
                 assert!(a.abs_diff(b) <= 2);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn gpu_page_export_keeps_mask_and_ordered_backdrop() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("page with backdrop");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background, background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background = Color::new(245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0, 1.0);
+            *background_visible = true;
+        }
+        let dark = doc.create(page, NodeKind::Rectangle, "Dark half", 0.0, 0.0, 50.0, 100.0)?;
+        doc.node_mut(dark).ok_or("dark half missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        let group = doc.create(page, NodeKind::Group, "Masked group", 0.0, 0.0, 20.0, 20.0)?;
+        let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 0.0, 10.0, 20.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let content = doc.create(group, NodeKind::Rectangle, "Content", 0.0, 0.0, 20.0, 20.0)?;
+        doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let actual = render_page_gpu(&doc, page, &view).ok_or("GPU page export unavailable")?;
+        let reference = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("reference export unavailable")?;
+        for (x, y) in [(5, 10), (15, 10), (35, 50), (47, 50), (53, 50), (65, 50)] {
+            let gpu = actual.pixel(x, y).ok_or("GPU sample missing")?;
+            let cpu = reference.pixel(x, y).ok_or("CPU sample missing")?;
+            assert!(gpu.red().abs_diff(cpu.red()) <= 20, "x={x}, y={y}: GPU={gpu:?}, CPU={cpu:?}");
         }
         Ok(())
     }
