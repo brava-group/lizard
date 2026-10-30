@@ -1996,6 +1996,7 @@ dependencies = [
  "rayon",
  "vello_common 0.3.0",
  "vello_gpu",
+ "web-time",
  "wgpu",
 ]
 
@@ -2331,8 +2332,12 @@ version = "0.9.0"
 dependencies = [
  "eframe",
  "egui",
+ "figcraft-canvas-gpu",
  "figcraft-collab-net",
+ "figcraft-color",
+ "figcraft-doc",
  "figcraft-engine",
+ "figcraft-render",
  "figcraft-ui-egui",
  "js-sys",
  "log",

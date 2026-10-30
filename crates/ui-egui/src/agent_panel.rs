@@ -164,14 +164,14 @@ impl std::fmt::Debug for AgentPreview {
 #[derive(Clone, Debug)]
 pub struct AgentPulse {
     pub id: NodeId,
-    pub started: std::time::Instant,
+    pub started: web_time::Instant,
     pub inspection: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct AgentShimmer {
     pub id: NodeId,
-    pub started: std::time::Instant,
+    pub started: web_time::Instant,
     pub ongoing: bool,
 }
 
@@ -182,7 +182,7 @@ pub struct AgentPresence {
     pub target: Option<NodeId>,
     /// Smoothed cursor position in page coordinates; camera changes must not move it off target.
     pub shown: Option<(f64, f64)>,
-    pub updated: Option<std::time::Instant>,
+    pub updated: Option<web_time::Instant>,
     pub pulses: Vec<AgentPulse>,
     pub shimmers: Vec<AgentShimmer>,
     pub active: bool,
@@ -259,7 +259,7 @@ pub struct AgentUi {
     pub excluded_selection: Vec<NodeId>,
     pub observed_selection: Vec<NodeId>,
     pub observed_document: Option<u64>,
-    pub turn_started: Option<std::time::Instant>,
+    pub turn_started: Option<web_time::Instant>,
     pub remaining_agents: u8,
     pub finished_agents: Vec<bool>,
     pub active_agent_count: u8,
@@ -289,7 +289,7 @@ pub struct AgentUi {
     pub variant_count: u8,
     pub variant_mode: VariantMode,
     pub models_requested: Option<AgentKind>,
-    pub models_loading_until: Option<std::time::Instant>,
+    pub models_loading_until: Option<web_time::Instant>,
 }
 
 fn document_key(app: &FigApp) -> String {
@@ -466,7 +466,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                         app.ui.agent.busy = false;
                         app.ui.agent.turn_started = None;
                         app.ui.agent.presence.active = false;
-                        app.ui.agent.presence.updated = Some(std::time::Instant::now());
+                        app.ui.agent.presence.updated = Some(web_time::Instant::now());
                         app.ui.agent.pending_images.clear();
                     }
                 }
@@ -496,7 +496,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
                 app.ui.agent.remaining_agents = app.ui.agent.remaining_agents.saturating_sub(1);
                 if app.ui.agent.remaining_agents == 0 {
                     app.ui.agent.presence.active = false;
-                    app.ui.agent.presence.updated = Some(std::time::Instant::now());
+                    app.ui.agent.presence.updated = Some(web_time::Instant::now());
                     app.ui.agent.turn_started = None;
                     if app.session.ds().ok().is_some_and(|ds| Some(ds.uid) == app.ui.agent.runtime_document) {
                         app.ui.agent.images.append(&mut app.ui.agent.pending_images);
@@ -535,7 +535,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
     if completed {
         save_history(app);
     }
-    if app.ui.agent.busy || app.ui.agent.login_pending || app.ui.agent.models_loading_until.is_some_and(|until| until > std::time::Instant::now()) {
+    if app.ui.agent.busy || app.ui.agent.login_pending || app.ui.agent.models_loading_until.is_some_and(|until| until > web_time::Instant::now()) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
@@ -655,7 +655,7 @@ fn send_prompt(app: &mut FigApp) {
     let undo_before = ds.history.undo.len();
     let key = document_key(app);
     let active = app.ui.agent.active.filter(|id| app.ui.agent.conversations.iter().any(|chat| chat.id == *id && chat.document == key));
-    let id = active.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |time| time.as_nanos() as u64));
+    let id = active.unwrap_or_else(|| web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |time| time.as_nanos() as u64));
     let resume = app.ui.agent.conversations.iter().find(|chat| chat.id == id).and_then(|chat| chat.remote_session.clone());
     let resumes = app.ui.agent.conversations.iter().find(|chat| chat.id == id).map_or_else(Vec::new, |chat| chat.remote_sessions.clone());
     let prior = if app.ui.agent.runtime_conversation == Some(id) || (app.ui.agent.agent == AgentKind::Codex && resume.is_some()) {
@@ -690,7 +690,7 @@ fn send_prompt(app: &mut FigApp) {
         .as_deref()
         .and_then(|model| app.ui.agent.models.iter().find(|(id, _)| id == model).map(|(_, label)| label.clone()))
         .unwrap_or_else(|| app.ui.agent.agent.label().to_string());
-    let created_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |time| time.as_secs());
+    let created_at = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |time| time.as_secs());
     let agent_count = app.ui.agent.agent_count.clamp(1, 6);
     let variant_count = app.ui.agent.variant_count.clamp(1, 6);
     match app.services.agent_send(
@@ -766,7 +766,7 @@ fn send_prompt(app: &mut FigApp) {
             app.ui.agent.runtime_document = Some(document);
             app.ui.agent.draft.clear();
             app.ui.agent.pending_images = std::mem::take(&mut app.ui.agent.images);
-            app.ui.agent.turn_started = Some(std::time::Instant::now());
+            app.ui.agent.turn_started = Some(web_time::Instant::now());
             app.ui.agent.busy = true;
             app.ui.agent.presence.document = Some(document);
             app.ui.agent.presence.conversation = Some(id);
@@ -776,7 +776,7 @@ fn send_prompt(app: &mut FigApp) {
             app.ui.agent.presence.shimmers.clear();
             app.ui.agent.presence.generating = false;
             app.ui.agent.presence.active = true;
-            app.ui.agent.presence.updated = Some(std::time::Instant::now());
+            app.ui.agent.presence.updated = Some(web_time::Instant::now());
             save_history(app);
         }
         Err(error) => {
@@ -844,7 +844,7 @@ fn begin_next_variant(app: &mut FigApp) {
         app.services.agent_reset();
         return;
     }
-    let created_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |time| time.as_secs());
+    let created_at = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |time| time.as_secs());
     let model_label = app
         .ui
         .agent
@@ -872,7 +872,7 @@ fn begin_next_variant(app: &mut FigApp) {
     app.ui.agent.remaining_variants = app.ui.agent.remaining_variants.saturating_sub(1);
     app.ui.agent.remaining_agents = agent_count;
     app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
-    app.ui.agent.turn_started = Some(std::time::Instant::now());
+    app.ui.agent.turn_started = Some(web_time::Instant::now());
     app.ui.agent.presence.active = true;
     app.ui.agent.presence.target = selected_nodes.first().map(|node| node.id);
     app.ui.agent.presence.shown = None;
@@ -990,7 +990,7 @@ fn message_timestamp(created_at: u64) -> String {
     if created_at == 0 {
         return String::new();
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(created_at, |time| time.as_secs());
+    let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(created_at, |time| time.as_secs());
     let elapsed = now.saturating_sub(created_at);
     if elapsed < 60 {
         "há instantes".into()
@@ -1165,7 +1165,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     if app.ui.agent.models_requested != Some(app.ui.agent.agent) {
         app.ui.agent.models_requested = Some(app.ui.agent.agent);
         if app.ui.agent.agent == AgentKind::Codex {
-            app.ui.agent.models_loading_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+            app.ui.agent.models_loading_until = Some(web_time::Instant::now() + std::time::Duration::from_secs(5));
             app.services.agent_request_models(app.ui.agent.agent);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }

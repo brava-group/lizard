@@ -297,7 +297,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, method: &str, p: &Value) -> Resul
             } else {
                 Vec::new()
             };
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             let presence = &mut app.ui.agent.presence;
             presence.document = Some(document);
             presence.conversation = app.ui.agent.runtime_conversation;

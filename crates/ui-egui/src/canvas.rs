@@ -33,7 +33,7 @@ pub trait CanvasGpuBackend {
 
 pub struct CanvasState {
     pub rect: Rect,
-    eyedrop_sample: Option<(Pos2, Point, std::time::Instant, Vec<u8>)>,
+    eyedrop_sample: Option<(Pos2, Point, web_time::Instant, Vec<u8>)>,
     texture: Option<egui::TextureHandle>,
     tiles: Vec<CanvasTile>,
     tex_view: Option<figcraft_render::View>,
@@ -1212,7 +1212,7 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
         let scale = ds.view.zoom.clamp(0.01, 64.0);
         let view = figcraft_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
         if let Some(pix) = figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()) {
-            app.canvas.eyedrop_sample = Some((pointer, point, std::time::Instant::now(), figcraft_render::to_rgba8(&pix)));
+            app.canvas.eyedrop_sample = Some((pointer, point, web_time::Instant::now(), figcraft_render::to_rgba8(&pix)));
         }
     }
     let Some((_, _, _, pixels)) = &app.canvas.eyedrop_sample else { return };

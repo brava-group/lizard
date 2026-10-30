@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use base64::Engine as _;
 use egui::{Color32, Rect as UiRect, TextureHandle, Ui, pos2, vec2};

@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use figcraft_color::{
     BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, PatternPaint, ShaderFill,

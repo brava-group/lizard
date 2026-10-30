@@ -18,10 +18,11 @@ figcraft-shader = { workspace = true }
 wgpu = "30.0.1"
 rayon = "1"
 pollster = "0.4"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 vello_common = "0.3.0"
-vello_gpu = "0.3.0"
+vello_gpu = { version = "0.3.0", default-features = false, features = ["wgpu", "std"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
 
 [dev-dependencies]
 image = { workspace = true }

@@ -1,6 +1,8 @@
 //! Temporary agent cursor and node activity overlay. It never changes the document.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use egui::{Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
 

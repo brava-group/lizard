@@ -57,6 +57,11 @@ pub fn start() {
                     session.live.install(Box::new(figcraft_collab_net::NetLink::new(std::sync::Arc::new(move || ctx.request_repaint()))));
                     let mut fig =
                         FigApp::new(session, Box::new(WebServices { reduce_motion, ctx: cc.egui_ctx.clone(), pasted_html: Rc::clone(&pasted_html) }));
+                    if let Some(state) =
+                        cc.wgpu_render_state.clone().filter(|state| state.adapter.get_info().backend == eframe::wgpu::Backend::BrowserWebGpu)
+                    {
+                        fig.gpu_canvas = Some(Box::new(crate::gpu_canvas::WebGpuCanvas::new(state)));
+                    }
                     // `#join=<link>`: join that session, as opening an invite link does on the desktop.
                     let hash = web_sys::window().and_then(|w| w.location().hash().ok()).unwrap_or_default();
                     if let Some(link) = crate::query::join_link(&hash) {
