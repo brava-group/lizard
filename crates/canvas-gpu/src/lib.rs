@@ -4,6 +4,8 @@
 #![forbid(unsafe_code)]
 
 pub mod compositor;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod export;
 pub mod geometry_atlas;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_blur;

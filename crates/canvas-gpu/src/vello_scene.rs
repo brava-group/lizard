@@ -4124,6 +4124,31 @@ impl GpuCanvas {
         self.make_scene_document_with_backdrops(doc, page, view, None)
     }
 
+    /// Render selected page roots to a transparent target for raster export. The caller checks
+    /// that the selected subtree has no backdrop dependency or unsupported paint operation.
+    pub fn render_export_roots(&mut self, doc: &Document, roots: &[NodeId], view: &View) -> Result<(), Box<dyn Error>> {
+        let mut scene = Scene::new(view.width as u16, view.height as u16);
+        let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
+        let world = Rect::new(
+            view.origin.0,
+            view.origin.1,
+            view.origin.0 + f64::from(view.width) / view.scale,
+            view.origin.1 + f64::from(view.height) / view.scale,
+        );
+        let cached = CachedEffects {
+            layer_blurs: Some(&self.layer_blurs),
+            drop_shadows: Some(&self.drop_shadows),
+            inner_shadows: Some(&self.inner_shadows),
+            noise: Some(&self.noise_effects),
+            texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+        };
+        for id in roots {
+            draw_node(&mut scene, doc, *id, camera, world, 0, Some(&self.image_info), None, cached, (view.width as u16, view.height as u16));
+        }
+        self.render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
+        self.wait()
+    }
+
     fn make_scene_document_with_backdrops(&self, doc: &Document, page: NodeId, view: &View, backdrops: Option<&HashMap<NodeId, ImageInfo>>) -> Scene {
         make_scene_with_cached_layers(
             doc,

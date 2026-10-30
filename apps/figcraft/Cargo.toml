@@ -15,6 +15,7 @@ path = "src/main.rs"
 workspace = true
 
 [features]
+default = ["gpu-canvas-experiment"]
 gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-doc", "dep:figcraft-render"]
 
 [dependencies]

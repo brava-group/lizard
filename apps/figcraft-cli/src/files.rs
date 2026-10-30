@@ -92,6 +92,11 @@ pub fn render_page(doc: &Document, page: NodeId, scale: f64) -> CliResult<figcra
         width: (b.width() * scale).ceil().max(1.0) as u32,
         height: (b.height() * scale).ceil().max(1.0) as u32,
     };
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_page_gpu(doc, page, &view)
+    {
+        return Ok(pixmap);
+    }
     figcraft_render::render_view(doc, page, &view, &Default::default()).ok_or_else(|| CliError::Failed("render failed".into()))
 }
 

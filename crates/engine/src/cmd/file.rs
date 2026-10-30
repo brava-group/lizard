@@ -909,6 +909,16 @@ pub fn export_bytes(doc: &Document, ids: &[NodeId], format: ExportFormat, scale:
     export_bytes_with(doc, ids, &ExportSetting { format, ..Default::default() }, scale)
 }
 
+fn render_export_area(doc: &Document, ids: &[NodeId], area: figcraft_geom::Rect, scale: f64) -> Option<figcraft_render::Pixmap> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
+        && let Some(pixmap) = figcraft_canvas_gpu::export::render_area_gpu(doc, ids, area, scale)
+    {
+        return Some(pixmap);
+    }
+    figcraft_render::render_area(doc, ids, area, scale)
+}
+
 /// The page area exporting `ids` with `setting` covers: what they paint (a clipping frame's own
 /// area), or their boxes with "include bounding box" and for slices. Hidden layers paint nothing,
 /// so they take no room next to visible ones (a hidden-only export keeps its own area).
@@ -977,8 +987,7 @@ pub fn export_bytes_with(doc: &Document, ids: &[NodeId], setting: &ExportSetting
             pdf_bytes(doc, &groups, &setting.print, (!own_area).then_some(area))
         }
         _ => {
-            let pix = figcraft_render::render_area(doc, &drawn, area, scale)
-                .ok_or_else(|| EngineError::Other("render failed (empty or too large)".into()))?;
+            let pix = render_export_area(doc, &drawn, area, scale).ok_or_else(|| EngineError::Other("render failed (empty or too large)".into()))?;
             figcraft_render::encode_export(&pix, setting.format, doc.color_profile).map_err(EngineError::Other)
         }
     }
@@ -988,7 +997,7 @@ pub fn export_bytes_with(doc: &Document, ids: &[NodeId], setting: &ExportSetting
 /// profile; the clipboard wants sRGB).
 pub fn copy_png(doc: &Document, ids: &[NodeId]) -> Option<figcraft_render::Pixmap> {
     let area = export_area(doc, ids, &ExportSetting::default())?;
-    figcraft_render::render_area(doc, &super::edit::z_sorted(doc, ids), area, 2.0)
+    render_export_area(doc, &super::edit::z_sorted(doc, ids), area, 2.0)
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {

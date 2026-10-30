@@ -1,5 +1,5 @@
-//! Opt-in in-editor bridge for the standalone atlas. It falls back to the ordinary canvas until
-//! the current view is covered, so measurements can be made without changing the default path.
+//! Native GPU canvas. Unsupported content falls back to the ordinary CPU canvas; the legacy
+//! geometry atlas remains available for measurements through `LIZARD_GPU_CANVAS_ATLAS=1`.
 
 use std::error::Error;
 use std::sync::Arc;
@@ -52,7 +52,7 @@ impl GpuCanvasExperiment {
             direct_page: None,
             direct_camera: None,
             direct_provisional_effects: false,
-            direct_mode: std::env::var_os("LIZARD_GPU_CANVAS_DIRECT").is_some(),
+            direct_mode: std::env::var_os("LIZARD_GPU_CANVAS_ATLAS").is_none(),
             direct_force: std::env::var_os("LIZARD_GPU_CANVAS_DIRECT_FORCE").is_some(),
             direct_cached_blur: std::env::var_os("LIZARD_GPU_CANVAS_NO_EFFECT_CACHE").is_none(),
             direct_fallback_logged: false,
@@ -86,9 +86,12 @@ impl GpuCanvasExperiment {
                 return self.update_direct(doc, page, view, clear, gesture_active);
             }
         }
-        if self.direct_mode && !self.direct_fallback_logged {
-            eprintln!("Lizard direct Vello GPU: document contains unsupported effects; using the faithful atlas path");
-            self.direct_fallback_logged = true;
+        if self.direct_mode {
+            if !self.direct_fallback_logged {
+                eprintln!("Lizard direct Vello GPU: view contains unsupported effects; using the CPU canvas");
+                self.direct_fallback_logged = true;
+            }
+            return Ok(None);
         }
         if view.width == 0
             || view.height == 0

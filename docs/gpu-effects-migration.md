@@ -1,6 +1,6 @@
 # GPU effects migration
 
-Lizard's native canvas experiment uses Vello GPU for vector geometry and wgpu for reusable effect textures. The normal canvas and exports still use `figcraft-render`, whose pixel and paint APIs are built on tiny-skia. Removing tiny-skia is a renderer migration, not a dependency deletion: `crates/render`, PDF raster effects, UI icon rasterization, image previews, and WASM all use it today.
+Lizard's native canvas uses Vello GPU for supported vector geometry and wgpu for reusable effect textures by default. Native PNG, JPEG, and WebP exports use the GPU for supported sRGB content up to 4096 × 4096 pixels; unsupported content and larger exports use `figcraft-render`. SVG and PDF retain their vector exporters, and WASM uses the CPU canvas. Set `LIZARD_GPU_CANVAS_CPU=1` to use the CPU canvas or `LIZARD_GPU_EXPORT_CPU=1` to use CPU raster exports. `figcraft-render` and some other paths still use tiny-skia; removing it requires a separate renderer migration.
 
 ## Current coverage
 
