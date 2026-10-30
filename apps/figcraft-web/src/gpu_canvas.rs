@@ -1,11 +1,13 @@
 //! Browser WebGPU canvas. The WebGL2 runner keeps the ordinary CPU fallback.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::vello_scene::{
-    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_outline_scene,
+    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_except_outlined_in_view, has_unhandled_effects_with_cached_noise_in_view,
+    make_outline_scene,
 };
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
@@ -252,9 +254,10 @@ impl CanvasGpuBackend for WebGpuCanvas {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
+        let outlined_ids: HashSet<_> = selected.iter().flat_map(|id| doc.subtree(*id)).collect();
         if self.disabled
-            || has_unhandled_effects_with_cached_noise_in_view(&doc, view, true)
-            || !BackdropIndex::new(&doc, page).visible_ids(view).is_empty()
+            || has_unhandled_effects_except_outlined_in_view(&doc, view, true, selected)
+            || BackdropIndex::new(&doc, page).visible_ids(view).iter().any(|id| !outlined_ids.contains(id))
         {
             return None;
         }

@@ -3249,6 +3249,22 @@ mod selected_outline_gpu_tests {
     use super::*;
 
     #[test]
+    fn selected_outline_excludes_only_its_replaced_subtree_from_gpu_capability() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU selected outline capability");
+        let page = doc.current_page.ok_or("page missing")?;
+        let group = doc.create(page, NodeKind::Group, "selected group", 5.0, 5.0, 40.0, 40.0)?;
+        let child = doc.create(group, NodeKind::Rectangle, "unsupported child", 0.0, 0.0, 30.0, 30.0)?;
+        let sibling = doc.create(page, NodeKind::Rectangle, "sibling", 60.0, 5.0, 30.0, 30.0)?;
+        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::PlusDarker;
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 80 };
+        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[group]));
+        doc.node_mut(sibling).ok_or("sibling missing")?.blend = BlendMode::PlusDarker;
+        assert!(has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[group]));
+        Ok(())
+    }
+
+    #[test]
     fn selected_outline_keeps_a_siblings_cached_blur() -> Result<(), Box<dyn Error>> {
         let Ok(mut gpu) = GpuCanvas::new(120, 80) else { return Ok(()) };
         let mut doc = Document::new("GPU selected outline with sibling blur");
@@ -3360,12 +3376,23 @@ pub fn has_unhandled_effects_in_view(doc: &Document, view: &View) -> bool {
 
 /// Capability check for scenes prepared with [`GpuCanvas::prepare_static_effects`].
 pub fn has_unhandled_effects_with_cached_noise_in_view(doc: &Document, view: &View, cached_noise: bool) -> bool {
-    if has_matching_effects_in_view(doc, view, true, true, cached_noise) {
+    has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &HashSet::new())
+}
+
+/// Selected outline roots replace their entire subtrees, so those paints and effects cannot
+/// require a CPU fallback. All other visible nodes keep the normal capability check.
+pub fn has_unhandled_effects_except_outlined_in_view(doc: &Document, view: &View, cached_noise: bool, outlined: &[NodeId]) -> bool {
+    let excluded = outlined.iter().flat_map(|id| doc.subtree(*id)).collect();
+    has_unhandled_effects_excluding_in_view(doc, view, cached_noise, &excluded)
+}
+
+fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_noise: bool, excluded: &HashSet<NodeId>) -> bool {
+    if has_matching_effects_excluding_in_view(doc, view, true, true, cached_noise, excluded) {
         return true;
     }
     let rect = view.page_rect();
     doc.nodes().any(|node| {
-        if !node.visible {
+        if !node.visible || excluded.contains(&node.id) {
             return false;
         }
         let unsupported_paint = |paint: &Paint| {
@@ -3809,6 +3836,17 @@ fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> O
 }
 
 fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: bool, gpu_backdrop: bool, cached_noise: bool) -> bool {
+    has_matching_effects_excluding_in_view(doc, view, unsupported_only, gpu_backdrop, cached_noise, &HashSet::new())
+}
+
+fn has_matching_effects_excluding_in_view(
+    doc: &Document,
+    view: &View,
+    unsupported_only: bool,
+    gpu_backdrop: bool,
+    cached_noise: bool,
+    excluded: &HashSet<NodeId>,
+) -> bool {
     let rect = Rect::new(
         view.origin.0,
         view.origin.1,
@@ -3817,6 +3855,7 @@ fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: b
     );
     doc.nodes().any(|node| {
         node.visible
+            && !excluded.contains(&node.id)
             && node.effects.iter().any(|effect| {
                 effect.visible
                     && (!unsupported_only

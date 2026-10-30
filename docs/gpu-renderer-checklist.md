@@ -40,6 +40,8 @@ the migration concerns rasterization and pixel effects.
     and paint order on native and browser canvas.
   - [x] Preserve GPU effect caches for unselected siblings in selected-outline mode while a
     selected shape's own cached fill remains replaced by its outline.
+  - [x] Ignore paint and effect capabilities inside a selected-outline subtree on native and
+    browser WebGPU; keep unsupported siblings and their backdrop effects guarded.
   - [ ] Move Focus/selected outlines combined with backdrop effects or other view modes to GPU.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
@@ -140,6 +142,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: native and browser selected-outline capability checks now exclude only the roots
+  replaced by outlines and their descendants. A selected group containing a Plus Darker child
+  no longer forces CPU rendering; the same blend mode on an unselected sibling still does. The
+  backdrop check also ignores selected roots while preserving its guard for unselected backdrops.
 
 - 2026-10-30: selected-outline scene composition now keeps cached GPU layer effects for siblings.
   A pixel fixture with blur on both the selected rectangle and its sibling matched the CPU
