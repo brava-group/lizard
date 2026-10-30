@@ -1002,6 +1002,91 @@ pub fn render_svg_preview_pixels(svg: &str, width: u32, height: u32) -> std::res
     render_export_area(&doc, &[vector], area, 1.0).ok_or_else(|| "cannot render vector preview".into())
 }
 
+/// Render a plugin's 24-unit SVG path through the same GPU-first document path as editor previews.
+/// The SVG importer keeps the path editable, while the bounded input and escaped attribute prevent
+/// plugin path data from becoming markup.
+pub fn render_plugin_icon_pixels(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, px: u32) -> Option<Vec<u8>> {
+    if !(8..=256).contains(&px) || d.trim().is_empty() || d.len() > 16 * 1024 {
+        return None;
+    }
+    figcraft_geom::BezPath::from_svg(d).ok()?;
+    let color = match stroke {
+        Some((color, width)) if width.is_finite() && width > 0.0 && width <= 24.0 => Some((color, Some(width))),
+        Some(_) => return None,
+        None => fill.map(|color| (color, None)),
+    }?;
+    let hex = color.0.trim().trim_start_matches('#');
+    if !matches!(hex.len(), 3 | 6 | 8) {
+        return None;
+    }
+    let paint = figcraft_color::Color::from_hex(hex)?.to_css_hex();
+    let escaped = d.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;");
+    let style = match color.1 {
+        Some(width) => format!("fill=\"none\" stroke=\"{paint}\" stroke-width=\"{width}\" stroke-linecap=\"round\" stroke-linejoin=\"round\""),
+        None => format!("fill=\"{paint}\""),
+    };
+    let svg =
+        format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path d=\"{escaped}\" {style}/></svg>");
+    let mut doc = Document::new("Plugin icon");
+    let page = doc.current_page?;
+    let icon = figcraft_svg::import_svg(&mut doc, svg.as_bytes(), page, 0.0, 0.0, "Plugin icon").ok()?;
+    let area = figcraft_geom::Rect::new(0.0, 0.0, 24.0, 24.0);
+    let pixmap = render_export_area_screen(&doc, &[icon], area, f64::from(px) / 24.0)?;
+    Some(figcraft_render::to_rgba8(&pixmap))
+}
+
+#[cfg(test)]
+mod plugin_icon_gpu_tests {
+    use super::render_plugin_icon_pixels;
+
+    #[test]
+    fn fill_and_stroke_match_reference_samples() {
+        if figcraft_canvas_gpu::vello_scene::GpuCanvas::new(1, 1).is_err() {
+            return;
+        }
+        for (path, fill, stroke) in [("M4 4H20V20H4Z", Some("#F24822"), None), ("M4 12L20 12", None, Some(("#0D99FF", 2.0)))] {
+            let gpu = render_plugin_icon_pixels(path, fill, stroke, 72).expect("GPU-first icon");
+            let cpu = figcraft_render::rasterize_icon(path, fill, stroke, 72).expect("reference icon");
+            assert_eq!(gpu.len(), cpu.len());
+            for (x, y) in [(0, 0), (18, 18), (36, 36), (54, 54), (71, 71)] {
+                let index = ((y * 72 + x) * 4) as usize;
+                for channel in 0..4 {
+                    let delta = i16::from(gpu[index + channel]) - i16::from(cpu[index + channel]);
+                    assert!(
+                        delta.abs() <= 8,
+                        "sample ({x},{y}) channel {channel}: GPU {:?}, CPU {:?}",
+                        &gpu[index..index + 4],
+                        &cpu[index..index + 4]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn imported_icon_is_supported_by_native_gpu_export() {
+        if figcraft_canvas_gpu::vello_scene::GpuCanvas::new(1, 1).is_err() {
+            return;
+        }
+        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path d=\"M4 4H20V20H4Z\" fill=\"#F24822\"/></svg>";
+        let mut doc = figcraft_doc::Document::new("GPU icon capability");
+        let page = doc.current_page.expect("page");
+        let icon = figcraft_svg::import_svg(&mut doc, svg, page, 0.0, 0.0, "Icon").expect("import icon");
+        let area = figcraft_geom::Rect::new(0.0, 0.0, 24.0, 24.0);
+        let direct = figcraft_canvas_gpu::export::render_area_gpu(&doc, &[icon], area, 3.0).expect("direct GPU icon export");
+        let routed = render_plugin_icon_pixels("M4 4H20V20H4Z", Some("#F24822"), None, 72).expect("routed icon");
+        assert_eq!(figcraft_render::to_rgba8(&direct), routed);
+    }
+
+    #[test]
+    fn invalid_icon_data_is_rejected() {
+        assert!(render_plugin_icon_pixels("", Some("#000000"), None, 72).is_none());
+        assert!(render_plugin_icon_pixels("M4 12L20 12", Some("#000000"), None, 7).is_none());
+        assert!(render_plugin_icon_pixels("M4 12L20 12", Some("invalid"), None, 72).is_none());
+        assert!(render_plugin_icon_pixels("M4 12L20 12", None, Some(("#000000", 0.0)), 72).is_none());
+    }
+}
+
 /// The page area exporting `ids` with `setting` covers: what they paint (a clipping frame's own
 /// area), or their boxes with "include bounding box" and for slices. Hidden layers paint nothing,
 /// so they take no room next to visible ones (a hidden-only export keeps its own area).

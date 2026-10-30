@@ -1445,8 +1445,8 @@ fn cell_pixels(item: &figcraft_engine::plugins::GridItem, dark: bool) -> Option<
     }
     let color = if item.color.is_empty() { if dark { "#EDEDED" } else { "#1E1E1E" } } else { item.color.as_str() };
     let rgba = match item.stroke {
-        Some(w) => figcraft_render::rasterize_icon(&item.path, None, Some((color, w)), GRID_ICON_PX),
-        None => figcraft_render::rasterize_icon(&item.path, Some(color), None, GRID_ICON_PX),
+        Some(w) => figcraft_engine::cmd::file::render_plugin_icon_pixels(&item.path, None, Some((color, w)), GRID_ICON_PX),
+        None => figcraft_engine::cmd::file::render_plugin_icon_pixels(&item.path, Some(color), None, GRID_ICON_PX),
     }?;
     Some(egui::ColorImage::from_rgba_unmultiplied([GRID_ICON_PX as usize, GRID_ICON_PX as usize], &rgba))
 }

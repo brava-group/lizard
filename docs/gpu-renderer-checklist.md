@@ -73,6 +73,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
     asynchronous 9 × 9 readback, without a per-pointer re-render or synchronous stall. The CPU
     reference remains for WebGL2 and scenes that the GPU canvas cannot draw.
   - [ ] Move plugin SVG icon thumbnails and other direct `figcraft_render` preview calls to GPU.
+    - [x] Route native plugin grid SVG paths through the document importer and GPU-first export;
+      retain the CPU fallback when no compatible device exists.
+    - [ ] Route browser plugin grid icons through WebGPU and audit remaining direct preview calls.
 - [ ] Use the same GPU effect path when SVG/PDF must embed rasterized effects or masks; keep
   their ordinary vector drawing as vector output.
   - [ ] Route SVG import paint rasterization and SVG/PDF effect/mask embedding through a GPU
@@ -224,3 +227,8 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   node's blend layer brought every supported node blend mode back within 12/255 at sampled fill,
   shadow, and background pixels. Partial opacity remains guarded. All 76 canvas-GPU tests and
   `CARGO_INCREMENTAL=0 cargo xtask ci` passed.
+- 2026-10-30: native plugin grid SVG paths now go through the document vector importer and
+  GPU-first export rather than directly calling the tiny-skia icon rasterizer. Fill and round-cap
+  stroke samples at 72 px matched the prior renderer within 8/255; a direct GPU export of the
+  imported icon succeeded. `CARGO_INCREMENTAL=0 cargo xtask ci` passed. Browser plugin icons
+  still use the CPU fallback until WebGPU export readback is available.
