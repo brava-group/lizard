@@ -97,6 +97,11 @@ fn run(path: &Path, gpu: &mut GpuCanvas) -> Result<(), Box<dyn Error>> {
     let images = gpu.register_images(&doc)?;
     let clear = clear_color(&doc, page);
     let backdrop = BackdropIndex::new(&doc, page);
+    let direct = std::env::var_os("LIZARD_CORPUS_DIRECT").is_some();
+    if direct {
+        let (blur, drop, inner) = gpu.prepare_static_effects(&doc)?;
+        println!("direct_effects,path={},blur={blur},drop={drop},inner={inner}", path.display());
+    }
     println!("document,path={},nodes={},images={},views={}", path.display(), doc.nodes().count(), images, cases.len());
     for (label, view) in cases {
         let fallback = has_unhandled_effects_in_view(&doc, &view);
@@ -104,11 +109,17 @@ fn run(path: &Path, gpu: &mut GpuCanvas) -> Result<(), Box<dyn Error>> {
         let reference = render_view(&doc, page, &view, &Options { lod: true, ..Default::default() }).ok_or("CPU render failed")?;
         let cpu_ms = cpu_start.elapsed().as_secs_f64() * 1000.0;
         let gpu_start = Instant::now();
-        let (_, backdrop_count) = gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, clear, &backdrop)?;
+        let backdrop_count = if direct {
+            gpu.render_submit_document(&doc, page, &view, clear)?;
+            0
+        } else {
+            let (_, count) = gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, clear, &backdrop)?;
+            count
+        };
         let actual = gpu.pixels()?;
         let gpu_ms = gpu_start.elapsed().as_secs_f64() * 1000.0;
         let (changed, changed_16, changed_32, mean_abs) = difference(&actual, reference.data());
-        if !fallback && changed >= 2.0 {
+        if (!fallback && changed >= 2.0) || std::env::var_os("LIZARD_CORPUS_SAVE_ALL").is_some() {
             let stem = path.file_stem().and_then(|part| part.to_str()).unwrap_or("document");
             let directory = Path::new("target/canvas-strategies/parity");
             std::fs::create_dir_all(directory)?;

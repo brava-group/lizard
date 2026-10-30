@@ -23,6 +23,8 @@ mod control_server;
 #[cfg(target_os = "macos")]
 mod figma_webview;
 mod gamepad;
+#[cfg(all(feature = "gpu-canvas-experiment", not(target_arch = "wasm32")))]
+mod gpu_canvas_experiment;
 mod graphics;
 mod recovery;
 mod services;
@@ -312,6 +314,10 @@ fn main() -> eframe::Result {
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([800.0, 500.0])
         .with_drag_and_drop(true);
+    #[cfg(all(feature = "gpu-canvas-experiment", not(target_arch = "wasm32")))]
+    if std::env::var_os("LIZARD_GPU_CANVAS_EXPERIMENT").is_some() && std::env::var_os("LIZARD_GPU_CANVAS_ULTRAWIDE").is_some() {
+        viewport = viewport.with_inner_size([2560.0, 1080.0]);
+    }
     // Who draws the window frame is decided once, before the viewport is built, by the shared
     // craft-window crate (the rest of the Craft suite uses it too). On macOS the system frame is
     // kept with Lizard's inset traffic lights; on Windows it is the system frame; on Linux the
@@ -337,6 +343,12 @@ fn main() -> eframe::Result {
         "Lizard",
         options,
         Box::new(move |_cc| {
+            #[cfg(all(feature = "gpu-canvas-experiment", not(target_arch = "wasm32")))]
+            if std::env::var_os("LIZARD_GPU_CANVAS_EXPERIMENT").is_some()
+                && let Some(state) = _cc.wgpu_render_state.clone()
+            {
+                with_app(|fig| fig.gpu_canvas = Some(Box::new(gpu_canvas_experiment::GpuCanvasExperiment::new(state))));
+            }
             Ok(Box::new(App {
                 queue,
                 ctx_slot,

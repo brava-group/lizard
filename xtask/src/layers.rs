@@ -15,6 +15,7 @@ const TABLE: &[(&str, u8)] = &[
     ("collab", 2),
     ("plugin", 2),
     ("render", 3),
+    ("canvas-gpu", 4),
     ("format", 3),
     ("svg", 4),
     ("pdf", 4),

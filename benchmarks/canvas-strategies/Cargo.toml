@@ -11,8 +11,9 @@ figcraft-color = { path = "../../crates/color" }
 figcraft-geom = { path = "../../crates/geom" }
 figcraft-format = { path = "../../crates/format" }
 figcraft-render = { path = "../../crates/render" }
-vello_common = "0.3.0"
-vello_gpu = "0.3.0"
+figcraft-engine = { path = "../../crates/engine" }
+figcraft-canvas-gpu = { path = "../../crates/canvas-gpu" }
+vello_cpu = "0.3"
 wgpu = "30.0.1"
 winit = "0.30.13"
 pollster = "0.4"

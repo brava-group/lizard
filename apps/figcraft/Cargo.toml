@@ -14,10 +14,16 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-doc", "dep:figcraft-render"]
+
 [dependencies]
 figcraft-engine = { workspace = true }
 figcraft-figma-plugin = { workspace = true }
 figcraft-ui-egui = { workspace = true }
+figcraft-canvas-gpu = { workspace = true, optional = true }
+figcraft-doc = { workspace = true, optional = true }
+figcraft-render = { workspace = true, optional = true }
 figcraft-collab-net = { workspace = true }
 figcraft-format = { workspace = true }
 figcraft-text = { workspace = true }

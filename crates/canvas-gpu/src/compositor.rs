@@ -492,16 +492,11 @@ impl Compositor {
         self.enqueue_gpu_tile(layer, source)
     }
 
-    /// Install an opaque CPU-rendered geometry tile in a reusable GPU atlas slot.
-    pub fn update_cpu_layer(&self, layer: u32, origin: (f32, f32), span: f32, image: &Pixmap) -> Result<(), Box<dyn Error>> {
+    /// Upload a CPU tile hidden; the presentation thread reveals it after upload completes.
+    pub fn update_cpu_layer(&self, layer: u32, image: &Pixmap) -> Result<(), Box<dyn Error>> {
         if layer >= self.count || image.width() != self.tile_size + self.bleed * 2 || image.height() != self.tile_size + self.bleed * 2 {
             return Err("invalid CPU tile dimensions or atlas slot".into());
         }
-        let mut bytes = [0u8; 24];
-        bytes[0..4].copy_from_slice(&origin.0.to_le_bytes());
-        bytes[4..8].copy_from_slice(&origin.1.to_le_bytes());
-        bytes[8..12].copy_from_slice(&span.to_le_bytes());
-        bytes[12..16].copy_from_slice(&layer.to_le_bytes());
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.atlas,
@@ -513,6 +508,62 @@ impl Compositor {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(image.width() * 4), rows_per_image: Some(image.height()) },
             wgpu::Extent3d { width: image.width(), height: image.height(), depth_or_array_layers: 1 },
         );
+        self.hide_gpu_layer(layer)
+    }
+
+    /// Replace a damaged rectangle in a resident CPU tile without reallocating the atlas layer.
+    pub fn patch_cpu_layer(&self, layer: u32, x: u32, y: u32, image: &Pixmap) -> Result<(), Box<dyn Error>> {
+        self.patch_cpu_layer_region(layer, x, y, image, 0, 0, image.width(), image.height())
+    }
+
+    /// Upload a rectangle from a shared rendered patch into one atlas layer.
+    pub fn patch_cpu_layer_region(
+        &self,
+        layer: u32,
+        x: u32,
+        y: u32,
+        image: &Pixmap,
+        source_x: u32,
+        source_y: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        let side = self.tile_size + self.bleed * 2;
+        if layer >= self.count
+            || width == 0
+            || height == 0
+            || x.checked_add(width).is_none_or(|end| end > side)
+            || y.checked_add(height).is_none_or(|end| end > side)
+            || source_x.checked_add(width).is_none_or(|end| end > image.width())
+            || source_y.checked_add(height).is_none_or(|end| end > image.height())
+        {
+            return Err("invalid CPU tile patch".into());
+        }
+        let offset = (u64::from(source_y) * u64::from(image.width()) + u64::from(source_x)) * 4;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.atlas,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: layer },
+                aspect: wgpu::TextureAspect::All,
+            },
+            image.data(),
+            wgpu::TexelCopyBufferLayout { offset, bytes_per_row: Some(image.width() * 4), rows_per_image: Some(image.height()) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        Ok(())
+    }
+
+    /// Show a previously uploaded CPU tile after changing the atlas detail tier.
+    pub fn show_cpu_layer(&self, layer: u32, origin: (f32, f32), span: f32) -> Result<(), Box<dyn Error>> {
+        if layer >= self.count {
+            return Err("invalid streaming atlas slot".into());
+        }
+        let mut bytes = [0u8; 24];
+        bytes[0..4].copy_from_slice(&origin.0.to_le_bytes());
+        bytes[4..8].copy_from_slice(&origin.1.to_le_bytes());
+        bytes[8..12].copy_from_slice(&span.to_le_bytes());
+        bytes[12..16].copy_from_slice(&layer.to_le_bytes());
         self.queue.write_buffer(&self.instances, u64::from(layer) * 24, &bytes);
         Ok(())
     }
@@ -724,6 +775,17 @@ impl Compositor {
     pub fn render_submit_over_to_surface(&self, origin: (f64, f64), zoom: f64, target: &wgpu::TextureView) -> Result<f64, Box<dyn Error>> {
         let pipeline = self.surface_pipeline.as_ref().ok_or("surface compositor pipeline unavailable")?;
         self.render_submit_target(origin, zoom, (0.0, 0.0, 0.0), true, target, pipeline, &self.bind)
+    }
+
+    pub fn render_submit_to_surface(
+        &self,
+        origin: (f64, f64),
+        zoom: f64,
+        clear: (f64, f64, f64),
+        target: &wgpu::TextureView,
+    ) -> Result<f64, Box<dyn Error>> {
+        let pipeline = self.surface_pipeline.as_ref().ok_or("surface compositor pipeline unavailable")?;
+        self.render_submit_target(origin, zoom, clear, false, target, pipeline, &self.bind)
     }
 
     fn render_submit_with_background(&self, origin: (f64, f64), zoom: f64, clear: (f64, f64, f64), preserve: bool) -> Result<f64, Box<dyn Error>> {

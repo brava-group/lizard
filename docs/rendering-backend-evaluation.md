@@ -1,0 +1,48 @@
+# Canvas rendering evaluation (October 2026)
+
+## Current pipeline
+
+The document renderer in `crates/render` rasterizes vectors and effects with `tiny-skia` on the CPU. `crates/ui-egui/src/render_worker.rs` converts each result to an `egui::ColorImage`; eframe's `wgpu` backend then uploads and presents it. Shader fills are a separate exception: `crates/shader/src/runtime.rs` renders WGSL on another `wgpu` device, synchronously reads the texture back to CPU memory for `tiny-skia` compositing, and the completed canvas image is uploaded to the window GPU. `vello_cpu` is present only through egui's `epaint` dependency. The document canvas does not use Vello, full Skia, or ThorVG.
+
+Each `Retained` image can patch its viewport at one scale. The UI worker now keeps up to two older scales within a 3-million-pixel budget, so returning to an unchanged view reuses the finished image. The tile path renders all desired tiles in parallel, collects all results, and only then publishes them. Broad effects disable tiling, so a first visit to a high-zoom view can still become one large CPU raster operation. Effect layers also allocate intermediate pixmaps. These are the main architectural limits to address next.
+
+On `Lizard-new-icon.figcraft` in the development build, a settled 1600% view took about 23 seconds and reached about 900 MB resident memory during the render. This is a diagnostic baseline, not a release-build benchmark. A rapid 1600%↔100% zoom sequence after removing synchronous UI-thread rendering completed without a crash in eight transitions; the original crash was not reproduced, so its exact cause remains unconfirmed.
+
+The repeatable saved-document benchmark (`LIZARD_BENCH_DOC=/path/to/file.figcraft cargo test -p figcraft-ui-egui --lib saved_document_zoom_latency -- --ignored --nocapture`) measures the worker directly at a fixed 1440×900 device-pixel viewport centred at the document's saved view centre. The October 27 input has SHA-256 `968c09aada0e3e90a2cf932ecb6c21ec8cd898f0c40c1f623c783896d2e70b8e`; an immutable copy is kept at `/tmp/lizard-icon-bench-968c.figcraft` for local before/after runs. This debug-profile baseline is separate from the higher-resolution window measurement above:
+
+| Zoom sequence | 100% | 800% | 1600% | Back to 800% | Back to 100% |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before bounded zoom cache, ms | 30.3 | 516.6 | 1727.6 | 422.0 | 13.3 |
+| After bounded zoom cache, ms | 27.2 | 476.7 | 1623.0 | 2.1 | 2.2 |
+
+The first run reported `Work::Full` five times. The second reused the two return views, reducing those worker steps by about 99.5% and 83.5%, respectively. First visits to 800% and 1600% still render the whole view; the small differences in those times are normal run-to-run variation, not evidence of an initial-render speedup. These timings are single-run diagnostics, not a statistical release benchmark or a UI response-time measurement. The cache retains at most two older views and 3 million pixels; it is cleared on document, page, style, or animation-time changes and when tiled rendering takes over.
+
+## Relevant implementations
+
+| Project | Useful code | Integration limits |
+| --- | --- | --- |
+| [Vello](https://github.com/linebender/vello/blob/main/ARCHITECTURE.md) | [Sparse strips](https://github.com/linebender/vello/blob/main/vello_common/src/strip_generator.rs) flatten and bin paths, retaining coverage only near boundaries. [`vello_gpu::Renderer`](https://github.com/linebender/vello/blob/main/vello_gpu/src/render/wgpu/mod.rs) accepts a `wgpu` device and encoder, matching our desktop graphics stack. | The current [GPU scene API](https://github.com/linebender/vello/blob/main/vello_gpu/src/scene.rs) still rejects mask layers. It is a rasterizer, not a complete document cache or editor renderer. Lizard would still need layer invalidation, tiles, effects, and parity tests. |
+| [ThorVG](https://github.com/thorvg/thorvg) | The [software renderer](https://github.com/thorvg/thorvg/blob/main/src/renderer/cpu_engine/tvgSwRenderer.cpp) tracks old and new dirty regions and redraws only intersections. Lizard's `Retained` already implements this idea at the current scale; the useful next step is keeping a small number of scale-specific results. Its [WebGPU target pool](https://github.com/thorvg/thorvg/blob/main/src/renderer/gpu_engine/wg/tvgWgRenderTarget.cpp) also reuses temporary render targets by size. | Its [canvas code](https://github.com/thorvg/thorvg/blob/main/src/renderer/tvgCanvas.cpp) says WebGPU does not yet support SmartRender. It is C++, requiring an FFI and separate native/WASM builds. The target pool itself notes that eviction is still missing. |
+| [Penpot](https://github.com/penpot/penpot/blob/develop/render-wasm/docs/tile_rendering.md) | Visible tiles are prioritized, rendered progressively under a frame budget, and cached with a limited capacity. Its [tile scheduler](https://github.com/penpot/penpot/blob/develop/render-wasm/src/tiles.rs) skips speculative work during interaction. | Its Rust/Skia WASM stack cannot be dropped directly into Lizard; the scheduling and invalidation ideas can. |
+| [Graphite](https://graphite.art/volunteer/guide/graphene/) | Node-graph execution caches unchanged branches. | Its graph architecture differs from Lizard's scene tree; dependency-based invalidation is the transferable idea. |
+
+## Recommendation
+
+1. Add reproducible native **release-build** benchmarks for zoom, pan, creating text, effect-slider edits, and memory peaks on saved stress documents. Record input latency, time to first visible tile, final render time, GPU upload bytes, cache hit rate, and cancellation count. Keep the full UI test suite green as a separate gate.
+2. Replace whole-view completion with a bounded progressive tile scheduler. Publish visible tiles as they finish, cancel obsolete work, and render off-screen tiles only while idle. Use an explicit CPU/GPU memory budget and LRU eviction. Cache keys must include page, tile, zoom bucket, document/style revision, font generation, color profile, and animation time; invalidate old and new paint bounds and backdrop dependents.
+3. Isolate effects from geometry. Keep vector geometry and sharp edges at native resolution; cache unchanged effect inputs, use separable or downsampled blur for broad kernels, and reuse bounded temporary surfaces. Measure each effect separately before selecting CPU or GPU execution. Render shader fills on the same GPU device as the canvas and composite their textures there; remove the synchronous GPU → CPU → GPU round trip from the interactive path.
+4. Build a small Vello GPU prototype using the existing `wgpu` device for ordinary filled and stroked paths. Compare visual parity, zoom latency, and peak memory with `tiny-skia` on the same documents. Keep the CPU path for unsupported masks/effects and exports until the prototype proves that a wider migration helps. Use ThorVG's dirty-region logic as a reference, not as an immediate backend swap.
+
+The current hotfix removes synchronous full rendering from zoom-out and avoids cloning the retained viewport on zoom changes. It addresses UI blocking and one source of memory amplification; it does not make the expensive effect pipeline fast.
+
+## Native-resolution geometry preview
+
+The October 27 zoom follow-up found a visible gap in the cache approach: when zooming to a new scale, the canvas projected its last texture while a full-resolution image with effects was still rendering. On the icon document this made curves visibly blocky for the entire effect render. The worker now draws a native-resolution geometry pass without layer effects at high zoom, publishes it first, and replaces it with the exact effect render. It still rasterizes to a texture; this is a latency fix, not a GPU vector renderer. A Vello GPU prototype remains the route to drawing paths directly through the window's `wgpu` device.
+
+On the immutable icon input and the same 1440×900 device-pixel benchmark viewport, the sharp geometry pass at 1600% took 17–25 ms in two runs; the full pass took 1,809–1,827 ms. At 800%, the sharp pass took 14–20 ms and the full pass 491–598 ms. The baseline full pass before this change took 2,327 ms at 1600% in one run, but that difference is run-to-run noise; the measured gain is the time to sharp edges. The exported preview was visually inspected at 1441×901 pixels. Gesture quality in the larger Retina app viewport still needs user confirmation.
+
+After building the app, a control-channel `view.set` change from 100% to 1600% on `Lizard-new-icon.figcraft` reported `quality: preview` after 56.9 ms and `quality: refined` after 3,929.4 ms in the live window. This is one end-to-end diagnostic run, not a stable latency distribution. It confirms that the sharp pass reaches the UI quickly while effects remain the expensive part.
+
+## Verification
+
+On October 27, `CARGO_INCREMENTAL=0 cargo xtask ci` passed: 3,220 tests passed across the main workspace and plugins, with no failures; formatting, Clippy, architecture layers, asset checks, native tests, and WASM checks passed. The UI suite passed 710 tests (3 intentionally ignored), and the engine suite passed 1,166 tests (2 intentionally ignored). The saved-document zoom benchmark above is intentionally ignored in the default suite and was run separately with its fixed input. The app was opened on `Lizard-new-icon.figcraft` through the control channel; `document.inspect` confirmed the file and `ui.inspect` reported a current refined canvas texture. A control-channel screenshot timed out in this environment; the native-resolution preview was instead exported and visually inspected from the benchmark.

@@ -96,6 +96,15 @@ fn excursion_trace() -> Vec<Camera> {
     cameras
 }
 
+fn high_zoom_trace() -> Vec<Camera> {
+    let mut cameras = trace();
+    for (index, camera) in cameras.iter_mut().enumerate() {
+        let progress = if index < 60 { index as f64 / 60.0 } else { (120 - index) as f64 / 60.0 };
+        camera.zoom = 2.0 + 6.0 * progress;
+    }
+    cameras
+}
+
 fn source_contains(source: &View, camera: &View) -> bool {
     let source_right = source.origin.0 + f64::from(source.width) / source.scale;
     let source_bottom = source.origin.1 + f64::from(source.height) / source.scale;
@@ -127,6 +136,7 @@ struct State {
     residual: GpuLiveResidual,
     geometry_atlas: Option<GeometryAtlas>,
     atlas_one_pass: bool,
+    atlas_faithful: bool,
     cached: Option<GpuResidual>,
     cached_source: Option<View>,
     cached_two_pass: bool,
@@ -144,6 +154,8 @@ struct State {
     start_atlas_ready: bool,
     initial_margin: i32,
     atlas_upload_limit: usize,
+    atlas_motion_margin: i32,
+    warm_zoom_tiers: u8,
     motion_delay_ms: f64,
     warm_frame_interval_ms: u64,
     first_static_submitted: bool,
@@ -261,6 +273,7 @@ impl State {
         let trace = match trace_kind.as_str() {
             "random" => trace(),
             "excursion" => excursion_trace(),
+            "high-zoom" => high_zoom_trace(),
             _ => return Err(format!("unknown trace: {trace_kind}").into()),
         };
         let cameras = trace.repeat(
@@ -269,6 +282,14 @@ impl State {
                 .unwrap_or(1)
                 .clamp(1, 100),
         );
+        if std::env::args().any(|arg| arg == "--geometry-atlas") {
+            let first_cycle = cameras.iter().take(120).copied().map(Camera::view).collect::<Vec<_>>();
+            println!(
+                "atlas_trace_tiles_visible={:?} atlas_trace_tiles_margin1={:?}",
+                geometry_atlas::distinct_tile_counts(&first_cycle, 0),
+                geometry_atlas::distinct_tile_counts(&first_cycle, 1)
+            );
+        }
         let cache_guard =
             std::env::args().find_map(|arg| arg.strip_prefix("--cache-guard=").and_then(|value| value.parse::<f64>().ok())).unwrap_or(0.0);
         if !cache_guard.is_finite() || !(0.0..=2048.0).contains(&cache_guard) {
@@ -426,6 +447,10 @@ impl State {
             (None, None)
         };
         let atlas_one_pass = std::env::args().any(|arg| arg == "--atlas-one-pass");
+        let atlas_faithful = std::env::args().any(|arg| arg == "--atlas-faithful");
+        if atlas_one_pass && atlas_faithful {
+            return Err("--atlas-one-pass cannot be combined with --atlas-faithful".into());
+        }
         let initial_margin = std::env::args()
             .find_map(|arg| arg.strip_prefix("--initial-margin=").and_then(|value| value.parse::<i32>().ok()))
             .unwrap_or(1)
@@ -441,10 +466,20 @@ impl State {
         let atlas_slots = std::env::args()
             .find_map(|arg| arg.strip_prefix("--atlas-slots=").and_then(|value| value.parse::<u32>().ok()))
             .unwrap_or(geometry_atlas::DEFAULT_CAPACITY);
+        let atlas_bleed = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--atlas-bleed=").and_then(|value| value.parse::<u32>().ok()))
+            .unwrap_or(if atlas_faithful { 128 } else { 2 })
+            .min(512);
         let atlas_upload_limit = std::env::args()
             .find_map(|arg| arg.strip_prefix("--atlas-upload-limit=").and_then(|value| value.parse::<usize>().ok()))
             .unwrap_or(2)
             .min(8);
+        let atlas_motion_margin = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--atlas-motion-margin=").and_then(|value| value.parse::<i32>().ok()))
+            .unwrap_or(1)
+            .clamp(0, 2);
+        let warm_zoom_tiers =
+            std::env::args().find_map(|arg| arg.strip_prefix("--warm-zoom-tiers=").and_then(|value| value.parse::<u8>().ok())).unwrap_or(0).min(2);
         let geometry_atlas = if std::env::args().any(|arg| arg == "--geometry-atlas") {
             if cached.is_some() {
                 return Err("--geometry-atlas cannot be combined with --cache-guard".into());
@@ -456,17 +491,36 @@ impl State {
                     format!("--atlas-slots={atlas_slots} cannot retain the {required} tiles required by --initial-margin={initial_margin}").into()
                 );
             }
-            let mut atlas = GeometryAtlas::new(Arc::new(doc.clone()), page, device.clone(), queue.clone(), WIDTH, HEIGHT, atlas_slots)?;
-            atlas.request_margin(&cameras.first().ok_or("empty camera trace")?.view(), initial_margin);
+            let mut atlas = GeometryAtlas::new(
+                Arc::new(doc.clone()),
+                page,
+                device.clone(),
+                queue.clone(),
+                WIDTH,
+                HEIGHT,
+                atlas_slots,
+                atlas_bleed,
+                !atlas_faithful,
+            )?;
+            atlas.request_margin(&cameras.first().ok_or("empty camera trace")?.view(), initial_margin)?;
+            if warm_zoom_tiers > 0 {
+                atlas.prefetch_zoom_tiers(&initial_camera, warm_zoom_tiers);
+            }
             if atlas_one_pass {
                 let (full, base) = residual.low_views();
                 atlas.enable_one_pass(config.format, &full, &base, &low)?;
+            }
+            if atlas_faithful {
+                atlas.enable_surface(config.format)?;
             }
             residual.set_alt_sharp(atlas.output_view());
             Some(atlas)
         } else {
             if atlas_one_pass {
                 return Err("--atlas-one-pass requires --geometry-atlas".into());
+            }
+            if atlas_faithful {
+                return Err("--atlas-faithful requires --geometry-atlas".into());
             }
             None
         };
@@ -559,6 +613,7 @@ impl State {
             residual,
             geometry_atlas,
             atlas_one_pass,
+            atlas_faithful,
             cached,
             cached_source,
             cached_two_pass,
@@ -576,6 +631,8 @@ impl State {
             start_atlas_ready,
             initial_margin,
             atlas_upload_limit,
+            atlas_motion_margin,
+            warm_zoom_tiers,
             motion_delay_ms,
             warm_frame_interval_ms,
             first_static_submitted: false,
@@ -608,7 +665,10 @@ impl State {
             let camera = self.cameras.first().ok_or("empty camera trace")?.view();
             let atlas = self.geometry_atlas.as_mut().ok_or("geometry atlas unavailable")?;
             atlas.install(&camera, 2)?;
-            atlas.request_margin(&camera, self.initial_margin);
+            atlas.request_margin(&camera, self.initial_margin)?;
+            if self.warm_zoom_tiers > 0 {
+                atlas.prefetch_zoom_tiers(&camera, self.warm_zoom_tiers);
+            }
             if !self.first_static_submitted {
                 let scene = make_scene_with_images(&self.doc, self.page, &camera, Some(self.gpu.image_info()));
                 self.gpu.render_submit_with_clear(&scene, self.clear)?;
@@ -641,7 +701,12 @@ impl State {
                     );
                 }
                 if self.setup_total_ms + self.started.elapsed().as_secs_f64() * 1000.0 >= self.motion_delay_ms {
-                    println!("warm_static_frames={}", self.warm_frames);
+                    println!(
+                        "warm_static_frames={} zoom_prefetch_ready={} atlas_stats={:?}",
+                        self.warm_frames,
+                        atlas.prefetched_zoom_tiers_ready(&camera, self.warm_zoom_tiers),
+                        atlas.stats()
+                    );
                     self.started = Instant::now();
                     self.start_atlas_ready = false;
                 } else {
@@ -655,7 +720,9 @@ impl State {
                     };
                     if let Some(frame) = frame {
                         let view = frame.texture.create_view(&Default::default());
-                        if self.atlas_one_pass {
+                        if self.atlas_faithful {
+                            atlas.render_to_surface(&camera, self.clear, &view)?;
+                        } else if self.atlas_one_pass {
                             atlas.render_one_pass_to_surface(&camera, self.clear, &view)?;
                         } else {
                             atlas.render_submit(&camera, self.clear)?;
@@ -664,7 +731,8 @@ impl State {
                         self.queue.present(frame);
                         self.warm_frames += 1;
                     }
-                    std::thread::sleep(Duration::from_millis(self.warm_frame_interval_ms));
+                    let waiting_for_zoom = self.warm_zoom_tiers > 0 && !atlas.prefetched_zoom_tiers_ready(&camera, self.warm_zoom_tiers);
+                    std::thread::sleep(Duration::from_millis(if waiting_for_zoom { 13 } else { self.warm_frame_interval_ms }));
                 }
             } else {
                 std::thread::sleep(Duration::from_millis(2));
@@ -683,8 +751,8 @@ impl State {
         let camera = self.cameras[self.frame].view();
         let started = Instant::now();
         let (atlas_hit, tile_uploads) = if let Some(atlas) = self.geometry_atlas.as_mut() {
+            atlas.request_margin(&camera, self.atlas_motion_margin)?;
             let installed = atlas.install(&camera, self.atlas_upload_limit)?;
-            atlas.request(&camera);
             (atlas.covers(&camera), installed)
         } else {
             (false, 0)
@@ -710,7 +778,9 @@ impl State {
         let after_acquire = Instant::now();
         if atlas_hit {
             let atlas = self.geometry_atlas.as_ref().ok_or("geometry atlas unavailable")?;
-            if self.atlas_one_pass {
+            if self.atlas_faithful {
+                atlas.render_to_surface(&camera, self.clear, &view)?;
+            } else if self.atlas_one_pass {
                 atlas.render_one_pass_to_surface(&camera, self.clear, &view)?;
             } else {
                 atlas.render_submit(&camera, self.clear)?;
@@ -849,15 +919,20 @@ impl State {
             );
         }
         if std::env::args().any(|arg| arg == "--verify-atlas")
-            && let Some(atlas) = &self.geometry_atlas
+            && let Some(atlas) = &mut self.geometry_atlas
         {
             for &index in &[0usize, 20, 40, 60, 80, 100, 119] {
                 let Some(camera) = self.cameras.get(index).copied().map(Camera::view) else { continue };
+                atlas.request_margin(&camera, 0)?;
+                atlas.install(&camera, 0)?;
                 if !atlas.covers(&camera) {
                     println!("atlas_parity camera={index} missing_tiles");
                     continue;
                 }
-                let actual = if self.atlas_one_pass {
+                let actual = if self.atlas_faithful {
+                    atlas.render_submit(&camera, self.clear)?;
+                    atlas.pixels()?
+                } else if self.atlas_one_pass {
                     atlas.render_one_pass(&camera, self.clear)?
                 } else {
                     atlas.render_submit(&camera, self.clear)?;
@@ -872,9 +947,37 @@ impl State {
                         changed_percent(&actual, reference.data(), threshold)
                     );
                 }
-                if index == 0 && std::env::args().any(|arg| arg == "--save-atlas") {
+                if (index == 0 || index == 60) && std::env::args().any(|arg| arg == "--save-atlas") {
                     for (name, pixels) in [("actual", actual.as_slice()), ("reference", reference.data())] {
-                        let file = std::fs::File::create(format!("target/canvas-strategies/atlas-{name}.png"))?;
+                        let prefix = if index == 60 { "high-zoom-atlas" } else { "atlas" };
+                        let file = std::fs::File::create(format!("target/canvas-strategies/{prefix}-{name}.png"))?;
+                        let mut encoder = png::Encoder::new(file, WIDTH, HEIGHT);
+                        encoder.set_color(png::ColorType::Rgba);
+                        encoder.set_depth(png::BitDepth::Eight);
+                        encoder.write_header()?.write_image_data(pixels)?;
+                    }
+                }
+            }
+        }
+        if std::env::args().any(|arg| arg == "--verify-live") {
+            for &index in &[0usize, 30, 60, 90, 119] {
+                let Some(camera) = self.cameras.get(index).copied().map(Camera::view) else { continue };
+                let scene = make_scene_with_images(&self.doc, self.page, &camera, Some(self.gpu.image_info()));
+                self.gpu.render_submit_with_clear(&scene, self.clear)?;
+                self.residual.render_submit(&camera);
+                let actual = self.residual.pixels()?;
+                let reference = render_view(&self.doc, self.page, &camera, &Options { lod: true, ..Default::default() })
+                    .ok_or("live route reference render failed")?;
+                for threshold in [4, 16] {
+                    println!(
+                        "live_parity camera={index} zoom={:.2} threshold={threshold} changed={:.3}%",
+                        camera.scale,
+                        changed_percent(&actual, reference.data(), threshold)
+                    );
+                }
+                if index == 60 && std::env::args().any(|arg| arg == "--save-live") {
+                    for (name, pixels) in [("actual", actual.as_slice()), ("reference", reference.data())] {
+                        let file = std::fs::File::create(format!("target/canvas-strategies/high-zoom-live-{name}.png"))?;
                         let mut encoder = png::Encoder::new(file, WIDTH, HEIGHT);
                         encoder.set_color(png::ColorType::Rgba);
                         encoder.set_depth(png::BitDepth::Eight);

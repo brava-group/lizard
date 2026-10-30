@@ -1,0 +1,166 @@
+//! Texture scatter on an isolated layer. The source, scatter and result stay on the GPU.
+
+use figcraft_doc::Texture;
+use figcraft_geom::Affine;
+use wgpu::util::DeviceExt;
+
+use crate::gpu_noise::GRAIN_HASH_WGSL;
+
+const SHADER: &str = r#"
+struct Params {
+    cell_x: vec4<f32>,
+    cell_y: vec4<f32>,
+    settings: vec4<f32>,
+    tail: vec4<u32>,
+};
+
+@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(1) var destination: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= params.tail.z || id.y >= params.tail.w { return; }
+    let xy = vec2<i32>(id.xy);
+    let p = vec3<f32>(f32(id.x) + 0.5, f32(id.y) + 0.5, 1.0);
+    let ix = i32(floor(dot(params.cell_x.xyz, p)));
+    let iy = i32(floor(dot(params.cell_y.xyz, p)));
+    let h = grain_hash(ix, iy, params.tail.x ^ 0x7e57u);
+    let angle = unit(h, 0u) * 6.283185307179586;
+    let dist = sqrt(unit(h, 16u)) * params.settings.x;
+    let fx = p.x + cos(angle) * dist;
+    let fy = p.y + sin(angle) * dist;
+    var color = vec4<f32>(0.0);
+    if fx >= 0.0 && fy >= 0.0 && fx < f32(params.tail.z) && fy < f32(params.tail.w) {
+        color = textureLoad(source, vec2<i32>(i32(fx), i32(fy)), 0);
+    }
+    if params.tail.y != 0u {
+        color = color * textureLoad(source, xy, 0).a;
+    }
+    textureStore(destination, xy, color);
+}
+"#;
+
+pub struct GpuTexture {
+    pipeline: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout,
+}
+
+impl GpuTexture {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Lizard GPU texture scatter"),
+            source: wgpu::ShaderSource::Wgsl(format!("{GRAIN_HASH_WGSL}\n{SHADER}").into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Lizard GPU texture scatter bindings"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Lizard GPU texture scatter pipeline layout"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Lizard GPU texture scatter pass"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        Self { pipeline, layout }
+    }
+
+    pub fn submit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Texture,
+        texture: &Texture,
+        surface_to_local: Affine,
+        scale: f64,
+        seed: u32,
+    ) -> wgpu::Texture {
+        let size = source.size();
+        let result = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Lizard GPU texture scatter result"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let [a, b, c, d, e, f] = surface_to_local.as_coeffs();
+        let (sx, sy) = texture.grain();
+        let mut params = Vec::with_capacity(64);
+        for value in [a / (sx * 2.0), c / (sx * 2.0), e / (sx * 2.0), 0.0, b / (sy * 2.0), d / (sy * 2.0), f / (sy * 2.0), 0.0] {
+            params.extend_from_slice(&(value as f32).to_le_bytes());
+        }
+        for value in [(texture.radius * scale).min(2048.0) as f32, 0.0, 0.0, 0.0] {
+            params.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [seed, u32::from(texture.clip_to_shape), size.width, size.height] {
+            params.extend_from_slice(&value.to_le_bytes());
+        }
+        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Lizard GPU texture scatter params"),
+            contents: &params,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Lizard GPU texture scatter pass"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&result.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard GPU texture scatter compute") });
+        {
+            let mut pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Lizard GPU texture scatter pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(size.width.div_ceil(16), size.height.div_ceil(16), 1);
+        }
+        queue.submit([encoder.finish()]);
+        result
+    }
+}
