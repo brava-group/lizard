@@ -89,8 +89,11 @@ try {
   const before = await screenshotPixel(center.x, center.y);
   await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'r', code: 'KeyR', windowsVirtualKeyCode: 82 });
   await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'r', code: 'KeyR', windowsVirtualKeyCode: 82 });
+  await new Promise((resolve) => setTimeout(resolve, 100));
   await command('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, x: center.x - 45, y: center.y - 35 });
+  await new Promise((resolve) => setTimeout(resolve, 80));
   await command('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: center.x + 45, y: center.y + 35 });
+  await new Promise((resolve) => setTimeout(resolve, 80));
   await command('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, x: center.x + 45, y: center.y + 35 });
   let after;
   const paintDeadline = Date.now() + 5_000;
@@ -102,7 +105,25 @@ try {
   if (!after || !before || !after.slice(0, 3).some((channel, i) => channel > before[i] + 60)) {
     throw new Error(`${backend} did not present the new rectangle: before ${before}, after ${after}; ${messages.join('\n')}`);
   }
-  console.log(`${backend} canvas started at ${state.width} × ${state.height} and presented a rectangle (${before} → ${after})`);
+  const previewPoint = { x: center.x + 35, y: center.y + 35 };
+  const previewBefore = await screenshotPixel(previewPoint.x, previewPoint.y);
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'i', code: 'KeyI', windowsVirtualKeyCode: 73 });
+  await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'i', code: 'KeyI', windowsVirtualKeyCode: 73 });
+  await command('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', buttons: 0, x: center.x, y: center.y });
+  let previewAfter;
+  const eyedropperDeadline = Date.now() + 5_000;
+  while (Date.now() < eyedropperDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    previewAfter = await screenshotPixel(previewPoint.x, previewPoint.y);
+    if (previewAfter && previewBefore && previewAfter[0] > previewBefore[0] + 60) break;
+  }
+  if (!previewAfter || !previewBefore || previewAfter[0] <= previewBefore[0] + 60) {
+    throw new Error(`${backend} eyedropper preview did not display its sampled pixels: ${previewBefore} → ${previewAfter}; ${messages.join('\n')}`);
+  }
+  if (messages.some((message) => /panicked|Uncaught exception|WebGPU eyedropper readback failed/i.test(message))) {
+    throw new Error(messages.filter((message) => /panicked|Uncaught exception|WebGPU eyedropper readback failed/i.test(message)).join('\n'));
+  }
+  console.log(`${backend} presented a rectangle (${before} → ${after}) and its eyedropper preview (${previewBefore} → ${previewAfter})`);
 } finally {
   socket.close();
 }

@@ -5314,6 +5314,54 @@ impl GpuCanvas {
         self.texture_pixels(texture)
     }
 
+    /// Queue a small readback from the already rendered canvas. The caller polls the result on
+    /// subsequent frames; this does not block the UI or submit a second scene render.
+    pub fn sample_9x9(&self, x: i32, y: i32, presented: bool) -> Result<Option<GpuPixelSample>, Box<dyn Error>> {
+        let texture = if presented { self.gpu_color_profile.as_ref().map_or(&self.texture, GpuColorProfile::texture) } else { &self.texture };
+        let size = texture.size();
+        let left = i64::from(x) - 4;
+        let top = i64::from(y) - 4;
+        let x0 = left.max(0).min(i64::from(size.width)) as u32;
+        let y0 = top.max(0).min(i64::from(size.height)) as u32;
+        let x1 = (left + 9).max(0).min(i64::from(size.width)) as u32;
+        let y1 = (top + 9).max(0).min(i64::from(size.height)) as u32;
+        if x0 >= x1 || y0 >= y1 {
+            return Ok(None);
+        }
+        let width = x1 - x0;
+        let height = y1 - y0;
+        let stride = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Lizard eyedropper readback"),
+            size: u64::from(stride) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard eyedropper copy") });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: x0, y: y0, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(height) },
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        self.queue.submit([encoder.finish()]);
+        let (tx, rx) = mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        Ok(Some(GpuPixelSample {
+            buffer,
+            rx,
+            width,
+            height,
+            stride,
+            offset_x: (i64::from(x0) - left) as usize,
+            offset_y: (i64::from(y0) - top) as usize,
+        }))
+    }
+
     fn texture_pixels(&self, texture: &wgpu::Texture) -> Result<Vec<u8>, Box<dyn Error>> {
         let size = texture.size();
         let stride = size.width.saturating_mul(4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -5348,5 +5396,63 @@ impl GpuCanvas {
         drop(mapped);
         output.unmap();
         Ok(pixels)
+    }
+}
+
+/// Pending 9 × 9 canvas sample. Empty space outside the rendered viewport stays transparent.
+pub struct GpuPixelSample {
+    buffer: wgpu::Buffer,
+    rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    width: u32,
+    height: u32,
+    stride: u32,
+    offset_x: usize,
+    offset_y: usize,
+}
+
+impl GpuPixelSample {
+    pub fn try_pixels(&mut self, device: &wgpu::Device) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        device.poll(wgpu::PollType::Poll)?;
+        #[cfg(target_arch = "wasm32")]
+        let _ = device;
+        match self.rx.try_recv() {
+            Ok(result) => result?,
+            Err(mpsc::TryRecvError::Empty) => return Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => return Err("GPU pixel readback channel disconnected".into()),
+        }
+        let mapped = self.buffer.slice(..).get_mapped_range()?;
+        let mut pixels = vec![0; 9 * 9 * 4];
+        for row in 0..self.height as usize {
+            let source = &mapped[row * self.stride as usize..row * self.stride as usize + self.width as usize * 4];
+            let destination = ((row + self.offset_y) * 9 + self.offset_x) * 4;
+            pixels[destination..destination + source.len()].copy_from_slice(source);
+        }
+        drop(mapped);
+        self.buffer.unmap();
+        Ok(Some(pixels))
+    }
+}
+
+#[cfg(test)]
+mod pixel_sample_tests {
+    use super::*;
+
+    #[test]
+    fn eyedropper_reads_presented_pixels_without_rerendering() -> Result<(), Box<dyn Error>> {
+        let Ok(mut canvas) = GpuCanvas::new(16, 16) else { return Ok(()) };
+        let scene = Scene::new(16, 16);
+        canvas.render_submit_with_clear(&scene, [0.8, 0.2, 0.1])?;
+        let mut middle = canvas.sample_9x9(8, 8, false)?.ok_or("middle sample missing")?;
+        let mut corner = canvas.sample_9x9(0, 0, false)?.ok_or("corner sample missing")?;
+        canvas.wait()?;
+        let middle = middle.try_pixels(&canvas.device())?.ok_or("middle sample still pending")?;
+        let corner = corner.try_pixels(&canvas.device())?.ok_or("corner sample still pending")?;
+        assert_eq!(middle.len(), 9 * 9 * 4);
+        assert_eq!(corner.len(), 9 * 9 * 4);
+        assert!(middle.get(160..163).is_some_and(|rgb| rgb[0] > 190 && rgb[1] > 40 && rgb[2] > 15));
+        assert_eq!(corner.get(0..4), Some([0, 0, 0, 0].as_slice()));
+        assert!(corner.get(160..164).is_some_and(|rgba| rgba[0] > 190 && rgba[3] == 255));
+        Ok(())
     }
 }

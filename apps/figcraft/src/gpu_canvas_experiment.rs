@@ -7,11 +7,14 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::{RenderState, wgpu};
 use figcraft_canvas_gpu::geometry_atlas::{GeometryAtlas, required_slots};
-use figcraft_canvas_gpu::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_with_cached_noise_in_view, make_scene_with_images};
+use figcraft_canvas_gpu::vello_scene::{
+    BackdropIndex, GpuCanvas, GpuPixelSample, has_unhandled_effects_with_cached_noise_in_view, make_scene_with_images,
+};
 use figcraft_color::{Color, ColorProfile};
 use figcraft_doc::{Document, NodeId};
+use figcraft_geom::Point;
 use figcraft_render::View;
-use figcraft_ui_egui::canvas::CanvasGpuBackend;
+use figcraft_ui_egui::canvas::{CanvasGpuBackend, GpuSample};
 
 pub struct GpuCanvasExperiment {
     state: RenderState,
@@ -23,6 +26,8 @@ pub struct GpuCanvasExperiment {
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
     direct_camera: Option<(f64, f64, f64)>,
+    direct_current: bool,
+    eyedrop_pending: Option<(Point, GpuPixelSample)>,
     direct_provisional_effects: bool,
     direct_mode: bool,
     direct_force: bool,
@@ -54,6 +59,8 @@ impl GpuCanvasExperiment {
             direct_document: None,
             direct_page: None,
             direct_camera: None,
+            direct_current: false,
+            eyedrop_pending: None,
             direct_provisional_effects: false,
             direct_mode: std::env::var_os("LIZARD_GPU_CANVAS_ATLAS").is_none(),
             direct_force: std::env::var_os("LIZARD_GPU_CANVAS_DIRECT_FORCE").is_some(),
@@ -394,11 +401,58 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
             return None;
         }
         match self.update(doc, page, view, clear, gesture_active, ctx) {
-            Ok(texture) => texture,
+            Ok(texture) => {
+                self.direct_current = texture.is_some() && texture == self.direct_texture_id;
+                texture
+            }
             Err(error) => {
                 eprintln!("Lizard GPU atlas disabled after an error: {error}");
                 self.disabled = true;
+                self.direct_current = false;
                 None
+            }
+        }
+    }
+
+    fn sample_eyedropper(&mut self, point: Point, ctx: &egui::Context) -> GpuSample {
+        if !self.direct_current {
+            self.eyedrop_pending = None;
+            return GpuSample::Unavailable;
+        }
+        let Some(canvas) = self.direct.as_ref() else { return GpuSample::Unavailable };
+        if let Some((at, pending)) = self.eyedrop_pending.as_mut() {
+            if *at == point {
+                match pending.try_pixels(&self.state.device) {
+                    Ok(Some(pixels)) => {
+                        self.eyedrop_pending = None;
+                        return GpuSample::Ready(pixels);
+                    }
+                    Ok(None) => {
+                        ctx.request_repaint_after(Duration::from_millis(16));
+                        return GpuSample::Pending;
+                    }
+                    Err(error) => {
+                        eprintln!("Lizard GPU eyedropper readback failed: {error}");
+                        self.eyedrop_pending = None;
+                        return GpuSample::Unavailable;
+                    }
+                }
+            }
+            self.eyedrop_pending = None;
+        }
+        let Some((origin_x, origin_y, scale)) = self.direct_camera else { return GpuSample::Unavailable };
+        let x = ((point.x - origin_x) * scale).floor() as i32;
+        let y = ((point.y - origin_y) * scale).floor() as i32;
+        match canvas.sample_9x9(x, y, self.direct_profile == Some(ColorProfile::DisplayP3)) {
+            Ok(Some(pending)) => {
+                self.eyedrop_pending = Some((point, pending));
+                ctx.request_repaint_after(Duration::from_millis(16));
+                GpuSample::Pending
+            }
+            Ok(None) => GpuSample::Unavailable,
+            Err(error) => {
+                eprintln!("Lizard GPU eyedropper copy failed: {error}");
+                GpuSample::Unavailable
             }
         }
     }

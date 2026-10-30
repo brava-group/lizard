@@ -64,8 +64,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
     rasterize, and MCP renders through the shared GPU-first renderer.
   - [x] Render the vectorization SVG preview through imported vectors and GPU-first export.
   - [x] Render animated presentation textures through GPU composition after frame decoding.
-  - [ ] Sample the canvas eyedropper magnifier from GPU pixels instead of its direct CPU
-    `render_view` call, without a per-pointer GPU re-render or synchronous stall.
+  - [x] Sample the canvas eyedropper magnifier from the already presented GPU texture with an
+    asynchronous 9 × 9 readback, without a per-pointer re-render or synchronous stall. The CPU
+    reference remains for WebGL2 and scenes that the GPU canvas cannot draw.
   - [ ] Move plugin SVG icon thumbnails and other direct `figcraft_render` preview calls to GPU.
 - [ ] Use the same GPU effect path when SVG/PDF must embed rasterized effects or masks; keep
   their ordinary vector drawing as vector output.
@@ -201,3 +202,9 @@ and an interaction or export test. Do not remove a capability guard merely to ma
   8 px repeated-cell fixture passed sampled GPU/CPU comparisons and visual inspection. Edge
   antialiasing differed by up to 48/255 in premultiplied channels at 2×; broader clipping and
   pattern combinations remain open. `CARGO_INCREMENTAL=0 cargo xtask ci` passed with this change.
+- 2026-10-30: the interactive eyedropper magnifier now queues a 9 × 9 copy from the canvas GPU
+  texture and polls its mapped result on later frames. The unit test verified interior and
+  viewport-edge samples; Chrome drew a rectangle and displayed the sampled preview on both
+  BrowserWebGpu and WebGL2 fallback. `CARGO_INCREMENTAL=0 cargo xtask ci` and a production WASM
+  build passed. The click-to-pick command
+  still performs a separate GPU-first 1 × 1 export; unsupported GPU scenes retain CPU fallback.

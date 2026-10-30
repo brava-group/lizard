@@ -16,7 +16,7 @@ workspace = true
 
 [features]
 default = ["gpu-canvas-experiment"]
-gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-color", "dep:figcraft-doc", "dep:figcraft-render"]
+gpu-canvas-experiment = ["dep:figcraft-canvas-gpu", "dep:figcraft-color", "dep:figcraft-doc", "dep:figcraft-geom", "dep:figcraft-render"]
 
 [dependencies]
 figcraft-engine = { workspace = true }
@@ -25,6 +25,7 @@ figcraft-ui-egui = { workspace = true }
 figcraft-canvas-gpu = { workspace = true, optional = true }
 figcraft-color = { workspace = true, optional = true }
 figcraft-doc = { workspace = true, optional = true }
+figcraft-geom = { workspace = true, optional = true }
 figcraft-render = { workspace = true, optional = true }
 figcraft-collab-net = { workspace = true }
 figcraft-format = { workspace = true }

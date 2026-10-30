@@ -17,8 +17,7 @@ use crate::i18n::{tr, trf, trn};
 use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
 use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
 
-/// Optional native canvas experiment. The ordinary render worker remains the fallback until a
-/// GPU backend has a current, complete view to show.
+/// The GPU canvas. The ordinary render worker remains the fallback for unsupported scenes.
 pub trait CanvasGpuBackend {
     fn texture(
         &mut self,
@@ -29,11 +28,24 @@ pub trait CanvasGpuBackend {
         gesture_active: bool,
         ctx: &egui::Context,
     ) -> Option<egui::TextureId>;
+
+    /// Sample the already presented canvas. `Pending` schedules a repaint; `Unavailable` lets
+    /// the CPU fallback handle scenes the GPU backend did not draw.
+    fn sample_eyedropper(&mut self, _point: Point, _ctx: &egui::Context) -> GpuSample {
+        GpuSample::Unavailable
+    }
+}
+
+pub enum GpuSample {
+    Ready(Vec<u8>),
+    Pending,
+    Unavailable,
 }
 
 pub struct CanvasState {
     pub rect: Rect,
     eyedrop_sample: Option<(Pos2, Point, web_time::Instant, Vec<u8>)>,
+    gpu_presented: bool,
     texture: Option<egui::TextureHandle>,
     tiles: Vec<CanvasTile>,
     tex_view: Option<figcraft_render::View>,
@@ -92,6 +104,7 @@ impl Default for CanvasState {
         Self {
             rect: Rect::NOTHING,
             eyedrop_sample: None,
+            gpu_presented: false,
             texture: None,
             tiles: Vec::new(),
             tex_view: None,
@@ -1095,6 +1108,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     } else {
         None
     };
+    app.canvas.gpu_presented = gpu_texture.is_some();
     if (!app.canvas.dragging || !composing_drag) && gpu_texture.is_none() {
         request_render(app, worker, &ctx, ppp, max_texture_side);
     }
@@ -1208,11 +1222,23 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
         .eyedrop_sample
         .as_ref()
         .is_none_or(|(at, page, when, _)| (*at != pointer || *page != point) && when.elapsed() >= std::time::Duration::from_millis(16));
-    if refresh && let Ok(ds) = app.session.ds() {
-        let scale = ds.view.zoom.clamp(0.01, 64.0);
-        let view = figcraft_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
-        if let Some(pix) = figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()) {
-            app.canvas.eyedrop_sample = Some((pointer, point, web_time::Instant::now(), figcraft_render::to_rgba8(&pix)));
+    if refresh {
+        let gpu = if app.canvas.gpu_presented {
+            app.gpu_canvas.as_mut().map_or(GpuSample::Unavailable, |backend| backend.sample_eyedropper(point, ctx))
+        } else {
+            GpuSample::Unavailable
+        };
+        let pixels = match gpu {
+            GpuSample::Ready(pixels) => Some(pixels),
+            GpuSample::Pending => None,
+            GpuSample::Unavailable => app.session.ds().ok().and_then(|ds| {
+                let scale = ds.view.zoom.clamp(0.01, 64.0);
+                let view = figcraft_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
+                figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()).map(|pix| figcraft_render::to_rgba8(&pix))
+            }),
+        };
+        if let Some(pixels) = pixels {
+            app.canvas.eyedrop_sample = Some((pointer, point, web_time::Instant::now(), pixels));
         }
     }
     let Some((_, _, _, pixels)) = &app.canvas.eyedrop_sample else { return };
