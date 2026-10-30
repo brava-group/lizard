@@ -73,6 +73,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Keep texture scatter on GPU at 1× and 2× during fractional camera pan. The static cache
     interpolates fine grains slightly; a fine-grain rotated fixture retained shape coverage and
     stayed within a 5% viewport difference threshold at both zoom levels.
+  - [x] Keep texture scatter on GPU at fractional zoom up to 2× by selecting the 1× or 2×
+    precomputed texture. A flat and rotated fixture at 0.75×, 1.25×, and 1.5× retained shape
+    coverage and stayed below a 5% viewport difference threshold.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
@@ -432,3 +435,11 @@ the migration concerns rasterization and pixel effects.
   gradient stroke, preserving its empty interior and border pixels. All 92 canvas-GPU tests
   passed, and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across
   native/WASM, plugins, Clippy, formatting, and layer checks.
+- 2026-10-30: texture scatter no longer forces a CPU frame at fractional zoom up to 2×. The
+  1× cache serves scales through 1× and the 2× cache serves larger scales. At 0.75×, 1.25×,
+  and 1.5×, the flat fixture differed from CPU at 405/23220, 808/64575, and 730/93150
+  pixels by more than 8/255; the rotated fixture differed at 422/23220, 669/64575, and
+  921/93150. The shape remained covered in each case. Zoom above 2× remains guarded until
+  the texture cache can be rendered at the required resolution. All 93 canvas-GPU tests passed,
+  and `RUST_TEST_THREADS=1 CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM,
+  plugins, Clippy, formatting, and layer checks.

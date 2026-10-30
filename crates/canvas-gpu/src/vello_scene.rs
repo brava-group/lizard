@@ -1340,6 +1340,42 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn texture_scatter_stays_on_gpu_during_fractional_zoom() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU texture fractional zoom");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 30.0, 25.0, 120.0, 90.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.7, 0.6, 1.0))];
+        node.effects = vec![figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        }];
+        for angle in [0.0, 0.4] {
+            doc.node_mut(id).ok_or("shape missing")?.transform = Affine::translate((30.0, 25.0)) * Affine::rotate(angle);
+            for scale in [0.75, 1.25, 1.5] {
+                let view = View { origin: (0.0, 0.0), scale, width: (230.0 * scale) as u32, height: (180.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "GPU capability at {scale}x, angle {angle}");
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                eprintln!("fractional texture scale={scale} angle={angle} pixels={} changed={changed}", view.width as usize * view.height as usize);
+                assert!(
+                    changed * 100 < view.width as usize * view.height as usize * 5,
+                    "fractional texture changed {changed} pixels at {scale}x, angle {angle}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn translucent_vector_without_shadow_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Translucent vector baseline");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3785,7 +3821,9 @@ fn gpu_axis_aligned(doc: &Document, node: &Node) -> bool {
 fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture: &Texture) -> bool {
     if !gpu_texture_cache_supported(doc, node, texture)
         || node.effects.iter().filter(|effect| effect.visible).count() != 1
-        || !matches!(view.scale, 1.0 | 2.0)
+        || !view.scale.is_finite()
+        || view.scale <= 0.0
+        || view.scale > 2.0
     {
         return false;
     }
@@ -4920,7 +4958,7 @@ impl GpuCanvas {
             drop_shadows: Some(&self.drop_shadows),
             inner_shadows: Some(&self.inner_shadows),
             noise: Some(&self.noise_effects),
-            texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+            texture: if view.scale <= 1.0 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
             outlined: &[],
             outline_options: figcraft_render::Outline::default(),
         };
@@ -4962,7 +5000,7 @@ impl GpuCanvas {
                 drop_shadows: Some(&self.drop_shadows),
                 inner_shadows: Some(&self.inner_shadows),
                 noise: Some(&self.noise_effects),
-                texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+                texture: if view.scale <= 1.0 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
                 outlined,
                 outline_options,
             },
@@ -4991,7 +5029,7 @@ impl GpuCanvas {
                 drop_shadows: Some(&self.drop_shadows),
                 inner_shadows: Some(&self.inner_shadows),
                 noise: Some(&self.noise_effects),
-                texture: if (view.scale - 1.0).abs() < 1e-6 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
+                texture: if view.scale <= 1.0 { Some(&self.texture_effects_1x) } else { Some(&self.texture_effects) },
                 outlined,
                 outline_options: options,
             },
