@@ -273,6 +273,9 @@ the migration concerns rasterization and pixel effects.
     alpha. Texture stacks passed 40 comparisons at 1×/2× across ±8, +16, and ±32 spread
     with four node opacities. Blur/Noise/Shadow passed 12 comparisons across ±8 spread, and
     a rotated masked group with Texture and +8 spread passed six more.
+  - [x] Extend positive Drop Shadow spread to 128 document units for leaf shapes in ordered
+    Texture stacks. A 64-unit spread passed eight GPU/reference comparisons at four opacities
+    and 1×/2×, with at most six pixels above 8/255 and no severe pixels.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,

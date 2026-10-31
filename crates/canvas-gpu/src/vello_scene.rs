@@ -2701,6 +2701,7 @@ mod effect_capability_tests {
             ("negative-spread-shadow-texture", vec![spread_shadow(-8.0), texture()]),
             ("blur-texture-positive-spread-shadow", vec![blur(), texture(), spread_shadow(16.0)]),
             ("texture-max-positive-spread-shadow", vec![texture(), spread_shadow(32.0)]),
+            ("texture-large-positive-spread-shadow", vec![texture(), spread_shadow(64.0)]),
             ("texture-max-negative-spread-shadow", vec![texture(), spread_shadow(-32.0)]),
         ]
         .into_iter()
@@ -5957,7 +5958,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
                     && shadow.spread.is_finite()
-                    && (-32.0..=32.0).contains(&shadow.spread)
+                    && ((-32.0..=32.0).contains(&shadow.spread) || !matches!(node.kind, NodeKind::Group) && (0.0..=128.0).contains(&shadow.spread))
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
