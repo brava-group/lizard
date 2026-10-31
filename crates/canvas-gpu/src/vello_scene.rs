@@ -6647,7 +6647,11 @@ fn gpu_simple_group_child_supported(doc: &Document, child: &Node, depth: usize) 
     if matches!(child.kind, NodeKind::Frame) && !child.children.is_empty() {
         return (!child.is_mask || matches!(child.mask_type, MaskType::Alpha | MaskType::Vector))
             && matches!(child.blend, BlendMode::Normal | BlendMode::PassThrough)
-            && child.fills.iter().chain(&child.strokes).all(|paint| !paint.visible || gpu_cached_source_paint_supported(doc, paint))
+            && child
+                .fills
+                .iter()
+                .chain(&child.strokes)
+                .all(|paint| !paint.visible || paint.blend == BlendMode::Normal && gpu_cached_source_paint_supported(doc, paint))
             && draw::node_outline(doc, child).is_some()
             && child.children.iter().all(|id| doc.node(*id).is_some_and(|node| gpu_simple_group_child_supported(doc, node, depth + 1)));
     }
