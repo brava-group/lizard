@@ -223,6 +223,11 @@ the migration concerns rasterization and pixel effects.
   - [x] Cache Texture/Blur and Blur/Noise/Texture on GPU for a rotated, partly transparent
     vector. All eight 1×/2× comparisons at full and half node opacity matched the CPU
     reference within 8/255, and each effect stack visibly changed the source vector.
+  - [x] Apply Drop Shadow spread in ordered GPU stacks. Positive spread uses the vector
+    silhouette for shapes; group content uses GPU morphology, and negative spread erodes the
+    alpha. Texture stacks passed 40 comparisons at 1×/2× across ±8, +16, and ±32 spread
+    with four node opacities. Blur/Noise/Shadow passed 12 comparisons across ±8 spread, and
+    a rotated masked group with Texture and +8 spread passed six more.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,

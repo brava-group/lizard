@@ -788,6 +788,13 @@ mod effect_capability_tests {
             }
             effect
         };
+        let spread_shadow = |spread| {
+            let mut effect = shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.spread = spread;
+            }
+            effect
+        };
         for (name, effects) in [
             ("blur-noise-shadow", vec![blur(), noise(), shadow()]),
             ("blur-shadow-noise", vec![blur(), shadow(), noise()]),
@@ -795,6 +802,8 @@ mod effect_capability_tests {
             ("noise-shadow-blur", vec![noise(), shadow(), blur()]),
             ("shadow-blur-noise", vec![shadow(), blur(), noise()]),
             ("shadow-noise-blur", vec![shadow(), noise(), blur()]),
+            ("blur-noise-positive-spread-shadow", vec![blur(), noise(), spread_shadow(8.0)]),
+            ("negative-spread-shadow-noise-blur", vec![spread_shadow(-8.0), noise(), blur()]),
         ] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
             for opacity in [0.25, 0.5, 0.75] {
@@ -1954,6 +1963,13 @@ mod effect_capability_tests {
             }
             effect
         };
+        let spread_shadow = || {
+            let mut effect = shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.spread = 8.0;
+            }
+            effect
+        };
         for (name, effects) in [
             ("blur-noise-shadow", vec![blur(), noise(), shadow()]),
             ("noise-blur-shadow", vec![noise(), blur(), shadow()]),
@@ -1964,6 +1980,7 @@ mod effect_capability_tests {
             ("texture-blur", vec![texture(), blur()]),
             ("shadow-texture-noise", vec![shadow(), texture(), noise()]),
             ("blur-noise-texture-shadow", vec![blur(), noise(), texture(), shadow()]),
+            ("texture-group-spread-shadow", vec![texture(), spread_shadow()]),
         ] {
             doc.node_mut(group).ok_or("group missing")?.effects = effects;
             for opacity in [0.25, 0.5, 0.75] {
@@ -2475,6 +2492,13 @@ mod effect_capability_tests {
             }
             effect
         };
+        let spread_shadow = |spread| {
+            let mut effect = shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.spread = spread;
+            }
+            effect
+        };
         let mut cases = vec![
             ("blur-texture", vec![blur(), texture()]),
             ("texture-blur", vec![texture(), blur()]),
@@ -2507,6 +2531,11 @@ mod effect_capability_tests {
             ("shadow-texture-shadow", vec![shadow(), texture(), shadow2()]),
             ("shadow-shadow-texture", vec![shadow(), shadow2(), texture()]),
             ("blur-texture-shadow-noise-shadow", vec![blur(), texture(), shadow(), noise(), shadow2()]),
+            ("texture-positive-spread-shadow", vec![texture(), spread_shadow(8.0)]),
+            ("negative-spread-shadow-texture", vec![spread_shadow(-8.0), texture()]),
+            ("blur-texture-positive-spread-shadow", vec![blur(), texture(), spread_shadow(16.0)]),
+            ("texture-max-positive-spread-shadow", vec![texture(), spread_shadow(32.0)]),
+            ("texture-max-negative-spread-shadow", vec![texture(), spread_shadow(-32.0)]),
         ]
         .into_iter()
         .map(|(name, effects)| (name.to_owned(), effects))
@@ -5416,7 +5445,8 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
-                    && shadow.spread == 0.0
+                    && shadow.spread.is_finite()
+                    && (-32.0..=32.0).contains(&shadow.spread)
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
@@ -5455,7 +5485,8 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::Texture(texture) => texture.radius.is_finite() && (0.5..=16.0).contains(&texture.radius),
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
-                    && shadow.spread == 0.0
+                    && shadow.spread.is_finite()
+                    && (-32.0..=32.0).contains(&shadow.spread)
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
@@ -6362,6 +6393,40 @@ impl GpuCanvas {
                     pass.submit(&self.device, &self.queue, &result, texture, surface_to_local, scale, id.0 as u32)
                 }
                 EffectKind::DropShadow(shadow) => {
+                    let spread_px = (shadow.spread * scale).round() as i32;
+                    let silhouette = (spread_px > 0)
+                        .then(|| doc.node(id).filter(|node| !matches!(node.kind, NodeKind::Group)))
+                        .flatten()
+                        .and_then(|node| figcraft_render::shadow::silhouette(doc, node));
+                    let geometric_caster = if let Some(outlines) = silhouette {
+                        let mut mask_scene = Scene::new(width, height);
+                        mask_scene.set_transform(camera * doc.world_transform(id));
+                        mask_scene.set_paint(peniko::Color::new([1.0; 4]));
+                        for (path, rule) in outlines {
+                            set_rule(&mut mask_scene, rule);
+                            mask_scene.fill_path(&path);
+                            mask_scene.set_stroke(
+                                peniko::kurbo::Stroke::new(shadow.spread * 2.0)
+                                    .with_join(peniko::kurbo::Join::Miter)
+                                    .with_caps(peniko::kurbo::Cap::Butt)
+                                    .with_miter_limit(figcraft_doc::SPREAD_MITER_LIMIT),
+                            );
+                            mask_scene.stroke_path(&path);
+                        }
+                        let mut mask = Self::shared_with(self, u32::from(width), u32::from(height));
+                        mask.render_submit_with_target(
+                            &mask_scene,
+                            TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }),
+                        )?;
+                        Some(mask.texture.clone())
+                    } else {
+                        None
+                    };
+                    let pixel_caster = (spread_px != 0 && geometric_caster.is_none()).then(|| {
+                        let morph = self.gpu_morph.get_or_insert_with(|| GpuMorph::new(&self.device));
+                        morph.submit(&self.device, &self.queue, &result, spread_px.unsigned_abs(), spread_px > 0)
+                    });
+                    let caster = geometric_caster.as_ref().or(pixel_caster.as_ref()).unwrap_or(&result);
                     let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                     let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
                     pass.submit_drop_composited(
@@ -6369,7 +6434,7 @@ impl GpuCanvas {
                         &self.queue,
                         blur,
                         &result,
-                        &result,
+                        caster,
                         ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
                         (shadow.radius * scale / 2.0) as f32,
                         shadow.color,
