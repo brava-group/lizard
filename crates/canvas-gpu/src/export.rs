@@ -71,6 +71,7 @@ fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
         if !world_scale.is_finite() {
             return None;
         }
+        let mut node_reach = 0.0;
         for effect in node.effects.iter().filter(|effect| effect.visible) {
             let local = match &effect.kind {
                 EffectKind::DropShadow(shadow) => {
@@ -88,8 +89,9 @@ fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
             if !local.is_finite() {
                 return None;
             }
-            reach = reach.max(local * world_scale);
+            node_reach += local;
         }
+        reach = reach.max(node_reach * world_scale);
     }
     if reach == 0.0 {
         return Some(0);
@@ -260,6 +262,60 @@ mod tests {
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
     use std::sync::Arc;
+
+    #[test]
+    fn effect_tile_halo_accumulates_ordered_effect_reach() -> Result<(), Box<dyn std::error::Error>> {
+        let mut doc = Document::new("stacked tile halo");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "blurred shadow", 0.0, 0.0, 80.0, 80.0)?;
+        let node = doc.node_mut(id).ok_or("node missing")?;
+        node.effects = vec![
+            Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true },
+            Effect { kind: EffectKind::DropShadow(Shadow { radius: 5.0, spread: 3.0, offset: (4.0, 2.0), ..Shadow::default() }), visible: true },
+        ];
+        // Blur: 60; shadow: 30 + 12 + 4 + 2; plus the two-pixel sampling margin.
+        assert_eq!(effect_tile_halo(&doc, 1.0), Some(110));
+        assert_eq!(effect_tile_halo(&doc, 2.0), Some(218));
+        Ok(())
+    }
+
+    #[test]
+    fn wide_ordered_blur_shadow_export_keeps_tile_seam() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide ordered effect export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "Across seam", 2030.0, 35.0, 65.0, 70.0)?;
+        let node = doc.node_mut(id).ok_or("effect node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.3, 0.2, 1.0))];
+        node.effects = vec![
+            Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true },
+            Effect { kind: EffectKind::DropShadow(Shadow { radius: 5.0, spread: 3.0, offset: (4.0, 2.0), ..Shadow::default() }), visible: true },
+        ];
+        let wide = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 140 };
+        let actual = render_page_gpu(&doc, page, &wide).ok_or("wide ordered effect GPU export unavailable")?;
+        let crop = View { origin: (1900.0, 0.0), scale: 1.0, width: 360, height: 140 };
+        let expected = render_page_gpu(&doc, page, &crop).ok_or("ordered effect GPU crop unavailable")?;
+        for y in [30, 50, 70, 105, 120] {
+            for x in [2015, 2030, 2047, 2048, 2070, 2095, 2110] {
+                let wide_pixel = actual.pixel(x, y).ok_or("wide pixel missing")?;
+                let crop_pixel = expected.pixel(x - 1900, y).ok_or("crop pixel missing")?;
+                for (a, b) in [wide_pixel.red(), wide_pixel.green(), wide_pixel.blue(), wide_pixel.alpha()].into_iter().zip([
+                    crop_pixel.red(),
+                    crop_pixel.green(),
+                    crop_pixel.blue(),
+                    crop_pixel.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "at ({x},{y}): wide={wide_pixel:?}, crop={crop_pixel:?}");
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn adaptive_tile_core_stays_within_gpu_texture_limit() -> Result<(), Box<dyn std::error::Error>> {

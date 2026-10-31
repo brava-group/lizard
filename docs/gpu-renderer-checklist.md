@@ -308,6 +308,9 @@ the migration concerns rasterization and pixel effects.
     GPU page, preserving its transparent background and selected paint order. The wide selected
     export matched GPU crops across the tile seam for both effects.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
+  - [x] Accumulate the reach of ordered effects on each node when choosing the export tile
+    overlap. A Blur → Drop Shadow fixture at 4200 px matched a separate GPU crop at samples
+    across the tile seam within 12/255; the reach calculation is tested at 1× and 2×.
   - [x] Choose the tile core from the effect halo instead of imposing a 512 px halo cap.
     A 4200 × 128 page with a 90 px layer blur used a halo over 512 px on GPU; samples
     around the 2048 px seam matched an independently rendered GPU crop within 12/255.
