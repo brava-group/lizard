@@ -90,7 +90,7 @@ the migration concerns rasterization and pixel effects.
     isolated full-frame comparison stayed below 5% pixels differing by more than 20/255.
     Six transparent page-export RGBA samples stayed within 20/255 of the CPU reference.
     Selecting an outline inside the group while glass and blur remain visible passed the
-    same full-frame visual gate.
+    same full-frame visual gate. Rotating the translucent group by 0.3 radians also passed.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
