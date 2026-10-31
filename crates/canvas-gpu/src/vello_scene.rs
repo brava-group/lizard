@@ -262,9 +262,7 @@ mod shader_cache_tests {
         let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 1600.0, 1400.0)?;
         doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
         let pane = doc.create(page, NodeKind::Rectangle, "Glass", 40.0, 40.0, 1520.0, 1320.0)?;
-        let mut glass = Glass::default();
-        glass.frost = 0.0;
-        glass.depth = 10.0;
+        let glass = Glass { frost: 0.0, depth: 10.0, ..Default::default() };
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
         node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(glass.clone()), visible: true }];
@@ -792,7 +790,10 @@ mod cached_shadow_capability_tests {
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
         doc.node_mut(id).ok_or("missing rectangle")?.opacity = 0.5;
-        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.prepare_static_effects(&doc)?;
+        gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
         Ok(())
     }
 
@@ -2294,7 +2295,10 @@ mod effect_capability_tests {
         for blend in [BlendMode::Lighten, BlendMode::ColorDodge, BlendMode::HardLight, BlendMode::Difference] {
             doc.node_mut(id).ok_or("blended shape missing")?.blend = blend;
             let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 220 };
-            assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} stays guarded");
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} GPU capability");
+            let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { continue };
+            gpu.prepare_static_effects(&doc)?;
+            gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
         }
         Ok(())
     }
@@ -2426,10 +2430,10 @@ mod effect_capability_tests {
                         for scale in [1.0, 2.0] {
                             let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
                             if opacity < 0.999 && matches!(blend, BlendMode::ColorBurn | BlendMode::PlusLighter) {
-                                assert!(
-                                    has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true),
-                                    "{blend:?} partial opacity stays guarded"
-                                );
+                                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} GPU capability");
+                                let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { continue };
+                                gpu.prepare_static_effects(&doc)?;
+                                gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
                                 continue;
                             }
                             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} opacity={opacity} capability");
@@ -2539,7 +2543,10 @@ mod effect_capability_tests {
             node.blend = blend;
             node.opacity = 0.5;
             let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 220 };
-            assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} partial opacity stays guarded");
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} GPU capability");
+            let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { continue };
+            gpu.prepare_static_effects(&doc)?;
+            gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
         }
         Ok(())
     }
@@ -4957,6 +4964,16 @@ fn isolated_backdrop_effects_supported(doc: &Document, node: &Node, view: &View)
 
 type BackdropGroupBatch = (NodeId, f32, Vec<(NodeId, f64)>);
 
+#[derive(Clone, Copy)]
+struct BackdropRenderContext<'a> {
+    doc: &'a Document,
+    page: NodeId,
+    view: &'a View,
+    clear: [f32; 4],
+    outlined: &'a [NodeId],
+    options: figcraft_render::Outline,
+}
+
 fn independent_backdrop_groups(doc: &Document, page: NodeId, view: &View, index: &BackdropIndex) -> Option<Vec<BackdropGroupBatch>> {
     let world = Rect::new(
         view.origin.0,
@@ -6500,9 +6517,9 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
         };
         let unsupported = !gpu_styled_text_paints_supported(doc, node)
             || (node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node))
-            || (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
-                && !gpu_simple_node_blend_supported(node)
-                && !(gpu_glass_stack_supported(doc, node) && gpu_node_blend(node).is_some()))
+            || !(matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+                || gpu_simple_node_blend_supported(node)
+                || (gpu_glass_stack_supported(doc, node) && gpu_node_blend(node).is_some()))
             || node.fills.iter().chain(&node.strokes).any(unsupported_paint)
             || matches!(&node.kind, NodeKind::Vector { network }
                 if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(unsupported_paint));
@@ -8577,7 +8594,8 @@ impl GpuCanvas {
         if let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
         {
-            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options, None, true);
+            let context = BackdropRenderContext { doc, page, view, clear, outlined, options };
+            let result = self.render_isolated_group_backdrop(&context, &candidates, group, opacity, None, true);
             self.release_temporary_textures();
             return result;
         }
@@ -8901,6 +8919,7 @@ impl GpuCanvas {
         options: figcraft_render::Outline,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
+        let context = BackdropRenderContext { doc, page, view, clear, outlined, options };
         let roots = doc.node(page).map(|node| node.children.clone()).ok_or("page missing")?;
         let mut previous: Option<wgpu::Texture> = None;
         let mut last_index = None;
@@ -8912,19 +8931,7 @@ impl GpuCanvas {
                 self.render_root_segment(doc, page, view, &roots, last + 1..index, outlined, options)?;
                 previous = Some(self.snapshot_submit());
             }
-            let (_, rendered) = self.render_isolated_group_backdrop(
-                doc,
-                page,
-                view,
-                clear,
-                candidates,
-                *group,
-                *opacity,
-                outlined,
-                options,
-                previous.as_ref(),
-                false,
-            )?;
+            let (_, rendered) = self.render_isolated_group_backdrop(&context, candidates, *group, *opacity, previous.as_ref(), false)?;
             count += rendered;
             previous = Some(self.snapshot_submit());
             last_index = Some(index);
@@ -8937,18 +8944,14 @@ impl GpuCanvas {
 
     fn render_isolated_group_backdrop(
         &mut self,
-        doc: &Document,
-        page: NodeId,
-        view: &View,
-        clear: [f32; 4],
+        context: &BackdropRenderContext<'_>,
         candidates: &[(NodeId, f64)],
         group: NodeId,
         opacity: f32,
-        outlined: &[NodeId],
-        options: figcraft_render::Outline,
         previous: Option<&wgpu::Texture>,
         render_suffix: bool,
     ) -> Result<(f64, usize), Box<dyn Error>> {
+        let BackdropRenderContext { doc, page, view, clear, outlined, options } = *context;
         let started = Instant::now();
         let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing")?;
 
