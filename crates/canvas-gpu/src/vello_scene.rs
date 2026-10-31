@@ -3924,6 +3924,21 @@ mod effect_capability_tests {
                 .count();
             assert!(changed < (view.width * view.height / 20) as usize, "{name}: {changed} changed pixels");
         }
+        doc.node_mut(second).ok_or("second pane missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+        let index = BackdropIndex::new(&doc, page);
+        assert_eq!(index.visible_ids(&view), vec![pane, second]);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "two ordered glass panes rejected");
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("two glass panes reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "two ordered glass panes: {changed} changed pixels");
         Ok(())
     }
 
