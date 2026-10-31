@@ -10,8 +10,9 @@
 #   MACOS_SIGN_IDENTITY   codesign identity (name or SHA-1). Default "-" = ad-hoc (local testing;
 #                         Gatekeeper will reject the result on other Macs). In CI, import-cert.sh sets it.
 #   MACOS_KEYCHAIN        keychain holding the identity (optional)
-# Notarization (env; all three needed, and a real identity):
-#   APPLE_ID, APPLE_PASSWORD (app-specific password), APPLE_TEAM_ID
+# Notarization (env; a real Developer ID identity and one credential method):
+#   MACOS_NOTARY_PROFILE  credentials stored in Keychain with `xcrun notarytool store-credentials`
+#   or APPLE_ID, APPLE_PASSWORD (app-specific password), APPLE_TEAM_ID
 set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
@@ -46,12 +47,28 @@ BINS=(lizard)
 [ "$HAS_CLI" = 1 ] && BINS+=(lizard-cli)
 
 NOTARIZE=0
+NOTARY_ARGS=()
+SIGNING_IDENTITY_RECORD=""
+if [ "$IDENTITY" != "-" ]; then
+  SIGNING_IDENTITY_RECORD="$(security find-identity -v -p codesigning ${MACOS_KEYCHAIN:+"$MACOS_KEYCHAIN"} \
+    | grep -F 'Developer ID Application:' | grep -F "$IDENTITY" | head -n 1 || true)"
+fi
 if [ "$IDENTITY" = "-" ]; then
   warn "macOS: ad-hoc signing (no MACOS_SIGN_IDENTITY); artifacts are not notarized"
+elif [ -z "$SIGNING_IDENTITY_RECORD" ]; then
+  echo "error: MACOS_SIGN_IDENTITY must identify an installed Developer ID Application certificate" >&2
+  exit 1
+elif [ -n "${APPLE_TEAM_ID:-}" ] && [[ "$SIGNING_IDENTITY_RECORD" != *"($APPLE_TEAM_ID)"* ]]; then
+  echo "error: Developer ID Application identity does not belong to APPLE_TEAM_ID" >&2
+  exit 1
+elif [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+  NOTARY_ARGS=(--keychain-profile "$MACOS_NOTARY_PROFILE")
+  NOTARIZE=1
 elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+  NOTARY_ARGS=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
   NOTARIZE=1
 else
-  warn "macOS: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete; signed but not notarized"
+  warn "macOS: no MACOS_NOTARY_PROFILE or complete Apple ID credentials; signed but not notarized"
 fi
 
 echo "==> Lizard $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, notarize: $NOTARIZE"
@@ -59,9 +76,10 @@ echo "==> Lizard $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, no
 # ---- build -------------------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = 0 ]; then
   for t in "${TARGETS[@]}"; do
-    (cd "$ROOT" && cargo build --release --locked -p lizard --bin lizard --target "$t")
     if [ "$HAS_CLI" = 1 ]; then
-      (cd "$ROOT" && cargo build --release --locked -p lizard-cli --bin lizard-cli --target "$t")
+      (cd "$ROOT" && cargo build --release --locked -p lizard -p lizard-cli --bins --target "$t")
+    else
+      (cd "$ROOT" && cargo build --release --locked -p lizard --bin lizard --target "$t")
     fi
   done
 fi
@@ -88,14 +106,13 @@ sign() {
 notarize() {
   local file="$1" out id status
   echo "==> notarizing $(basename "$file") (this can take a few minutes)"
-  out="$(xcrun notarytool submit "$file" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
-    --team-id "$APPLE_TEAM_ID" --wait --timeout 1h --output-format json)" || true
+  out="$(xcrun notarytool submit "$file" "${NOTARY_ARGS[@]}" --wait --timeout 1h --output-format json)" || true
   echo "$out"
   id="$(printf '%s' "$out" | plutil -extract id raw -o - - 2>/dev/null || true)"
   status="$(printf '%s' "$out" | plutil -extract status raw -o - - 2>/dev/null || true)"
   if [ "$status" != "Accepted" ]; then
     if [ -n "$id" ]; then
-      xcrun notarytool log "$id" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+      xcrun notarytool log "$id" "${NOTARY_ARGS[@]}" || true
     fi
     echo "error: notarization of $(basename "$file") failed (status: ${status:-unknown})" >&2
     exit 1
@@ -120,9 +137,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/lizard" "$APP/Contents/MacOS/Lizard"
 cp "$WORK/Lizard.icns" "$APP/Contents/Resources/Lizard.icns"
+mkdir -p "$APP/Contents/Resources/Licenses"
+for notice in LICENSE-MIT LICENSE-APACHE NOTICE; do
+  cp "$ROOT/$notice" "$APP/Contents/Resources/Licenses/$notice"
+done
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
 if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
-  mkdir -p "$APP/Contents/Resources/Licenses"
   copy_font_licences "$APP/Contents/Resources/Licenses"
 fi
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
@@ -151,12 +171,10 @@ STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Lizard.app"
 ln -s /Applications "$STAGE/Applications"
-rm -f "$DMG" "$WORK/raw.dmg"
-# makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
-# which is flaky on CI runners ("Resource busy") and hangs in sandboxed sessions.
-hdiutil makehybrid -hfs -hfs-volume-name "Lizard" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
-hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
-rm -f "$WORK/raw.dmg"
+rm -f "$DMG"
+# `makehybrid -hfs` adds FinderInfo to files inside the image, invalidating the already-signed
+# app when the DMG is mounted. A direct compressed HFS+ image preserves the app's signature.
+retry hdiutil create -srcfolder "$STAGE" -format UDZO -fs HFS+ -volname Lizard -ov -o "$DMG"
 sign "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 if [ "$NOTARIZE" = 1 ]; then

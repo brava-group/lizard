@@ -13,7 +13,7 @@
   <key>CFBundleExecutable</key>
   <string>Lizard</string>
   <key>CFBundleIdentifier</key>
-  <string>com.matheuspires.lizard</string>
+  <string>com.brava.lizard</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>

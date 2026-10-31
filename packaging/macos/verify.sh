@@ -8,10 +8,10 @@
 #
 # Usage: packaging/macos/verify.sh [--arch universal|aarch64|x86_64]
 #
-# With a real signing identity and notarization credentials in the environment (the same
-# MACOS_SIGN_IDENTITY / APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID that package.sh uses), every
+# With a real signing identity and notarization credentials (MACOS_NOTARY_PROFILE or the
+# APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID combination used by package.sh), every
 # check is strict and a failure exits non-zero. Without them (local ad-hoc builds, or a release run
-# whose secrets are missing) only the signature's integrity is checked and the rest is a warning,
+# whose credentials are missing) only the signature's integrity is checked and the rest is a warning,
 # matching package.sh. Nothing here reads or prints a secret's value; it only tests whether one is set.
 #
 # A bare Mach-O can't carry a stapled notarization ticket (only .app, .dmg and .pkg can), so for the
@@ -41,8 +41,11 @@ DMG="$DIST/lizard-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/lizard-cli-$VERSION-macos-$ARCH.zip"
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 STRICT=0
-if [ "$IDENTITY" != "-" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
-  STRICT=1
+if [ "$IDENTITY" != "-" ]; then
+  if [ -n "${MACOS_NOTARY_PROFILE:-}" ] || \
+    { [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; }; then
+    STRICT=1
+  fi
 fi
 
 FAILED=0
@@ -80,7 +83,13 @@ for f in "${FILES[@]}"; do
 done
 
 WORK="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lizard-verify.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
+MOUNT="$WORK/mount"
+MOUNTED=0
+cleanup() {
+  if [ "$MOUNTED" = 1 ]; then hdiutil detach "$MOUNT" >/dev/null 2>&1 || true; fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 # ---- CLI zip (when apps/lizard-cli exists) ----------------------------------------------------
 if [ "$HAS_CLI" = 1 ]; then
@@ -129,7 +138,45 @@ fi
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> $(basename "$DMG")"
 codesign --verify --strict --verbose=2 "$DMG"
+mkdir -p "$MOUNT"
+retry hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG" >/dev/null
+MOUNTED=1
+APP="$MOUNT/Lizard.app"
+if [ ! -d "$APP" ]; then
+  echo "error: DMG has no Lizard.app" >&2
+  exit 1
+fi
+codesign --verify --strict --deep --verbose=2 "$APP"
+bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")"
+if [ "$bundle_id" != com.brava.lizard ]; then
+  echo "error: wrong bundle identifier: $bundle_id" >&2
+  exit 1
+fi
+archs="$(lipo -archs "$APP/Contents/MacOS/Lizard")"
+for a in $WANT_ARCHS; do
+  case " $archs " in
+    *" $a "*) ;;
+    *) echo "error: Lizard.app lacks $a (has: $archs)" >&2; exit 1 ;;
+  esac
+done
+for notice in LICENSE-MIT LICENSE-APACHE NOTICE; do
+  if [ ! -f "$APP/Contents/Resources/Licenses/$notice" ]; then
+    echo "error: Lizard.app is missing $notice" >&2
+    exit 1
+  fi
+done
 if [ "$STRICT" = 1 ]; then
+  details="$(codesign -d --verbose=2 "$APP" 2>&1)"
+  printf '%s\n' "$details" | grep -q '^Authority=Developer ID Application:' \
+    || fail "Lizard.app is not signed with Developer ID Application"
+  printf '%s\n' "$details" | grep -q '^Timestamp=' \
+    || fail "Lizard.app signature has no secure timestamp"
+  if [ -n "${APPLE_TEAM_ID:-}" ]; then
+    printf '%s\n' "$details" | grep -qx "TeamIdentifier=$APPLE_TEAM_ID" \
+      || fail "Lizard.app is signed by a different team"
+  fi
+  retry xcrun stapler validate "$APP" || fail "no notarization ticket stapled to Lizard.app"
+  assess --assess --type execute -vv "$APP" || fail "Gatekeeper rejects Lizard.app"
   retry xcrun stapler validate "$DMG" || fail "no notarization ticket stapled to the DMG"
   assess --assess --type open --context context:primary-signature -vv "$DMG" \
     || fail "Gatekeeper rejects the DMG"

@@ -115,10 +115,25 @@ Noto Sans Georgian and the Archivo SemiBold wordmark, when the pin has them. Pac
 `Info.plist.in`). The `.icns` is generated at packaging time with `iconutil` from the committed
 `assets/app-icon/lizard-<size>.png` (made by `cargo xtask icon`); it is never committed.
 Signing goes inside-out with the hardened runtime and a timestamp (empty entitlements), then the
-app is notarized and stapled, put on a DMG with an `Applications` link (`hdiutil makehybrid` +
-`convert`), and the DMG is signed, notarized and stapled. The CLI is signed with the same
-identity and notarized as a zip. `packaging/macos/verify.sh` checks the artifacts as shipped
-(strict with secrets, warnings without).
+app is notarized and stapled, put on a compressed HFS+ DMG with an `Applications` link
+(`hdiutil create -srcfolder`), and the DMG is signed, notarized and stapled. The CLI is signed
+with the same identity and notarized as a zip. `packaging/macos/verify.sh` mounts the DMG and
+checks the app's signature, bundle ID, architectures and bundled licences as shipped
+(strict with notarization credentials, warnings without). For distribution outside the Mac App
+Store, the signing identity must be an installed **Developer ID Application** certificate;
+an Apple Distribution certificate is for a different distribution channel and is rejected by
+`package.sh`.
+
+For a local release under PR SOLUCOES LTDA (team `2L268W62AW`), create or install its Developer
+ID Application certificate in Keychain Access. Apple restricts creation of this certificate
+to the team's Account Holder; an Admin can sign with an existing Developer ID identity only if
+its certificate and private key have been securely installed on the build Mac. Store notarization credentials with
+`xcrun notarytool store-credentials Lizard-PR --apple-id YOUR_APPLE_ID --team-id 2L268W62AW`;
+the tool prompts securely for an app-specific password. Then set `MACOS_SIGN_IDENTITY` to the
+Developer ID identity's SHA-1 from `security find-identity -v -p codesigning`, set
+`MACOS_NOTARY_PROFILE=Lizard-PR` and `APPLE_TEAM_ID=2L268W62AW`, and run `package.sh` followed
+by `verify.sh` for the same architecture. Neither the password nor the private key belongs in
+this repository.
 
 Locally (no certificates: ad-hoc signature, no notarization):
 
