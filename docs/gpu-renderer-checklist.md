@@ -107,6 +107,9 @@ the migration concerns rasterization and pixel effects.
     rich text runs remain guarded.
   - [x] Render a repeating pattern whose source has one uniform Layer Blur on GPU at 1× and 2×;
     progressive blur and other source effects remain guarded.
+  - [x] Render pattern sources with two or three uniform Layer Blurs on GPU in effect order.
+    Repeated cells matched the CPU reference at 1× and 2×; four blurs remain guarded after
+    the 2× comparison exceeded the visual difference limit.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas

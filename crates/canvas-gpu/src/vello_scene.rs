@@ -3616,7 +3616,7 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
     if depth > 64
         || matches!(&node.kind, NodeKind::Text(text) if !text.runs.is_empty())
-        || node.effects.iter().filter(|effect| effect.visible).count() > 1
+        || node.effects.iter().filter(|effect| effect.visible).count() > 3
         || node.effects.iter().any(|effect| {
             effect.visible
                 && !matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius))
@@ -4168,15 +4168,18 @@ fn draw_node(
     if split_shadow_opacity {
         scene.push_opacity_layer(node.opacity);
     }
-    let blur = if backdrops.is_some_and(|entries| entries.contains_key(&id)) && gpu_glass_stack_supported(doc, node) {
-        None
+    let blurs = if backdrops.is_some_and(|entries| entries.contains_key(&id)) && gpu_glass_stack_supported(doc, node) {
+        Vec::new()
     } else {
-        node.effects.iter().find_map(|effect| match &effect.kind {
-            EffectKind::LayerBlur(blur) if effects && effect.visible && blur.radius > 0.0 => Some(blur.radius),
-            _ => None,
-        })
+        node.effects
+            .iter()
+            .filter_map(|effect| match &effect.kind {
+                EffectKind::LayerBlur(blur) if effects && effect.visible && blur.radius > 0.0 => Some(blur.radius),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
-    if let Some(radius) = blur {
+    for radius in &blurs {
         scene.set_transform(transform);
         scene.push_filter_layer(Filter::from_function(FilterFunction::Blur { radius: (radius / 2.0) as f32 }));
     }
@@ -4209,7 +4212,7 @@ fn draw_node(
     if clipped {
         scene.pop_clip();
     }
-    if blur.is_some() {
+    for _ in &blurs {
         scene.pop_layer();
     }
     if opacity_layer {
