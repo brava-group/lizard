@@ -1690,16 +1690,12 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         send_resp.hovered() || send_resp.has_focus(),
         if reduce_motion { 0.0 } else { 0.14 },
     );
-    let send_blue = Color32::from_rgb(
-        (12.0 + 18.0 * send_hover).round() as u8,
-        (140.0 + 13.0 * send_hover).round() as u8,
-        (232.0 + 7.0 * send_hover).round() as u8,
-    );
-    ui.painter().circle_filled(send.center(), 12.0, send_blue);
+    let send_fill = Color32::from(egui::lerp(egui::Rgba::from(t.accent)..=egui::Rgba::from(t.accent_hover), send_hover));
+    ui.painter().circle_filled(send.center(), 12.0, send_fill);
     if app.ui.agent.busy {
-        ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(7.0, 7.0)), 1.0, Color32::from_rgb(0xDD, 0xE1, 0xED));
+        ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(7.0, 7.0)), 1.0, t.accent_on);
     } else {
-        glyph(ui, send, AgentIcon::SendUp, vec2(15.0, 15.0), Color32::from_rgb(0xDD, 0xE1, 0xED));
+        glyph(ui, send, AgentIcon::SendUp, vec2(15.0, 15.0), t.accent_on);
     }
     let enter = input_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
     if send_resp.clicked() || enter {

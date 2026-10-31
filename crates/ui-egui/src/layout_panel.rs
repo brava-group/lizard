@@ -131,7 +131,7 @@ fn layout_header(ui: &mut Ui, title: &str, action: Option<(LayoutIcon, &str)>, s
     let button = Rect::from_center_size(pos2(rect.max.x - widgets::PAD - 12.0, rect.center().y), vec2(24.0, 24.0));
     let response = ui.interact(button, ui.id().with("layout_header_action"), Sense::click()).tip(tip);
     if selected || response.hovered() {
-        ui.painter().rect_filled(button, CornerRadius::same(5), if selected { Color32::from_rgb(0x32, 0x39, 0x4d) } else { t.hover });
+        ui.painter().rect_filled(button, CornerRadius::same(5), if selected { t.selected_row } else { t.hover });
     }
     icons::paint_layout(
         ui.painter(),
