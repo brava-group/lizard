@@ -1184,20 +1184,26 @@ mod effect_capability_tests {
             }),
             visible: true,
         }];
-        for scale in [1.0, 2.0] {
-            let view = View { origin: (0.0, 0.0), scale, width: 220 * scale as u32, height: 200 * scale as u32 };
-            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
-            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
-            let mut gpu = GpuCanvas::new(view.width, view.height)?;
-            assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
-            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-            let actual = gpu.pixels()?;
-            let changed = actual
-                .chunks_exact(4)
-                .zip(reference.data().chunks_exact(4))
-                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
-                .count();
-            assert!(changed * 1000 < view.width as usize * view.height as usize, "progressive blur at {scale}x changed {changed} pixels");
+        for opacity in [1.0, 0.25, 0.5, 0.75] {
+            doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: 220 * scale as u32, height: 200 * scale as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                assert!(
+                    changed * 1000 < view.width as usize * view.height as usize,
+                    "progressive blur at {scale}x opacity={opacity} changed {changed} pixels"
+                );
+            }
         }
         Ok(())
     }
@@ -4938,7 +4944,7 @@ fn gpu_progressive_layer_blur_supported(doc: &Document, node: &Node, blur: &Blur
         || !node.visible
         || node.is_mask
         || !node.children.is_empty()
-        || node.opacity < 0.999
+        || !(0.0..=1.0).contains(&node.opacity)
         || node.blend != BlendMode::Normal
         || node.effects.iter().filter(|effect| effect.visible).count() != 1
         || ![blur.radius, blur.start_radius, blur.start.0, blur.start.1, blur.end.0, blur.end.1].into_iter().all(f64::is_finite)

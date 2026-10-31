@@ -148,6 +148,8 @@ the migration concerns rasterization and pixel effects.
     two-effect orders and Blur → Noise → Blur; tested 25%, 50%, and 75% opacity at 1× and 2×.
   - [x] Cache a single uniform Layer Blur on GPU for rotated leaves with 25%, 50%, and 75%
     opacity, applying opacity after the blur at 1× and 2×.
+  - [x] Cache a single progressive Layer Blur on GPU with 25%, 50%, and 75% opacity at 1×
+    and 2×, applying opacity after the variable-radius pass.
   - [x] Keep all six orders of one Layer Blur, one Noise, and one Drop Shadow on GPU at 1× and
     2× for rotated shapes and groups, including a group with a masked child. Each pass now runs
     at its position in the effect list rather than moving the shadow to the end.
@@ -214,6 +216,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: the progressive Layer Blur fixture now covers 100%, 25%, 50%, and 75% node
+  opacity at 1× and 2×. All eight GPU/reference comparisons passed the existing 0.1% pixel
+  tolerance while using a cached GPU result. The partial-opacity variants no longer fail the
+  progressive blur capability check.
 
 - 2026-10-30: six GPU/reference comparisons for one uniform Layer Blur on a rotated
   partially opaque rectangle over a colored backdrop matched pixel for pixel at 25%, 50%, and
