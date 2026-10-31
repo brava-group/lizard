@@ -65,10 +65,8 @@ const TOOLBAR_SVGS: [&str; 12] = [
 ];
 
 // The two spacing glyphs drawn in the owner's New Trasso Icons document.
-const SELECTION_SPACING_SVGS: [&str; 2] = [
-    include_str!("../assets/selection-spacing-horizontal.svg"),
-    include_str!("../assets/selection-spacing-vertical.svg"),
-];
+const SELECTION_SPACING_SVGS: [&str; 2] =
+    [include_str!("../assets/selection-spacing-horizontal.svg"), include_str!("../assets/selection-spacing-vertical.svg")];
 
 // Exact paths from the owner's image toolbar reference (node pxhiB).
 const IMAGE_ACTION_SVGS: [&str; 7] = [

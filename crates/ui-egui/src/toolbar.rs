@@ -55,8 +55,8 @@ const GROUPS: &[Group] = &[
 
 const MODE_CELL: f32 = 28.0;
 const MODE_GAP: f32 = 2.0;
-const MODE_SEGMENT_WIDTH: f32 = 4.0 * MODE_CELL + 3.0 * MODE_GAP + 4.0;
-const MODE_SECTION_WIDTH: f32 = 138.0;
+const MODE_SEGMENT_WIDTH: f32 = 3.0 * MODE_CELL + 2.0 * MODE_GAP + 4.0;
+const MODE_SECTION_WIDTH: f32 = MODE_SEGMENT_WIDTH + 16.0;
 const TOOL_GAP: f32 = 8.0;
 const FLYOUT_WIDTH: f32 = 16.0;
 
@@ -124,7 +124,7 @@ pub(crate) fn main_width() -> f32 {
 }
 
 /// The main toolbar pill: the tool groups with their flyouts, Comment and Actions, then the
-/// Draw · Design · Prototype · Inspect mode switcher.
+/// Draw · Design · Inspect mode switcher.
 fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let cell = 32.0;
     let width = main_width();
@@ -202,46 +202,55 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
         [pos2(mode_x, rect.min.y), pos2(mode_x, rect.max.y)],
         Stroke::new(1.0, if t.dark { Color32::from_rgb(0x3e, 0x3c, 0x3e) } else { t.border }),
     );
-    // Mode switcher: Draw · Design · Prototype · Inspect (code).
-    let modes = [tr("Draw"), tr("Design"), tr("Prototype"), tr("Inspect")];
+    // Mode switcher: Draw · Design · Inspect (code).
+    let modes = [tr("Draw"), tr("Design"), tr("Inspect")];
     let active = match app.ui.right_tab {
-        crate::RightTab::Design if app.session.tool.tool == ToolId::Pencil => 0,
-        crate::RightTab::Design => 1,
-        crate::RightTab::Prototype => 2,
-        crate::RightTab::Inspect => 3,
+        crate::RightTab::Design if app.session.tool.tool == ToolId::Pencil => Some(0),
+        crate::RightTab::Design => Some(1),
+        crate::RightTab::Prototype => None,
+        crate::RightTab::Inspect => Some(2),
     };
     let seg = Rect::from_min_size(pos2(mode_x + 8.0, cy - 16.0), vec2(MODE_SEGMENT_WIDTH, 32.0));
     ui.painter().rect_filled(seg, CornerRadius::same(5), if t.dark { Color32::from_rgb(0x44, 0x44, 0x44) } else { t.field });
     let mode_rect = |i: f32| Rect::from_min_size(pos2(seg.min.x + 2.0 + i * (MODE_CELL + MODE_GAP), seg.min.y + 2.0), vec2(MODE_CELL, MODE_CELL));
     let responses =
-        std::array::from_fn::<_, 4, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).on_hover_text(modes[i]));
+        std::array::from_fn::<_, 3, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).on_hover_text(modes[i]));
     for (i, resp) in responses.iter().enumerate() {
-        if resp.hovered() && i != active {
+        if resp.hovered() && active != Some(i) {
             let r = mode_rect(i as f32);
             ui.painter().rect_filled(r, CornerRadius::same(3), t.pressed);
         }
     }
-    // One shared selected surface slides between the four radio options.
-    let selected = ui.ctx().animate_value_with_time(ui.id().with("mode_selected_position"), active as f32, 0.18);
-    let selected_rect = mode_rect(selected);
-    ui.painter().rect_filled(selected_rect, CornerRadius::same(3), if t.dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel });
-    ui.painter().rect_stroke(
-        selected_rect,
-        CornerRadius::same(3),
-        Stroke::new(1.0, if t.dark { Color32::from_rgb(0x37, 0x37, 0x37) } else { t.border }),
-        StrokeKind::Inside,
-    );
-    if responses[active].hovered() {
-        ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(3), t.pressed);
+    // One shared selected surface slides between the three radio options.
+    if let Some(active) = active {
+        let selected = ui.ctx().animate_value_with_time(ui.id().with("mode_selected_position"), active as f32, 0.18);
+        let selected_rect = mode_rect(selected);
+        ui.painter().rect_filled(selected_rect, CornerRadius::same(3), if t.dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel });
+        ui.painter().rect_stroke(
+            selected_rect,
+            CornerRadius::same(3),
+            Stroke::new(1.0, if t.dark { Color32::from_rgb(0x37, 0x37, 0x37) } else { t.border }),
+            StrokeKind::Inside,
+        );
+        if responses[active].hovered() {
+            ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(3), t.pressed);
+        }
     }
     for (i, (tip, resp)) in modes.iter().zip(responses.iter()).enumerate() {
         let r = mode_rect(i as f32);
-        a11y::toggle(resp, tip, i == active);
+        a11y::toggle(resp, tip, active == Some(i));
+        // The owner-drawn Draw and Design artwork occupies more of its 24 px viewbox than
+        // the Inspect glyph. Scale both down to match its visible size and weight.
+        let icon_size = match i {
+            0 => 18.0,
+            1 => 16.0,
+            _ => 24.0,
+        };
         icons::paint_toolbar(
             ui.painter(),
-            Rect::from_center_size(r.center(), vec2(24.0, 24.0)),
-            8 + i,
-            if i == active {
+            Rect::from_center_size(r.center(), vec2(icon_size, icon_size)),
+            if i == 2 { 11 } else { 8 + i },
+            if active == Some(i) {
                 if t.dark { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.accent_text }
             } else if t.dark {
                 Color32::from_white_alpha(178)
@@ -261,7 +270,6 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
                         app.run("tool.set", json!({"tool": "move"}));
                     }
                 }
-                2 => app.ui.right_tab = crate::RightTab::Prototype,
                 _ => app.ui.right_tab = crate::RightTab::Inspect,
             }
         }
