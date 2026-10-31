@@ -3985,6 +3985,26 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "image glass stack: {changed} changed pixels");
+        let shader = figcraft_shader::demo();
+        doc.shaders.insert(shader.id.clone(), shader);
+        doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint {
+            kind: PaintKind::Shader(ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: Default::default() }),
+            opacity: 0.35,
+            ..Paint::solid(Color::WHITE)
+        }];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "shader glass stack rejected");
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("shader glass stack reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.register_images(&doc)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "shader glass stack: {changed} changed pixels");
         Ok(())
     }
 
@@ -6094,7 +6114,8 @@ fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
         })
         && node.fills.iter().all(|paint| {
             !paint.visible
-                || paint.blend == BlendMode::Normal && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_) | PaintKind::Image(_))
+                || paint.blend == BlendMode::Normal
+                    && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_) | PaintKind::Image(_) | PaintKind::Shader(_))
         })
         && node.strokes.is_empty()
 }

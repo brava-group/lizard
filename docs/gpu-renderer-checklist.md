@@ -116,6 +116,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Use a decoded PNG image fill on the same ordered Glass stack. The GPU image texture is
     composed before Noise → Layer Blur, and the second pane samples it; the full-frame
     comparison passed the 5% visual gate.
+  - [x] Use a document shader fill on that stack. The shader texture and Glass/Noise/Blur
+    passes stay on GPU, and the full-frame comparison passed the 5% visual gate.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
