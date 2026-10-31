@@ -17,7 +17,7 @@ use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
 use crate::proto_editor::{Cx, Slot, set_action};
 use crate::right::{menu_item, menu_popup, row};
-use crate::theme::{ACCENT, Tokens, regular, semibold};
+use crate::theme::{Tokens, regular, semibold};
 use crate::widgets::{self, FIELD_H, FieldEdit, Lead, PAD};
 
 /// The interaction whose editor popover is open: (layer, index).
@@ -608,8 +608,8 @@ fn interactions(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId, 
         }
         // A small connection glyph.
         let g = pos2(body.min.x + 14.0, body.center().y);
-        ui.painter().circle_stroke(g, 5.0, Stroke::new(1.2, ACCENT));
-        ui.painter().circle_filled(g, 2.0, ACCENT);
+        ui.painter().circle_stroke(g, 5.0, Stroke::new(1.2, Tokens::get(ui.ctx()).accent));
+        ui.painter().circle_filled(g, 2.0, Tokens::get(ui.ctx()).accent);
         let tx = body.min.x + 28.0;
         let clip = ui.painter().with_clip_rect(body);
         clip.text(pos2(tx, body.center().y - 7.0), Align2::LEFT_CENTER, trigger_summary(&it.trigger), semibold(11.0), t.text);
@@ -757,7 +757,7 @@ fn trigger_rows(app: &mut LizardApp, ui: &mut Ui, node: NodeId, k: usize, it: &I
                 let id = capture_id().with("field");
                 ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
                 if cap {
-                    ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                    ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, Tokens::get(ui.ctx()).accent), StrokeKind::Inside);
                     ui.memory_mut(|m| m.request_focus(id));
                     let _ = ui.interact(r, id, Sense::focusable_noninteractive());
                     let pressed = ui.input(|i| {
@@ -1113,7 +1113,7 @@ fn animation_rows(app: &mut LizardApp, ui: &mut Ui, node: NodeId, k: usize, it: 
         } else {
             1.0
         };
-        curve(ui.painter(), box_r.shrink2(vec2(10.0, 12.0)), it.easing, ACCENT, Some(phase));
+        curve(ui.painter(), box_r.shrink2(vec2(10.0, 12.0)), it.easing, Tokens::get(ui.ctx()).accent, Some(phase));
     }
 }
 

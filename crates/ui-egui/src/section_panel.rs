@@ -66,7 +66,7 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
                 let c = lizard_color::Color::from_hex(hex).unwrap_or(lizard_color::Color::WHITE);
                 ui.painter().rect_filled(r, CornerRadius::same(9), crate::theme::doc_c32(ui.ctx(), c));
                 let on = current.as_ref().and_then(|c| c.as_ref()).is_some_and(|h| h.eq_ignore_ascii_case(hex.trim_start_matches('#')));
-                let stroke = if on { Stroke::new(2.0, crate::theme::ACCENT) } else { Stroke::new(1.0, t.border) };
+                let stroke = if on { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.border) };
                 ui.painter().rect_stroke(r, CornerRadius::same(9), stroke, egui::StrokeKind::Inside);
                 let name = tr(name);
                 crate::a11y::radio(&resp, name, on);

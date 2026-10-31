@@ -198,7 +198,7 @@ pub(super) fn show_browser(app: &mut LizardApp, ctx: &egui::Context, target: &Pi
                             ui.painter().rect_stroke(
                                 square,
                                 CornerRadius::same(7),
-                                Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { Color32::from_rgb(28, 149, 255) } else { BORDER }),
+                                Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { Tokens::get(ui.ctx()).accent } else { BORDER }),
                                 StrokeKind::Inside,
                             );
                             let label = if definition.name.chars().count() > 14 {

@@ -4,8 +4,6 @@ use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, pa
 use super::*;
 
 const BASE_HEIGHT: f32 = 329.0;
-const SELECTED_ROW: Color32 = Color32::from_rgb(0x39, 0x43, 0x60);
-const SELECTED_MARKER: Color32 = Color32::from_rgb(0x0c, 0x8c, 0xe9);
 const MAX_STOPS: usize = 32;
 
 fn entry(ui: &mut Ui, rect: Rect, id: Id, value: String) -> Option<String> {
@@ -100,7 +98,7 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
         let response = ui
             .interact(marker, Id::new(("cp_gradient_marker", index)), Sense::click_and_drag())
             .on_hover_text(format!("{}%", (stop.position * 100.0).round()));
-        ui.painter().rect_filled(marker, CornerRadius::same(5), if index == *selected { SELECTED_MARKER } else { FIELD });
+        ui.painter().rect_filled(marker, CornerRadius::same(5), if index == *selected { Tokens::get(ui.ctx()).accent } else { FIELD });
         let swatch = Rect::from_center_size(marker.center(), vec2(14.0, 14.0));
         widgets::paint_swatch(ui.painter(), swatch, &Paint::solid(stop.color));
         if response.clicked() || response.drag_started() {
@@ -120,7 +118,7 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
     }
     if let Some(stop) = stop_snapshot.get(*selected) {
         let marker = Rect::from_center_size(pos2(bar.left() + stop.position.clamp(0.0, 1.0) * bar.width(), origin.y + 140.0), vec2(24.0, 24.0));
-        ui.painter().rect_filled(marker, CornerRadius::same(5), SELECTED_MARKER);
+        ui.painter().rect_filled(marker, CornerRadius::same(5), Tokens::get(ui.ctx()).accent);
         widgets::paint_swatch(ui.painter(), Rect::from_center_size(marker.center(), vec2(14.0, 14.0)), &Paint::solid(stop.color));
     }
     if bar_response.clicked()
@@ -139,7 +137,7 @@ fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut 
         let y = 220.0 + index as f32 * 32.0;
         let row = at(origin, 0.0, y, WIDTH, 32.0);
         if index == *selected {
-            ui.painter().rect_filled(row, CornerRadius::ZERO, SELECTED_ROW);
+            ui.painter().rect_filled(row, CornerRadius::ZERO, Tokens::get(ui.ctx()).selected_row);
         }
         if ui.interact(row, Id::new(("cp_gradient_row", index)), Sense::click()).clicked() {
             *selected = index;

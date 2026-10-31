@@ -7,6 +7,7 @@ pub use colors::{ALL_COLOR_ROLES, ColorRole};
 use std::sync::Arc;
 
 use egui::{Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
+use workbench_ui::ThemeRecipe;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
@@ -25,11 +26,15 @@ pub struct Tokens {
     pub hover: Color32,
     pub pressed: Color32,
     pub field: Color32,
+    pub surface_tertiary: Color32,
     pub field_hover_border: Color32,
     pub accent: Color32,
     pub accent_hover: Color32,
+    pub accent_pressed: Color32,
     pub accent_on: Color32,
     pub accent_text: Color32,
+    pub canvas_accent: Color32,
+    pub text_selection_bg: Color32,
     pub selected_row: Color32,
     pub selected_row_child: Color32,
     pub component: Color32,
@@ -56,8 +61,8 @@ pub const ACCENT_ON: Color32 = Color32::WHITE;
 /// Text selection in every editor and input, including the component catalog.
 pub const TEXT_SELECTION_BG: Color32 = Color32::from_rgb(0x25, 0x56, 0x81);
 /// The blue overlay color used by the branch's canvas.
-pub fn canvas_accent(_ctx: &Context) -> Color32 {
-    ACCENT
+pub fn canvas_accent(ctx: &Context) -> Color32 {
+    Tokens::get(ctx).canvas_accent
 }
 
 /// Preserve the branch's blue fill under white text.
@@ -89,11 +94,15 @@ impl Tokens {
             hover: color(ColorRole::BgHover),
             pressed: color(ColorRole::BgPressed),
             field: color(ColorRole::BgSecondary),
+            surface_tertiary: color(ColorRole::BgTertiary),
             field_hover_border: Color32::from_rgb(0xE6, 0xE6, 0xE6),
             accent: color(ColorRole::BgBrand),
             accent_hover: color(ColorRole::BgBrandHover),
+            accent_pressed: color(ColorRole::BgBrandPressed),
             accent_on: ACCENT_ON,
             accent_text: color(ColorRole::TextBrand),
+            canvas_accent: ACCENT,
+            text_selection_bg: TEXT_SELECTION_BG,
             selected_row: color(ColorRole::BgSelected),
             selected_row_child: color(ColorRole::BgSelectedSecondary),
             component: color(ColorRole::BgComponent),
@@ -130,11 +139,15 @@ impl Tokens {
             hover: color(ColorRole::BgHover),
             pressed: color(ColorRole::BgPressed),
             field: color(ColorRole::BgSecondary),
+            surface_tertiary: color(ColorRole::BgTertiary),
             field_hover_border: Color32::from_rgb(0x4D, 0x4D, 0x4D),
             accent: color(ColorRole::BgBrand),
             accent_hover: color(ColorRole::BgBrandHover),
+            accent_pressed: color(ColorRole::BgBrandPressed),
             accent_on: ACCENT_ON,
             accent_text: color(ColorRole::TextBrand),
+            canvas_accent: ACCENT,
+            text_selection_bg: TEXT_SELECTION_BG,
             selected_row: color(ColorRole::BgSelected),
             selected_row_child: color(ColorRole::BgSelectedSecondary),
             component: color(ColorRole::BgComponent),
@@ -152,6 +165,89 @@ impl Tokens {
             menu_dim: Color32::from_rgba_unmultiplied(255, 255, 255, 178),
             focus: color(ColorRole::BorderSelected),
         }
+    }
+
+    /// Preview a portable Workbench recipe without changing the editor's saved theme.
+    pub fn from_recipe(dark: bool, recipe: ThemeRecipe) -> Self {
+        let mut t = if dark { Self::dark() } else { Self::light() };
+        if dark && recipe.darkness != 50 {
+            for neutral in [
+                &mut t.bg,
+                &mut t.panel,
+                &mut t.canvas,
+                &mut t.border,
+                &mut t.border_strong,
+                &mut t.hover,
+                &mut t.pressed,
+                &mut t.field,
+                &mut t.surface_tertiary,
+                &mut t.field_hover_border,
+                &mut t.tab_bar,
+                &mut t.tab_active,
+                &mut t.menu,
+            ] {
+                *neutral = recipe.dark_neutral(*neutral);
+            }
+        }
+        if recipe.primary != ThemeRecipe::default().primary {
+            let shades = recipe.primary_scale(dark, t.panel);
+            t.accent = shades.base;
+            t.accent_hover = shades.hover;
+            t.accent_pressed = shades.pressed;
+            t.accent_on = shades.on_primary;
+            t.accent_text = shades.text;
+            t.canvas_accent = shades.base;
+            t.text_selection_bg = shades.selected;
+            t.selected_row = shades.selected;
+            t.selected_row_child = shades.selected_child;
+            t.menu_hover = shades.base;
+            t.focus = shades.base;
+        }
+        t
+    }
+
+    /// Stable semantic names and their resolved colors for export by a host app.
+    pub fn named_colors(self) -> [(&'static str, Color32); 38] {
+        [
+            ("bg", self.bg),
+            ("panel", self.panel),
+            ("canvas", self.canvas),
+            ("border", self.border),
+            ("border-strong", self.border_strong),
+            ("text", self.text),
+            ("text-secondary", self.text_secondary),
+            ("text-tertiary", self.text_tertiary),
+            ("icon", self.icon),
+            ("icon-secondary", self.icon_secondary),
+            ("hover", self.hover),
+            ("pressed", self.pressed),
+            ("field", self.field),
+            ("surface-tertiary", self.surface_tertiary),
+            ("field-hover-border", self.field_hover_border),
+            ("accent", self.accent),
+            ("accent-hover", self.accent_hover),
+            ("accent-pressed", self.accent_pressed),
+            ("accent-on", self.accent_on),
+            ("accent-text", self.accent_text),
+            ("canvas-accent", self.canvas_accent),
+            ("text-selection-bg", self.text_selection_bg),
+            ("selected-row", self.selected_row),
+            ("selected-row-child", self.selected_row_child),
+            ("component", self.component),
+            ("component-row", self.component_row),
+            ("danger", self.danger),
+            ("success", self.success),
+            ("warning", self.warning),
+            ("guide", self.guide),
+            ("tab-bar", self.tab_bar),
+            ("tab-active", self.tab_active),
+            ("shadow", self.shadow),
+            ("menu", self.menu),
+            ("menu-text", self.menu_text),
+            ("menu-hover", self.menu_hover),
+            ("menu-dim", self.menu_dim),
+            ("focus", self.focus),
+        ]
     }
 
     pub fn get(ctx: &Context) -> Tokens {
@@ -207,7 +303,7 @@ fn visuals(t: Tokens) -> Visuals {
     v.window_stroke = Stroke::new(1.0, t.border);
     v.window_corner_radius = egui::CornerRadius::same(13);
     v.menu_corner_radius = egui::CornerRadius::same(13);
-    v.selection.bg_fill = TEXT_SELECTION_BG;
+    v.selection.bg_fill = t.text_selection_bg;
     v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
     v.hyperlink_color = t.accent_text;
     for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open, &mut v.widgets.noninteractive] {

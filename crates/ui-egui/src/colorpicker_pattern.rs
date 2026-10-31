@@ -4,7 +4,6 @@ use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, pa
 use super::*;
 
 const HEIGHT: f32 = 522.0;
-const ACTIVE: Color32 = Color32::from_rgb(0x7c, 0xc4, 0xf8);
 
 fn source_dimensions(app: &LizardApp, source: u64) -> (f64, f64) {
     app.session
@@ -226,7 +225,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                     ui.painter().rect_filled(
                         Rect::from_center_size(center, if selected { vec2(10.0, 10.0) } else { vec2(2.0, 2.0) }),
                         CornerRadius::same(if selected { 2 } else { 1 }),
-                        if selected { ACTIVE } else { Color32::from_white_alpha(102) },
+                        if selected { Tokens::get(ui.ctx()).accent_text } else { Color32::from_white_alpha(102) },
                     );
                     if ui.interact(cell, Id::new(("cp_pattern_alignment", row, col)), Sense::click()).clicked() {
                         pattern.align_x = Some(axes[col]);

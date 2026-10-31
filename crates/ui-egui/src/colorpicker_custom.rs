@@ -8,8 +8,6 @@ pub(super) const PANEL: Color32 = Color32::from_rgb(44, 44, 44);
 pub(super) const FIELD: Color32 = Color32::from_rgb(56, 56, 56);
 pub(super) const BORDER: Color32 = Color32::from_rgb(68, 68, 68);
 pub(super) const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
-const SELECTED_BG: Color32 = Color32::from_rgb(0x39, 0x43, 0x60);
-const SELECTED_ICON: Color32 = Color32::from_rgb(0x7c, 0xc4, 0xf8);
 const PAINT_KIND_HINTS: [&str; 6] = ["Solid", "Gradient", "Pattern", "Image", "Video", "Shader"];
 const PAINT_KIND_IDS: [&str; 6] = ["cp_kind0", "cp_kind1", "cp_kind2", "cp_kind3", "cp_kind4", "cp_kind5"];
 
@@ -24,7 +22,7 @@ pub(super) fn paint_blend_icon(ui: &Ui, button: Rect) {
 pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: usize, selected: bool, hint: &str) -> egui::Response {
     let response = ui.interact(rect, Id::new(id), Sense::click()).tip(hint);
     let bg = if selected {
-        SELECTED_BG
+        Tokens::get(ui.ctx()).selected_row
     } else if response.hovered() {
         Color32::from_rgb(64, 64, 64)
     } else {
@@ -43,7 +41,7 @@ pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: us
     let color = if !ui.is_enabled() {
         MUTED
     } else if selected {
-        SELECTED_ICON
+        Tokens::get(ui.ctx()).accent_text
     } else {
         Color32::WHITE
     };
@@ -197,6 +195,88 @@ pub(super) fn show_stop(app: &mut LizardApp, ctx: &egui::Context, target: &Picke
     show_inner(app, ctx, target, paint, Some((index, parent_pos)));
 }
 
+/// The same solid-color controls serve document paints and standalone theme palettes.
+fn edit_solid_controls(ui: &mut Ui, origin: Pos2, color: Color, allow_alpha: bool) -> Option<(Color, bool)> {
+    let mut hsb = ui
+        .data(|d| d.get_temp::<(f32, f32, f32, [u8; 4])>(Id::new("cp_hsb")))
+        .filter(|(_, _, _, rgba)| *rgba == color.to_rgba8())
+        .map(|(h, s, b, _)| Hsb { h, s, b })
+        .unwrap_or_else(|| Hsb::from_color(color));
+    let square = at(origin, 16.0, 96.0, 208.0, 208.0);
+    let (sv_changed, sv_done) = sv_square(ui, square, &mut hsb);
+    let hue = at(origin, 52.0, 314.0, 172.0, 16.0);
+    let (hue_changed, hue_done) = hue_slider(ui, hue, &mut hsb);
+    let alpha = at(origin, 52.0, 342.0, 172.0, 16.0);
+    let alpha_change = if allow_alpha { alpha_slider(ui, alpha, color) } else { ui.add_enabled_ui(false, |ui| alpha_slider(ui, alpha, color)).inner };
+    let mut next = hsb.to_color().with_alpha(alpha_change.map_or(color.a, |(a, _)| a));
+    let mut changed = sv_changed || hue_changed || alpha_change.is_some();
+    let mut done = sv_done || hue_done || alpha_change.is_some_and(|(_, end)| end);
+
+    let format = at(origin, 16.0, 380.0, 55.0, 24.0);
+    let model: usize = ui.data(|d| d.get_temp(Id::new("cp_model"))).unwrap_or(0).min(MODELS.len() - 1);
+    field(ui, format, CornerRadius::same(5), true);
+    ui.painter().text(format.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, MODELS[model], regular(11.0), Color32::WHITE);
+    icons::paint_colorpicker(ui.painter(), at(origin, 60.0, 390.5, 5.002, 3.002), 7, Color32::WHITE);
+    let format_response = ui.interact(format, Id::new("cp_format"), Sense::click());
+    crate::right::menu_popup(&format_response).show(|ui| {
+        for model in MODELS {
+            if crate::right::menu_item(ui, model, "") {
+                ui.data_mut(|d| d.insert_temp(Id::new("cp_model"), MODELS.iter().position(|m| *m == model).unwrap_or(0)));
+                ui.close();
+            }
+        }
+    });
+    let alpha_rect = at(origin, 170.0, 380.0, 54.0, 24.0);
+    field(ui, alpha_rect, CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }, false);
+    if let Some(parsed) = model_entry(ui, origin, model, next) {
+        next = parsed;
+        hsb = Hsb::from_color(next);
+        changed = true;
+        done = true;
+    }
+    if allow_alpha {
+        if let Some(text) = text_entry(ui, at(origin, 178.0, 384.0, 32.0, 16.0), "cp_alpha_exact", format!("{:.0}", next.a * 100.0))
+            && let Ok(value) = text.trim_end_matches('%').parse::<f32>()
+        {
+            next = next.with_alpha((value / 100.0).clamp(0.0, 1.0));
+            changed = true;
+            done = true;
+        }
+    } else {
+        ui.painter().text(pos2(origin.x + 194.0, origin.y + 392.0), Align2::CENTER_CENTER, "100", regular(11.0), MUTED);
+    }
+    ui.painter().text(pos2(origin.x + 215.0, origin.y + 392.0), Align2::CENTER_CENTER, "%", regular(11.0), MUTED);
+    ui.data_mut(|d| d.insert_temp(Id::new("cp_hsb"), (hsb.h, hsb.s, hsb.b, next.to_rgba8())));
+    changed.then_some((next, done))
+}
+
+#[cfg(feature = "catalog")]
+pub(super) fn show_standalone_solid(ctx: &egui::Context, color: Color, anchor: Pos2, open: &mut bool) -> Option<Color> {
+    let mut updated = None;
+    let mut close_now = false;
+    crate::primitives::FloatingPanel::new(Id::new("theme_solid_color_picker"), anchor)
+        .width(crate::primitives::FloatingPanelWidth::Compact)
+        .height(crate::primitives::FloatingPanelHeight::Fixed(414.0))
+        .fill(PANEL)
+        .show_with_header(ctx, |ui, header| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            ui.allocate_exact_size(vec2(WIDTH, 374.0), Sense::hover());
+            let origin = header.min;
+            label_tab(ui, at(origin, 8.0, 8.0, 91.609, 24.0), "cp_custom_tab", "Custom", true);
+            if vector_button(ui, at(origin, 208.0, 8.0, 24.0, 24.0), "cp_close", 9, false, tr("Close")).clicked() {
+                close_now = true;
+            }
+            ui.painter().hline(origin.x..=origin.x + WIDTH, origin.y + 79.5, Stroke::new(1.0, BORDER));
+            if let Some((next, _)) = edit_solid_controls(ui, origin, color, false) {
+                updated = Some(next);
+            }
+        });
+    if close_now || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        *open = false;
+    }
+    updated
+}
+
 fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
     let pos =
         stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)));
@@ -315,59 +395,12 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
                 },
                 None => paint.solid_color().unwrap_or(Color::BLACK).with_alpha(paint.opacity),
             };
-            let mut hsb = ui
-                .data(|d| d.get_temp::<(f32, f32, f32, [u8; 4])>(Id::new("cp_hsb")))
-                .filter(|(_, _, _, rgba)| *rgba == color.to_rgba8())
-                .map(|(h, s, b, _)| Hsb { h, s, b })
-                .unwrap_or_else(|| Hsb::from_color(color));
-            let square = at(origin, 16.0, 96.0, 208.0, 208.0);
-            let (sv_changed, sv_done) = sv_square(ui, square, &mut hsb);
             let eye = at(origin, 16.0, 326.0, 24.0, 24.0);
             if vector_button(ui, eye, "cp_eye", 10, false, tr("Pick color (I)")).clicked() {
                 close_now = true;
                 app.run("edit.pickColor", json!({}));
             }
-            let hue = at(origin, 52.0, 314.0, 172.0, 16.0);
-            let (hue_changed, hue_done) = hue_slider(ui, hue, &mut hsb);
-            let alpha = at(origin, 52.0, 342.0, 172.0, 16.0);
-            let alpha_change = alpha_slider(ui, alpha, color);
-            let mut next = hsb.to_color().with_alpha(alpha_change.map_or(color.a, |(a, _)| a));
-            let mut changed = sv_changed || hue_changed || alpha_change.is_some();
-            let mut done = sv_done || hue_done || alpha_change.is_some_and(|(_, end)| end);
-
-            // 40 pt format and value row.
-            let format = at(origin, 16.0, 380.0, 55.0, 24.0);
-            let model: usize = ui.data(|d| d.get_temp(Id::new("cp_model"))).unwrap_or(0).min(MODELS.len() - 1);
-            field(ui, format, CornerRadius::same(5), true);
-            ui.painter().text(format.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, MODELS[model], regular(11.0), Color32::WHITE);
-            icons::paint_colorpicker(ui.painter(), at(origin, 60.0, 390.5, 5.002, 3.002), 7, Color32::WHITE);
-            let format_response = ui.interact(format, Id::new("cp_format"), Sense::click());
-            crate::right::menu_popup(&format_response).show(|ui| {
-                for model in MODELS {
-                    if crate::right::menu_item(ui, model, "") {
-                        ui.data_mut(|d| d.insert_temp(Id::new("cp_model"), MODELS.iter().position(|m| *m == model).unwrap_or(0)));
-                        ui.close();
-                    }
-                }
-            });
-            let alpha_rect = at(origin, 170.0, 380.0, 54.0, 24.0);
-            field(ui, alpha_rect, CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }, false);
-            if let Some(parsed) = model_entry(ui, origin, model, next) {
-                next = parsed;
-                hsb = Hsb::from_color(next);
-                changed = true;
-                done = true;
-            }
-            if let Some(text) = text_entry(ui, at(origin, 178.0, 384.0, 32.0, 16.0), "cp_alpha_exact", format!("{:.0}", next.a * 100.0))
-                && let Ok(value) = text.trim_end_matches('%').parse::<f32>()
-            {
-                next = next.with_alpha((value / 100.0).clamp(0.0, 1.0));
-                changed = true;
-                done = true;
-            }
-            ui.painter().text(pos2(origin.x + 215.0, origin.y + 392.0), Align2::CENTER_CENTER, "%", regular(11.0), MUTED);
-            ui.data_mut(|d| d.insert_temp(Id::new("cp_hsb"), (hsb.h, hsb.s, hsb.b, next.to_rgba8())));
-            if changed {
+            if let Some((next, done)) = edit_solid_controls(ui, origin, color, true) {
                 if let Some((index, _)) = stop {
                     if let PaintKind::Gradient(gradient) = &mut paint.kind
                         && let Some(stop) = gradient.stops.get_mut(index)
@@ -379,9 +412,9 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
                     paint.opacity = next.a;
                 }
                 write(app, target, &paint, !done);
-            }
-            if done {
-                finish(app);
+                if done {
+                    finish(app);
+                }
             }
 
             // Page swatches, two 16 pt rows with 8 pt gutters.

@@ -12,7 +12,7 @@ use crate::icons::{self, AppearanceIcon, HeaderIcon, Icon, PositionIcon};
 use crate::list_drag::{ListDrag, move_flags, remove_flags};
 use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant};
 use crate::style_picker::{self, StyleSlot};
-use crate::theme::{ACCENT, Tokens, regular, semibold};
+use crate::theme::{Tokens, regular, semibold};
 use crate::widgets::{self, Edit, FIELD_H, FieldEdit, Lead, PAD};
 use crate::{LizardApp, RightTab};
 
@@ -1042,14 +1042,9 @@ fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
                 crate::a11y::toggle(&response, tr("Individual corners"), open);
                 let t = Tokens::get(ui.ctx());
                 if open || response.hovered() {
-                    ui.painter().rect_filled(rect, CornerRadius::same(5), if open { Color32::from_rgb(0x39, 0x43, 0x60) } else { t.hover });
+                    ui.painter().rect_filled(rect, CornerRadius::same(5), if open { t.selected_row } else { t.hover });
                 }
-                icons::paint_appearance(
-                    ui.painter(),
-                    rect.shrink(4.0),
-                    AppearanceIcon::Corners,
-                    if open { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.icon },
-                );
+                icons::paint_appearance(ui.painter(), rect.shrink(4.0), AppearanceIcon::Corners, if open { t.accent_text } else { t.icon });
                 if response.clicked() {
                     ui.data_mut(|d| d.insert_temp(Id::new("indep_corners"), !open));
                 }
@@ -1150,7 +1145,7 @@ fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
                         painter.rect_filled(
                             Rect::from_min_max(track.min + vec2(1.0, 1.0), pos2(knob_x, track.max.y - 1.0)),
                             CornerRadius::same(7),
-                            ACCENT,
+                            Tokens::get(ui.ctx()).accent,
                         );
                         painter.rect_stroke(
                             track,
@@ -2760,7 +2755,7 @@ fn fx_glass_slider(
     ui.painter().rect_filled(
         Rect::from_min_size(track.min, vec2((track.width() * fraction).max(3.0), 6.0)),
         CornerRadius::same(4),
-        Color32::from_rgb(12, 140, 233),
+        Tokens::get(ui.ctx()).accent,
     );
     let knob = pos2(track.min.x + track.width() * fraction, track.center().y);
     ui.painter().circle_filled(knob + vec2(0.0, 1.0), 7.0, Color32::from_black_alpha(70));

@@ -948,7 +948,7 @@ pub(super) fn paint_alignment(painter: &Painter, rect: Rect, horizontal: bool, p
     let icons = ALIGNMENT.get_or_init(|| ALIGNMENT_SVGS.iter().map(|svg| build(svg, true)).collect());
     let index = (if horizontal { 3 } else { 0 }) + position.min(2);
     if let Some(Some(geometry)) = icons.get(index) {
-        paint_geometry(painter, rect, geometry, Color32::from_rgb(0x7c, 0xc4, 0xf8), [16.0, 16.0]);
+        paint_geometry(painter, rect, geometry, crate::theme::Tokens::get(painter.ctx()).accent_text, [16.0, 16.0]);
     }
 }
 

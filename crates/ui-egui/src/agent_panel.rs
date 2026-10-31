@@ -11,8 +11,6 @@ use crate::icons::{self, AgentIcon, LayerIcon};
 use crate::primitives::{Menu, MenuItem, ShimmerDirection, ShimmerText};
 use crate::theme::{Tokens, regular, semibold};
 
-const BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF8);
-const BLUE_BG: Color32 = Color32::from_rgb(0x39, 0x43, 0x60);
 const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
 const DIM: Color32 = Color32::from_rgba_premultiplied(102, 102, 102, 102);
 const CHAT_BUBBLE: Color32 = Color32::from_rgb(0x40, 0x40, 0x40);
@@ -1291,10 +1289,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     ui.set_width((bubble_width - 32.0).max(0.0));
                                     for node in &message.selected_nodes {
                                         let badge = egui::Button::new(
-                                            egui::RichText::new(format!("⌗ {}", node.name)).size(12.0).color(Color32::from_rgb(0xA8, 0xD9, 0xFC)),
+                                            egui::RichText::new(format!("⌗ {}", node.name)).size(12.0).color(Tokens::get(ui.ctx()).accent_text),
                                         )
-                                        .fill(BLUE_BG)
-                                        .stroke(Stroke::new(1.0, Color32::from_rgb(0x52, 0x65, 0x89)))
+                                        .fill(Tokens::get(ui.ctx()).selected_row)
+                                        .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).accent_text.gamma_multiply(0.4)))
                                         .corner_radius(5);
                                         if ui.add(badge).on_hover_text("Localizar no canvas").clicked() {
                                             locate_node = Some(node.id);
@@ -1304,7 +1302,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         ui.label(egui::RichText::new(&message.text).size(14.0).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
                                     }
                                     for image in &message.attached_images {
-                                        ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(Color32::from_rgb(0xA8, 0xD9, 0xFC)));
+                                        ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(Tokens::get(ui.ctx()).accent_text));
                                     }
                                 });
                         });
@@ -1398,7 +1396,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                     }
                     if !message.text.is_empty() {
                         ui.add_space(9.0);
-                        crate::agent_markdown::show(ui, &message.text, Color32::from_rgb(0xB9, 0xB9, 0xBC), BLUE);
+                        let accent = Tokens::get(ui.ctx()).accent_text;
+                        crate::agent_markdown::show(ui, &message.text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
                     }
                     if message.stopped {
                         ui.label(egui::RichText::new("Interrompido").size(11.0).color(secondary));
@@ -1446,8 +1445,9 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let section_gap = ((full.height() - 924.0) / 2.0).max(0.0);
         let welcome_top = header_bottom + section_gap + 16.0;
         let emblem = Rect::from_center_size(pos2(full.center().x, welcome_top + 36.0), vec2(40.0, 40.0));
-        painter.circle_filled(emblem.center(), 20.0, BLUE_BG);
-        glyph(ui, emblem, AgentIcon::Emblem, vec2(16.5, 16.5), BLUE);
+        let palette = Tokens::get(ui.ctx());
+        painter.circle_filled(emblem.center(), 20.0, palette.selected_row);
+        glyph(ui, emblem, AgentIcon::Emblem, vec2(16.5, 16.5), palette.accent_text);
         painter.text(pos2(full.center().x, welcome_top + 68.0), Align2::CENTER_TOP, "E depois?", semibold(15.0), text);
         let labels = ["Organizar e polir", "Gerar designs", "Criar plugins e shaders"];
         let prompts =

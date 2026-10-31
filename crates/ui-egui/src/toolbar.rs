@@ -193,7 +193,18 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     } else if resp.hovered() {
         ui.painter().rect_filled(actions, CornerRadius::same(5), t.hover);
     }
-    paint_tool_icon(ui, actions.shrink(4.0), Icon::Actions, if actions_open || t.dark { Color32::WHITE } else { t.icon });
+    paint_tool_icon(
+        ui,
+        actions.shrink(4.0),
+        Icon::Actions,
+        if actions_open {
+            t.accent_on
+        } else if t.dark {
+            Color32::WHITE
+        } else {
+            t.icon
+        },
+    );
     if resp.clicked() {
         crate::menus::toggle_palette(&mut app.ui);
     }
@@ -251,7 +262,7 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             Rect::from_center_size(r.center(), vec2(icon_size, icon_size)),
             if i == 2 { 11 } else { 8 + i },
             if active == Some(i) {
-                if t.dark { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.accent_text }
+                t.accent_text
             } else if t.dark {
                 Color32::from_white_alpha(178)
             } else {
@@ -604,7 +615,32 @@ fn pill(ui: &Ui, nav: &mut Nav, canvas: Rect, width: f32, t: &Tokens) -> Rect {
 }
 
 fn toolbar_accent(t: &Tokens) -> Color32 {
-    if t.dark { Color32::from_rgb(0x0c, 0x8c, 0xe9) } else { t.accent }
+    t.accent
+}
+
+#[cfg(test)]
+mod theme_recipe_tests {
+    use super::*;
+    use workbench_ui::ThemeRecipe;
+
+    #[test]
+    fn active_tool_renders_with_the_edited_primary() {
+        let ctx = egui::Context::default();
+        let palette = Tokens::from_recipe(true, ThemeRecipe { primary: [0xc5, 0x68, 0xff], ..ThemeRecipe::default() });
+        crate::theme::apply(&ctx, palette);
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(32.0, 32.0));
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            tool_cell(ui, &palette, rect, "active_tool", Icon::Move, true, "Move");
+        });
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect && shape.fill == palette.accent))
+        );
+        output.textures_delta.clear();
+    }
 }
 
 /// A square tool button: accent when active, tinted on hover; `tip` is its tooltip and name.
@@ -621,7 +657,18 @@ fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Ic
         Color32::TRANSPARENT
     };
     ui.painter().rect_filled(r, CornerRadius::same(5), bg);
-    paint_tool_icon(ui, r.shrink(4.0), icon, if active || t.dark { Color32::WHITE } else { t.icon });
+    paint_tool_icon(
+        ui,
+        r.shrink(4.0),
+        icon,
+        if active {
+            t.accent_on
+        } else if t.dark {
+            Color32::WHITE
+        } else {
+            t.icon
+        },
+    );
     resp
 }
 

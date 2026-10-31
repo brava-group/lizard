@@ -24,3 +24,4 @@ egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 serde_json = { workspace = true }
 image = { workspace = true }
+rfd = { workspace = true }

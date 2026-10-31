@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use web_time::Instant;
 
-use egui::{Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
 
 use crate::LizardApp;
-
-const BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF7);
+use crate::theme::Tokens;
 
 pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
+    let brand = Tokens::get(ctx).accent_text;
     let now = Instant::now();
     let Some(document) = app.session.ds().ok().map(|ds| ds.uid) else { return };
     let presence = &app.ui.agent.presence;
@@ -48,13 +48,13 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         let length = if pulse.inspection { 2.0 } else { 0.9 };
         let t = (now.saturating_duration_since(pulse.started).as_secs_f32() / length).clamp(0.0, 1.0);
         let alpha = (1.0 - t).min(t * 8.0).clamp(0.0, 1.0);
-        painter.rect_stroke(rect, CornerRadius::same(5), Stroke::new(2.0, BLUE.gamma_multiply(alpha)), StrokeKind::Outside);
+        painter.rect_stroke(rect, CornerRadius::same(5), Stroke::new(2.0, brand.gamma_multiply(alpha)), StrokeKind::Outside);
         if !reduce_motion && rect.width() > 12.0 && rect.height() > 12.0 {
             let y = rect.top() + rect.height() * t;
             let visible = rect.intersect(app.canvas.rect);
             if y >= visible.top() && y <= visible.bottom() {
                 let clipped = painter.with_clip_rect(visible);
-                clipped.line_segment([pos2(visible.left(), y), pos2(visible.right(), y)], Stroke::new(10.0, BLUE.gamma_multiply(alpha * 0.12)));
+                clipped.line_segment([pos2(visible.left(), y), pos2(visible.right(), y)], Stroke::new(10.0, brand.gamma_multiply(alpha * 0.12)));
             }
         }
     }
@@ -67,7 +67,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         if rect.is_positive() && rect.intersects(app.canvas.rect) {
             let elapsed = now.saturating_duration_since(shimmer.started).as_secs_f32();
             let fade = if shimmer.ongoing { 1.0 } else { (1.0 - elapsed / 2.0).clamp(0.0, 1.0) };
-            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, BLUE.gamma_multiply(0.65 * fade)), StrokeKind::Outside);
+            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, brand.gamma_multiply(0.65 * fade)), StrokeKind::Outside);
             if !reduce_motion {
                 let visible = rect.intersect(app.canvas.rect);
                 let clipped = painter.with_clip_rect(visible);
@@ -78,7 +78,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
                     let distance = (strip as f32 - 4.0).abs() / 4.0;
                     let x = center + (strip as f32 - 4.5) * band / 9.0;
                     let stripe = Rect::from_min_size(pos2(x, visible.top()), vec2(band / 9.0 + 1.0, visible.height()));
-                    clipped.rect_filled(stripe, CornerRadius::ZERO, BLUE.gamma_multiply((1.0 - distance) * 0.18 * fade));
+                    clipped.rect_filled(stripe, CornerRadius::ZERO, brand.gamma_multiply((1.0 - distance) * 0.18 * fade));
                 }
             }
         }
@@ -86,14 +86,14 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     if let Some((x, y)) = shown.filter(|_| fade > 0.0) {
         let tip = app.to_screen(x, y);
         if app.canvas.rect.contains(tip) {
-            crate::live::pointer(painter, tip, BLUE.gamma_multiply(fade));
+            crate::live::pointer(painter, tip, brand.gamma_multiply(fade));
             let name = app
                 .ui
                 .agent
                 .runtime_conversation
                 .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
                 .map_or("Agente", |chat| chat.agent.label());
-            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, BLUE.gamma_multiply(fade));
+            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
         }
     }
     if moving || !app.ui.agent.presence.shimmers.is_empty() || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && !active) {

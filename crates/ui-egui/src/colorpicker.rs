@@ -30,6 +30,12 @@ pub fn close_library_preview(ctx: &egui::Context) {
     library_tab::deactivate(ctx);
 }
 
+/// Reuse the production solid-color picker for palette editors without a document target.
+#[cfg(feature = "catalog")]
+pub fn show_standalone_solid(ctx: &egui::Context, color: Color, anchor: Pos2, open: &mut bool) -> Option<Color> {
+    custom::show_standalone_solid(ctx, color, anchor, open)
+}
+
 pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
     library_tab::create_variable(ctx, color);
 }
@@ -709,7 +715,7 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
                     ui.painter().rect_stroke(
                         r,
                         CornerRadius::same(3),
-                        Stroke::new(if i == sel { 2.0 } else { 1.0 }, if i == sel { crate::theme::ACCENT } else { Color32::WHITE }),
+                        Stroke::new(if i == sel { 2.0 } else { 1.0 }, if i == sel { Tokens::get(ui.ctx()).accent } else { Color32::WHITE }),
                         StrokeKind::Outside,
                     );
                     if resp.clicked() || resp.drag_started() {

@@ -14,7 +14,7 @@ use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon, LayoutIcon, SizingIcon};
 use crate::primitives::{Button, ButtonBehavior, ControlWidth, Segment, SegmentedControl};
 use crate::right::{block, common, menu_item, menu_popup, row};
-use crate::theme::{ACCENT, Tokens, regular};
+use crate::theme::{Tokens, regular};
 use crate::widgets::{self, FIELD_H, Lead};
 
 /// Most tracks listed in the panel (the rest are still laid out; edit them through commands).
@@ -137,7 +137,7 @@ fn layout_header(ui: &mut Ui, title: &str, action: Option<(LayoutIcon, &str)>, s
         ui.painter(),
         Rect::from_center_size(button.center(), vec2(18.0, 18.0)),
         if selected { LayoutIcon::AutoLayoutActive } else { icon },
-        if selected { Color32::from_rgb(0x7c, 0xc4, 0xf8) } else { t.icon },
+        if selected { t.accent_text } else { t.icon },
     );
     response.clicked()
 }
@@ -148,7 +148,7 @@ fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> eg
     let response = response.tip(tip);
     if selected || response.hovered() {
         let fill = if selected && icon == LayoutIcon::PaddingIndividual {
-            Color32::from_rgb(0x39, 0x43, 0x60)
+            t.selected_row
         } else if selected {
             t.field
         } else {
@@ -160,7 +160,7 @@ fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> eg
     let artwork = Rect::from_center_size(rect.center(), vec2(artwork_size, artwork_size));
     let artwork_icon = if selected && icon == LayoutIcon::PaddingIndividual { LayoutIcon::PaddingIndividualActive } else { icon };
     let color = if selected && icon == LayoutIcon::PaddingIndividual {
-        Color32::from_rgb(0x7c, 0xc4, 0xf8)
+        t.accent_text
     } else if selected {
         t.icon
     } else {
@@ -284,7 +284,7 @@ fn sizing_menu_option(ui: &mut Ui, label: &str, icon: SizingIcon, selected: bool
     crate::a11y::own_focus(&response);
     let hovered = enabled && (response.hovered() || response.has_focus());
     if hovered {
-        ui.painter().rect_filled(rect, CornerRadius::same(5), ACCENT);
+        ui.painter().rect_filled(rect, CornerRadius::same(5), t.accent);
     }
     let color = if hovered {
         Color32::WHITE
@@ -533,7 +533,7 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                 let on = (cur_main == main_i || cur_main == 9) && (cur_cross == cross_i || cur_cross == 9);
                 if on {
                     if grid_mode {
-                        ui.painter().rect_filled(Rect::from_center_size(c, vec2(4.0, 4.0)), CornerRadius::same(1), ACCENT);
+                        ui.painter().rect_filled(Rect::from_center_size(c, vec2(4.0, 4.0)), CornerRadius::same(1), t.accent);
                     } else {
                         icons::paint_alignment(
                             ui.painter(),
@@ -543,7 +543,7 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                         );
                     }
                 } else {
-                    ui.painter().circle_filled(c, if resp.hovered() { 2.5 } else { 1.5 }, if resp.hovered() { ACCENT } else { t.text_tertiary });
+                    ui.painter().circle_filled(c, if resp.hovered() { 2.5 } else { 1.5 }, if resp.hovered() { t.accent } else { t.text_tertiary });
                 }
                 if resp.clicked() {
                     let m = ["min", "center", "max"][main_i];

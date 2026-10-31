@@ -9,8 +9,6 @@ use crate::icons;
 use crate::theme::{Tokens, medium};
 use crate::widgets::{self, FieldEdit};
 
-const FOCUS_BLUE: Color32 = Color32::from_rgb(0x12, 0x81, 0xE1);
-
 /// What appears beside the swatch. The container decides how an edit changes its document.
 pub enum ColorValue<'a> {
     EditableHex(&'a str),
@@ -192,7 +190,7 @@ impl<'a> ColorControl<'a> {
             || suffix_response.has_focus()
             || suffix_response.dragged();
         if focused {
-            ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, FOCUS_BLUE), StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.focus), StrokeKind::Inside);
         } else if hovered {
             ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
         }
@@ -347,7 +345,7 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
             })
     });
     if focused || suffix_active {
-        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, FOCUS_BLUE), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.focus), StrokeKind::Inside);
     } else if hovered {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
     }
@@ -420,12 +418,9 @@ mod tests {
                 ui.memory_mut(|m| m.request_focus(id.with(focus).with("te")));
                 ColorControl::new(id, &paint, ColorValue::EditableHex("0C8CE9"), 100.0).show_at(ui, rect);
             });
-            assert!(
-                output
-                    .shapes
-                    .iter()
-                    .any(|clipped| { matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect && shape.stroke.color == FOCUS_BLUE) })
-            );
+            assert!(output.shapes.iter().any(|clipped| {
+                matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect && shape.stroke.color == Tokens::dark().focus)
+            }));
             output.textures_delta.clear();
         }
     }

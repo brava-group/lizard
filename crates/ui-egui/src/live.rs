@@ -345,7 +345,7 @@ pub fn chat_box(app: &mut LizardApp, ctx: &egui::Context) {
     let first = chat.typed.is_none();
     let typed = *chat.typed.get_or_insert(now);
     let live = app.session.live();
-    let fill = live.info.as_ref().map_or(ACCENT, |i| color(&i.color));
+    let fill = live.info.as_ref().map_or(Tokens::get(ctx).accent, |i| color(&i.color));
     let tip = live.cursor.map_or(app.canvas.rect.center(), |(x, y)| app.to_screen(x, y));
     let reduce = app.reduce_motion();
     if !chat.editing {
@@ -476,7 +476,7 @@ pub fn people_bar(app: &mut LizardApp, ui: &mut Ui, area: Rect) {
         let resp = ui.interact(Rect::from_center_size(c, vec2(2.0 * R, 2.0 * R)), ui.id().with("live_me"), Sense::click());
         a11y::menu_button(&resp, tr("You"), a11y::menu_open(&resp));
         if spotlighting || resp.hovered() {
-            icons::paint_header(ui.painter(), Rect::from_center_size(c, vec2(30.0, 40.0)), HeaderIcon::AvatarRing, ACCENT);
+            icons::paint_header(ui.painter(), Rect::from_center_size(c, vec2(30.0, 40.0)), HeaderIcon::AvatarRing, t.accent);
         }
         menu_popup(&resp).width(200.0).show(|ui| {
             if menu_item(ui, if spotlighting { tr("Stop spotlighting") } else { tr("Spotlight me") }, "") {

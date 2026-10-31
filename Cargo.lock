@@ -7524,6 +7524,7 @@ dependencies = [
  "lizard-engine",
  "lizard-text",
  "lizard-ui-egui",
+ "rfd",
  "serde_json",
  "workbench-ui",
 ]

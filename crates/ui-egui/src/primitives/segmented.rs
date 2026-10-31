@@ -5,7 +5,7 @@ use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2
 use super::ControlWidth;
 use crate::a11y;
 use crate::icons::{self, Icon, LayoutIcon, PositionIcon, VectorPointIcon};
-use crate::theme::{ColorRole, Tokens, regular};
+use crate::theme::{Tokens, regular};
 use crate::widgets;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -121,7 +121,7 @@ impl<'a> SegmentedControl<'a> {
         let width = self.width.resolve(ui, natural_total + 2.0);
         let group_id = ui.next_auto_id().with("segmented");
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-        ui.painter().rect_filled(rect, CornerRadius::same(5), ColorRole::BgSecondary.value(t.dark));
+        ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
 
         let usable = (width - 2.0).max(0.0);
         let weights: Vec<f32> = match self.sizing {
@@ -170,8 +170,8 @@ impl<'a> SegmentedControl<'a> {
                 pos2(egui::lerp(from.min.x..=to.min.x, amount), from.min.y),
                 pos2(egui::lerp(from.max.x..=to.max.x, amount), from.max.y),
             );
-            ui.painter().rect_filled(surface, CornerRadius::same(4), ColorRole::Bg.value(t.dark));
-            ui.painter().rect_stroke(surface, CornerRadius::same(4), Stroke::new(1.0, ColorRole::Border.value(t.dark)), StrokeKind::Inside);
+            ui.painter().rect_filled(surface, CornerRadius::same(4), t.bg);
+            ui.painter().rect_stroke(surface, CornerRadius::same(4), Stroke::new(1.0, t.border), StrokeKind::Inside);
         }
 
         for (index, segment) in self.segments.iter().enumerate() {

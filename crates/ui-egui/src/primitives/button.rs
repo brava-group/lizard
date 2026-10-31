@@ -339,9 +339,7 @@ fn palette(t: Tokens, variant: ButtonVariant, enabled: bool, selected: bool) -> 
     let danger_soft = color(ColorRole::BgDangerTertiary);
     let disabled_ink = color(ColorRole::TextDisabled);
     let (normal, hover, pressed, outline, ink) = match variant {
-        ButtonVariant::Primary => {
-            (color(ColorRole::BgBrand), color(ColorRole::BgBrandHover), color(ColorRole::BgBrandPressed), clear, color(ColorRole::TextOnBrand))
-        }
+        ButtonVariant::Primary => (t.accent, t.accent_hover, t.accent_pressed, clear, t.accent_on),
         ButtonVariant::Secondary | ButtonVariant::Property => (clear, t.hover, translucent_press(t), border, t.text),
         ButtonVariant::Danger => {
             (color(ColorRole::BgDanger), color(ColorRole::BgDangerHover), color(ColorRole::BgDangerHover), clear, color(ColorRole::TextOnDanger))
@@ -351,7 +349,7 @@ fn palette(t: Tokens, variant: ButtonVariant, enabled: bool, selected: bool) -> 
             (clear, if variant == ButtonVariant::DangerGhost { danger_soft } else { clear }, danger_soft, clear, danger_ink)
         }
         ButtonVariant::Ghost => (clear, color(ColorRole::BgTransparentHover), translucent_press(t), clear, t.text),
-        ButtonVariant::Link => (clear, clear, color(ColorRole::BgSelected), clear, t.accent_text),
+        ButtonVariant::Link => (clear, clear, t.selected_row, clear, t.accent_text),
         ButtonVariant::Input => (t.field, clear, translucent_press(t), clear, t.text),
         ButtonVariant::Overlay => (color(ColorRole::Bg), color(ColorRole::Bg), t.field, border, t.text),
     };
@@ -369,9 +367,26 @@ fn palette(t: Tokens, variant: ButtonVariant, enabled: bool, selected: bool) -> 
         };
     }
     if selected {
-        let fill = color(ColorRole::BgSelected);
-        let ink = color(ColorRole::TextSelected);
+        let fill = t.selected_row;
+        let ink = t.accent_text;
         return Palette { normal: fill, hover: fill, pressed: fill, border: clear, ink, pressed_ink: ink, disabled_ink };
     }
     Palette { normal, hover, pressed, border: outline, ink, pressed_ink: ink, disabled_ink }
+}
+
+#[cfg(test)]
+mod theme_recipe_tests {
+    use super::*;
+    use workbench_ui::ThemeRecipe;
+
+    #[test]
+    fn primary_button_uses_the_edited_theme_colors() {
+        let recipe = ThemeRecipe { primary: [0xc5, 0x68, 0xff], ..ThemeRecipe::default() };
+        let tokens = Tokens::from_recipe(true, recipe);
+        let primary = palette(tokens, ButtonVariant::Primary, true, false);
+        assert_eq!(primary.normal, tokens.accent);
+        assert_eq!(primary.hover, tokens.accent_hover);
+        assert_eq!(primary.pressed, tokens.accent_pressed);
+        assert_eq!(primary.ink, tokens.accent_on);
+    }
 }

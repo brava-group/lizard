@@ -4,7 +4,7 @@ use egui::{Align, Align2, Color32, CornerRadius, Id, Key, Rect, Response, Sense,
 
 use super::ControlWidth;
 use crate::a11y;
-use crate::theme::{ColorRole, Tokens, regular};
+use crate::theme::{Tokens, regular};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SliderKind {
@@ -196,7 +196,7 @@ impl<'a> Slider<'a> {
         let value_width = (track.width() - if modern { 0.0 } else { 16.0 }).max(1.0);
         let x_of = |v: f64| value_left + (((v - min) / span).clamp(0.0, 1.0) as f32) * value_width;
         let track_round = CornerRadius::same(if modern { 3 } else { 8 });
-        painter.rect_filled(track, track_round, if modern { ColorRole::BgTertiary.value(t.dark) } else { t.panel }.gamma_multiply(dim));
+        painter.rect_filled(track, track_round, if modern { t.surface_tertiary } else { t.panel }.gamma_multiply(dim));
         if !modern {
             painter.rect_stroke(track, track_round, Stroke::new(1.0, t.border.gamma_multiply(dim)), StrokeKind::Inside);
         }

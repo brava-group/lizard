@@ -4,8 +4,6 @@ use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, pa
 use super::*;
 
 const HEIGHT: f32 = 577.0;
-const BLUE: Color32 = Color32::from_rgb(0x0c, 0x8c, 0xe9);
-const SLIDER_BLUE: Color32 = Color32::from_rgb(0x12, 0x81, 0xe1);
 const SLIDER_TRACK: Color32 = Color32::from_rgb(0x31, 0x31, 0x31);
 const SLIDER_BORDER: Color32 = Color32::from_rgb(0x5a, 0x5a, 0x5a);
 const FILTER_NAMES: [&str; 7] = ["Exposure", "Contrast", "Saturation", "Temperature", "Tint", "Highlights", "Shadows"];
@@ -99,14 +97,14 @@ fn filter_slider(ui: &mut Ui, origin: Pos2, index: usize, value: f32) -> (Option
     if (knob_x - center_x).abs() > 0.5 {
         let (left, right) = if knob_x < center_x { (knob_x, center_x + 8.0) } else { (center_x - 8.0, knob_x) };
         let fill = Rect::from_min_max(pos2(left, track.top()), pos2(right, track.bottom()));
-        ui.painter().rect_filled(fill, CornerRadius::same(8), SLIDER_BLUE);
+        ui.painter().rect_filled(fill, CornerRadius::same(8), Tokens::get(ui.ctx()).accent);
         ui.painter().circle_filled(pos2(center_x, track.center().y), 2.0, Color32::WHITE);
     }
     let knob = pos2(knob_x, track.center().y);
     ui.painter().circle_filled(knob + vec2(0.0, 0.5), 8.6, Color32::from_black_alpha(130));
     ui.painter().circle_filled(knob, 8.0, Color32::WHITE);
     if (knob_x - center_x).abs() > 0.5 {
-        ui.painter().circle_filled(knob, 4.0, SLIDER_BLUE);
+        ui.painter().circle_filled(knob, 4.0, Tokens::get(ui.ctx()).accent);
     }
     (changed.filter(|next| (next - value).abs() > f32::EPSILON), response.drag_stopped() || response.double_clicked())
 }
@@ -125,7 +123,7 @@ fn preview(ui: &mut Ui, app: &mut LizardApp, ctx: &egui::Context, target: &Picke
     mask_round_corners(ui, rect, 5.0);
 
     let upload_rect = at(origin, 36.0, 204.0, 168.0, 24.0);
-    ui.painter().rect_filled(upload_rect, CornerRadius::same(5), BLUE);
+    ui.painter().rect_filled(upload_rect, CornerRadius::same(5), Tokens::get(ui.ctx()).accent);
     ui.painter().text(upload_rect.center(), Align2::CENTER_CENTER, "Upload from computer", regular(11.0), Color32::WHITE);
     if ui.interact(upload_rect, Id::new("cp_image_upload"), Sense::click()).tip("Upload from computer").clicked() {
         upload(app, target);

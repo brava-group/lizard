@@ -12,7 +12,6 @@ use crate::theme::{Tokens, regular};
 use crate::{LizardApp, TitleBar};
 
 pub const HEIGHT: f32 = 40.0;
-const DOCUMENT_BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF7);
 
 const MIN_TAB_WIDTH: f32 = 96.0;
 const OVERFLOW_WIDTH: f32 = 32.0;
@@ -211,7 +210,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             } else if resp.hovered() || cresp.hovered() {
                 painter.rect_filled(paint_r, CornerRadius::ZERO, t.hover.linear_multiply(progress));
             }
-            icons::paint_tab_document(ui.painter(), Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)), DOCUMENT_BLUE);
+            icons::paint_tab_document(ui.painter(), Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)), t.accent_text);
             // The unsaved-changes dot follows the name on screen, whichever way the name reads.
             let shown = crate::bidi::paint_name(
                 ui.painter(),
@@ -226,7 +225,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 icons::paint(&painter, at, crate::online::mark(shared), if shared { t.success } else { t.icon_secondary }.linear_multiply(progress));
             }
             if dirty {
-                ui.painter().circle_filled(pos2(shown.max.x + 7.0, r.center().y), 3.0, DOCUMENT_BLUE);
+                ui.painter().circle_filled(pos2(shown.max.x + 7.0, r.center().y), 3.0, t.accent_text);
             }
             let cr = Rect::from_center_size(close_r.center() + vec2(paint_r.min.x - r.min.x, 0.0), vec2(18.0, 18.0));
             // The close target never overlaps the draggable body, including on inactive tabs.
@@ -257,7 +256,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             && (rect.min.y - 12.0..=rect.max.y + 12.0).contains(&p.y)
             && let Some((_, at)) = tab_drop_position(&visible, from, p.x)
         {
-            ui.painter().line_segment([pos2(at, rect.min.y + 5.0), pos2(at, rect.max.y - 5.0)], Stroke::new(3.0, crate::theme::ACCENT));
+            ui.painter().line_segment([pos2(at, rect.min.y + 5.0), pos2(at, rect.max.y - 5.0)], Stroke::new(3.0, t.accent));
         }
         let reorder = dropped.and_then(|(from, at)| tab_drop_position(&visible, from, at).map(|(to, _)| (from, to)));
         if layout.overflow {

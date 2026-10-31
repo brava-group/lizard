@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::LizardApp;
 use crate::i18n::tr;
 use crate::right::{menu_item, menu_popup};
-use crate::theme::{ACCENT, Tokens};
+use crate::theme::Tokens;
 use crate::widgets::{self, FIELD_H, PAD};
 
 /// How far the bar sits from the widget, and how much room the size label under a selection takes.
@@ -98,7 +98,12 @@ fn items(ui: &mut Ui, menu: &[MenuItem], t: &Tokens) -> Option<(String, Value)> 
                     let resp = widgets::swatch(ui, &Paint::solid(Color::from_hex(hex).unwrap_or(Color::BLACK)), SWATCH);
                     crate::a11y::radio(&resp, &format!("{label}: {hex}"), value.and_then(Value::as_str) == Some(hex));
                     if value.and_then(Value::as_str) == Some(hex) {
-                        ui.painter().rect_stroke(resp.rect.expand(2.0), CornerRadius::same(4), Stroke::new(1.5, ACCENT), StrokeKind::Outside);
+                        ui.painter().rect_stroke(
+                            resp.rect.expand(2.0),
+                            CornerRadius::same(4),
+                            Stroke::new(1.5, Tokens::get(ui.ctx()).accent),
+                            StrokeKind::Outside,
+                        );
                     }
                     if resp.on_hover_text(hex.as_str()).clicked() {
                         picked = Some(json!(hex));

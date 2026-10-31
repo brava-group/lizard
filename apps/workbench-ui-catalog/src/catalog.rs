@@ -12,6 +12,10 @@ use serde_json::json;
 
 #[path = "cursor_playground.rs"]
 mod cursor_playground;
+#[path = "theme_editor.rs"]
+mod theme_editor;
+
+use workbench_ui::ThemeRecipe;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -36,6 +40,7 @@ enum Page {
     Typography,
     Icons,
     Theme,
+    ThemeEditor,
     Tokens,
     CanvasFeedback,
     CursorPlayground,
@@ -119,6 +124,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::Typography, "Primitives", "Typography", "label · note · sublabels"),
     (Page::Icons, "Primitives", "Iconography", "all production icon families"),
     (Page::Theme, "Primitives", "Theme", "theme::Tokens · light and dark previews"),
+    (Page::ThemeEditor, "Primitives", "Theme editor", "workbench_ui::ThemeRecipe · live preview · JSON / CSS export"),
     (Page::Tokens, "Primitives", "Color tokens", "theme::ColorRole · semantic palette"),
     (Page::MainMenu, "Compositions", "App menu", "menus::popups · main menu"),
     (Page::ActionsPalette, "Compositions", "Actions palette", "menus::popups · command search"),
@@ -194,6 +200,12 @@ pub struct State {
     clicks: usize,
     token_search: String,
     theme_preview_text: String,
+    theme_recipe: ThemeRecipe,
+    theme_picker_open: bool,
+    theme_picker_anchor: egui::Pos2,
+    theme_export_css: bool,
+    theme_export_message: String,
+    applied_theme: Option<(bool, ThemeRecipe)>,
     button_toggle: bool,
     button_selection: usize,
     number: f64,
@@ -237,6 +249,12 @@ impl Default for State {
             clicks: 0,
             token_search: String::new(),
             theme_preview_text: "Editable text".into(),
+            theme_recipe: ThemeRecipe::default(),
+            theme_picker_open: false,
+            theme_picker_anchor: pos2(360.0, 150.0),
+            theme_export_css: false,
+            theme_export_message: String::new(),
+            applied_theme: None,
             button_toggle: false,
             button_selection: 0,
             number: 100.0,
@@ -481,6 +499,7 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
         return;
     }
     state.last_page = Some(state.page);
+    state.theme_picker_open = false;
     fig.ui.picker = None;
     fig.ui.main_menu = false;
     lizard_ui_egui::menus::set_palette(&mut fig.ui, false);
@@ -638,6 +657,11 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
 }
 
 pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixture) {
+    let theme_key = (state.dark, state.theme_recipe);
+    if state.applied_theme != Some(theme_key) {
+        theme::apply(ui.ctx(), Tokens::from_recipe(state.dark, state.theme_recipe));
+        state.applied_theme = Some(theme_key);
+    }
     let t = Tokens::get(ui.ctx());
     fig.canvas.rect = ui.max_rect();
     ui.painter().rect_filled(ui.max_rect(), 0.0, t.bg);
@@ -651,7 +675,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
             ui.add_space(10.0);
             if ui.button(if state.dark { "Light mode" } else { "Dark mode" }).clicked() {
                 state.dark = !state.dark;
-                theme::apply(ui.ctx(), if state.dark { Tokens::dark() } else { Tokens::light() });
+                state.applied_theme = None;
             }
             ui.add_space(10.0);
             ui.add(egui::TextEdit::singleline(&mut state.query).hint_text("Filter components").desired_width(215.0));
@@ -741,6 +765,15 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::Typography => typography(ui),
                     Page::Icons => iconography(ui),
                     Page::Theme => theme_preview(ui, state),
+                    Page::ThemeEditor => theme_editor::show(
+                        ui,
+                        &mut state.theme_recipe,
+                        &mut state.theme_picker_open,
+                        &mut state.theme_picker_anchor,
+                        &mut state.theme_export_css,
+                        &mut state.theme_export_message,
+                        &mut state.theme_preview_text,
+                    ),
                     Page::Tokens => tokens(ui, state),
                     Page::CanvasFeedback => canvas_feedback(ui),
                     Page::CursorPlayground => cursor_playground::show(ui, &mut state.cursor_playground),
@@ -1189,7 +1222,7 @@ fn selects(ui: &mut Ui, state: &mut State) {
     });
     example(ui, "Leading art", "The same Select supports a plain value, an icon, or a category color.", |ui| {
         ui.horizontal(|ui| {
-            for lead in [None, Some(SelectLead::Icon(Icon::Eye)), Some(SelectLead::Dot(Color32::from_rgb(0x0D, 0x99, 0xFF)))] {
+            for lead in [None, Some(SelectLead::Icon(Icon::Eye)), Some(SelectLead::Dot(Tokens::get(ui.ctx()).accent))] {
                 let mut select = Select::new(&OPTIONS, state.select_choice).width(ControlWidth::Fixed(118.0));
                 if let Some(lead) = lead {
                     select = select.lead(lead);
@@ -2247,12 +2280,61 @@ fn theme_preview(ui: &mut Ui, state: &mut State) {
     });
 }
 
-fn token_value(ui: &mut Ui, role: ColorRole, dark: bool) {
+fn preview_role_color(role: ColorRole, dark: bool, recipe: ThemeRecipe) -> Color32 {
+    if recipe == ThemeRecipe::default() {
+        return role.value(dark);
+    }
+    let t = Tokens::from_recipe(dark, recipe);
+    if recipe.primary == ThemeRecipe::default().primary {
+        return match role {
+            ColorRole::Bg => t.bg,
+            ColorRole::BgSecondary => t.field,
+            ColorRole::BgTertiary | ColorRole::BgSwitch => t.surface_tertiary,
+            ColorRole::BgHover => t.hover,
+            ColorRole::BgPressed | ColorRole::BgActive => t.pressed,
+            ColorRole::BgMenu => t.menu,
+            ColorRole::Border => t.border,
+            _ => role.value(dark),
+        };
+    }
+    let shades = recipe.primary_scale(dark, t.panel);
+    match role {
+        ColorRole::Bg => t.bg,
+        ColorRole::BgSecondary => t.field,
+        ColorRole::BgTertiary | ColorRole::BgSwitch => t.surface_tertiary,
+        ColorRole::BgHover => t.hover,
+        ColorRole::BgPressed | ColorRole::BgActive => t.pressed,
+        ColorRole::BgMenu => t.menu,
+        ColorRole::BgMenuHover => t.menu_hover,
+        ColorRole::BgBrand | ColorRole::BgSelectedStrong | ColorRole::IconSelectedSecondary => t.accent,
+        ColorRole::BgBrandHover => t.accent_hover,
+        ColorRole::BgBrandPressed => t.accent_pressed,
+        ColorRole::BgBrandSecondary => shades.secondary,
+        ColorRole::BgBrandTertiary => shades.subtle,
+        ColorRole::BgSelected | ColorRole::BgSelectedPressed => t.selected_row,
+        ColorRole::BgSelectedHover | ColorRole::BgOnSelected => shades.selected_hover,
+        ColorRole::BgSelectedSecondary | ColorRole::BgSelectedTertiary => t.selected_row_child,
+        ColorRole::TextBrand | ColorRole::TextSelected | ColorRole::IconBrand | ColorRole::IconSelected => t.accent_text,
+        ColorRole::TextOnBrand => t.accent_on,
+        ColorRole::Border => t.border,
+        ColorRole::BorderSelected => t.focus,
+        ColorRole::BorderSelectedStrong | ColorRole::BorderBrandStrong => t.accent_text,
+        ColorRole::BorderBrand => shades.secondary,
+        ColorRole::IconPressed => t.accent_hover,
+        _ => role.value(dark),
+    }
+}
+
+fn token_value(ui: &mut Ui, role: ColorRole, dark: bool, recipe: ThemeRecipe) {
+    let background = preview_role_color(ColorRole::Bg, dark, recipe);
+    let border = preview_role_color(ColorRole::Border, dark, recipe);
+    let color = preview_role_color(role, dark, recipe);
     let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(4), ColorRole::Bg.value(dark));
-    ui.painter().rect_filled(rect.shrink(2.0), CornerRadius::same(2), role.value(dark));
-    ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, ColorRole::Border.value(dark)), StrokeKind::Inside);
-    let hex = role.hex(dark);
+    ui.painter().rect_filled(rect, CornerRadius::same(4), background);
+    ui.painter().rect_filled(rect.shrink(2.0), CornerRadius::same(2), color);
+    ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, border), StrokeKind::Inside);
+    let [red, green, blue, alpha] = color.to_array();
+    let hex = if alpha == 255 { format!("#{red:02X}{green:02X}{blue:02X}") } else { format!("#{red:02X}{green:02X}{blue:02X}{alpha:02X}") };
     if ui.small_button(&hex).on_hover_text("Copy color value").clicked() {
         ui.ctx().copy_text(hex);
     }
@@ -2270,6 +2352,7 @@ fn tokens(ui: &mut Ui, state: &mut State) {
     });
     ui.add_space(12.0);
     let query = state.token_search.trim().to_lowercase();
+    let recipe = state.theme_recipe;
     for group in ["Surfaces", "Brand and status", "Selection", "Text", "Borders", "Icons"] {
         let roles: Vec<_> = ALL_COLOR_ROLES
             .iter()
@@ -2294,8 +2377,8 @@ fn tokens(ui: &mut Ui, state: &mut State) {
                 ui.end_row();
                 for role in roles {
                     ui.label(egui::RichText::new(role.name()).monospace().size(10.0));
-                    ui.horizontal(|ui| token_value(ui, role, false));
-                    ui.horizontal(|ui| token_value(ui, role, true));
+                    ui.horizontal(|ui| token_value(ui, role, false, recipe));
+                    ui.horizontal(|ui| token_value(ui, role, true, recipe));
                     ui.label(egui::RichText::new(role.usage()).size(10.0));
                     ui.end_row();
                 }

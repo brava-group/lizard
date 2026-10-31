@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, HeaderIcon, Icon, NavIcon};
-use crate::theme::{ACCENT, ColorRole, Tokens, regular, semibold};
+use crate::theme::{ColorRole, Tokens, regular, semibold};
 use crate::{LeftTab, LizardApp};
 
 pub const ROW: f32 = 32.0;
@@ -118,8 +118,7 @@ pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
             a11y::tab(&resp, label, active);
         }
         if active {
-            let color = if t.dark { Color32::from_rgb(0x39, 0x43, 0x60) } else { t.selected_row };
-            ui.painter().rect_filled(ir, CornerRadius::same(5), color);
+            ui.painter().rect_filled(ir, CornerRadius::same(5), t.selected_row);
         } else if resp.hovered() {
             ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
         }
@@ -290,7 +289,7 @@ fn pages(app: &mut LizardApp, ui: &mut Ui) {
                 // The gap between rows counts too.
                 && pointer.is_some_and(|p| resp.interact_rect.expand2(vec2(0.0, 3.0)).contains(p))
             {
-                ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(2.0, ACCENT), egui::StrokeKind::Inside);
+                ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(2.0, Tokens::get(ui.ctx()).accent), egui::StrokeKind::Inside);
                 if ui.input(|i| i.pointer.any_released()) {
                     move_to = Some((id, name.clone()));
                 }
@@ -403,7 +402,7 @@ fn pages_edge(app: &mut LizardApp, ui: &mut Ui, shown: f32) {
     if active {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
-    let (width, colour) = if active { (2.0, ACCENT) } else { (1.0, t.border) };
+    let (width, colour) = if active { (2.0, t.accent) } else { (1.0, t.border) };
     ui.painter().line_segment([line.left_center(), line.right_center()], Stroke::new(width, colour));
     let asked = if resp.double_clicked() {
         Some(None)
@@ -744,7 +743,7 @@ fn search_field(ui: &mut Ui, t: &Tokens, w: f32, id: Id, hint: &str, text: &mut 
     }
     crate::widgets::select_all_on_focus(ui, &r, text);
     if r.has_focus() {
-        ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, ACCENT), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, Tokens::get(ui.ctx()).focus), egui::StrokeKind::Inside);
     }
     if (r.has_focus() || r.lost_focus()) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         *open = false;
@@ -915,7 +914,7 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
             let hover_brightness = if t.dark { 1.12 } else { 1.015 };
             if selected {
                 let base = if t.dark {
-                    Color32::from_rgb(0x39, 0x43, 0x60)
+                    t.selected_row
                 } else if is_comp {
                     t.component_row
                 } else {
@@ -1116,7 +1115,7 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
                     _ => r.center().y,
                 };
                 if zone == 0 {
-                    ui.painter().rect_stroke(rr, CornerRadius::same(5), Stroke::new(2.0, ACCENT), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(rr, CornerRadius::same(5), Stroke::new(2.0, Tokens::get(ui.ctx()).accent), egui::StrokeKind::Inside);
                     // Holding over a collapsed group or frame opens it, to drop deeper inside.
                     if row.has_kids && !app.ui.expanded.contains(&row.id) {
                         let hold_id = Id::new("layer_drag_hold");
