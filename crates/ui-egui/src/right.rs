@@ -411,7 +411,6 @@ fn design(app: &mut LizardApp, ui: &mut Ui) {
     }
     // Editing a vector with points selected, the points' fields stand in for the layer's position
     // and dimensions.
-    let vector_edit_none = vector_edit.is_none();
     match vector_edit {
         Some(ve) => crate::vector_panel::points(app, ui, &doc, &ve),
         None => {
@@ -426,9 +425,6 @@ fn design(app: &mut LizardApp, ui: &mut Ui) {
     widgets::separator(ui);
     if !points_selected {
         crate::layout_panel::layout_section(app, ui, &doc, &sel);
-        widgets::separator(ui);
-    }
-    if vector_edit_none && (arc_section(app, ui, &doc, &sel) || points_section(app, ui, &doc, &sel)) {
         widgets::separator(ui);
     }
     if !points_selected {
@@ -869,8 +865,8 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
 /// The selected ellipses' arc: Start (degrees), Sweep (a share of a full turn, negative running
 /// the other way) and Ratio (the inner radius), the same values the canvas arc handles drag
 /// (`node.set`'s `arcStart` / `arcSweep` / `arcInner`; bindable to number variables, sweep and
-/// ratio ones holding percentages). Returns whether it showed.
-fn arc_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+/// ratio ones holding percentages).
+fn arc_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let arcs: Vec<(f64, f64, f64)> = sel
         .iter()
         .filter_map(|i| match doc.node(*i)?.kind {
@@ -879,7 +875,7 @@ fn arc_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
         })
         .collect();
     if arcs.is_empty() || arcs.len() != sel.len() {
-        return false;
+        return;
     }
     let ids = sel.to_vec();
     let same = |f: &dyn Fn(&(f64, f64, f64)) -> f64| -> Option<f64> {
@@ -889,31 +885,24 @@ fn arc_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
     let start = same(&|a| a.0.to_degrees().rem_euclid(360.0));
     let sweep = same(&|a| a.1 / std::f64::consts::TAU * 100.0);
     let ratio = same(&|a| a.2 * 100.0);
-    widgets::section_header(ui, tr("Arc"), &[], false);
-    let col = widgets::col_width(ui.available_width());
     let field = |app: &mut LizardApp, ui: &mut Ui, key: &str, icon: Icon, name: &str, value: Option<f64>, suffix: &str, width: f32| {
         crate::variable_ui::number_field(app, ui, &ids, key, Id::new(("arc", key)), Lead::Icon(icon, name), value, suffix, width)
     };
-    widgets::sublabels(ui, tr("Start"), Some(tr("Sweep")));
-    row(ui, 32.0, |ui| {
-        let e = field(app, ui, "arcStart", Icon::ArcStart, tr("Arc start"), start, "°", col);
+    ui.add_space(8.0);
+    row(ui, 24.0, |ui| {
+        let width = (ui.available_width() - 16.0) / 3.0;
+        let e = field(app, ui, "arcStart", Icon::ArcStart, tr("Arc start"), start, "°", width);
         app.field(&ids, "arcStart", e, |v| json!(v));
-        let e = field(app, ui, "arcSweep", Icon::ArcSweep, tr("Arc sweep"), sweep, "%", col);
+        let e = field(app, ui, "arcSweep", Icon::ArcSweep, tr("Arc sweep"), sweep, "%", width);
         app.field(&ids, "arcSweep", e, |v| json!(v.clamp(-100.0, 100.0) * 3.6));
-    });
-    widgets::sublabels(ui, tr("Ratio"), None);
-    row(ui, 32.0, |ui| {
-        let e = field(app, ui, "arcInner", Icon::ArcRatio, tr("Arc ratio"), ratio, "%", ui.available_width());
+        let e = field(app, ui, "arcInner", Icon::ArcRatio, tr("Arc ratio"), ratio, "%", width);
         app.field(&ids, "arcInner", e, |v| json!((v / 100.0).clamp(0.0, 0.99)));
     });
-    ui.add_space(12.0);
-    true
 }
 
 /// The selected polygons' and stars' point count (3 to 60 on stars), and the stars' ratio (the
 /// inner radius as a share of the outer one), as `node.set`'s `pointCount` / `innerRadius`.
-/// Returns whether it showed.
-fn points_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+fn shape_points_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let shapes: Vec<(u32, Option<f64>)> = sel
         .iter()
         .filter_map(|i| match doc.node(*i)?.kind {
@@ -923,17 +912,16 @@ fn points_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
         })
         .collect();
     if shapes.is_empty() || shapes.len() != sel.len() {
-        return false;
+        return;
     }
     let ids = sel.to_vec();
     let count = shapes.first().map(|s| s.0).filter(|c| shapes.iter().all(|s| s.0 == *c)).map(f64::from);
     let stars: Vec<f64> = shapes.iter().filter_map(|s| s.1).collect();
     let ratio = stars.first().map(|r| (r * 1000.0).round() / 10.0).filter(|r| stars.iter().all(|x| ((x * 1000.0).round() / 10.0 - r).abs() < 1e-9));
     let all_stars = stars.len() == shapes.len();
-    widgets::section_header(ui, tr(if all_stars { "Star" } else { "Polygon" }), &[], false);
-    let col = widgets::col_width(ui.available_width());
-    widgets::sublabels(ui, tr("Count"), all_stars.then_some(tr("Ratio")));
-    row(ui, 32.0, |ui| {
+    ui.add_space(8.0);
+    row(ui, 24.0, |ui| {
+        let col = ((ui.available_width() - 8.0) / 2.0).max(0.0);
         let width = if all_stars { col } else { ui.available_width() };
         let e = widgets::number_field(ui, Id::new("pts_count"), Lead::Icon(Icon::Polygon, tr("Count")), count, "", width, 1.0);
         app.field(&ids, "pointCount", e, |v| json!(v.round().clamp(3.0, 120.0)));
@@ -942,8 +930,6 @@ fn points_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
             app.field(&ids, "innerRadius", e, |v| json!((v / 100.0).clamp(0.001, 1.0)));
         }
     });
-    ui.add_space(12.0);
-    true
 }
 
 /// Constraint names as shown (English keys, translated at display).
@@ -1070,6 +1056,8 @@ fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
             }
         }
     });
+    arc_fields(app, ui, doc, sel);
+    shape_points_fields(app, ui, doc, sel);
     if indep_ok && ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false) {
         let radii = common(doc, sel, |n| n.corners.radii);
         let keys = [
