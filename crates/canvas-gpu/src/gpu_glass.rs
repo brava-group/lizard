@@ -57,8 +57,8 @@ fn distances(@builtin(global_invocation_id) id: vec3<u32>) {
     let seed = textureLoad(distance_seed, xy, 0).xy;
     let alpha = textureLoad(distance_mask, xy, 0).a;
     var d = 0.0;
-    if alpha >= 0.5 && seed.x >= 0 {
-        d = max(length(vec2<f32>(xy - seed)) - 0.5, 0.0);
+    if alpha >= 0.5 {
+        d = select(1e9, max(length(vec2<f32>(xy - seed)) - 0.5, 0.0), seed.x >= 0);
     }
     textureStore(distance_out, xy, vec4<f32>(d, 0.0, 0.0, 0.0));
 }

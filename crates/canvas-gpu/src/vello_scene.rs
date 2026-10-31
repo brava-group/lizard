@@ -124,6 +124,28 @@ mod shader_cache_tests {
         gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
         Ok(())
     }
+
+    #[test]
+    fn large_glass_region_uses_gpu_tiles() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("large GPU glass");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 1600.0, 1400.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Glass", 40.0, 40.0, 1520.0, 1320.0)?;
+        let mut glass = Glass::default();
+        glass.frost = 0.0;
+        glass.depth = 10.0;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(glass.clone()), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 1600, height: 1400 };
+        let region = gpu_glass_region(&doc, pane, &view, &glass).ok_or("large glass region rejected")?;
+        assert!(u32::from(region.2) * u32::from(region.3) > 2_000_000);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &BackdropIndex::new(&doc, page))?;
+        Ok(())
+    }
 }
 
 fn same_global_inputs(before: &Document, after: &Document) -> bool {
@@ -6810,7 +6832,7 @@ fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> O
         requested[2].clamp(0.0, f64::from(view.width)),
         requested[3].clamp(0.0, f64::from(view.height)),
     ];
-    if x1 <= x0 || y1 <= y0 || (x1 - x0) * (y1 - y0) > 2_000_000.0 {
+    if x1 <= x0 || y1 <= y0 {
         return None;
     }
     Some((
@@ -8167,6 +8189,101 @@ impl GpuCanvas {
         self.render_outline_mask(doc, id, width, height, camera)
     }
 
+    fn render_glass_region(
+        &mut self,
+        doc: &Document,
+        id: NodeId,
+        view: &View,
+        region: (u16, u16, u16, u16),
+        backdrop: &wgpu::Texture,
+        backdrop_is_region: bool,
+        effect: &Glass,
+    ) -> Result<wgpu::Texture, Box<dyn Error>> {
+        let (x, y, width, height) = region;
+        let source = if backdrop_is_region { backdrop.clone() } else { self.crop_texture(backdrop, region) };
+        let area = u32::from(width) * u32::from(height);
+        if area <= 2_000_000 {
+            let mask = self.render_glass_mask(doc, id, view, region)?;
+            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+            let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
+            return Ok(glass.submit(&self.device, &self.queue, blur, &source, &mask, effect, view.scale));
+        }
+
+        let safe = effect.sanitized();
+        let depth = (safe.depth * view.scale).clamp(1.0, 1024.0);
+        let band = (depth * (0.15 + 0.35 * safe.splay)).max(1.0);
+        let k = 510.0 * safe.light_intensity;
+        let highlight = if k > 1.0 { (band * k.ln()).min(512.0) } else { 0.0 };
+        let halo = (depth.max(highlight) + safe.max_bend() * view.scale + 12.0).ceil() as u32;
+        if halo > 256 {
+            let mask = self.render_glass_mask(doc, id, view, region)?;
+            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+            let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
+            return Ok(glass.submit(&self.device, &self.queue, blur, &source, &mask, effect, view.scale));
+        }
+
+        // Frost is applied once across the whole source so tile edges cannot acquire blur seams.
+        let frosted = if safe.frost > 0.0 {
+            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+            blur.submit(&self.device, &self.queue, &source, (safe.frost * view.scale / 2.0) as f32, 1, None)
+        } else {
+            source
+        };
+        let mut tile_effect = safe;
+        tile_effect.frost = 0.0;
+        let result = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Lizard tiled glass result"),
+            size: wgpu::Extent3d { width: u32::from(width), height: u32::from(height), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let core = 1024u32;
+        for top in (0..u32::from(height)).step_by(core as usize) {
+            for left in (0..u32::from(width)).step_by(core as usize) {
+                let right = (left + core).min(u32::from(width));
+                let bottom = (top + core).min(u32::from(height));
+                let expanded_left = left.saturating_sub(halo);
+                let expanded_top = top.saturating_sub(halo);
+                let expanded_right = (right + halo).min(u32::from(width));
+                let expanded_bottom = (bottom + halo).min(u32::from(height));
+                let expanded = (
+                    u16::try_from(expanded_left)?,
+                    u16::try_from(expanded_top)?,
+                    u16::try_from(expanded_right - expanded_left)?,
+                    u16::try_from(expanded_bottom - expanded_top)?,
+                );
+                let tile_source = self.crop_texture(&frosted, expanded);
+                let tile_region = (u16::try_from(u32::from(x) + expanded_left)?, u16::try_from(u32::from(y) + expanded_top)?, expanded.2, expanded.3);
+                let tile_mask = self.render_glass_mask(doc, id, view, tile_region)?;
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
+                let tile = glass.submit(&self.device, &self.queue, blur, &tile_source, &tile_mask, &tile_effect, view.scale);
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass tile stitch") });
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &tile,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: left - expanded_left, y: top - expanded_top, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &result,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: left, y: top, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d { width: right - left, height: bottom - top, depth_or_array_layers: 1 },
+                );
+                self.queue.submit([encoder.finish()]);
+            }
+        }
+        Ok(result)
+    }
+
     fn release_temporary_textures(&mut self) {
         for id in self.temporary_ids.drain(..) {
             self.image_bindings.remove(id);
@@ -8377,11 +8494,7 @@ impl GpuCanvas {
             });
             let blurred = if let Some(effect) = glass {
                 let region = glass_region.unwrap_or((0, 0, view.width as u16, view.height as u16));
-                let cropped = if cropped_prefix { prefix_texture.clone() } else { self.crop_texture(&prefix_texture, region) };
-                let mask = self.render_glass_mask(doc, id, view, region)?;
-                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-                let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
+                let mut result = self.render_glass_region(doc, id, view, region, &prefix_texture, cropped_prefix, effect)?;
                 let composited = doc.node(id).is_some_and(|node| {
                     gpu_glass_stack_supported(doc, node)
                         && node.fills.iter().chain(&node.strokes).any(|paint| paint.visible)
@@ -8620,11 +8733,7 @@ impl GpuCanvas {
             });
             let (blurred, region) = if let Some(effect) = glass {
                 let region = gpu_glass_region(doc, id, view, effect).ok_or("glass region unavailable")?;
-                let cropped = self.crop_texture(&source, region);
-                let mask = self.render_glass_mask(doc, id, view, region)?;
-                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-                let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
+                let mut result = self.render_glass_region(doc, id, view, region, &source, false, effect)?;
                 let composited = doc.node(id).is_some_and(|node| {
                     gpu_glass_stack_supported(doc, node)
                         && node.fills.iter().chain(&node.strokes).any(|paint| paint.visible)
