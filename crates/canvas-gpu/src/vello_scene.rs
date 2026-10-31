@@ -2621,6 +2621,65 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn vector_texture_effect_stacks_preserve_faces_and_order() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU vector texture stack");
+        let page = doc.current_page.ok_or("page missing")?;
+        let network = figcraft_doc::VectorNetwork::from_points(
+            &[Point::new(10.0, 10.0), Point::new(140.0, 25.0), Point::new(95.0, 65.0), Point::new(110.0, 150.0), Point::new(20.0, 140.0)],
+            true,
+        );
+        let id = doc.create(page, NodeKind::Vector { network }, "Vector", 35.0, 30.0, 140.0, 150.0)?;
+        let node = doc.node_mut(id).ok_or("vector missing")?;
+        node.transform = Affine::translate((35.0, 30.0)) * Affine::rotate(0.2);
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.5, 0.3, 0.8))];
+        let texture = || figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        };
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        for (name, effects) in [("texture-blur", vec![texture(), blur()]), ("blur-noise-texture", vec![blur(), noise(), texture()])] {
+            doc.node_mut(id).ok_or("vector missing")?.effects = effects;
+            for opacity in [1.0, 0.5] {
+                doc.node_mut(id).ok_or("vector missing")?.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (260.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} capability");
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut plain_doc = doc.clone();
+                    plain_doc.node_mut(id).ok_or("plain vector missing")?.effects.clear();
+                    let plain = render_view(&plain_doc, page, &view, &Options::default()).ok_or("plain reference render failed")?;
+                    let effect_pixels = reference
+                        .data()
+                        .chunks_exact(4)
+                        .zip(plain.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 4))
+                        .count();
+                    assert!(effect_pixels > 100, "{name} at {scale}x must visibly change the vector");
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("vector {name} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn translucent_vector_without_shadow_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Translucent vector baseline");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -5407,7 +5466,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
         })
         && (0.0..=1.0).contains(&node.opacity)
         && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
-        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Group)
+        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. } | NodeKind::Group)
         && gpu_isolated_grain_supported(doc, node)
 }
 

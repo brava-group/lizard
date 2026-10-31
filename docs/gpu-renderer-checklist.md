@@ -220,6 +220,9 @@ the migration concerns rasterization and pixel effects.
     for a rotated group with painted children and an alpha mask. Eighteen comparisons at
     25%, 50%, and 75% group opacity and 1×/2× passed; the largest texture case differed by
     1,389 pixels above 8/255 with no severe pixels.
+  - [x] Cache Texture/Blur and Blur/Noise/Texture on GPU for a rotated, partly transparent
+    vector. All eight 1×/2× comparisons at full and half node opacity matched the CPU
+    reference within 8/255, and each effect stack visibly changed the source vector.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
