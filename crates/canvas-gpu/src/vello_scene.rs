@@ -967,6 +967,54 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_shadowed_blends_keep_backdrop_and_silhouette() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent blended shadows");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 240.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blended shadow", 70.0, 60.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        node.corners.radii = [12.0; 4];
+        let mut effect = figcraft_doc::Effect::drop_shadow();
+        if let EffectKind::DropShadow(shadow) = &mut effect.kind {
+            shadow.radius = 8.0;
+            shadow.offset = (4.0, 6.0);
+            shadow.color = Color::new(0.2, 0.1, 0.3, 0.2);
+        }
+        node.effects = vec![effect];
+        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+            doc.node_mut(id).ok_or("shape missing")?.blend = blend;
+            for opacity in [0.25, 0.5, 0.75] {
+                doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    gpu.prepare_static_effects(&doc)?;
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("{blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn supported_masks_use_gpu_and_unimplemented_paints_fall_back() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU content capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3924,19 +3972,29 @@ fn draw_node(
         scene.push_blend_layer(blend);
     }
     let opacity_layer = node.opacity < 0.999;
-    if opacity_layer {
+    let split_shadow_opacity = opacity_layer && shadow_outside_blend;
+    if opacity_layer && !split_shadow_opacity {
         scene.push_opacity_layer(node.opacity);
     }
     let effects = std::env::var_os("LIZARD_GPU_NO_EFFECTS").is_none();
     if effects {
+        if split_shadow_opacity {
+            scene.push_opacity_layer(node.opacity);
+        }
         if let Some(effect) = cached.drop_shadows.and_then(|entries| entries.get(&id)) {
             draw_cached_effect(scene, camera, effect);
         } else {
             draw_shadow(scene, doc, node, camera);
         }
+        if split_shadow_opacity {
+            scene.pop_layer();
+        }
     }
     if let Some(blend) = blend.filter(|_| shadow_outside_blend) {
         scene.push_blend_layer(blend);
+    }
+    if split_shadow_opacity {
+        scene.push_opacity_layer(node.opacity);
     }
     let blur = if backdrops.is_some_and(|entries| entries.contains_key(&id)) && gpu_glass_stack_supported(doc, node) {
         None
@@ -4051,7 +4109,7 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
 
 fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
     node.children.is_empty()
-        && node.opacity >= 0.999
+        && (node.opacity >= 0.999 || matches!(node.blend, BlendMode::Multiply | BlendMode::Screen) && (0.0..=1.0).contains(&node.opacity))
         && node.effects.iter().any(|effect| effect.visible)
         && node.effects.iter().all(|effect| !effect.visible || matches!(effect.kind, EffectKind::DropShadow(_)))
 }

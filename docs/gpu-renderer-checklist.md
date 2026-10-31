@@ -118,6 +118,8 @@ the migration concerns rasterization and pixel effects.
     stacks remain guarded.
   - [x] Apply node blend modes to opaque leaf content after drawing its Drop Shadow; all
     Vello-supported modes match CPU samples at the fill, shadow, and background.
+  - [x] Keep Multiply and Screen with a single Drop Shadow on GPU at 25%, 50%, and 75% node
+    opacity, compositing shadow and blended fill in separate opacity layers.
   - [x] Apply 12 verified Vello node blends to the GPU-cached `Layer Blur ↔ Noise` stack on
     opaque rotated leaves: Darken, Multiply, Color Burn, Screen, Plus Lighter, Overlay, Soft Light,
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
@@ -220,6 +222,12 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: a translucent rounded rectangle with Multiply or Screen and one Drop Shadow
+  now stays on GPU. Twelve GPU/reference comparisons at 25%, 50%, and 75% node opacity and
+  1×/2× differed at most 132/249,600 pixels above 8/255 and none above 48/255. The first
+  probe exposed a full-shape error because the blend sampled inside the shadow's opacity
+  layer; separating shadow and fill opacity removed that error.
 
 - 2026-10-30: partially opaque rotated groups with three painted children and an alpha mask
   now cache a single Drop Shadow or Inner Shadow on GPU. Twelve GPU/reference comparisons at
