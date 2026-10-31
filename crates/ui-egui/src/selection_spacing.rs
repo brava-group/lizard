@@ -112,6 +112,7 @@ pub fn panel(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId]) {
     if layout.horizontal.is_none() && layout.vertical.is_none() {
         return;
     }
+    ui.add_space(8.0);
     let col = widgets::col_width(ui.available_width());
     crate::right::row(ui, 24.0, |ui| {
         for (axis, key, icon, tip) in [
