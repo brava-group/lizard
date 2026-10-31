@@ -803,6 +803,7 @@ mod effect_capability_tests {
             ("shadow-blur-noise", vec![shadow(), blur(), noise()]),
             ("shadow-noise-blur", vec![shadow(), noise(), blur()]),
             ("blur-noise-positive-spread-shadow", vec![blur(), noise(), spread_shadow(8.0)]),
+            ("blur-noise-large-positive-spread-shadow", vec![blur(), noise(), spread_shadow(64.0)]),
             ("negative-spread-shadow-noise-blur", vec![spread_shadow(-8.0), noise(), blur()]),
         ] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
@@ -5918,7 +5919,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
                     && shadow.spread.is_finite()
-                    && (-32.0..=32.0).contains(&shadow.spread)
+                    && ((-32.0..=32.0).contains(&shadow.spread) || !matches!(node.kind, NodeKind::Group) && (0.0..=128.0).contains(&shadow.spread))
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
