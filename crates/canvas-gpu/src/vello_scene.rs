@@ -3785,6 +3785,25 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "glass group: {changed} changed pixels");
+        let outlined = vec![dark];
+        let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
+            .ok_or("glass group outline reference failed")?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(
+            &doc,
+            page,
+            &view,
+            [245.0 / 255.0; 3],
+            &index,
+            &outlined,
+            figcraft_render::Outline::default(),
+        )?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "glass group outline: {changed} changed pixels");
         Ok(())
     }
 
