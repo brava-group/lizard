@@ -5490,34 +5490,19 @@ fn gpu_uniform_blur_node_blend_supported(node: &Node) -> bool {
 
 fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-    let blur_noise_pair = visible.len() == 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1;
-    let texture_stack = visible.len() >= 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
+    let ordered_stack = visible.len() >= 2
         && visible.iter().all(|effect| {
             matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
         });
     node.children.is_empty()
-        && (node.opacity >= 0.999 || (0.0..=1.0).contains(&node.opacity) && !matches!(node.blend, BlendMode::ColorBurn | BlendMode::PlusLighter))
-        && matches!(
-            node.blend,
-            BlendMode::Darken
-                | BlendMode::Multiply
-                | BlendMode::ColorBurn
-                | BlendMode::Screen
-                | BlendMode::PlusLighter
-                | BlendMode::Overlay
-                | BlendMode::SoftLight
-                | BlendMode::Exclusion
-                | BlendMode::Hue
-                | BlendMode::Saturation
-                | BlendMode::Color
-                | BlendMode::Luminosity
-        )
-        && (blur_noise_pair || texture_stack)
-        && node.fills.iter().chain(&node.strokes).all(|paint| !paint.visible || paint.blend == BlendMode::Normal)
+        && (0.0..=1.0).contains(&node.opacity)
+        && gpu_node_blend(node).is_some()
+        && ordered_stack
+        && node
+            .fills
+            .iter()
+            .chain(&node.strokes)
+            .all(|paint| !paint.visible || paint.blend == BlendMode::Normal || gpu_blend_mode(paint.blend).is_some())
 }
 
 fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
@@ -5534,15 +5519,13 @@ fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
         && (node.effects.iter().all(|effect| !effect.visible)
             || gpu_shadowed_paint_blend_supported(node)
             || gpu_uniform_blur_paint_blend_supported(node)
-            || gpu_texture_paint_blend_candidate(node))
+            || gpu_ordered_effect_paint_blend_candidate(node))
 }
 
-fn gpu_texture_paint_blend_candidate(node: &Node) -> bool {
+fn gpu_ordered_effect_paint_blend_candidate(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
         && visible.len() >= 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
         && visible
             .iter()
             .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_)))
@@ -6296,7 +6279,6 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() >= 2
         && visible.iter().any(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 1
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=80.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
@@ -6321,21 +6303,13 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
                 | NodeKind::Vector { .. }
                 | NodeKind::Group
         )
-        && (gpu_axis_aligned(doc, node)
-            || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_)))
-            || visible.iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-            || (visible.len() == 3
-                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
-                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
-                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1))
         && gpu_isolated_grain_supported(doc, node)
 }
 
 fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() >= 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
+        && visible.iter().any(|effect| matches!(effect.kind, EffectKind::Texture(_)))
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
@@ -6390,7 +6364,6 @@ fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
                         PaintKind::Pattern(fill) => gpu_pattern_source(doc, fill).is_some(),
                     }
         })
-        && node.strokes.is_empty()
 }
 
 fn gpu_glass_shadow_supported(doc: &Document, node: &Node) -> bool {
@@ -6415,11 +6388,6 @@ fn gpu_multiple_drop_shadows_supported(doc: &Document, node: &Node) -> bool {
 
 fn gpu_texture_cache_supported(doc: &Document, node: &Node, texture: &Texture) -> bool {
     texture.radius.is_finite() && texture.radius >= 0.5 && gpu_isolated_grain_supported(doc, node)
-}
-
-fn gpu_axis_aligned(doc: &Document, node: &Node) -> bool {
-    let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
-    a.abs() > 1e-6 && d.abs() > 1e-6 && b.abs() < 1e-6 && c.abs() < 1e-6
 }
 
 fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture: &Texture) -> bool {
@@ -6600,14 +6568,21 @@ fn gpu_simple_group_child_supported(doc: &Document, child: &Node, depth: usize) 
             child.kind,
             NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. }
         )
-        && child.fills.len() <= 1
         && !(child.fills.is_empty() && child.strokes.is_empty())
         && child
             .fills
             .iter()
             .chain(&child.strokes)
-            .all(|paint| paint.visible && paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+            .all(|paint| paint.visible && paint.blend == BlendMode::Normal && gpu_cached_source_paint_supported(doc, paint))
         && draw::node_outline(doc, child).is_some()
+}
+
+fn gpu_cached_source_paint_supported(doc: &Document, paint: &Paint) -> bool {
+    match &paint.kind {
+        PaintKind::Solid { .. } | PaintKind::Gradient(_) | PaintKind::Image(_) => true,
+        PaintKind::Shader(shader) => doc.shaders.contains_key(&shader.shader_id),
+        PaintKind::Pattern(pattern) => gpu_pattern_source(doc, pattern).is_some(),
+    }
 }
 
 fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
@@ -6620,24 +6595,13 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
         && (visible_effect_count == 1
             && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_) | EffectKind::Texture(_)))
             || visible_effect_count >= 2
-                && node
-                    .effects
-                    .iter()
-                    .filter(|effect| effect.visible)
-                    .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-            || visible_effect_count == 3
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_))).count() == 1
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
-            || visible_effect_count >= 2
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible).all(|effect| {
                     matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
                 }));
     let paint_supported = |paint: &Paint| {
         !paint.visible
-            || ((paint.blend == BlendMode::Normal || gpu_texture_paint_blend_candidate(node) && gpu_blend_mode(paint.blend).is_some())
-                && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+            || ((paint.blend == BlendMode::Normal || gpu_ordered_effect_paint_blend_candidate(node) && gpu_blend_mode(paint.blend).is_some())
+                && gpu_cached_source_paint_supported(doc, paint))
     };
     node.visible
         && !node.is_mask
@@ -6672,7 +6636,7 @@ fn gpu_progressive_layer_blur_supported(doc: &Document, node: &Node, blur: &Blur
         || node.blend != BlendMode::Normal
         || node.effects.iter().filter(|effect| effect.visible).count() != 1
         || ![blur.radius, blur.start_radius, blur.start.0, blur.start.1, blur.end.0, blur.end.1].into_iter().all(f64::is_finite)
-        || node.fills.iter().chain(&node.strokes).any(|paint| !matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+        || node.fills.iter().chain(&node.strokes).any(|paint| !gpu_cached_source_paint_supported(doc, paint))
     {
         return false;
     }
@@ -7100,7 +7064,7 @@ impl GpuCanvas {
                     || node.blend != BlendMode::Normal
                     || !blur.radius.is_finite()
                     || blur.max_radius() <= 0.0
-                    || node.fills.iter().chain(&node.strokes).any(|paint| !matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+                    || node.fills.iter().chain(&node.strokes).any(|paint| !gpu_cached_source_paint_supported(doc, paint))
                     || (blur.is_progressive() && !gpu_progressive_layer_blur_supported(doc, node, blur))
                 {
                     return None;
@@ -7126,8 +7090,20 @@ impl GpuCanvas {
             }
             let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
             let mut scene = Scene::new(width as u16, height as u16);
-            draw_node(&mut scene, &source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width as u16, height as u16));
+            draw_node(
+                &mut scene,
+                &source_doc,
+                id,
+                camera,
+                bounds,
+                0,
+                Some(&self.image_info),
+                None,
+                CachedEffects::empty(),
+                (width as u16, height as u16),
+            );
             let mut source = Self::shared_with(self, width, height);
+            source.image_bindings = self.image_bindings.clone();
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
             let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
@@ -7263,8 +7239,9 @@ impl GpuCanvas {
         }
         let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
         let mut scene = Scene::new(width, height);
-        draw_node(&mut scene, &source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width, height));
+        draw_node(&mut scene, &source_doc, id, camera, bounds, 0, Some(&self.image_info), None, CachedEffects::empty(), (width, height));
         let mut source = Self::shared_with(self, u32::from(width), u32::from(height));
+        source.image_bindings = self.image_bindings.clone();
         source.render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
         let surface_to_local = doc.world_transform(id).inverse() * Affine::translate((bounds.x0, bounds.y0)) * Affine::scale(1.0 / scale);
         let mut result = source.texture.clone();
@@ -7439,12 +7416,13 @@ impl GpuCanvas {
                 camera,
                 bounds,
                 0,
-                None,
+                Some(&self.image_info),
                 None,
                 CachedEffects::empty(),
                 (width_u16, height_u16),
             );
             let mut source = Self::shared_with(self, width, height);
+            source.image_bindings = self.image_bindings.clone();
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
             let surface_to_local = doc.world_transform(id).inverse() * Affine::translate((bounds.x0, bounds.y0)) * Affine::scale(1.0 / scale);
@@ -7493,8 +7471,20 @@ impl GpuCanvas {
                 copy
             });
             let cache_source_doc = source_doc.as_ref().unwrap_or(doc);
-            draw_node(&mut scene, cache_source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width_u16, height_u16));
+            draw_node(
+                &mut scene,
+                cache_source_doc,
+                id,
+                camera,
+                bounds,
+                0,
+                Some(&self.image_info),
+                None,
+                CachedEffects::empty(),
+                (width_u16, height_u16),
+            );
             let mut source = Self::shared_with(self, width, height);
+            source.image_bindings = self.image_bindings.clone();
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
             let surface_to_local = doc.world_transform(id).inverse() * Affine::translate((bounds.x0, bounds.y0)) * Affine::scale(1.0 / scale);
@@ -7512,8 +7502,20 @@ impl GpuCanvas {
                 {
                     let camera_1x = Affine::translate((-bounds.x0, -bounds.y0));
                     let mut scene_1x = Scene::new(width_1x, height_1x);
-                    draw_node(&mut scene_1x, cache_source_doc, id, camera_1x, bounds, 0, None, None, CachedEffects::empty(), (width_1x, height_1x));
+                    draw_node(
+                        &mut scene_1x,
+                        cache_source_doc,
+                        id,
+                        camera_1x,
+                        bounds,
+                        0,
+                        Some(&self.image_info),
+                        None,
+                        CachedEffects::empty(),
+                        (width_1x, height_1x),
+                    );
                     let mut source_1x = Self::shared_with(self, u32::from(width_1x), u32::from(height_1x));
+                    source_1x.image_bindings = self.image_bindings.clone();
                     source_1x.render_submit_with_target(
                         &scene_1x,
                         TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }),
@@ -7565,8 +7567,9 @@ impl GpuCanvas {
                 group.effects.clear();
                 group.opacity = 1.0;
             }
-            draw_node(&mut scene, &source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width_u16, height_u16));
+            draw_node(&mut scene, &source_doc, id, camera, bounds, 0, Some(&self.image_info), None, CachedEffects::empty(), (width_u16, height_u16));
             let mut source = Self::shared_with(self, width, height);
+            source.image_bindings = self.image_bindings.clone();
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
             let spread_px = (shadow.spread * scale).round() as i32;
@@ -8249,7 +8252,7 @@ impl GpuCanvas {
                 let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
                 let composited = doc.node(id).is_some_and(|node| {
                     gpu_glass_stack_supported(doc, node)
-                        && node.fills.iter().any(|paint| paint.visible)
+                        && node.fills.iter().chain(&node.strokes).any(|paint| paint.visible)
                         && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
                 });
                 if composited {
