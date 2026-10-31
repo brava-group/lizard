@@ -1378,6 +1378,51 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn nested_alpha_and_luminance_masks_render_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Nested GPU masks");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 160.0, 140.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.2, 0.3, 1.0))];
+        let outer = doc.create(page, NodeKind::Group, "Outer", 0.0, 0.0, 120.0, 110.0)?;
+        doc.node_mut(outer).ok_or("outer missing")?.transform = Affine::translate((20.0, 15.0)) * Affine::rotate(0.12);
+        let alpha = doc.create(outer, NodeKind::Rectangle, "Alpha mask", 0.0, 0.0, 105.0, 100.0)?;
+        let node = doc.node_mut(alpha).ok_or("alpha mask missing")?;
+        node.is_mask = true;
+        node.mask_type = MaskType::Alpha;
+        node.fills = vec![Paint::solid(Color::new(1.0, 1.0, 1.0, 0.8))];
+        let inner = doc.create(outer, NodeKind::Group, "Inner", 0.0, 0.0, 120.0, 110.0)?;
+        let luminance = doc.create(inner, NodeKind::Rectangle, "Luminance mask", 5.0, 5.0, 105.0, 90.0)?;
+        let node = doc.node_mut(luminance).ok_or("luminance mask missing")?;
+        node.is_mask = true;
+        node.mask_type = MaskType::Luminance;
+        node.fills = vec![Paint::solid(Color::new(0.6, 0.6, 0.6, 1.0))];
+        let content = doc.create(inner, NodeKind::Rectangle, "Content", 0.0, 0.0, 120.0, 110.0)?;
+        doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.3, 0.2, 1.0))];
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (140.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_in_view(&doc, &view));
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                .count();
+            let severe = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                .count();
+            println!("nested masks at {scale}x: changed={changed} severe={severe}");
+            assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+            assert!(severe * 100 < view.width as usize * view.height as usize);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn page_level_alpha_mask_preserves_siblings() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Page mask order");
         let page = doc.current_page.ok_or("new document has no page")?;

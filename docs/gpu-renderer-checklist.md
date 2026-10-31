@@ -149,6 +149,8 @@ the migration concerns rasterization and pixel effects.
     at partial opacity; tested 25%, 50%, and 75% at 1× and 2×.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
+  - [x] Keep an alpha mask around a nested luminance mask on GPU, including a rotated parent
+    group. Full-frame CPU comparisons at 1× and 2× found only 3 and 6 changed pixels.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
     sampled reveal levels remain within 16/255 of the reference.
   - [x] Compose a single solid or gradient luminance stroke as the mask source on GPU;
