@@ -1483,6 +1483,73 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_masked_group_effect_stacks_keep_children() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent masked group effects");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 300.0, 260.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let group = doc.create(page, NodeKind::Group, "Effects", 0.0, 0.0, 140.0, 110.0)?;
+        let node = doc.node_mut(group).ok_or("group missing")?;
+        node.transform = Affine::translate((95.0, 75.0)) * Affine::rotate(0.35);
+        node.opacity = 0.5;
+        let back = doc.create(group, NodeKind::Rectangle, "Back", 0.0, 0.0, 115.0, 88.0)?;
+        doc.node_mut(back).ok_or("back missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.6, 0.9, 0.85))];
+        let front = doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Front", 65.0, 12.0, 72.0, 72.0)?;
+        doc.node_mut(front).ok_or("front missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.3, 0.2, 0.75))];
+        let mask = doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Mask", 88.0, 60.0, 28.0, 28.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let masked = doc.create(group, NodeKind::Rectangle, "Masked", 82.0, 54.0, 40.0, 40.0)?;
+        doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let shadow = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.radius = 8.0;
+                value.offset = (4.0, 6.0);
+                value.color = Color::new(0.2, 0.1, 0.3, 0.4);
+            }
+            effect
+        };
+        for (name, effects) in [
+            ("blur-noise-shadow", vec![blur(), noise(), shadow()]),
+            ("noise-blur-shadow", vec![noise(), blur(), shadow()]),
+            ("shadow-noise-blur", vec![shadow(), noise(), blur()]),
+            ("shadow-blur-noise", vec![shadow(), blur(), noise()]),
+            ("blur-shadow-noise", vec![blur(), shadow(), noise()]),
+            ("noise-shadow-blur", vec![noise(), shadow(), blur()]),
+        ] {
+            doc.node_mut(group).ok_or("group missing")?.effects = effects;
+            for opacity in [0.25, 0.5, 0.75] {
+                doc.node_mut(group).ok_or("group missing")?.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} capability");
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("{name} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn blended_rotated_blur_noise_cache_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU blended cached effects");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3684,7 +3751,8 @@ fn draw_node(
         if let Some(blend) = blend {
             scene.push_blend_layer(blend);
         }
-        let opacity_layer = node.opacity < 0.999 && node.blend == BlendMode::Normal;
+        let opacity_layer =
+            node.opacity < 0.999 && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough);
         if opacity_layer {
             scene.push_opacity_layer(node.opacity);
         }
@@ -4785,8 +4853,8 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
     let bounds = figcraft_render::raster_bounds(doc, node.id);
     let visible_effect_count = node.effects.iter().filter(|effect| effect.visible).count();
     let partial_grain = (0.0..=1.0).contains(&node.opacity)
-        && node.blend == BlendMode::Normal
-        && node.children.is_empty()
+        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
+        && (node.children.is_empty() || matches!(node.kind, NodeKind::Group))
         && (visible_effect_count == 1
             && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_) | EffectKind::Texture(_)))
             || visible_effect_count >= 2

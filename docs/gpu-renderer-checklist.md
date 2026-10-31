@@ -151,6 +151,8 @@ the migration concerns rasterization and pixel effects.
     at its position in the effect list rather than moving the shadow to the end.
   - [x] Keep those six effect orders on GPU for rotated leaves with 25%, 50%, and 75% node
     opacity, applying opacity after the ordered stack.
+  - [x] Keep those same six orders on GPU for a rotated group with multiple painted children and
+    an alpha mask at 25%, 50%, and 75% group opacity.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
@@ -210,6 +212,12 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: 36 GPU/reference comparisons covered all six Blur/Noise/Shadow orders on a
+  rotated group with three visible child shapes, one alpha mask, and 25%, 50%, or 75% group
+  opacity at 1×/2×. The worst order differed at 12,359/312,000 pixels above 8/255 and none
+  above 48/255; three orders matched exactly. The default Pass Through group blend now keeps
+  its post-effect opacity layer in the cached GPU path.
 
 - 2026-10-30: 36 GPU/reference comparisons covered all six orders of one Layer Blur, one
   Noise, and one Drop Shadow on a rotated partially opaque leaf, at 25%, 50%, and 75% node
