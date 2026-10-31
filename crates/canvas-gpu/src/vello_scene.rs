@@ -3832,6 +3832,32 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "clipped glass group: {changed} changed pixels");
+        doc.node_mut(group).ok_or("group missing")?.transform = Affine::translate((30.0, 5.0)) * Affine::rotate(0.3);
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("rotated clipped glass reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "rotated clipped glass: {changed} changed pixels");
+        doc.node_mut(group).ok_or("group missing")?.corners.radii = [12.0; 4];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("rounded clipped glass reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "rounded clipped glass: {changed} changed pixels");
         Ok(())
     }
 
@@ -4255,8 +4281,10 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
     while current != page {
         let node = doc.node(current)?;
         let transform = doc.world_transform(current).as_coeffs();
+        let complex_clip =
+            node.clip && (transform[1].abs() > 1e-6 || transform[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0));
         if node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask))
-            || (node.clip && (transform[1].abs() > 1e-6 || transform[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0)))
+            || complex_clip && !(current != id && matches!(node.kind, NodeKind::Group) && node.opacity < 0.999 && group.is_none())
         {
             return None;
         }
