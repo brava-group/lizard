@@ -1350,6 +1350,7 @@ fn range_fill(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId, star
             app.run("text.style", json!({"id": id, "start": start, "end": end, "textFills": null}));
         }
     });
+    ui.add_space(12.0);
 }
 
 fn paints(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: bool) {
@@ -1404,6 +1405,7 @@ fn paints(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fill
                 .unwrap_or_else(|| Paint::solid(lizard_color::Color::TRANSPARENT));
             Some((style.name.as_str(), preview))
         });
+    let has_content = styled.is_some() || list.as_ref().is_none_or(|l| !l.is_empty());
     if let Some((name, preview)) = styled {
         styled_paint_row(app, ui, &ids, fills, name, &preview);
     } else {
@@ -1551,7 +1553,9 @@ fn paints(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fill
             }
         }
     }
-    ui.add_space(12.0);
+    if has_content {
+        ui.add_space(12.0);
+    }
 }
 
 fn region_paints(app: &mut LizardApp, ui: &mut Ui, id: NodeId, regions: Vec<usize>, list: Vec<Paint>) {
@@ -1570,6 +1574,9 @@ fn region_paints(app: &mut LizardApp, ui: &mut Ui, id: NodeId, regions: Vec<usiz
         if let Some(crate::colorpicker::PickerTarget::VectorRegion { index, .. }) = &mut app.ui.picker {
             *index = moved_index(*index, from, to);
         }
+    }
+    if !list.is_empty() {
+        ui.add_space(12.0);
     }
 }
 
@@ -2310,13 +2317,19 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             style_picker::open(app, ui, &ids, StyleSlot::Effect);
         }
     }
+    let before_chip = ui.cursor().min.y;
     style_picker::chip(app, ui, doc, &ids, StyleSlot::Effect);
+    let has_chip = ui.cursor().min.y > before_chip;
     let Some(list) = list else {
-        ui.add_space(4.0);
+        if has_chip {
+            ui.add_space(12.0);
+        }
         return;
     };
     if list.is_empty() {
-        ui.add_space(4.0);
+        if has_chip {
+            ui.add_space(12.0);
+        }
         return;
     }
     let mut drag = ListDrag::new(ui, "effects");
@@ -3090,11 +3103,21 @@ fn grids(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             style_picker::open(app, ui, &ids, StyleSlot::Grid);
         }
     }
+    let before_chip = ui.cursor().min.y;
     style_picker::chip(app, ui, doc, &ids, StyleSlot::Grid);
+    let has_chip = ui.cursor().min.y > before_chip;
     let Some(list) = list else {
-        ui.add_space(12.0);
+        if has_chip {
+            ui.add_space(12.0);
+        }
         return;
     };
+    if list.is_empty() {
+        if has_chip {
+            ui.add_space(12.0);
+        }
+        return;
+    }
     // The last grid first, like paints and effects; rows drag to reorder.
     let mut drag = ListDrag::new(ui, "grids");
     let mut removed = None;

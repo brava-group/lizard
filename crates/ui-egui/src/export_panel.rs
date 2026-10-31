@@ -45,7 +45,9 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
     }
     let jobs = export_jobs(doc, sel);
     if jobs.is_empty() {
-        ui.add_space(12.0);
+        if mixed || !list.is_empty() {
+            ui.add_space(12.0);
+        }
         return;
     }
     if let Some(first) = jobs.first().map(|j| j.id) {
