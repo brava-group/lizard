@@ -646,7 +646,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
         ui.allocate_ui_with_layout(vec2(238.0, total.y), Layout::top_down(egui::Align::Min), |ui| {
             ui.set_width(238.0);
             ui.add_space(14.0);
-            ui.label(egui::RichText::new("Lizard / UI components").size(16.0).strong().color(t.text));
+            ui.label(egui::RichText::new("Workbench UI").size(16.0).strong().color(t.text));
             ui.label(egui::RichText::new(format!("{} component pages · local only", PAGES.len())).size(11.0).color(t.text_secondary));
             ui.add_space(10.0);
             if ui.button(if state.dark { "Light mode" } else { "Dark mode" }).clicked() {
