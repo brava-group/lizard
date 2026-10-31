@@ -3529,6 +3529,7 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
         && node.opacity >= 0.999
+        && matches!(node.blend, BlendMode::Multiply | BlendMode::Screen)
         && visible.len() == 2
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
