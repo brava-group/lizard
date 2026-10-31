@@ -1396,28 +1396,55 @@ mod effect_capability_tests {
         node.is_mask = true;
         node.mask_type = MaskType::Luminance;
         node.fills = vec![Paint::solid(Color::new(0.6, 0.6, 0.6, 1.0))];
-        let content = doc.create(inner, NodeKind::Rectangle, "Content", 0.0, 0.0, 120.0, 110.0)?;
+        let content = doc.create(inner, NodeKind::Rectangle, "Content", 20.0, 20.0, 60.0, 50.0)?;
         doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.3, 0.2, 1.0))];
-        for scale in [1.0, 2.0] {
-            let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (140.0 * scale) as u32 };
-            assert!(!has_unhandled_effects_in_view(&doc, &view));
-            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
-            let mut gpu = GpuCanvas::new(view.width, view.height)?;
-            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-            let actual = gpu.pixels()?;
-            let changed = actual
-                .chunks_exact(4)
-                .zip(reference.data().chunks_exact(4))
-                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
-                .count();
-            let severe = actual
-                .chunks_exact(4)
-                .zip(reference.data().chunks_exact(4))
-                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
-                .count();
-            println!("nested masks at {scale}x: changed={changed} severe={severe}");
-            assert!(changed * 100 < view.width as usize * view.height as usize * 10);
-            assert!(severe * 100 < view.width as usize * view.height as usize);
+        let mut baseline = HashMap::<u64, Vec<u8>>::new();
+        for shadowed in [false, true] {
+            if shadowed {
+                let mut effect = figcraft_doc::Effect::drop_shadow();
+                if let EffectKind::DropShadow(shadow) = &mut effect.kind {
+                    shadow.radius = 6.0;
+                    shadow.offset = (3.0, 4.0);
+                    shadow.color = Color::new(0.0, 0.0, 0.0, 0.5);
+                    shadow.show_behind = true;
+                }
+                doc.node_mut(content).ok_or("content missing")?.effects = vec![effect];
+            }
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (140.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                if shadowed {
+                    let plain = baseline.get(&scale.to_bits()).ok_or("plain mask comparison missing")?;
+                    let shadow_pixels = reference
+                        .data()
+                        .chunks_exact(4)
+                        .zip(plain.chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 4))
+                        .count();
+                    println!("shadow fixture at {scale}x changed {shadow_pixels} pixels");
+                    assert!(shadow_pixels > 50, "shadow fixture must show the effect inside nested masks");
+                } else {
+                    baseline.insert(scale.to_bits(), reference.data().to_vec());
+                }
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("nested masks shadow={shadowed} at {scale}x: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
         }
         Ok(())
     }

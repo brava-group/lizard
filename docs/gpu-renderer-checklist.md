@@ -151,6 +151,9 @@ the migration concerns rasterization and pixel effects.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Keep an alpha mask around a nested luminance mask on GPU, including a rotated parent
     group. Full-frame CPU comparisons at 1× and 2× found only 3 and 6 changed pixels.
+  - [x] Keep a cached Drop Shadow on content inside nested alpha/luminance masks. The test
+    verifies that the shadow changes more than 600 pixels at 1× and 2,400 at 2×, while GPU
+    comparisons differ from the CPU by at most five pixels above 8/255.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
     sampled reveal levels remain within 16/255 of the reference.
   - [x] Compose a single solid or gradient luminance stroke as the mask source on GPU;
