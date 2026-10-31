@@ -114,7 +114,7 @@ impl Menu {
     }
 
     fn chrome(popup: Popup<'static>, width: f32) -> MenuPopup {
-        let frame = Surface::menu().frame(Tokens::dark());
+        let frame = Surface::menu().frame(Tokens::lizard(true));
         let popup = popup.width(width.max(MIN_WIDTH)).frame(frame).style(|style: &mut egui::Style| {
             egui::containers::menu::menu_style(style);
             style.wrap_mode = Some(egui::TextWrapMode::Extend);

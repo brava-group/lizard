@@ -71,12 +71,18 @@ pub fn under_white(c: Color32) -> Color32 {
 }
 
 pub const COMPONENT: Color32 = Color32::from_rgb(0x97, 0x47, 0xFF);
+/// Palette exported from the Workbench UI theme editor for the Lizard application.
+pub const LIZARD_THEME: ThemeRecipe = ThemeRecipe { darkness: 80, primary: [0x73, 0x5D, 0xF7] };
 /// Handoff status badges (white text on these, in both themes).
 pub const DEV_READY: Color32 = Color32::from_rgb(0x14, 0xAE, 0x5C);
 pub const DEV_CHANGED: Color32 = Color32::from_rgb(0xD9, 0x7A, 0x06);
 pub const DEV_COMPLETED: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x73);
 
 impl Tokens {
+    pub fn lizard(dark: bool) -> Self {
+        Self::from_recipe(dark, LIZARD_THEME)
+    }
+
     pub fn light() -> Self {
         let color = |role: ColorRole| role.value(false);
         Self {

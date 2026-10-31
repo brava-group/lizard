@@ -17,7 +17,7 @@ fn fresh_app_uses_system_dark_theme_on_its_first_frame() {
     let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
     frame(&ctx, &mut app, Some(Theme::Dark));
     assert!(app.ui.dark, "a first run must use the OS dark theme before drawing");
-    assert_eq!(Tokens::get(&ctx), Tokens::dark());
+    assert_eq!(Tokens::get(&ctx), Tokens::lizard(true));
     assert_eq!(app.session.prefs.theme, "system", "following the OS must remain a preference, not a saved snapshot");
 }
 
@@ -30,13 +30,13 @@ fn first_run_and_preferences_without_a_theme_follow_system_light() {
         let mut app = LizardApp::new(session, Box::new(NoServices));
         frame(&ctx, &mut app, Some(Theme::Light));
         assert_eq!(app.session.prefs.theme, "system");
-        assert_eq!(Tokens::get(&ctx), Tokens::light());
+        assert_eq!(Tokens::get(&ctx), Tokens::lizard(false));
     }
 }
 
 #[test]
 fn saved_manual_themes_survive_startup_and_os_changes() {
-    for (saved, expected) in [("light", Tokens::light()), ("dark", Tokens::dark())] {
+    for (saved, expected) in [("light", Tokens::lizard(false)), ("dark", Tokens::lizard(true))] {
         let ctx = Context::default();
         let mut session = Session::empty();
         session.prefs = serde_json::from_value(json!({"theme": saved})).unwrap();
@@ -81,5 +81,5 @@ fn unavailable_system_theme_uses_the_existing_light_fallback() {
     let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
     app.session.execute("view.themeSystem", &json!({})).unwrap();
     frame(&ctx, &mut app, None);
-    assert_eq!(Tokens::get(&ctx), Tokens::light());
+    assert_eq!(Tokens::get(&ctx), Tokens::lizard(false));
 }
