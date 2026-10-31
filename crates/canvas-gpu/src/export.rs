@@ -264,6 +264,33 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn image_paint_survives_repeated_ordered_gpu_effects() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("GPU image effect smoke");
+        let page = doc.current_page.ok_or("page missing")?;
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(RgbaImage::from_pixel(4, 4, image::Rgba([240, 32, 24, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+        let hash = "effect-image".to_string();
+        doc.images.insert(hash.clone(), ImageData { bytes: Arc::new(bytes), width: 4, height: 4 });
+        let id = doc.create(page, NodeKind::Rectangle, "Image with effects", 24.0, 24.0, 64.0, 64.0)?;
+        let node = doc.node_mut(id).ok_or("image node missing")?;
+        node.fills = vec![Paint::image(hash, ImageScaleMode::Fill)];
+        node.effects = vec![
+            Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
+            Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+        ];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 112, height: 112 };
+        let image = render_page_gpu(&doc, page, &view).ok_or("ordered GPU image render unavailable")?;
+        let center = image.pixel(56, 56).ok_or("center pixel missing")?;
+        assert!(center.alpha() > 0 && center.red() > center.green(), "image paint disappeared from GPU effect stack: {center:?}");
+        Ok(())
+    }
+
+    #[test]
     fn effect_tile_halo_accumulates_ordered_effect_reach() -> Result<(), Box<dyn std::error::Error>> {
         let mut doc = Document::new("stacked tile halo");
         let page = doc.current_page.ok_or("page missing")?;
