@@ -2450,11 +2450,34 @@ mod effect_capability_tests {
             visible: true,
         };
         let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let shadow = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.radius = 8.0;
+                value.offset = (4.0, 6.0);
+                value.color = Color::new(0.0, 0.0, 0.0, 0.4);
+            }
+            effect
+        };
         for (name, effects) in [
             ("blur-texture", vec![blur(), texture()]),
             ("texture-blur", vec![texture(), blur()]),
             ("noise-texture", vec![noise(), texture()]),
             ("texture-noise", vec![texture(), noise()]),
+            ("texture-shadow", vec![texture(), shadow()]),
+            ("shadow-texture", vec![shadow(), texture()]),
+            ("blur-texture-shadow", vec![blur(), texture(), shadow()]),
+            ("blur-shadow-texture", vec![blur(), shadow(), texture()]),
+            ("texture-blur-shadow", vec![texture(), blur(), shadow()]),
+            ("texture-shadow-blur", vec![texture(), shadow(), blur()]),
+            ("shadow-blur-texture", vec![shadow(), blur(), texture()]),
+            ("shadow-texture-blur", vec![shadow(), texture(), blur()]),
+            ("noise-texture-shadow", vec![noise(), texture(), shadow()]),
+            ("noise-shadow-texture", vec![noise(), shadow(), texture()]),
+            ("texture-noise-shadow", vec![texture(), noise(), shadow()]),
+            ("texture-shadow-noise", vec![texture(), shadow(), noise()]),
+            ("shadow-noise-texture", vec![shadow(), noise(), texture()]),
+            ("shadow-texture-noise", vec![shadow(), texture(), noise()]),
             ("blur-noise-texture", vec![blur(), noise(), texture()]),
             ("blur-texture-noise", vec![blur(), texture(), noise()]),
             ("noise-blur-texture", vec![noise(), blur(), texture()]),
@@ -5316,10 +5339,20 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     (2..=4).contains(&visible.len())
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 1
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
             EffectKind::Texture(texture) => texture.radius.is_finite() && (0.5..=16.0).contains(&texture.radius),
+            EffectKind::DropShadow(shadow) => {
+                shadow.blend == BlendMode::Normal
+                    && shadow.spread == 0.0
+                    && shadow.radius.is_finite()
+                    && (0.0..=32.0).contains(&shadow.radius)
+                    && shadow.offset.0.is_finite()
+                    && shadow.offset.1.is_finite()
+                    && shadow_cache_offset_aligned(doc, node, shadow)
+            }
             _ => false,
         })
         && (0.0..=1.0).contains(&node.opacity)
@@ -5584,11 +5617,9 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
             || (2..=4).contains(&visible_effect_count)
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1
-                && node
-                    .effects
-                    .iter()
-                    .filter(|effect| effect.visible)
-                    .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_))));
+                && node.effects.iter().filter(|effect| effect.visible).all(|effect| {
+                    matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
+                }));
     let paint_supported = |paint: &Paint| {
         !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
     };
@@ -5745,6 +5776,7 @@ fn has_matching_effects_excluding_in_view(
                                     || gpu_vector_drop_shadow_supported(node, shadow)
                                     || gpu_backdrop && gpu_glass_shadow_supported(doc, node)
                                     || cached_noise && gpu_stacked_blur_noise_supported(doc, node)
+                                    || cached_noise && gpu_stacked_blur_texture_supported(doc, node)
                                     || cached_noise && gpu_cached_drop_shadow_supported(doc, node, shadow))
                             }
                             EffectKind::Noise(noise) => {

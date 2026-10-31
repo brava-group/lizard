@@ -200,6 +200,11 @@ the migration concerns rasterization and pixel effects.
   - [x] Compose all six orders of one Layer Blur, one Noise, and one Texture on GPU at 100%,
     25%, 50%, and 75% opacity. Each effect visibly changes the reference image; all 48
     comparisons at 1× and 2× matched the CPU pixels within the 8/255 threshold.
+  - [x] Compose Texture with one Drop Shadow in both orders, and every three-effect order
+    containing Texture, Drop Shadow, and either Layer Blur or Noise. A rotated rectangle at
+    four node opacities and 1×/2× passed 112 GPU/reference comparisons. The largest
+    shadow-first difference was 5,159 pixels above 8/255 in a 520×480 image; at most two
+    pixels per image differed by more than 48/255.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
