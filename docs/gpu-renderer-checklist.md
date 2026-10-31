@@ -101,6 +101,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Apply Noise after the glass pane in that group through the GPU local-coordinate
     pass; the following backdrop sees the ordered result. The full-frame comparison
     passed the same 5% visual gate.
+  - [x] Execute multiple GPU effects after Glass in an isolated translucent group. Both
+    Glass → Layer Blur → Noise and Glass → Noise → Layer Blur passed the existing 5% visual
+    gate with a subsequent background blur pane sampling the ordered result.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

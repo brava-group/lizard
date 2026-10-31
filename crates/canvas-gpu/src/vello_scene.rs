@@ -3892,6 +3892,38 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "glass noise stack group: {changed} changed pixels");
+        for (name, effects) in [
+            (
+                "glass blur noise group",
+                vec![
+                    figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
+                    figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+                    figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+                ],
+            ),
+            (
+                "glass noise blur group",
+                vec![
+                    figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
+                    figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+                    figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+                ],
+            ),
+        ] {
+            doc.node_mut(pane).ok_or("pane missing")?.effects = effects;
+            let index = BackdropIndex::new(&doc, page);
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("glass ordered stack reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            assert!(changed < (view.width * view.height / 20) as usize, "{name}: {changed} changed pixels");
+        }
         Ok(())
     }
 
@@ -4354,11 +4386,13 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
                         EffectKind::BackgroundBlur(_) => true,
                         EffectKind::Glass(glass) => gpu_glass_supported(doc, node, view, glass),
                         _ => false,
-                    }) || matches!(effects.as_slice(), [glass, extra]
-                        if matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
+                    }) || effects.split_first().is_some_and(|(glass, extras)| {
+                        !extras.is_empty()
+                            && matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
                             && gpu_glass_stack_supported(doc, node)
-                            && matches!(&extra.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_))
-                            && node.fills.iter().all(|paint| !paint.visible))
+                            && extras.iter().all(|effect| matches!(&effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+                            && node.fills.iter().all(|paint| !paint.visible)
+                    })
                 })
         })
 }
@@ -8097,25 +8131,25 @@ impl GpuCanvas {
                 let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                 let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
                 let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
-                if let Some(node) = doc.node(id)
-                    && let Some(layer_effect) = node.effects.iter().filter(|effect| effect.visible).nth(1)
-                {
-                    match &layer_effect.kind {
-                        EffectKind::LayerBlur(layer_blur) => {
-                            let pass = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                            result = pass.submit(&self.device, &self.queue, &result, (layer_blur.radius * view.scale / 2.0) as f32, 1, None);
+                if let Some(node) = doc.node(id) {
+                    for layer_effect in node.effects.iter().filter(|effect| effect.visible).skip(1) {
+                        match &layer_effect.kind {
+                            EffectKind::LayerBlur(layer_blur) => {
+                                let pass = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                                result = pass.submit(&self.device, &self.queue, &result, (layer_blur.radius * view.scale / 2.0) as f32, 1, None);
+                            }
+                            EffectKind::Noise(noise) => {
+                                let surface_to_local = doc.world_transform(id).inverse()
+                                    * Affine::translate((
+                                        view.origin.0 + f64::from(region.0) / view.scale,
+                                        view.origin.1 + f64::from(region.1) / view.scale,
+                                    ))
+                                    * Affine::scale(1.0 / view.scale);
+                                let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
+                                result = pass.submit(&self.device, &self.queue, &result, noise, surface_to_local, id.0 as u32);
+                            }
+                            _ => {}
                         }
-                        EffectKind::Noise(noise) => {
-                            let surface_to_local = doc.world_transform(id).inverse()
-                                * Affine::translate((
-                                    view.origin.0 + f64::from(region.0) / view.scale,
-                                    view.origin.1 + f64::from(region.1) / view.scale,
-                                ))
-                                * Affine::scale(1.0 / view.scale);
-                            let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
-                            result = pass.submit(&self.device, &self.queue, &result, noise, surface_to_local, id.0 as u32);
-                        }
-                        _ => {}
                     }
                 }
                 (result, Some(region))
