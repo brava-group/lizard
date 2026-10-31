@@ -120,6 +120,10 @@ the migration concerns rasterization and pixel effects.
     passes stay on GPU, and the full-frame comparison passed the 5% visual gate.
   - [x] Use a supported repeating pattern fill on that Glass stack. Its GPU tile is composed
     before Noise → Layer Blur, and the full-frame comparison passed the 5% visual gate.
+  - [x] Render a masked translucent Glass group through the isolated GPU compositor. An alpha
+    mask clipped the rotated, rounded group with two ordered panes; full-frame 1×/2× comparisons
+    differed in 969/19,200 and 4,043/76,800 pixels above 20/255, with no pixels above 48/255.
+    Transparent page-export RGBA samples stayed within 20/255 of the CPU reference.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

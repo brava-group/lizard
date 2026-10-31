@@ -526,6 +526,28 @@ mod tests {
                 assert!(a.abs_diff(b) <= 20, "clipped glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
             }
         }
+        let mask = doc.create(group, NodeKind::Rectangle, "Mask", 5.0, 5.0, 95.0, 80.0)?;
+        let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
+        mask_node.is_mask = true;
+        mask_node.mask_type = figcraft_doc::MaskType::Alpha;
+        mask_node.fills = vec![Paint::solid(Color::WHITE)];
+        let children = &mut doc.node_mut(group).ok_or("group missing")?.children;
+        children.retain(|child| *child != mask);
+        children.insert(0, mask);
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU masked glass export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU masked glass export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU masked glass sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU masked glass sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 20, "masked glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
         Ok(())
     }
 

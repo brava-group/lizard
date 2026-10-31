@@ -4024,6 +4024,37 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "pattern glass stack: {changed} changed pixels");
+        doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.9, 1.0, 0.3))];
+        let mask = doc.create(group, NodeKind::Rectangle, "Alpha mask", 5.0, 5.0, 95.0, 80.0)?;
+        let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
+        mask_node.is_mask = true;
+        mask_node.mask_type = MaskType::Alpha;
+        mask_node.fills = vec![Paint::solid(Color::WHITE)];
+        let children = &mut doc.node_mut(group).ok_or("group missing")?.children;
+        children.retain(|child| *child != mask);
+        children.insert(0, mask);
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
+            let index = BackdropIndex::new(&doc, page);
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "masked glass group rejected at {scale}x");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("masked glass group reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            let severe = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 48))
+                .count();
+            println!("masked glass group at {scale}x: changed={changed} severe={severe}");
+            assert!(changed < (view.width * view.height * 7 / 100) as usize, "masked glass group at {scale}x: {changed} changed pixels");
+            assert_eq!(severe, 0, "masked glass group at {scale}x has severe differences");
+        }
         Ok(())
     }
 
@@ -4449,7 +4480,8 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
         let transform = doc.world_transform(current).as_coeffs();
         let complex_clip =
             node.clip && (transform[1].abs() > 1e-6 || transform[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0));
-        if node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask))
+        let isolated_group_candidate = current != id && matches!(node.kind, NodeKind::Group) && node.opacity < 0.999 && group.is_none();
+        if node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask)) && !isolated_group_candidate
             || complex_clip && !(current != id && matches!(node.kind, NodeKind::Group) && node.opacity < 0.999 && group.is_none())
         {
             return None;
