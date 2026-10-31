@@ -124,6 +124,8 @@ the migration concerns rasterization and pixel effects.
     mask clipped the rotated, rounded group with two ordered panes; full-frame 1×/2× comparisons
     differed in 969/19,200 and 4,043/76,800 pixels above 20/255, with no pixels above 48/255.
     Transparent page-export RGBA samples stayed within 20/255 of the CPU reference.
+  - [x] Outline the first Glass pane inside that masked group while the second pane stays
+    active; the GPU result passed the 7% full-frame visual gate.
   - [x] Use the same isolated GPU path for an opaque masked and rotated Glass group. The
     full-frame 1×/2× comparisons differed in 27 and 54 pixels above 20/255, with no severe
     pixels; transparent export RGBA samples stayed within 32/255.

@@ -4055,6 +4055,28 @@ mod effect_capability_tests {
             assert!(changed < (view.width * view.height * 7 / 100) as usize, "masked glass group at {scale}x: {changed} changed pixels");
             assert_eq!(severe, 0, "masked glass group at {scale}x has severe differences");
         }
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let index = BackdropIndex::new(&doc, page);
+        let outlined = vec![pane];
+        let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
+            .ok_or("masked glass outline reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(
+            &doc,
+            page,
+            &view,
+            [245.0 / 255.0; 3],
+            &index,
+            &outlined,
+            figcraft_render::Outline::default(),
+        )?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height * 7 / 100) as usize, "masked glass outlined pane: {changed} changed pixels");
         doc.node_mut(group).ok_or("group missing")?.opacity = 1.0;
         for scale in [1.0, 2.0] {
             let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
