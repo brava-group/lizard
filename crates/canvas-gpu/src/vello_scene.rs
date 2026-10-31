@@ -1113,6 +1113,58 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn uniform_blur_combines_node_and_paint_blends_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU combined blurred blends");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 220.0, 180.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blurred", 50.0, 40.0, 110.0, 80.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0)), Paint::solid(Color::new(0.28, 0.75, 0.9, 0.65))];
+        node.corners.radii = [12.0; 4];
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        let mut failures = Vec::new();
+        let blends = BlendMode::ALL
+            .into_iter()
+            .filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker))
+            .collect::<Vec<_>>();
+        for (index, node_blend) in blends.iter().copied().enumerate() {
+            let paint_blend = blends[(index + 5) % blends.len()];
+            for opacity in [1.0, 0.5] {
+                let node = doc.node_mut(id).ok_or("shape missing")?;
+                node.blend = node_blend;
+                node.fills[1].blend = paint_blend;
+                node.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (220.0 * scale) as u32, height: (180.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    assert_eq!(gpu.prepare_static_effects(&doc)?.0, 0);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    if changed * 100 >= view.width as usize * view.height as usize * 10 || severe * 100 >= view.width as usize * view.height as usize
+                    {
+                        failures.push(format!("{node_blend:?}/{paint_blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}"));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
+    #[test]
     fn supported_masks_use_gpu_and_unimplemented_paints_fall_back() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU content capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -4212,7 +4264,11 @@ fn gpu_uniform_blur_node_blend_supported(node: &Node) -> bool {
             matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=80.0).contains(&blur.radius))
         })
         && visible.next().is_none()
-        && node.fills.iter().chain(&node.strokes).all(|paint| !paint.visible || paint.blend == BlendMode::Normal)
+        && node.fills.iter().chain(&node.strokes).all(|paint| !paint.visible || paint.blend == BlendMode::Normal || gpu_blend_mode(paint.blend).is_some())
+        && match &node.kind {
+            NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().all(|paint| !paint.visible || paint.blend == BlendMode::Normal || gpu_blend_mode(paint.blend).is_some()),
+            _ => true,
+        }
 }
 
 fn gpu_cached_node_blend_supported(node: &Node) -> bool {
@@ -4259,7 +4315,7 @@ fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
 fn gpu_uniform_blur_paint_blend_supported(node: &Node) -> bool {
     let mut visible = node.effects.iter().filter(|effect| effect.visible);
     node.children.is_empty()
-        && node.blend == BlendMode::Normal
+        && (node.blend == BlendMode::Normal || gpu_node_blend(node).is_some())
         && (0.0..=1.0).contains(&node.opacity)
         && visible.next().is_some_and(|effect| {
             matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=80.0).contains(&blur.radius))
