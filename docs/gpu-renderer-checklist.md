@@ -280,6 +280,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Choose the tile core from the effect halo instead of imposing a 512 px halo cap.
     A 4200 × 128 page with a 90 px layer blur used a halo over 512 px on GPU; samples
     around the 2048 px seam matched an independently rendered GPU crop within 12/255.
+    A separate 1200 px halo fixture verified that the adaptive core shrinks to keep every
+    tile within 4096 px and preserves pixels at both new tile boundaries.
     Effects requiring 2048 px or more of halo still need a separate large-surface strategy.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.

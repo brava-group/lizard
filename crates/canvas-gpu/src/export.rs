@@ -262,6 +262,32 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn adaptive_tile_core_stays_within_gpu_texture_limit() -> Result<(), Box<dyn std::error::Error>> {
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let mut dimensions = Vec::new();
+        let result = render_tiled(&view, 1200, |tile| {
+            dimensions.push((tile.width, tile.height));
+            let mut image = Pixmap::new(tile.width, tile.height)?;
+            for y in 0..tile.height {
+                for x in 0..tile.width {
+                    let world_x = tile.origin.0 as u32 + x;
+                    let offset = ((y * tile.width + x) * 4) as usize;
+                    image.data_mut()[offset..offset + 4].copy_from_slice(&[(world_x & 255) as u8, (world_x >> 8) as u8, y as u8, 255]);
+                }
+            }
+            Some(image)
+        })
+        .ok_or("adaptive tile result missing")?;
+        assert_eq!(dimensions.len(), 3);
+        assert!(dimensions.iter().all(|(width, height)| *width <= 4096 && *height <= 4096));
+        for x in [0, 1695, 1696, 1697, 3391, 3392, 4199] {
+            let pixel = result.pixel(x, 64).ok_or("tile seam pixel missing")?;
+            assert_eq!([pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()], [(x & 255) as u8, (x >> 8) as u8, 64, 255]);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn wide_shadow_export_matches_cpu_across_tile_seams() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());
