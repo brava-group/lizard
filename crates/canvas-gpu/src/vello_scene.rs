@@ -1337,6 +1337,66 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn blended_rotated_blur_noise_cache_matches_reference() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU blended cached effects");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let back = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 220.0)?;
+        doc.node_mut(back).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.65, 0.8, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blended", 0.0, 0.0, 120.0, 96.0)?;
+        let node = doc.node_mut(id).ok_or("blended shape missing")?;
+        node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
+        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+            for blur_first in [true, false] {
+                let node = doc.node_mut(id).ok_or("blended shape missing")?;
+                node.blend = blend;
+                let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+                let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+                node.effects = if blur_first { vec![blur, noise] } else { vec![noise, blur] };
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} blur_first={blur_first} capability");
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    if let Ok(prefix) = std::env::var("LIZARD_GPU_BLEND_SCREENSHOT") {
+                        image::save_buffer(
+                            format!("{prefix}-{blend:?}-{blur_first}-{scale}-gpu.png"),
+                            &actual,
+                            view.width,
+                            view.height,
+                            image::ColorType::Rgba8,
+                        )?;
+                        image::save_buffer(
+                            format!("{prefix}-{blend:?}-{blur_first}-{scale}-cpu.png"),
+                            reference.data(),
+                            view.width,
+                            view.height,
+                            image::ColorType::Rgba8,
+                        )?;
+                    }
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("{blend:?} blur_first={blur_first} {scale}x: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 8);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn group_blur_noise_stack_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU group effect graph");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3348,7 +3408,14 @@ fn draw_node(
         .or_else(|| cached.noise.and_then(|entries| entries.get(&id)))
         .or_else(|| cached.texture.and_then(|entries| entries.get(&id)))
     {
+        let blend = gpu_node_blend(node);
+        if let Some(blend) = blend {
+            scene.push_blend_layer(blend);
+        }
         draw_cached_effect(scene, camera, effect);
+        if blend.is_some() {
+            scene.pop_layer();
+        }
         return;
     }
     let transform = camera * doc.world_transform(id);
@@ -3454,7 +3521,18 @@ fn gpu_blend_mode(mode: BlendMode) -> Option<peniko::BlendMode> {
 }
 
 fn gpu_simple_node_blend_supported(node: &Node) -> bool {
-    gpu_node_blend(node).is_some() && (node.effects.iter().all(|effect| !effect.visible) || gpu_shadowed_node_blend_supported(node))
+    gpu_node_blend(node).is_some()
+        && (node.effects.iter().all(|effect| !effect.visible) || gpu_shadowed_node_blend_supported(node) || gpu_cached_node_blend_supported(node))
+}
+
+fn gpu_cached_node_blend_supported(node: &Node) -> bool {
+    let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+    node.children.is_empty()
+        && node.opacity >= 0.999
+        && visible.len() == 2
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
+        && node.fills.iter().chain(&node.strokes).all(|paint| !paint.visible || paint.blend == BlendMode::Normal)
 }
 
 fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
@@ -4377,7 +4455,9 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
             || matches!(node.kind, NodeKind::Group)
                 && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_simple_group_child_supported(doc, child, 0))))
         && node.opacity >= 0.999
-        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
+        && (node.blend == BlendMode::Normal
+            || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
+            || gpu_cached_node_blend_supported(node))
         && [a, b, c, d].iter().all(|value| value.is_finite())
         && (a * d - b * c).abs() > 1e-6
         && node.fills.iter().chain(&node.strokes).all(paint_supported)
@@ -4926,6 +5006,7 @@ impl GpuCanvas {
             let mut source_doc = doc.clone();
             if let Some(node) = source_doc.node_mut(id) {
                 node.effects.clear();
+                node.blend = BlendMode::Normal;
             }
             let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
             let mut scene = Scene::new(width, height);

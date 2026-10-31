@@ -112,6 +112,8 @@ the migration concerns rasterization and pixel effects.
     stacks remain guarded.
   - [x] Apply node blend modes to opaque leaf content after drawing its Drop Shadow; all
     Vello-supported modes match CPU samples at the fill, shadow, and background.
+  - [x] Apply Multiply and Screen to the GPU-cached `Layer Blur ↔ Noise` stack on opaque rotated
+    leaves. The cached source is rendered without its node blend, then blended over the page.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
@@ -550,3 +552,9 @@ the migration concerns rasterization and pixel effects.
   content, mask, shadow, blur, and grain remain present. An existing axis-aligned group test now
   allows a 2% difference above 8/255 for early-shadow orders; its observed maximum was
   1,947/201,600 pixels, with no differences above 48/255.
+- 2026-10-30: rotated opaque leaves using Multiply or Screen with either `Layer Blur → Noise`
+  or `Noise → Layer Blur` now stay on GPU. At 1× and 2×, `Noise → Blur` matched the CPU reference
+  exactly. The largest `Blur → Noise` difference above 8/255 was 10,713/228,800 pixels for
+  Screen at 2×; no pixel differed above 48/255. I inspected the GPU and CPU images for that
+  case: the backdrop color, rotated contour, blur, and grain are intact. This does not yet cover
+  other blend modes or partial opacity with cached effect stacks.
