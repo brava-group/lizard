@@ -4,9 +4,9 @@
 use std::cell::Cell;
 use std::sync::Arc;
 
-use figcraft_color::{PatternCell, PatternPaint};
-use figcraft_doc::{Document, NodeId};
-use figcraft_geom::Affine;
+use lizard_color::{PatternCell, PatternPaint};
+use lizard_doc::{Document, NodeId};
+use lizard_geom::Affine;
 use tiny_skia::{FilterQuality, Pixmap, SpreadMode, Transform};
 
 use crate::draw::{Bounds, Ctx, draw_node};

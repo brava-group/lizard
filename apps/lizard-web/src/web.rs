@@ -1,0 +1,290 @@
+//! The browser shell: web `Services` and the eframe web runner.
+
+use lizard_engine::Session;
+use lizard_ui_egui::{ContentsFuture, LizardApp, Services};
+use std::cell::RefCell;
+use std::rc::Rc;
+use wasm_bindgen::JsCast as _;
+
+const CANVAS_ID: &str = "lizard_canvas";
+const LOADING_ID: &str = "lizard_loading";
+
+pub fn start() {
+    eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    wasm_bindgen_futures::spawn_local(async {
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            log::error!("no document");
+            return;
+        };
+        let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
+            log::error!("missing <canvas id=\"{CANVAS_ID}\">");
+            return;
+        };
+        // Read the HTML flavor during the trusted paste event, before egui forwards its text
+        // flavor to LizardApp. Browsers do not allow reading this flavor later on demand.
+        let pasted_html = Rc::new(RefCell::new(None));
+        let html_for_listener = Rc::clone(&pasted_html);
+        let on_paste = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(move |event: web_sys::ClipboardEvent| {
+            let html = event.clipboard_data().and_then(|data| data.get_data("text/html").ok()).filter(|value| !value.is_empty());
+            *html_for_listener.borrow_mut() = html;
+        });
+        if let Err(error) = document.add_event_listener_with_callback_and_bool("paste", on_paste.as_ref().unchecked_ref(), true) {
+            log::warn!("couldn't read HTML paste events: {error:?}");
+        } else {
+            on_paste.forget();
+        }
+        let mut options = eframe::WebOptions::default();
+        // `?webgl`: force the WebGL2 backend (troubleshooting, and headless browsers whose WebGPU
+        // adapter request returns nothing).
+        if query().contains("webgl")
+            && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
+        {
+            create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+        }
+        let result = eframe::WebRunner::new()
+            .start(
+                canvas,
+                options,
+                Box::new(move |cc| {
+                    if let Some(rs) = &cc.wgpu_render_state {
+                        log::info!("lizard-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+                    }
+                    let reduce_motion = web_sys::window().and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten());
+                    let mut session = Session::new();
+                    // Live sessions: the browser joins sessions a desktop app hosts; whatever arrives
+                    // on the socket wakes the page for a frame.
+                    let ctx = cc.egui_ctx.clone();
+                    session.live.install(Box::new(lizard_collab_net::NetLink::new(std::sync::Arc::new(move || ctx.request_repaint()))));
+                    let mut fig = LizardApp::new(
+                        session,
+                        Box::new(WebServices { reduce_motion, ctx: cc.egui_ctx.clone(), pasted_html: Rc::clone(&pasted_html) }),
+                    );
+                    if let Some(state) =
+                        cc.wgpu_render_state.clone().filter(|state| state.adapter.get_info().backend == eframe::wgpu::Backend::BrowserWebGpu)
+                    {
+                        fig.gpu_canvas = Some(Box::new(crate::gpu_canvas::WebGpuCanvas::new(state)));
+                    }
+                    // `#join=<link>`: join that session, as opening an invite link does on the desktop.
+                    let hash = web_sys::window().and_then(|w| w.location().hash().ok()).unwrap_or_default();
+                    if let Some(link) = crate::query::join_link(&hash) {
+                        let link = js_sys::decode_uri_component(link).ok().and_then(|s| s.as_string()).unwrap_or_else(|| link.to_string());
+                        lizard_ui_egui::live::open_invite(&mut fig, &link);
+                    }
+                    Ok(Box::new(WebShell { fig, pasted_html }))
+                }),
+            )
+            .await;
+        if let Some(el) = document.get_element_by_id(LOADING_ID) {
+            match result {
+                Ok(()) => el.remove(),
+                Err(e) => el.set_inner_html(&format!("<p>Lizard failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
+            }
+        }
+    });
+}
+
+fn query() -> String {
+    web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
+}
+
+struct WebShell {
+    fig: LizardApp,
+    pasted_html: Rc<RefCell<Option<String>>>,
+}
+
+impl eframe::App for WebShell {
+    // `LizardApp::ui` runs its own per-frame logic first (fonts, theme), like the desktop app.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.fig.ui(ui);
+        // A paste handled by a text field must not be reused by a later menu Paste action.
+        self.pasted_html.borrow_mut().take();
+    }
+}
+
+/// Browser services. Open dialogs return nothing for now (the trait's defaults); files are saved
+/// as downloads. Copies go to the system clipboard through egui's output; paste events provide
+/// text through egui and HTML captured while the browser grants clipboard access.
+struct WebServices {
+    /// `prefers-reduced-motion: reduce` (it follows the setting while the page is open).
+    reduce_motion: Option<web_sys::MediaQueryList>,
+    ctx: egui::Context,
+    pasted_html: Rc<RefCell<Option<String>>>,
+}
+
+impl Services for WebServices {
+    /// An `<input type="file">` taking `exts`, clicked; its file is read once picked.
+    fn pick_open_contents(&mut self, _title: &str, exts: &[&str]) -> Option<ContentsFuture> {
+        let accept = exts.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(",");
+        Some(Box::pin(async move {
+            pick_file(&accept).await.unwrap_or_else(|e| {
+                log::error!("couldn't open a file: {e:?}");
+                None
+            })
+        }))
+    }
+    fn downloads(&self) -> bool {
+        true
+    }
+    /// A Blob behind a temporary `<a download>` link, clicked and removed.
+    fn download(&mut self, name: &str, bytes: &[u8]) -> bool {
+        match download(name, bytes) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!("couldn't download {name}: {e:?}");
+                false
+            }
+        }
+    }
+    fn clipboard_set_text(&mut self, s: &str) {
+        lizard_ui_egui::egui_copy_text(&self.ctx, s);
+    }
+    fn clipboard_get_html(&mut self) -> Option<String> {
+        self.pasted_html.borrow_mut().take()
+    }
+    fn clipboard_set_png(&mut self, w: u32, h: u32, rgba: &[u8]) {
+        lizard_ui_egui::egui_copy_png(&self.ctx, w, h, rgba);
+    }
+    fn open_url(&mut self, url: &str) {
+        let Some(window) = web_sys::window() else { return };
+        if let Err(e) = window.open_with_url_and_target(url, "_blank") {
+            log::error!("couldn't open {url}: {e:?}");
+        }
+    }
+    fn reduce_motion(&self) -> bool {
+        self.reduce_motion.as_ref().is_some_and(web_sys::MediaQueryList::matches)
+    }
+    /// The browser's language (`navigator.language`).
+    fn system_language(&self) -> Option<String> {
+        web_sys::window().and_then(|w| w.navigator().language())
+    }
+    /// The Gamepad API's controllers with the standard mapping (its button order is the layout's;
+    /// others are skipped). Browsers list controllers once one of their buttons is pressed.
+    fn gamepad_held(&mut self) -> u32 {
+        let Some(pads) = web_sys::window().and_then(|w| w.navigator().get_gamepads().ok()) else { return 0 };
+        let mut held = 0;
+        for pad in pads.iter().filter_map(|p| p.dyn_into::<web_sys::Gamepad>().ok()) {
+            if pad.mapping() != web_sys::GamepadMappingType::Standard {
+                continue;
+            }
+            for (i, b) in pad.buttons().iter().take(32).enumerate() {
+                if b.dyn_into::<web_sys::GamepadButton>().is_ok_and(|b| b.pressed()) {
+                    held |= 1 << i;
+                }
+            }
+        }
+        held
+    }
+}
+
+/// The file picked in the browser's file picker (`accept`: the extensions it offers), with its
+/// name; `None` when the picker is cancelled, `Some(Err)` with what to tell the user when the file
+/// can't be read.
+async fn pick_file(accept: &str) -> Result<Option<Result<(String, Vec<u8>), String>>, wasm_bindgen::JsValue> {
+    let window = web_sys::window().ok_or("no window")?;
+    let document = window.document().ok_or("no document")?;
+    let body = document.body().ok_or("no body")?;
+    let input: web_sys::HtmlInputElement = document.create_element("input")?.dyn_into()?;
+    input.set_type("file");
+    input.set_accept(accept);
+    input.set_hidden(true);
+    // Some browsers (older Safari) open the picker only for an input in the page.
+    body.append_child(&input)?;
+    let (closed, picker) = PickerClosed::new(&window, input.clone());
+    input.click();
+    let result = wasm_bindgen_futures::JsFuture::from(closed).await;
+    let file = input.files().and_then(|files| files.get(0));
+    drop(picker);
+    result?;
+    let Some(file) = file else { return Ok(None) };
+    let name = file.name();
+    if let Err(why) = lizard_ui_egui::browser_can_read(&name, file.size()) {
+        return Ok(Some(Err(why)));
+    }
+    Ok(Some(match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+        Ok(buffer) => Ok((name, js_sys::Uint8Array::new(&buffer).to_vec())),
+        Err(e) => {
+            log::error!("couldn't read {name}: {e:?}");
+            Err(lizard_ui_egui::unreadable(&name))
+        }
+    }))
+}
+
+/// How long after the page gets focus back the file picker counts as closed (milliseconds): a
+/// picked file's `change` can come just after the focus, and must win. A `change` later than this
+/// (a slow cloud-backed file in a browser that never sends `cancel`) counts as a cancel.
+const PICKER_FOCUS_SETTLE_MS: i32 = 1_000;
+
+/// Settles a file picker's promise once: on `change` (a file was picked), on `cancel` (closed
+/// without one) or shortly after the page gets focus back, for browsers that never send `cancel`
+/// (Safari before 16.4), where the pick would otherwise stay pending and block every later one.
+/// Dropping it (also when the pick is abandoned) removes the input, the focus listener and its timer.
+struct PickerClosed {
+    window: web_sys::Window,
+    input: web_sys::HtmlInputElement,
+    _settle: wasm_bindgen::closure::Closure<dyn FnMut()>,
+    on_focus: wasm_bindgen::closure::Closure<dyn FnMut()>,
+    timer: std::rc::Rc<std::cell::Cell<Option<i32>>>,
+}
+
+impl PickerClosed {
+    fn new(window: &web_sys::Window, input: web_sys::HtmlInputElement) -> (js_sys::Promise, Self) {
+        let resolve = std::rc::Rc::new(std::cell::RefCell::new(None::<js_sys::Function>));
+        let slot = resolve.clone();
+        let closed = js_sys::Promise::new(&mut |res, _rej| *slot.borrow_mut() = Some(res));
+        let settle = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            if let Some(res) = resolve.borrow_mut().take() {
+                let _ = res.call0(&wasm_bindgen::JsValue::NULL);
+            }
+        });
+        let _ = input.add_event_listener_with_callback("change", settle.as_ref().unchecked_ref());
+        let _ = input.add_event_listener_with_callback("cancel", settle.as_ref().unchecked_ref());
+        let timer = std::rc::Rc::new(std::cell::Cell::new(None));
+        let (w, t, f) = (window.clone(), timer.clone(), settle.as_ref().unchecked_ref::<js_sys::Function>().clone());
+        let on_focus = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            if t.get().is_none() {
+                t.set(w.set_timeout_with_callback_and_timeout_and_arguments_0(&f, PICKER_FOCUS_SETTLE_MS).ok());
+            }
+        });
+        let _ = window.add_event_listener_with_callback("focus", on_focus.as_ref().unchecked_ref());
+        (closed, Self { window: window.clone(), input, _settle: settle, on_focus, timer })
+    }
+}
+
+impl Drop for PickerClosed {
+    fn drop(&mut self) {
+        if let Some(t) = self.timer.take() {
+            self.window.clear_timeout_with_handle(t);
+        }
+        let _ = self.window.remove_event_listener_with_callback("focus", self.on_focus.as_ref().unchecked_ref());
+        self.input.remove();
+    }
+}
+
+fn download(name: &str, bytes: &[u8]) -> Result<(), wasm_bindgen::JsValue> {
+    let window = web_sys::window().ok_or("no window")?;
+    let document = window.document().ok_or("no document")?;
+    let body = document.body().ok_or("no body")?;
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &{
+        let o = web_sys::BlobPropertyBag::new();
+        o.set_type("application/octet-stream");
+        o
+    })?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+    let a: web_sys::HtmlAnchorElement = document.create_element("a")?.dyn_into()?;
+    a.set_href(&url);
+    a.set_download(name);
+    body.append_child(&a)?;
+    a.click();
+    a.remove();
+    // Revoked later, not at once: some browsers cancel a download whose URL goes before it starts.
+    let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    // Without the timer the URL just stays until the page closes.
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), REVOKE_DOWNLOAD_MS);
+    Ok(())
+}
+
+/// How long a download's object URL is kept (milliseconds).
+const REVOKE_DOWNLOAD_MS: i32 = 40_000;

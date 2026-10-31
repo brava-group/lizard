@@ -2,12 +2,12 @@
 use std::sync::Arc;
 
 use egui::{CursorIcon, Id, Pos2, Rect, Stroke, Ui, vec2};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::selection_reorder::ReorderLayout;
-use figcraft_engine::selection_spacing::{Axis, SelectionSpacing, selection_spacing};
+use lizard_doc::{Document, NodeId};
+use lizard_engine::selection_reorder::ReorderLayout;
+use lizard_engine::selection_spacing::{Axis, SelectionSpacing, selection_spacing};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::handles::{PINK, pink_label};
 use crate::i18n::tr;
 use crate::icons::Icon;
@@ -24,7 +24,7 @@ struct LayoutCache {
     reorder: Option<Arc<ReorderLayout>>,
 }
 
-fn layout(app: &FigApp, ctx: &egui::Context, ids: &[NodeId]) -> Arc<SelectionSpacing> {
+fn layout(app: &LizardApp, ctx: &egui::Context, ids: &[NodeId]) -> Arc<SelectionSpacing> {
     let Ok(ds) = app.session.ds() else { return Arc::new(SelectionSpacing::default()) };
     let key = Id::new("selection_spacing_layout");
     let frame = ctx.cumulative_frame_nr();
@@ -52,7 +52,7 @@ fn layout(app: &FigApp, ctx: &egui::Context, ids: &[NodeId]) -> Arc<SelectionSpa
     });
     layout
 }
-fn reorder_layout(app: &FigApp, ctx: &egui::Context, ids: &[NodeId]) -> Option<Arc<ReorderLayout>> {
+fn reorder_layout(app: &LizardApp, ctx: &egui::Context, ids: &[NodeId]) -> Option<Arc<ReorderLayout>> {
     layout(app, ctx, ids);
     ctx.data(|d| d.get_temp::<LayoutCache>(Id::new("selection_spacing_layout"))).and_then(|c| c.reorder)
 }
@@ -64,7 +64,7 @@ fn drag_id() -> Id {
 /// The reorder ring of a layer with world bounds `b`: its centre on screen and hit radius. The
 /// radius is 8 px, at most a quarter of the layer's smaller side on screen, so most of a small
 /// layer still drags the selection; a layer under 16 px on screen has no ring.
-fn ring(app: &FigApp, b: figcraft_geom::Rect) -> Option<(Pos2, f32)> {
+fn ring(app: &LizardApp, b: lizard_geom::Rect) -> Option<(Pos2, f32)> {
     let zoom = app.session.ds().map_or(1.0, |d| d.view.zoom);
     let side = ((b.x1 - b.x0).min(b.y1 - b.y0) * zoom) as f32;
     (side >= 16.0).then(|| (app.to_screen((b.x0 + b.x1) * 0.5, (b.y0 + b.y1) * 0.5), (side / 4.0).min(8.0)))
@@ -86,7 +86,7 @@ struct Drag {
     moved: bool,
 }
 
-fn start_drag(app: &mut FigApp, ctx: &egui::Context, ids: Vec<NodeId>, p: Pos2, action: Action) {
+fn start_drag(app: &mut LizardApp, ctx: &egui::Context, ids: Vec<NodeId>, p: Pos2, action: Action) {
     let label = match action {
         Action::Spacing { .. } => tr("Spacing"),
         Action::Reorder { .. } => tr("Reorder selection"),
@@ -107,7 +107,7 @@ fn start_drag(app: &mut FigApp, ctx: &egui::Context, ids: Vec<NodeId>, p: Pos2, 
     }
 }
 
-pub fn panel(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId]) {
+pub fn panel(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId]) {
     let layout = layout(app, ui.ctx(), ids);
     if layout.horizontal.is_none() && layout.vertical.is_none() {
         return;
@@ -134,13 +134,13 @@ struct Handle {
     hit: Rect,
 }
 
-fn bounds(doc: &Document, ids: &[NodeId]) -> Option<figcraft_geom::Rect> {
+fn bounds(doc: &Document, ids: &[NodeId]) -> Option<lizard_geom::Rect> {
     ids.iter().filter_map(|id| doc.world_bounds(*id)).reduce(|a, b| a.union(b))
 }
 
-fn handles(app: &FigApp, axis: &Axis) -> Vec<Handle> {
+fn handles(app: &LizardApp, axis: &Axis) -> Vec<Handle> {
     let Ok(doc) = app.session.doc() else { return vec![] };
-    let cross = |b: figcraft_geom::Rect| if axis.vertical { (b.x0, b.x1) } else { (b.y0, b.y1) };
+    let cross = |b: lizard_geom::Rect| if axis.vertical { (b.x0, b.x1) } else { (b.y0, b.y1) };
     let mut out = Vec::new();
     for pair in axis.tracks.windows(2) {
         let Some((a, b)) = pair.first().zip(pair.get(1)) else { continue };
@@ -172,25 +172,25 @@ fn handles(app: &FigApp, axis: &Axis) -> Vec<Handle> {
     out
 }
 
-fn available(app: &FigApp) -> bool {
+fn available(app: &LizardApp) -> bool {
     app.ui.right_tab == crate::RightTab::Design
         && app.ui.picker.is_none()
-        && app.session.tool.tool == figcraft_engine::ToolId::Move
+        && app.session.tool.tool == lizard_engine::ToolId::Move
         && !app.session.tool.busy()
         && app.session.ds().is_ok_and(|d| d.text_edit.is_none() && d.vector_edit.is_none())
 }
 
-pub fn cancel(app: &mut FigApp, ctx: &egui::Context) -> bool {
+pub fn cancel(app: &mut LizardApp, ctx: &egui::Context) -> bool {
     let drag = ctx.data(|d| d.get_temp::<Drag>(drag_id()));
     if let Some(drag) = &drag {
-        figcraft_engine::selection_spacing::cancel_gesture(&mut app.session, drag.uid);
+        lizard_engine::selection_spacing::cancel_gesture(&mut app.session, drag.uid);
         ctx.data_mut(|d| d.remove::<Drag>(drag_id()));
     }
     drag.is_some()
 }
 
 /// Retire handles when another document, page, tool or editing context takes over.
-pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
+pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
     if let Some(drag) = ctx.data(|d| d.get_temp::<Drag>(drag_id())) {
         let same = app.session.ds().is_ok_and(|d| d.uid == drag.uid && d.page == drag.page && d.selection == drag.ids && d.interaction.is_some());
         if !same || !available(app) {
@@ -200,7 +200,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// Called before canvas pointer dispatch, also when the pointer leaves the canvas/window.
-pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Option<Pos2>, hovered: bool, space: bool) -> bool {
+pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Option<Pos2>, hovered: bool, space: bool) -> bool {
     let dragging = ctx.data(|d| d.get_temp::<Drag>(drag_id()));
     if let Some(mut drag) = dragging {
         let same = app.session.ds().is_ok_and(|d| d.uid == drag.uid && d.page == drag.page && d.selection == drag.ids && d.interaction.is_some());
@@ -245,7 +245,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Option<Pos2>, hovered: 
                         .slots
                         .iter()
                         .min_by(|a, b| {
-                            let center = |b: figcraft_geom::Rect| app.to_screen((b.x0 + b.x1) * 0.5, (b.y0 + b.y1) * 0.5);
+                            let center = |b: lizard_geom::Rect| app.to_screen((b.x0 + b.x1) * 0.5, (b.y0 + b.y1) * 0.5);
                             center(a.1).distance_sq(p).total_cmp(&center(b.1).distance_sq(p))
                         })
                         .map(|(id, _)| *id)
@@ -318,7 +318,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Option<Pos2>, hovered: 
     false
 }
 
-pub fn draw(app: &FigApp, painter: &egui::Painter) {
+pub fn draw(app: &LizardApp, painter: &egui::Painter) {
     let ctx = painter.ctx();
     let drag = ctx.data(|d| d.get_temp::<Drag>(drag_id()));
     if !available(app) && drag.is_none() {
@@ -378,16 +378,16 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 mod cache_tests {
     use super::*;
     use crate::NoServices;
-    use figcraft_engine::Session;
+    use lizard_engine::Session;
 
-    fn setup() -> (FigApp, egui::Context, Vec<NodeId>) {
+    fn setup() -> (LizardApp, egui::Context, Vec<NodeId>) {
         let mut session = Session::new();
         let mut ids = Vec::new();
         for x in [0, 80, 160] {
             ids.push(NodeId(session.execute("shape.rectangle", &json!({"x":x,"width":50,"height":50})).unwrap()["id"].as_u64().unwrap()));
         }
         session.execute("select.set", &json!({"ids":ids})).unwrap();
-        (FigApp::new(session, Box::new(NoServices)), egui::Context::default(), ids)
+        (LizardApp::new(session, Box::new(NoServices)), egui::Context::default(), ids)
     }
 
     #[test]

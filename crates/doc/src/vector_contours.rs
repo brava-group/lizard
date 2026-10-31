@@ -6,8 +6,8 @@
 
 use std::collections::VecDeque;
 
-use figcraft_geom::kurbo::ParamCurve;
-use figcraft_geom::{BezPath, Point, Shape};
+use lizard_geom::kurbo::ParamCurve;
+use lizard_geom::{BezPath, Point, Shape};
 
 use crate::VectorNetwork;
 
@@ -121,7 +121,7 @@ impl VectorNetwork {
 
 #[cfg(test)]
 mod tests {
-    use figcraft_geom::Point;
+    use lizard_geom::Point;
 
     use crate::{Segment, VectorNetwork, Vertex};
 

@@ -4,14 +4,14 @@
 use std::sync::mpsc::{Receiver, channel};
 
 use egui::{RawInput, ViewportEvent, ViewportId, ViewportInfo};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use crate::control::{ControlReply, ControlRequest};
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 /// One main-window frame, as the desktop app runs it; `close` asks the window to close.
-fn frame(ctx: &egui::Context, app: &mut FigApp, close: bool) {
+fn frame(ctx: &egui::Context, app: &mut LizardApp, close: bool) {
     let mut input = RawInput::default();
     if close {
         input.viewports.insert(ViewportId::ROOT, ViewportInfo { events: vec![ViewportEvent::Close], ..Default::default() });
@@ -25,7 +25,7 @@ fn frame(ctx: &egui::Context, app: &mut FigApp, close: bool) {
 }
 
 /// A control request queued for the UI, and where its reply arrives.
-fn request(app: &mut FigApp, method: &str, params: Value) -> Receiver<ControlReply> {
+fn request(app: &mut LizardApp, method: &str, params: Value) -> Receiver<ControlReply> {
     let (reply, rx) = channel();
     app.control_queue.push(ControlRequest { id: json!(1), method: method.into(), params, reply, cancelled: Default::default(), agent_guard: None });
     rx
@@ -33,7 +33,7 @@ fn request(app: &mut FigApp, method: &str, params: Value) -> Receiver<ControlRep
 
 /// The desktop app's logic as eframe runs it for the main window, with each window's visibility
 /// (`hidden`: minimised or covered). While the main window is hidden too this is all that runs.
-fn logic(ctx: &egui::Context, app: &mut FigApp, hidden: &[ViewportId]) {
+fn logic(ctx: &egui::Context, app: &mut LizardApp, hidden: &[ViewportId]) {
     let mut input = RawInput::default();
     for id in std::iter::once(ViewportId::ROOT).chain(app.windows.list.iter().map(|w| crate::windows::viewport(w.id))) {
         input.viewports.insert(id, ViewportInfo { minimized: Some(false), occluded: Some(hidden.contains(&id)), ..Default::default() });
@@ -41,7 +41,7 @@ fn logic(ctx: &egui::Context, app: &mut FigApp, hidden: &[ViewportId]) {
     let _ = ctx.run_logic(&input, |ctx| crate::control::drain_hidden(app, ctx));
 }
 
-fn names(app: &FigApp) -> Vec<String> {
+fn names(app: &LizardApp) -> Vec<String> {
     app.session.docs.iter().map(|d| d.doc.name.clone()).collect()
 }
 
@@ -50,7 +50,7 @@ fn closing_a_window_in_the_presenter_shows_the_unsaved_changes_dialog() {
     let mut session = Session::new();
     let frame_id = session.execute("node.create", &json!({"type": "frame", "width": 402, "height": 874})).unwrap()["id"].clone();
     let ctx = egui::Context::default();
-    let mut app = FigApp::new(session, Box::new(NoServices));
+    let mut app = LizardApp::new(session, Box::new(NoServices));
     frame(&ctx, &mut app, false);
     app.session.execute("proto.present", &json!({"start": frame_id})).unwrap();
     app.handle_ui_requests();
@@ -73,7 +73,7 @@ fn windows_hold_tabs_and_close_with_their_files() {
     let ctx = egui::Context::default();
     // As eframe does where windows are native.
     ctx.set_embed_viewports(false);
-    let mut app = FigApp::new(s, Box::new(NoServices));
+    let mut app = LizardApp::new(s, Box::new(NoServices));
     frame(&ctx, &mut app, false);
     let w = crate::control::handle(&mut app, &ctx, "window.new", &json!({"index": 0})).unwrap()["window"].as_u64().unwrap();
     frame(&ctx, &mut app, false);
@@ -112,13 +112,13 @@ fn another_hidden_window_answers_requests_that_need_no_frame_in_its_own_file() {
     }
     let ctx = egui::Context::default();
     ctx.set_embed_viewports(false);
-    let mut app = FigApp::new(s, Box::new(NoServices));
+    let mut app = LizardApp::new(s, Box::new(NoServices));
     frame(&ctx, &mut app, false);
     let w = crate::control::handle(&mut app, &ctx, "window.new", &json!({"index": 0})).unwrap()["window"].as_u64().unwrap();
     frame(&ctx, &mut app, false);
     let other = crate::windows::viewport(w);
     let rect = |size: u32| json!({"window": w, "command": "shape.rectangle", "params": {"x": 0, "y": 0, "width": size, "height": size}});
-    let dirty = |app: &FigApp, name: &str| app.session.docs.iter().find(|d| d.doc.name == name).unwrap().is_dirty();
+    let dirty = |app: &LizardApp, name: &str| app.session.docs.iter().find(|d| d.doc.name == name).unwrap().is_dirty();
 
     // The main window is on screen, the other one covered: the request to it is answered in its
     // file (A), and the main window keeps showing its own (B).
@@ -153,7 +153,7 @@ fn a_request_for_a_window_on_screen_wakes_it_while_the_main_window_is_hidden() {
     }
     let ctx = egui::Context::default();
     ctx.set_embed_viewports(false);
-    let mut app = FigApp::new(s, Box::new(NoServices));
+    let mut app = LizardApp::new(s, Box::new(NoServices));
     frame(&ctx, &mut app, false);
     let w = crate::control::handle(&mut app, &ctx, "window.new", &json!({"index": 0})).unwrap()["window"].as_u64().unwrap();
     frame(&ctx, &mut app, false);

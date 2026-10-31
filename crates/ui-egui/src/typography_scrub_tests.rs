@@ -1,13 +1,13 @@
 //! Regression for #373: actual pointer gestures on the Typography section's spacing icons.
 use egui::{Event, Id, Modifiers, Pos2, RawInput, Rect, vec2};
-use figcraft_doc::{LetterSpacing, LineHeight, NodeId};
-use figcraft_engine::Session;
+use lizard_doc::{LetterSpacing, LineHeight, NodeId};
+use lizard_engine::Session;
 use serde_json::json;
 
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 struct Fields {
-    app: FigApp,
+    app: LizardApp,
     ctx: egui::Context,
     time: f64,
     text: NodeId,
@@ -21,7 +21,7 @@ impl Fields {
                 .unwrap(),
         );
         s.execute("select.set", &json!({"ids":[text]})).unwrap();
-        let mut f = Self { app: FigApp::new(s, Box::new(NoServices)), ctx: egui::Context::default(), time: 0.0, text };
+        let mut f = Self { app: LizardApp::new(s, Box::new(NoServices)), ctx: egui::Context::default(), time: 0.0, text };
         crate::theme::install_fonts(&f.ctx, false, 0);
         crate::theme::apply(&f.ctx, crate::theme::Tokens::light());
         for _ in 0..3 {
@@ -172,8 +172,8 @@ fn typography_icon_scrub_converts_auto_and_does_not_replace_mixed_values() {
 fn typography_icon_scrub_changes_only_the_selected_characters_without_ending_text_editing() {
     let mut f = Fields::new();
     let undo = f.app.session.undo_depth().0;
-    figcraft_engine::textedit::begin(&mut f.app.session, f.text, Some(1), false).unwrap();
-    figcraft_engine::textedit::set_caret(&mut f.app.session, 4, true).unwrap();
+    lizard_engine::textedit::begin(&mut f.app.session, f.text, Some(1), false).unwrap();
+    lizard_engine::textedit::set_caret(&mut f.app.session, 4, true).unwrap();
     f.frame(vec![], Modifiers::NONE);
     f.drag("ty_ls", 16.0, Modifiers::NONE);
     let t = f.app.session.doc().unwrap().node(f.text).unwrap().kind.text().unwrap();
@@ -182,7 +182,7 @@ fn typography_icon_scrub_changes_only_the_selected_characters_without_ending_tex
     assert_eq!(t.style_at(4).letter_spacing, LetterSpacing::Pixels(0.0));
     assert!(f.app.session.ds().unwrap().text_edit.is_some());
     assert_eq!(f.app.session.undo_depth().0, undo);
-    figcraft_engine::textedit::end(&mut f.app.session).unwrap();
+    lizard_engine::textedit::end(&mut f.app.session).unwrap();
     assert_eq!(f.app.session.undo_depth().0, undo + 1);
     f.app.session.undo().unwrap();
     assert_eq!(f.value("ty_ls"), 0.0);

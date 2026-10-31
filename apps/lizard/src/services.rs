@@ -1,0 +1,585 @@
+//! Desktop services: native file dialogs, clipboard, URLs, persisted preferences.
+
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use lizard_engine::{Prefs, Session};
+use lizard_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
+use lizard_ui_egui::{ControlRequest, DialogFuture, LizardApp, Services};
+use serde_json::{Value, json};
+
+type ControlQueue = Arc<Mutex<Vec<ControlRequest>>>;
+type ContextSlot = Arc<Mutex<Option<egui::Context>>>;
+
+pub struct Desktop {
+    clipboard: Option<arboard::Clipboard>,
+    /// Where the preferences live ([`config_dir`]).
+    dir: Option<PathBuf>,
+    pub prefs: Option<Prefs>,
+    /// The system's reduce-motion setting (read in the background at startup).
+    reduce_motion: Arc<AtomicBool>,
+    /// The system's interface language (read at startup).
+    language: Option<String>,
+    /// Recovery copies of unsaved files (written at once after a panic).
+    recovery: crate::recovery::Shared,
+    agents: Vec<crate::agent::Agent>,
+    agent_control: Option<(ControlQueue, ContextSlot)>,
+    agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
+    agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
+    agent_model_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
+}
+
+pub fn config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"));
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    base.map(|b| b.join("Lizard"))
+}
+
+impl Desktop {
+    pub fn load(recovery: crate::recovery::Shared) -> Self {
+        let dir = config_dir();
+        if let Some(current) = &dir {
+            let current_state = current.join(STATE);
+            if !current_state.exists()
+                && let Some(legacy) = current.parent().map(|base| base.join("Lizard").join(STATE))
+                && let Ok(bytes) = std::fs::read(legacy)
+                && std::fs::create_dir_all(current).is_ok()
+            {
+                let _ = std::fs::write(current_state, bytes);
+            }
+        }
+        Self::load_from(dir, recovery)
+    }
+
+    /// With the preferences kept in `dir`.
+    pub fn load_from(dir: Option<PathBuf>, recovery: crate::recovery::Shared) -> Self {
+        let state: Value =
+            dir.as_ref().and_then(|d| std::fs::read_to_string(d.join(STATE)).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+        let prefs = state.get("prefs").and_then(|p| serde_json::from_value::<Prefs>(p.clone()).ok()).map(|mut p| {
+            // Older builds saved the inherited public server as a preference. Do not reconnect
+            // to it implicitly after Lizard moves to user-configured hosting.
+            if p.publish_server == "wss://collab.craftapps.dev/" {
+                p.publish_server.clear();
+            }
+            // Recent files lived next to the preferences before they moved into them.
+            if p.recent_files.is_empty()
+                && let Some(old) = state.get("recents").and_then(Value::as_array)
+            {
+                p.recent_files = old.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+            }
+            p.recent_files.truncate(lizard_engine::cmd::file::MAX_RECENT);
+            p
+        });
+        let reduce_motion = Arc::new(AtomicBool::new(false));
+        let flag = reduce_motion.clone();
+        std::thread::spawn(move || flag.store(system_reduce_motion(), Ordering::Relaxed));
+        Self {
+            clipboard: arboard::Clipboard::new().ok(),
+            dir,
+            prefs,
+            reduce_motion,
+            language: system_language(),
+            recovery,
+            agents: Vec::new(),
+            agent_control: None,
+            agent_bridges: Vec::new(),
+            agent_login_events: None,
+            agent_model_events: None,
+        }
+    }
+
+    pub fn configure_agent(&mut self, queue: ControlQueue, context: ContextSlot) {
+        self.agent_control = Some((queue, context));
+    }
+
+    fn agent_port(&mut self, document: u64, index: usize) -> Result<u16, String> {
+        let Some((queue, context)) = &self.agent_control else { return Err("O canal de controle não está disponível".into()) };
+        let bridge = if index == 0 {
+            crate::control_server::start_agent(document, queue.clone(), context.clone())
+        } else {
+            crate::control_server::start_agent_scoped(document, index, queue.clone(), context.clone())
+        };
+        let (port, enabled) = bridge.ok_or("Não foi possível abrir o canal de controle do Lizard")?;
+        self.agent_bridges.push((port, enabled));
+        Ok(port)
+    }
+}
+
+/// The system's preferred interface languages, most preferred first, comma-separated
+/// ("nl-NL,de-DE,en-US"): Windows' language list, macOS's AppleLanguages, `LANGUAGE` and the
+/// locale variables elsewhere. The UI shows the first language in the list that has a catalog.
+/// Windows keeps only its first preferred language (and English when it has no catalog): that
+/// list is also the input-language list, so a language added for a keyboard (Deutsch on a Polish
+/// system) must not decide the interface language.
+fn system_language() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::System::UserProfile::GlobalizationPreferences::Languages()
+            .and_then(|l| l.GetAt(0))
+            .map(|s| s.to_string())
+            .inspect_err(|e| log::info!("language: can't read the system languages: {e}"))
+            .ok()
+    }
+    // `defaults` prints a list: ( "es-ES", en ).
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output().ok()?;
+        let list: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .split(['(', ',', ')'])
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        Some(list.join(","))
+    }
+    // gettext's `LANGUAGE` priority list ("fr:de"), then the locale ("fr_FR.UTF-8").
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty() && v != "C" && v != "POSIX");
+        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().find_map(var);
+        let list: Vec<String> = var("LANGUAGE").map(|l| l.replace(':', ",")).into_iter().chain(locale).collect();
+        (!list.is_empty()).then(|| list.join(","))
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        None
+    }
+}
+
+/// Whether the system's accessibility settings ask for reduced motion: Windows' animation
+/// effects (`UISettings.AnimationsEnabled`), macOS's Reduce motion, GNOME's animations.
+fn system_reduce_motion() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        match windows::UI::ViewManagement::UISettings::new().and_then(|s| s.AnimationsEnabled()) {
+            Ok(on) => !on,
+            Err(e) => {
+                log::info!("reduce motion: can't read the animation setting: {e}");
+                false
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        command_says("defaults", &["read", "com.apple.universalaccess", "reduceMotion"], "1")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        command_says("gsettings", &["get", "org.gnome.desktop.interface", "enable-animations"], "false")
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        false
+    }
+}
+
+/// Whether `program args` runs and prints `want` (trimmed).
+#[cfg(unix)]
+fn command_says(program: &str, args: &[&str], want: &str) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == want)
+}
+
+/// Show `path` in the file manager: selected in Finder and Explorer, its folder elsewhere.
+fn reveal(path: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(path);
+        c
+    };
+    #[cfg(windows)]
+    let mut command = {
+        let mut arg = std::ffi::OsString::from("/select,");
+        arg.push(path);
+        let mut c = std::process::Command::new("explorer");
+        c.arg(arg);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(path.parent().unwrap_or(path));
+        c
+    };
+    // The file manager keeps running; reap it off this thread so it leaves no zombie.
+    let mut child = command.spawn()?;
+    let _ = std::thread::Builder::new().name("lizard-reveal".into()).spawn(move || child.wait());
+    Ok(())
+}
+
+/// The preferences' file in the config folder.
+const STATE: &str = "state.json";
+
+/// Everything quitting keeps, all done when it returns (macOS then ends the process): the
+/// preferences in `dir`, this run's recovery copies ([`Recovery::quit`](crate::recovery::Recovery::quit))
+/// and the live sessions' ends (one this app hosts tells everyone and stops; a joined one leaves).
+pub fn shutdown(app: &mut LizardApp, dir: Option<&Path>, recovery: Option<crate::recovery::Recovery>) {
+    if let Some(dir) = dir {
+        write_prefs(dir, &app.session.prefs);
+    }
+    // Before the sessions end: a recovered online file's copy waits for its session's outcome.
+    if let Some(r) = recovery {
+        r.quit(&app.session, app.ui.quit);
+    }
+    drop(std::mem::take(&mut app.session.live));
+}
+
+/// Write `prefs` to `dir` atomically (a temporary file renamed over the old one: a crash leaves
+/// either version whole). They hold online owner tokens, so on Unix only the owner can read them.
+pub(crate) fn write_prefs(dir: &Path, prefs: &Prefs) {
+    let tmp = dir.join("state.json.tmp");
+    let written = std::fs::create_dir_all(dir)
+        .and_then(|()| write_private(&tmp, json!({"prefs": prefs}).to_string().as_bytes()))
+        .and_then(|()| std::fs::rename(&tmp, dir.join(STATE)));
+    if let Err(e) = written {
+        log::warn!("preferences: couldn't save them in {}: {e}", dir.display());
+    }
+}
+
+/// Write `bytes` to `path`, owner read/write only on Unix from before the first byte (a leftover
+/// file from a crash is narrowed too: the mode given at open only applies to new files).
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    let mut f = o.open(path)?;
+    #[cfg(unix)]
+    f.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    f.write_all(bytes)
+}
+
+thread_local! {
+    /// While the main window draws: a dialog parented to it, so a dialog opened from it stays in
+    /// front of it (a sheet on macOS). eframe gives other windows no handle: theirs have no parent.
+    static PARENT: RefCell<Option<rfd::AsyncFileDialog>> = const { RefCell::new(None) };
+}
+
+/// Run the main window's frame `f` with the dialogs it opens parented to `frame`'s window.
+pub fn parented<R>(frame: &eframe::Frame, f: impl FnOnce() -> R) -> R {
+    PARENT.with(|p| p.replace(Some(rfd::AsyncFileDialog::new().set_parent(frame))));
+    let r = f();
+    PARENT.with(|p| p.replace(None));
+    r
+}
+
+/// A dialog with `title`, parented to the main window while it draws.
+fn dialog(title: &str) -> rfd::AsyncFileDialog {
+    PARENT.with(|p| p.borrow().clone()).unwrap_or_default().set_title(title)
+}
+
+/// The dialog opens now; its future gives the path picked.
+fn picked(pick: impl Future<Output = Option<rfd::FileHandle>> + 'static) -> DialogFuture {
+    Box::pin(async move { pick.await.map(|f| f.path().to_path_buf()) })
+}
+
+/// How long a clipboard read may wait on the app that copied (Linux and the BSDs).
+#[cfg(all(unix, not(target_os = "macos")))]
+const CLIPBOARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Read the clipboard. On Linux and the BSDs the read runs on a helper thread with its own handle
+/// and gives up after [`CLIPBOARD_TIMEOUT`]: a Wayland read waits on the app that copied with no
+/// timeout of its own, so an app that hangs must not hang the window too.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn read_clipboard<T: Send + 'static>(_: &mut arboard::Clipboard, read: fn(&mut arboard::Clipboard) -> Option<T>) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(arboard::Clipboard::new().ok().and_then(|mut c| read(&mut c)));
+    });
+    rx.recv_timeout(CLIPBOARD_TIMEOUT).ok().flatten()
+}
+
+/// Read the clipboard (the system's own reads don't wait on the app that copied).
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn read_clipboard<T>(c: &mut arboard::Clipboard, read: fn(&mut arboard::Clipboard) -> Option<T>) -> Option<T> {
+    read(c)
+}
+
+/// Native Save as filters; other callers keep their existing combined filter.
+fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
+    if exts == ["lizard", "fig"] {
+        vec![("Lizard (.lizard)", &exts[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &exts[1..])]
+    } else {
+        vec![("File", exts)]
+    }
+}
+
+impl Services for Desktop {
+    fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
+        let count = usize::from(prompt.agent_count.clamp(1, 6));
+        if !self.agents.is_empty()
+            && (self.agents.len() != count
+                || self.agents.iter().any(|agent| agent.document != document || agent.kind != kind || agent.conversation != prompt.conversation))
+        {
+            self.agent_reset();
+        }
+        if self.agents.is_empty() {
+            let cli = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|parent| parent.join(if cfg!(windows) { "lizard-cli.exe" } else { "lizard-cli" })))
+                .filter(|p| p.is_file())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "lizard-cli".into());
+            let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
+            std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
+            for index in 0..count {
+                let port = match self.agent_port(document, index) {
+                    Ok(port) => port,
+                    Err(error) => {
+                        self.agent_reset();
+                        return Err(error);
+                    }
+                };
+                match crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli) {
+                    Ok(agent) => self.agents.push(agent),
+                    Err(error) => {
+                        self.agent_reset();
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        for index in 0..self.agents.len() {
+            let mut assigned = prompt.clone();
+            if count > 1 {
+                let role = match prompt.parallel_mode {
+                    lizard_ui_egui::agent_panel::ParallelMode::SideBySide => format!(
+                        "Você é o agente {} de {}. Crie uma versão completa e independente do pedido. Trabalhe em um novo frame raiz identificado como 'Alternativa {}'. Preserve os frames dos outros agentes e não altere o trabalho deles.",
+                        index + 1,
+                        count,
+                        index + 1
+                    ),
+                    lizard_ui_egui::agent_panel::ParallelMode::Split => format!(
+                        "Você é o agente {} de {}. Faça uma parte distinta e proporcional do trabalho pedido. Identifique claramente sua parte antes de editar. Não altere as partes dos outros agentes. Ao terminar, informe qual parte fez.",
+                        index + 1,
+                        count
+                    ),
+                };
+                assigned.text.push_str("\n\nCoordenação da rodada: ");
+                assigned.text.push_str(&role);
+                assigned.resume = prompt.resumes.get(index).cloned().flatten().or_else(|| if index == 0 { prompt.resume.clone() } else { None });
+            }
+            if let Err(error) = self.agents[index].send(assigned) {
+                self.agent_reset();
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn agent_poll(&mut self) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        for (index, agent) in self.agents.iter().enumerate() {
+            for event in agent.poll() {
+                if self.agents.len() > 1 {
+                    events.push(AgentEvent::Scoped { index, event: Box::new(event) });
+                } else {
+                    events.push(event);
+                }
+            }
+        }
+        if let Some(login) = &self.agent_login_events {
+            events.extend(login.try_iter().take(20));
+        }
+        if let Some(models) = &self.agent_model_events {
+            events.extend(models.try_iter().take(20));
+        }
+        events
+    }
+
+    fn agent_connection(&mut self, kind: AgentKind) -> lizard_ui_egui::agent_panel::AgentConnection {
+        let Some(program) = crate::agent::program(kind) else {
+            return lizard_ui_egui::agent_panel::AgentConnection {
+                installed: false,
+                authenticated: false,
+                detail: format!("{} não está instalado neste computador", kind.label()),
+            };
+        };
+        if kind == AgentKind::Codex {
+            let status = std::process::Command::new(program).args(["login", "status"]).output();
+            let authenticated = status.as_ref().is_ok_and(|output| output.status.success());
+            lizard_ui_egui::agent_panel::AgentConnection {
+                installed: true,
+                authenticated,
+                detail: if authenticated { "ChatGPT conectado".into() } else { "Entre com sua conta ChatGPT".into() },
+            }
+        } else {
+            lizard_ui_egui::agent_panel::AgentConnection {
+                installed: true,
+                authenticated: true,
+                detail: format!("{} disponível via ACP", kind.label()),
+            }
+        }
+    }
+
+    fn agent_login(&mut self) -> Result<(), String> {
+        let (send, receive) = std::sync::mpsc::channel();
+        crate::agent::login_codex(send)?;
+        self.agent_login_events = Some(receive);
+        Ok(())
+    }
+
+    fn agent_request_models(&mut self, kind: AgentKind) {
+        if kind == AgentKind::Codex {
+            let (send, receive) = std::sync::mpsc::channel();
+            if let Err(error) = crate::agent::request_codex_models(send) {
+                log::warn!("codex models: {error}");
+            } else {
+                self.agent_model_events = Some(receive);
+            }
+        }
+    }
+
+    fn agent_stop(&mut self) {
+        for agent in &self.agents {
+            agent.stop();
+        }
+    }
+
+    fn agent_reset(&mut self) {
+        self.agents.clear();
+        for (_, enabled) in self.agent_bridges.drain(..) {
+            enabled.store(false, Ordering::Release);
+        }
+    }
+
+    fn agent_permission(&mut self, id: Value, option: Option<String>) {
+        let index = id.get("agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0);
+        let request = id.get("request").cloned().unwrap_or(id);
+        if let Some(agent) = self.agents.get(index) {
+            agent.permission(request, option);
+        }
+    }
+
+    fn agent_history_load(&mut self) -> Value {
+        self.dir
+            .as_ref()
+            .and_then(|dir| std::fs::read(dir.join("agent-chats.json")).ok())
+            .filter(|bytes| bytes.len() <= 8 * 1024 * 1024)
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(Value::Null)
+    }
+
+    fn agent_history_save(&mut self, history: &Value) {
+        if let Some(dir) = &self.dir
+            && let Ok(bytes) = serde_json::to_vec(history)
+            && bytes.len() <= 8 * 1024 * 1024
+            && let Err(error) = std::fs::create_dir_all(dir)
+                .and_then(|()| write_private(&dir.join("agent-chats.json.tmp"), &bytes))
+                .and_then(|()| std::fs::rename(dir.join("agent-chats.json.tmp"), dir.join("agent-chats.json")))
+        {
+            log::warn!("agent chat history: {error}");
+        }
+    }
+    fn pick_open(&mut self, title: &str, exts: &[&str]) -> DialogFuture {
+        picked(dialog(title).add_filter("Supported files", exts).pick_file())
+    }
+    fn pick_save(&mut self, title: &str, name: &str, exts: &[&str]) -> DialogFuture {
+        let mut dialog = dialog(title).set_file_name(name);
+        for (label, extensions) in save_filters(exts) {
+            dialog = dialog.add_filter(label, extensions);
+        }
+        picked(dialog.save_file())
+    }
+    fn pick_folder(&mut self, title: &str) -> DialogFuture {
+        picked(dialog(title).pick_folder())
+    }
+    fn clipboard_set_text(&mut self, s: &str) {
+        if let Some(c) = self.clipboard.as_mut() {
+            let _ = c.set_text(s.to_string());
+        }
+    }
+    fn clipboard_get_text(&mut self) -> Option<String> {
+        read_clipboard(self.clipboard.as_mut()?, |c| c.get_text().ok())
+    }
+    fn clipboard_get_html(&mut self) -> Option<String> {
+        read_clipboard(self.clipboard.as_mut()?, |c| c.get().html().ok())
+    }
+    fn clipboard_set_png(&mut self, w: u32, h: u32, rgba: &[u8]) {
+        if let Some(c) = self.clipboard.as_mut() {
+            let _ = c.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(rgba) });
+        }
+    }
+    fn clipboard_get_image(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        let img = read_clipboard(self.clipboard.as_mut()?, |c| c.get_image().ok())?;
+        let (w, h) = (u32::try_from(img.width).ok()?, u32::try_from(img.height).ok()?);
+        // Refuse absurd sizes (and mismatched buffers) rather than allocate.
+        if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 100_000_000 || img.bytes.len() != (w as usize) * (h as usize) * 4 {
+            return None;
+        }
+        Some((w, h, img.bytes.into_owned()))
+    }
+    fn open_url(&mut self, url: &str) {
+        let _ = webbrowser::open(url);
+    }
+    fn reveal_path(&mut self, path: &Path) {
+        if let Err(e) = reveal(path) {
+            log::warn!("show in folder: {}: {e}", path.display());
+        }
+    }
+    fn save_prefs(&mut self, prefs: &Prefs) {
+        if let Some(dir) = &self.dir {
+            write_prefs(dir, prefs);
+        }
+    }
+    fn emergency_save(&mut self, session: &Session) {
+        if let Some(r) = crate::recovery::lock(&self.recovery).as_mut() {
+            r.write(session, true);
+            // Earlier runs' copies now covered go, so the next start doesn't open them twice.
+            r.settle(session);
+        }
+    }
+    fn reduce_motion(&self) -> bool {
+        self.reduce_motion.load(Ordering::Relaxed)
+    }
+    fn gamepad_held(&mut self) -> u32 {
+        crate::gamepad::held()
+    }
+    fn system_language(&self) -> Option<String> {
+        self.language.clone()
+    }
+}
+
+/// The window icon from the bundled app icon (if present).
+pub fn window_icon() -> Option<egui::IconData> {
+    // The macOS icon includes its own rounded tile and transparent Dock margin.
+    #[cfg(target_os = "macos")]
+    let bytes = include_bytes!("../../../assets/app-icon/lizard-256.png");
+    #[cfg(not(target_os = "macos"))]
+    let bytes = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/com.brava.lizard.png");
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some(egui::IconData { rgba: img.into_raw(), width: w, height: h })
+}
+
+#[cfg(test)]
+mod save_filter_tests {
+    use super::save_filters;
+
+    #[test]
+    fn native_and_fig_save_filters_are_separate_with_native_first() {
+        let extensions = ["lizard", "fig"];
+        assert_eq!(
+            save_filters(&extensions),
+            vec![("Lizard (.lizard)", &extensions[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &extensions[1..])]
+        );
+    }
+
+    #[test]
+    fn other_save_filters_keep_one_combined_group() {
+        for extensions in [&["lizard"][..], &["fig"][..], &["png"][..], &["png", "jpg", "webp"][..], &[][..]] {
+            assert_eq!(save_filters(extensions), vec![("File", extensions)]);
+        }
+    }
+}

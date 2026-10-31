@@ -2,11 +2,11 @@
 //! default area width, and stay inside the window: drawn headless.
 
 use egui::{Color32, Event, Order, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 
 use crate::right::{menu_item, menu_popup};
 use crate::theme::{medium, regular};
-use crate::{FigApp, NoServices, RightTab};
+use crate::{LizardApp, NoServices, RightTab};
 
 const SCREEN: egui::Vec2 = vec2(1440.0, 900.0);
 
@@ -74,11 +74,11 @@ fn a_menu_is_as_wide_as_its_widest_row_and_does_not_wrap() {
 
 #[test]
 fn right_panel_dropdown_menus_fit_the_panel() {
-    let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
     app.ui.right_tab = RightTab::Inspect;
     let ctx = egui::Context::default();
     let mut t = 0.0;
-    let mut frame = |app: &mut FigApp, events: Vec<Event>| {
+    let mut frame = |app: &mut LizardApp, events: Vec<Event>| {
         let mut out = ctx.run_ui(input(&mut t, events), |ui| app.ui(ui));
         out.textures_delta.clear();
     };

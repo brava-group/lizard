@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::sync::mpsc;
 
-use figcraft_render::{Pixmap, View};
+use lizard_render::{Pixmap, View};
 
 const SHADER: &str = r#"
 @group(0) @binding(0) var sharp: texture_2d<f32>;

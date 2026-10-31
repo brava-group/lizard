@@ -6,7 +6,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use egui::{CursorIcon, CustomCursorImage, vec2};
-use figcraft_engine::tools::{Cursor, PenCursor};
+use lizard_engine::tools::{Cursor, PenCursor};
 
 /// The engine cursor's visual state.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -371,7 +371,7 @@ impl Shown {
 #[cfg(test)]
 mod tests {
     use super::{Asset, Glyph};
-    use figcraft_engine::tools::PenCursor;
+    use lizard_engine::tools::PenCursor;
 
     #[test]
     fn supplied_cursor_images_decode_and_states_use_the_reference_files() {

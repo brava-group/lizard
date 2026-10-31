@@ -11,7 +11,7 @@ const COMPLETE: &[&str] = &["es"];
 /// Keys looked up from data rather than written as `tr("…")` in the code: the main menu's
 /// submenu names (the engine's menu catalog) and labels of engine and document enums.
 fn dynamic_keys() -> BTreeSet<String> {
-    let mut keys: BTreeSet<String> = figcraft_engine::catalog::MENU.iter().flat_map(|m| m.menu.split('/')).map(str::to_string).collect();
+    let mut keys: BTreeSet<String> = lizard_engine::catalog::MENU.iter().flat_map(|m| m.menu.split('/')).map(str::to_string).collect();
     keys.extend(dynamic_labels().into_iter().map(str::to_string));
     keys
 }
@@ -128,24 +128,24 @@ const DATA_LABELS: &[&str] = &[
 
 /// Labels of engine enums the UI shows through `tr(x.label())`, read from the engine, plus [`DATA_LABELS`].
 fn dynamic_labels() -> Vec<&'static str> {
-    use figcraft_engine::keymap::{GESTURES, Group};
-    let mut v: Vec<&'static str> = figcraft_engine::ToolId::ALL.iter().map(|t| t.label()).collect();
-    v.extend(figcraft_engine::vectoredit::VTool::ALL.iter().map(|t| t.label()));
+    use lizard_engine::keymap::{GESTURES, Group};
+    let mut v: Vec<&'static str> = lizard_engine::ToolId::ALL.iter().map(|t| t.label()).collect();
+    v.extend(lizard_engine::vectoredit::VTool::ALL.iter().map(|t| t.label()));
     v.extend(Group::ALL.iter().map(|g| g.label()));
     v.extend(GESTURES.iter().flat_map(|(_, label, mac, other)| [*label, *mac, *other]));
     v.extend(DATA_LABELS);
-    v.push(figcraft_engine::live::TOO_LARGE_TO_JOIN);
+    v.push(lizard_engine::live::TOO_LARGE_TO_JOIN);
     // The starter templates' names, descriptions and kinds.
-    v.extend(figcraft_engine::templates::TEMPLATES.iter().flat_map(|t| [t.name, t.description, t.kind.label()]));
+    v.extend(lizard_engine::templates::TEMPLATES.iter().flat_map(|t| [t.name, t.description, t.kind.label()]));
     v
 }
 
 /// Ids of main-menu items whose label isn't the command's (besides a closing "…").
 fn menu_worded_differently() -> BTreeSet<&'static str> {
     let bare = |s: &'static str| s.trim_end_matches('…');
-    figcraft_engine::catalog::MENU
+    lizard_engine::catalog::MENU
         .iter()
-        .filter(|m| figcraft_engine::find_command(m.id).is_some_and(|c| bare(c.label) != bare(m.label)))
+        .filter(|m| lizard_engine::find_command(m.id).is_some_and(|c| bare(c.label) != bare(m.label)))
         .map(|m| m.id)
         .collect()
 }
@@ -279,10 +279,10 @@ fn english_text_is_its_key_except_plurals() {
 #[test]
 fn catalogs_have_known_keys_and_matching_placeholders() {
     let en = english();
-    let ids: BTreeSet<&str> = figcraft_engine::all_commands()
+    let ids: BTreeSet<&str> = lizard_engine::all_commands()
         .iter()
         .map(|c| c.id)
-        .chain(figcraft_engine::catalog::MENU.iter().map(|m| m.id).filter(|id| !id.is_empty()))
+        .chain(lizard_engine::catalog::MENU.iter().map(|m| m.id).filter(|id| !id.is_empty()))
         .collect();
     for lang in LANGS {
         assert!(!lang.name.is_empty(), "{}: [meta] name is missing", lang.code);
@@ -332,7 +332,7 @@ fn lookups_fall_back_to_english_and_fill_placeholders() {
 
 #[test]
 fn a_live_failure_the_ui_knows_is_read_back_for_translation() {
-    use figcraft_engine::live::TOO_LARGE_TO_JOIN;
+    use lizard_engine::live::TOO_LARGE_TO_JOIN;
     let reason = TOO_LARGE_TO_JOIN.replace("{mb}", "1024");
     assert!(matches!(crate::live::failure_text(&reason), std::borrow::Cow::Owned(t) if t == reason));
     assert!(matches!(crate::live::failure_text("Couldn't reach the server"), std::borrow::Cow::Borrowed(_)));
@@ -452,7 +452,7 @@ fn georgian_is_a_draft_with_count_neutral_plurals() {
 /// since Inter and egui's fonts have no Georgian: it draws every Georgian letter the catalog uses.
 #[test]
 fn the_built_in_georgian_face_draws_the_georgian_catalog() {
-    let Some(face) = figcraft_text::find_face("Noto Sans Georgian", "Regular").filter(|f| f.family == "Noto Sans Georgian") else {
+    let Some(face) = lizard_text::find_face("Noto Sans Georgian", "Regular").filter(|f| f.family == "Noto Sans Georgian") else {
         eprintln!("built without craft-fonts' Noto Sans Georgian; skipping");
         return;
     };
@@ -578,7 +578,7 @@ fn plural_fallback_uses_the_language_of_its_catalog() {
 
 #[test]
 fn the_language_preference_takes_language_codes() {
-    let mut s = figcraft_engine::Session::new();
+    let mut s = lizard_engine::Session::new();
     assert_eq!(s.prefs.language, "system");
     s.execute("pref.language", &serde_json::json!({"language": "es-419"})).unwrap();
     assert_eq!(s.prefs.language, "es-419");

@@ -6,8 +6,8 @@ use crate::proto::{Interaction, Overflow, ScrollPosition};
 use crate::styles::{CollectionId, ModeId, StyleRefs, VariableId};
 use crate::text::TextData;
 use crate::vector::VectorNetwork;
-use figcraft_color::{BlendMode, Color, Paint};
-use figcraft_geom::Affine;
+use lizard_color::{BlendMode, Color, Paint};
+use lizard_geom::Affine;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -205,7 +205,7 @@ impl DevStatus {
 pub struct Annotation {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub label: String,
-    /// Pinned property ids ("width", "fill", "fontSize"…; `figcraft_engine::annotations` lists
+    /// Pinned property ids ("width", "fill", "fontSize"…; `lizard_engine::annotations` lists
     /// them). Unknown ids are kept and ignored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<String>,
@@ -217,7 +217,7 @@ pub struct Annotation {
 
 /// A main component (or component set) linked to the code component it is built as, in one
 /// language: Dev Mode shows the snippet its template makes instead of generated code
-/// (`figcraft_engine::code_connect`).
+/// (`lizard_engine::code_connect`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeLink {
     /// `react`, `swiftui` or `compose`.
@@ -650,8 +650,8 @@ impl Node {
         (self.width, self.height)
     }
 
-    pub fn local_rect(&self) -> figcraft_geom::Rect {
-        figcraft_geom::Rect::new(0.0, 0.0, self.width, self.height)
+    pub fn local_rect(&self) -> lizard_geom::Rect {
+        lizard_geom::Rect::new(0.0, 0.0, self.width, self.height)
     }
 
     pub fn is_page(&self) -> bool {
@@ -775,24 +775,24 @@ impl Node {
 
     /// The page-space area this node paints itself under `world` (its children aside): its box
     /// grown by its strokes and glyphs, then by its effects (see [`Node::grow_by_effects`]).
-    pub fn own_paint_bounds(&self, world: Affine) -> figcraft_geom::Rect {
+    pub fn own_paint_bounds(&self, world: Affine) -> lizard_geom::Rect {
         let o = self.outline_reach();
         let base = self.local_rect().inflate(o, o);
-        let grown = self.grow_by_effects(figcraft_geom::transform_rect_bbox(world, base));
+        let grown = self.grow_by_effects(lizard_geom::transform_rect_bbox(world, base));
         let [a, b, c, d, _, _] = world.as_coeffs();
         self.effects.iter().filter(|e| e.visible).fold(grown, |r, e| match &e.kind {
             EffectKind::DropShadow(s) if s.spread.is_finite() && s.spread > 0.0 => {
                 let spread = s.spread.min(1e12);
                 let outline = if self.grows_by_exactly_its_spread() {
-                    figcraft_geom::transform_rect_bbox(world, base.inflate(spread, spread))
+                    lizard_geom::transform_rect_bbox(world, base.inflate(spread, spread))
                 } else {
                     let m = spread * SPREAD_MITER_LIMIT;
-                    figcraft_geom::transform_rect_bbox(world, base).inflate(m * a.hypot(c), m * b.hypot(d))
+                    lizard_geom::transform_rect_bbox(world, base).inflate(m * a.hypot(c), m * b.hypot(d))
                 };
                 let g = self.layer_effects_reach() + s.radius.abs() * 1.5;
                 let (dx, dy) = s.offset;
                 if g.is_finite() && dx.is_finite() && dy.is_finite() && outline.is_finite() {
-                    r.union(outline.inflate(g, g) + figcraft_geom::kurbo::Vec2::new(dx, dy))
+                    r.union(outline.inflate(g, g) + lizard_geom::kurbo::Vec2::new(dx, dy))
                 } else {
                     r
                 }
@@ -804,7 +804,7 @@ impl Node {
     /// Page-space area `b` grown by what this node's visible effects paint around it: blurs all
     /// round, drop shadows towards their offset (in page units, as the renderer draws them), so a
     /// shadow falling down adds room below and none above.
-    pub fn grow_by_effects(&self, b: figcraft_geom::Rect) -> figcraft_geom::Rect {
+    pub fn grow_by_effects(&self, b: lizard_geom::Rect) -> lizard_geom::Rect {
         let miter = self.spread_miter_reach();
         let layer = self.layer_effects_reach();
         let moved = if layer > 0.0 { b.inflate(layer, layer) } else { b };
@@ -813,7 +813,7 @@ impl Node {
                 let g = s.radius.abs() * 1.5 + s.spread.max(0.0) + miter;
                 let (dx, dy) = s.offset;
                 if g.is_finite() && dx.is_finite() && dy.is_finite() {
-                    r.union(moved.inflate(g, g) + figcraft_geom::kurbo::Vec2::new(dx, dy))
+                    r.union(moved.inflate(g, g) + lizard_geom::kurbo::Vec2::new(dx, dy))
                 } else {
                     r
                 }

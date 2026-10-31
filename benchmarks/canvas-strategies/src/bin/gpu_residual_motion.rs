@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use canvas_strategies_bench::gpu_residual::GpuResidual;
 use canvas_strategies_bench::residual::Residual;
-use figcraft_doc::EffectKind;
-use figcraft_render::{Options, View, render_view};
+use lizard_doc::EffectKind;
+use lizard_render::{Options, View, render_view};
 
 const WIDTH: u32 = 5120;
 const HEIGHT: u32 = 2160;
@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cameras = trace();
     let source = source_view(&cameras)?;
     let low = View { origin: source.origin, scale: source.scale / f64::from(FACTOR), width: source.width / FACTOR, height: source.height / FACTOR };
-    let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard"))?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

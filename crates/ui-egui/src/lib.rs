@@ -1,6 +1,6 @@
 //! The Lizard egui frontend.
 //!
-//! A thin shell over [`figcraft_engine::Session`]: panels read engine state and act by running
+//! A thin shell over [`lizard_engine::Session`]: panels read engine state and act by running
 //! commands; the canvas forwards pointer events to the engine's tools and draws overlays. Nothing
 //! below this crate knows about egui, so the frontend can be replaced.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -253,8 +253,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 pub use control::{ControlReply, ControlRequest};
@@ -330,13 +330,13 @@ pub trait Services {
     fn emergency_save(&mut self, _session: &Session) {}
     /// Keep the preferences now (the installed plugins or their settings changed), as the app
     /// does when it quits.
-    fn save_prefs(&mut self, _prefs: &figcraft_engine::Prefs) {}
+    fn save_prefs(&mut self, _prefs: &lizard_engine::Prefs) {}
     /// The OS or browser language as a tag ("es-ES"), for the "system" language preference.
     fn system_language(&self) -> Option<String> {
         None
     }
     /// The controller buttons held now on any controller: bit i is standard gamepad layout index i
-    /// (0 the bottom face button … 16 home; `figcraft_doc::proto::GAMEPAD_BUTTONS`). The prototype
+    /// (0 the bottom face button … 16 home; `lizard_doc::proto::GAMEPAD_BUTTONS`). The prototype
     /// player asks every frame while its prototype has gamepad triggers.
     fn gamepad_held(&mut self) -> u32 {
         0
@@ -351,7 +351,7 @@ pub type ContentsFuture = Pin<Box<dyn Future<Output = Option<Result<(String, Vec
 /// couldn't be read).
 pub type ReadFuture = Pin<Box<dyn Future<Output = Result<Vec<u8>, String>>>>;
 type PickFuture = Pin<Box<dyn Future<Output = Option<Picked>>>>;
-type DialogDone = Box<dyn FnOnce(&mut FigApp, Picked)>;
+type DialogDone = Box<dyn FnOnce(&mut LizardApp, Picked)>;
 
 /// What a dialog picked: a path, or a file's name and contents where there are no paths, or why
 /// the picked file couldn't be read.
@@ -382,7 +382,7 @@ pub fn unreadable(name: &str) -> String {
 
 /// The largest file read in the browser: wasm has at most 4 GiB of memory, and a file's contents
 /// are held about three times on their way to `file.open` (the bytes, base64, decoded again).
-/// As large as one member of a `.figcraft` file may be.
+/// As large as one member of a `.lizard` file may be.
 const MAX_BROWSER_FILE: f64 = (512u64 << 20) as f64;
 
 /// Checks a file of `size` bytes before the browser reads it (`Err`: what to tell the user).
@@ -477,7 +477,7 @@ pub const AUTO_SAVE_SECS: f64 = 3.0;
 const AUTO_SAVE_RETRY_SECS: f64 = 60.0;
 
 /// A file being encoded for auto-save: its snapshot and, once done, its bytes.
-pub type AutoSaveEncoding = std::thread::JoinHandle<(figcraft_engine::cmd::file::FileSnapshot, figcraft_engine::Result<Vec<u8>>)>;
+pub type AutoSaveEncoding = std::thread::JoinHandle<(lizard_engine::cmd::file::FileSnapshot, lizard_engine::Result<Vec<u8>>)>;
 
 /// How long a toast shows (seconds).
 const TOAST_SECS: f64 = 3.0;
@@ -570,11 +570,11 @@ pub struct UiState {
     /// File ▸ Rename: the file name in the left panel starts its inline rename on the next frame.
     pub rename_file: bool,
     /// What the interface size drew last frame and whether the window held it back. Set by
-    /// [`FigApp::logic`] for the main window.
+    /// [`LizardApp::logic`] for the main window.
     pub ui_scale: ui_scale::Plan,
     pub shortcuts_panel: bool,
     /// The Keyboard shortcuts panel's tab and search text.
-    pub shortcuts_tab: figcraft_engine::keymap::Group,
+    pub shortcuts_tab: lizard_engine::keymap::Group,
     pub shortcuts_query: String,
     /// An opacity digit just typed and when (a second one soon after makes an exact percentage).
     pub opacity_digit: Option<(u32, f64)>,
@@ -638,9 +638,9 @@ pub struct UiState {
     /// The Export dialog is open.
     pub export_preview: bool,
     /// The Export dialog's PDF print options (bleed, marks, CMYK).
-    pub pdf_print: figcraft_doc::PrintSettings,
+    pub pdf_print: lizard_doc::PrintSettings,
     /// The Color profile dialog is open, with this profile chosen.
-    pub color_profile: Option<figcraft_color::ColorProfile>,
+    pub color_profile: Option<lizard_color::ColorProfile>,
     /// The open style picker.
     pub style_picker: Option<style_picker::Picker>,
     /// The style picker shows colour styles as a grid of swatches.
@@ -740,7 +740,7 @@ impl Default for UiState {
             rename_file: false,
             ui_scale: ui_scale::plan(1.0, None, None),
             shortcuts_panel: false,
-            shortcuts_tab: figcraft_engine::keymap::Group::Essential,
+            shortcuts_tab: lizard_engine::keymap::Group::Essential,
             shortcuts_query: String::new(),
             opacity_digit: None,
             home: false,
@@ -777,7 +777,7 @@ impl Default for UiState {
             render_ms: 0.0,
             quit: false,
             export_preview: false,
-            pdf_print: figcraft_doc::PrintSettings::default(),
+            pdf_print: lizard_doc::PrintSettings::default(),
             color_profile: None,
             style_picker: None,
             style_grid: false,
@@ -817,7 +817,7 @@ impl Default for UiState {
 }
 
 /// The whole Lizard UI.
-pub struct FigApp {
+pub struct LizardApp {
     pub session: Session,
     pub ui: UiState,
     pub canvas: canvas::CanvasState,
@@ -830,7 +830,7 @@ pub struct FigApp {
     /// faces for these CJK scripts ([`cjk`]) in this UI language's order.
     script_fonts: Option<(u8, &'static str)>,
     /// The tab (uid) and document version whose names were last checked for CJK scripts.
-    cjk_checked: Option<(u64, Arc<figcraft_doc::Document>)>,
+    cjk_checked: Option<(u64, Arc<lizard_doc::Document>)>,
     /// The language preference the UI strings follow (applied when it changes).
     language: Option<String>,
     /// A field had the keyboard when the last frame ended.
@@ -846,8 +846,8 @@ pub struct FigApp {
     /// The other windows (desktop app).
     pub windows: windows::Windows,
     /// `window.new` / `window.focus` asked for by commands, for the end of the frame.
-    window_requests: Vec<figcraft_engine::UiRequest>,
-    /// Commands waiting for a server ([`FigApp::run_background`]) and what to do with their results.
+    window_requests: Vec<lizard_engine::UiRequest>,
+    /// Commands waiting for a server ([`LizardApp::run_background`]) and what to do with their results.
     waiting: Vec<(String, Done)>,
     /// Native dialogs complete asynchronously so their modal event loop never re-enters winit.
     pending_dialog: Option<PendingDialog>,
@@ -862,13 +862,13 @@ pub struct FigApp {
     ui_context: Option<egui::Context>,
     /// The automation roots the app was started with: every frame and control request runs
     /// confined to them ([`windows::guard`]).
-    pub automation_roots: Option<Arc<figcraft_engine::file_access::Roots>>,
+    pub automation_roots: Option<Arc<lizard_engine::file_access::Roots>>,
 }
 
 /// What to do with the result of a command run in the background.
-pub type Done = Box<dyn FnOnce(&mut FigApp, &egui::Context, Value)>;
+pub type Done = Box<dyn FnOnce(&mut LizardApp, &egui::Context, Value)>;
 
-impl FigApp {
+impl LizardApp {
     pub fn new(session: Session, services: Box<dyn Services>) -> Self {
         // The main window's panels open as wide as they were left.
         let (left_width, right_width) = session.prefs.panel_widths;
@@ -906,7 +906,7 @@ impl FigApp {
 
     /// Dismiss the composer after a successful switch away from the Comment tool.
     pub(crate) fn clear_comment_draft_after_tool_set(&mut self, id: &str, succeeded: bool) {
-        if id == "tool.set" && succeeded && self.session.tool.tool != figcraft_engine::tools::ToolId::Comment {
+        if id == "tool.set" && succeeded && self.session.tool.tool != lizard_engine::tools::ToolId::Comment {
             self.ui.comments.draft = None;
         }
     }
@@ -945,7 +945,7 @@ impl FigApp {
     }
 
     /// Show command `id`'s error.
-    fn failed(&mut self, id: &str, e: &figcraft_engine::EngineError) {
+    fn failed(&mut self, id: &str, e: &lizard_engine::EngineError) {
         let msg = e.to_string();
         log::warn!("{id}: {msg}");
         self.show_error(msg);
@@ -1000,7 +1000,7 @@ impl FigApp {
         if let Some((c, p, rev)) = &self.ui.text_preview
             && c == command
             && *p == params
-            && (*rev == revision || figcraft_engine::textpreview::active(&self.session))
+            && (*rev == revision || lizard_engine::textpreview::active(&self.session))
         {
             return;
         }
@@ -1027,7 +1027,7 @@ impl FigApp {
             return;
         }
         self.ui.last_right_tab = self.ui.right_tab;
-        if self.ui.right_tab != RightTab::Design && self.session.tool.tool == figcraft_engine::tools::ToolId::Pen {
+        if self.ui.right_tab != RightTab::Design && self.session.tool.tool == lizard_engine::tools::ToolId::Pen {
             self.run("tool.set", json!({"tool": "move"}));
         }
     }
@@ -1088,7 +1088,7 @@ impl FigApp {
                 "panel.assets" => self.select_left_tab(LeftTab::Assets),
                 "panel.versionHistory" => versions::open(self),
                 "view.devCompare" => {
-                    self.ui.dev.compare = r.data.get("id").and_then(figcraft_engine::params::id_of).map(dev_compare::CompareView::new);
+                    self.ui.dev.compare = r.data.get("id").and_then(lizard_engine::params::id_of).map(dev_compare::CompareView::new);
                 }
                 "panel.libraries" => {
                     self.select_left_tab(LeftTab::Assets);
@@ -1107,7 +1107,7 @@ impl FigApp {
                 "dialog.saveAs" => self.save_as_dialog(),
                 "dialog.colorProfile" => self.ui.color_profile = self.session.doc().ok().map(|d| d.color_profile),
                 "present" => {
-                    if let Some(start) = r.data.get("start").and_then(figcraft_engine::params::id_of) {
+                    if let Some(start) = r.data.get("start").and_then(lizard_engine::params::id_of) {
                         let mut p = present::Presenter::new(start);
                         p.view = self.ui.present_view;
                         self.ui.present = Some(p);
@@ -1138,21 +1138,21 @@ impl FigApp {
                     }
                 }
                 "preview" => {
-                    if let Some(start) = r.data.get("start").and_then(figcraft_engine::params::id_of) {
+                    if let Some(start) = r.data.get("start").and_then(lizard_engine::params::id_of) {
                         self.ui.preview = Some(present::Pane::new(start, &self.session));
                     }
                 }
                 "preview.close" => self.ui.preview = None,
-                "open.help" => self.services.open_url("https://getartcraft.com/apps/figcraft"),
+                "open.help" => self.services.open_url("https://github.com/brava-group/lizard"),
                 "layers.collapseAll" => layers::collapse_all(self),
                 "contextMenu" => self.ui.key_menu = true,
                 "selectArea" => self.start_key_box(),
                 "canvas.renameLabel" => {
-                    self.ui.rename_label = r.data.get("id").and_then(figcraft_engine::params::id_of).map(|id| layers::Rename { id, start: true });
+                    self.ui.rename_label = r.data.get("id").and_then(lizard_engine::params::id_of).map(|id| layers::Rename { id, start: true });
                 }
                 "layers.rename" => {
                     let ids: Vec<NodeId> =
-                        r.data.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(figcraft_engine::params::id_of).collect();
+                        r.data.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(lizard_engine::params::id_of).collect();
                     if ids.len() > 1 {
                         dialogs::open_batch_rename(self, &ids);
                     } else {
@@ -1241,17 +1241,17 @@ impl FigApp {
 
     pub fn save_as_dialog(&mut self) {
         let Ok(name) = self.session.doc().map(|d| d.name.clone()) else { return };
-        self.pick_save(i18n::tr("Save as"), &format!("{name}.figcraft"), &["figcraft", "fig"], |app, mut p| {
+        self.pick_save(i18n::tr("Save as"), &format!("{name}.lizard"), &["lizard", "fig"], |app, mut p| {
             if p.extension().is_none_or(|e| e.is_empty()) {
-                if !p.set_extension("figcraft") {
-                    app.toast(i18n::tr("Use the .figcraft or .fig extension."));
+                if !p.set_extension("lizard") {
+                    app.toast(i18n::tr("Use the .lizard or .fig extension."));
                     return;
                 }
                 // This name wasn't confirmed by the system dialog: don't replace an existing file.
                 match p.try_exists() {
                     Ok(false) => {}
                     Ok(true) => {
-                        app.toast(i18n::tr("A .figcraft file with this name already exists. Choose its full name to confirm replacement."));
+                        app.toast(i18n::tr("A .lizard file with this name already exists. Choose its full name to confirm replacement."));
                         return;
                     }
                     Err(e) => {
@@ -1259,8 +1259,8 @@ impl FigApp {
                         return;
                     }
                 }
-            } else if !p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("figcraft") || e.eq_ignore_ascii_case("fig")) {
-                app.toast(i18n::tr("Use the .figcraft or .fig extension."));
+            } else if !p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("lizard") || e.eq_ignore_ascii_case("fig")) {
+                app.toast(i18n::tr("Use the .lizard or .fig extension."));
                 return;
             }
             if let Some(r) = app.run("file.saveAs", json!({"path": p.to_string_lossy()})) {
@@ -1271,7 +1271,7 @@ impl FigApp {
 
     pub fn save(&mut self) {
         // A branch tab saves its main file.
-        let tab = figcraft_engine::branches::file_tab(&self.session);
+        let tab = lizard_engine::branches::file_tab(&self.session);
         // A path ending in .fig is never saved over silently: a .fig destination is an export copy.
         let native_path = self
             .session
@@ -1301,7 +1301,7 @@ impl FigApp {
         let exts: &[&str] = if place {
             &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"]
         } else {
-            &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "figcraft", "fig"]
+            &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "lizard", "fig"]
         };
         let title = if place { i18n::tr("Place image") } else { i18n::tr("Import") };
         self.pick_file(title, exts, true, |app, file| {
@@ -1311,8 +1311,8 @@ impl FigApp {
 
     /// Pick a file to open or import; `done` gets it as `file.open` and `file.import` take it (a
     /// path, or the name and contents where the platform has no paths). `pin`: as
-    /// [`FigApp::pick_open`]'s file in front.
-    fn pick_file(&mut self, title: &str, exts: &[&str], pin: bool, done: impl FnOnce(&mut FigApp, Value) + 'static) {
+    /// [`LizardApp::pick_open`]'s file in front.
+    fn pick_file(&mut self, title: &str, exts: &[&str], pin: bool, done: impl FnOnce(&mut LizardApp, Value) + 'static) {
         self.start_pick(
             |services| -> PickFuture {
                 match services.pick_open_contents(title, exts) {
@@ -1335,22 +1335,27 @@ impl FigApp {
 
     /// Pick a file to open. `done` runs with the file in front now back in front (and not at all
     /// if that file closed meanwhile).
-    pub fn pick_open(&mut self, title: &str, exts: &[&str], done: impl FnOnce(&mut FigApp, PathBuf) + 'static) {
+    pub fn pick_open(&mut self, title: &str, exts: &[&str], done: impl FnOnce(&mut LizardApp, PathBuf) + 'static) {
         self.start_dialog(|services| services.pick_open(title, exts), true, done);
     }
 
-    /// Pick where to save; `done` runs as [`FigApp::pick_open`]'s does.
-    pub fn pick_save(&mut self, title: &str, name: &str, exts: &[&str], done: impl FnOnce(&mut FigApp, PathBuf) + 'static) {
+    /// Pick where to save; `done` runs as [`LizardApp::pick_open`]'s does.
+    pub fn pick_save(&mut self, title: &str, name: &str, exts: &[&str], done: impl FnOnce(&mut LizardApp, PathBuf) + 'static) {
         self.start_dialog(|services| services.pick_save(title, name, exts), true, done);
     }
 
-    /// Pick a folder; `done` runs as [`FigApp::pick_open`]'s does.
-    pub fn pick_folder(&mut self, title: &str, done: impl FnOnce(&mut FigApp, PathBuf) + 'static) {
+    /// Pick a folder; `done` runs as [`LizardApp::pick_open`]'s does.
+    pub fn pick_folder(&mut self, title: &str, done: impl FnOnce(&mut LizardApp, PathBuf) + 'static) {
         self.start_dialog(|services| services.pick_folder(title), true, done);
     }
 
     /// Open a native dialog from the window drawing now, for the file in front (`pin`).
-    fn start_dialog(&mut self, start: impl FnOnce(&mut dyn Services) -> DialogFuture, pin: bool, done: impl FnOnce(&mut FigApp, PathBuf) + 'static) {
+    fn start_dialog(
+        &mut self,
+        start: impl FnOnce(&mut dyn Services) -> DialogFuture,
+        pin: bool,
+        done: impl FnOnce(&mut LizardApp, PathBuf) + 'static,
+    ) {
         self.start_pick(
             |services| -> PickFuture {
                 let pick = start(services);
@@ -1365,8 +1370,8 @@ impl FigApp {
         );
     }
 
-    /// [`FigApp::start_dialog`] for any kind of pick.
-    fn start_pick(&mut self, start: impl FnOnce(&mut dyn Services) -> PickFuture, pin: bool, done: impl FnOnce(&mut FigApp, Picked) + 'static) {
+    /// [`LizardApp::start_dialog`] for any kind of pick.
+    fn start_pick(&mut self, start: impl FnOnce(&mut dyn Services) -> PickFuture, pin: bool, done: impl FnOnce(&mut LizardApp, Picked) + 'static) {
         if self.pending_dialog.is_some() {
             return;
         }
@@ -1474,7 +1479,7 @@ impl FigApp {
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
             theme::install_fonts(ctx, false, 0);
             self.fonts_installed = true;
-        } else if figcraft_text::system_fonts_scanned() {
+        } else if lizard_text::system_fonts_scanned() {
             // Once the system fonts are indexed: faces for names in scripts the UI fonts lack, and
             // for each CJK script once something shows it.
             let installed = self.script_fonts.map_or(0, |(s, _)| s);
@@ -1542,7 +1547,7 @@ impl FigApp {
         // The browser has no files to save to.
         let on = !cfg!(target_arch = "wasm32") && self.session.prefs.auto_save;
         let saving = &self.ui.auto_saving;
-        let due = |d: &&figcraft_engine::DocState| {
+        let due = |d: &&lizard_engine::DocState| {
             d.path.is_some() && d.branch_of.is_none() && d.preview.is_none() && d.is_dirty() && !saving.iter().any(|(uid, _)| *uid == d.uid)
         };
         let changes = if on { self.session.docs.iter().filter(due).map(|d| d.revision).reduce(u64::wrapping_add) } else { None };
@@ -1560,13 +1565,13 @@ impl FigApp {
                 } else {
                     self.ui.auto_save_at = None;
                     let files: Vec<_> =
-                        self.session.docs.iter().filter(due).map(|d| (d.uid, figcraft_engine::cmd::file::FileSnapshot::of(d))).collect();
+                        self.session.docs.iter().filter(due).map(|d| (d.uid, lizard_engine::cmd::file::FileSnapshot::of(d))).collect();
                     for (uid, file) in files {
                         let encode = move || {
                             let bytes = file.encode();
                             (file, bytes)
                         };
-                        match std::thread::Builder::new().name("figcraft-save".into()).spawn(encode) {
+                        match std::thread::Builder::new().name("lizard-save".into()).spawn(encode) {
                             Ok(h) => self.ui.auto_saving.push((uid, h)),
                             Err(e) => {
                                 failed.get_or_insert(e.to_string());
@@ -1683,7 +1688,7 @@ impl FigApp {
         if self.ui.icon_gallery {
             icons::gallery(&ctx);
         }
-        theme::set_doc_profile(&ctx, self.session.doc().map_or(figcraft_color::ColorProfile::Srgb, |d| d.color_profile));
+        theme::set_doc_profile(&ctx, self.session.doc().map_or(lizard_color::ColorProfile::Srgb, |d| d.color_profile));
         widgets::set_nudge(&ctx, self.session.prefs.nudge_small, self.session.prefs.nudge_big);
         // The Inspect tab measures on hover without Alt.
         self.session.tool.redlines = self.ui.right_tab == RightTab::Inspect;
@@ -1873,12 +1878,12 @@ impl FigApp {
             "versionHistory": self.ui.versions.open,
             "branchReview": self.ui.branch_review.as_ref().map(|r| json!({"id": r.id, "picks": r.picks, "mode": if r.mode == dev_compare::Mode::Overlay { "overlay" } else { "sideBySide" }})),
             "devCompare": self.ui.dev.compare.as_ref().map(|c| json!({"id": c.id, "mode": if c.mode == dev_compare::Mode::Overlay { "overlay" } else { "sideBySide" }, "split": c.split})),
-            "devFocus": self.session.ds().ok().and_then(figcraft_engine::DocState::focused),
+            "devFocus": self.session.ds().ok().and_then(lizard_engine::DocState::focused),
             "annotationFilter": self.ui.dev.categories.id(),
             "colorProfileDialog": self.ui.color_profile.map(|p| p.id()),
             "stylePicker": self.ui.style_picker.as_ref().map(|p| p.slot().key()),
             "stylePickerView": if self.ui.style_grid { "grid" } else { "list" },
-            "textPreview": figcraft_engine::textpreview::active(&self.session),
+            "textPreview": lizard_engine::textpreview::active(&self.session),
             "comments": {
                 "open": self.ui.comments.open,
                 "draft": self.ui.comments.draft.as_ref().map(|d| [d.0, d.1]),
@@ -1895,9 +1900,9 @@ impl FigApp {
             "canvas": {
                 "rect": [self.canvas.rect.min.x, self.canvas.rect.min.y, self.canvas.rect.max.x, self.canvas.rect.max.y],
                 "renderWork": self.canvas.render_work.map(|w| match w {
-                    figcraft_render::Work::Reused => json!({"kind": "reused"}),
-                    figcraft_render::Work::Partial { pixels } => json!({"kind": "partial", "pixels": pixels}),
-                    figcraft_render::Work::Full => json!({"kind": "full"}),
+                    lizard_render::Work::Reused => json!({"kind": "reused"}),
+                    lizard_render::Work::Partial { pixels } => json!({"kind": "partial", "pixels": pixels}),
+                    lizard_render::Work::Full => json!({"kind": "full"}),
                 }),
                 "uploadPixels": self.canvas.upload_pixels,
                 "textureCurrent": self.session.ds().ok().is_some_and(|ds| self.canvas.texture_current(ds)),
@@ -1932,17 +1937,17 @@ impl FigApp {
 }
 
 /// The file types File ▸ Open and a drop on the home screen open.
-pub(crate) const OPEN_EXTENSIONS: &[&str] = &["figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"];
+pub(crate) const OPEN_EXTENSIONS: &[&str] = &["lizard", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"];
 
 /// Whether `path` names a file type that opens as a document (the extension, in any case).
 pub(crate) fn opens(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| OPEN_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-/// Whether `path` is a whole document (`.figcraft`, `.fig`, file JSON) rather than an image or SVG:
+/// Whether `path` is a whole document (`.lizard`, `.fig`, file JSON) rather than an image or SVG:
 /// dropped on the canvas it opens as a file of its own instead of adding its pages to the open one.
 pub(crate) fn is_document(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["figcraft", "fig", "json"].iter().any(|x| x.eq_ignore_ascii_case(e)))
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lizard", "fig", "json"].iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
 /// Reads the contents of dropped file `name` that has no file on disk to read by path.

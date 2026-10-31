@@ -8,10 +8,10 @@ embeds, invite links, document sync end to end (several apps edit one file), liv
 selections, avatars and follow. **Step 3 is implemented**: per-user undo and redo, rejection
 handling and offline queueing with reconnect (`crates/collab`, wired into the engine's live
 session and the transport). **Step 4 is implemented**: the browser build joins sessions a desktop
-app hosts, and `figcraft://` invite links open the app and join. Styles, variables, collections,
+app hosts, and `lizard://` invite links open the app and join. Styles, variables, collections,
 modes and comments created in a session take ids from their creator's id space, and others' text
 carets, cursor chat and spotlights show live (see Presence). **Step 5 is implemented**: the
-standalone `lizard-server` (`apps/figcraft-server`, running it: [`server.md`](server.md)) keeps
+standalone `lizard-server` (`apps/lizard-server`, running it: [`server.md`](server.md)) keeps
 many files with persistence and compaction, and share links that let people edit or only view;
 the app publishes to it, and a file's team library lives there for other files to use. Files are
 shared with **join codes** (see *Sharing with a join code*): online through a server that names
@@ -22,7 +22,7 @@ are per document: an app hosts, joins and publishes several files at once (see H
 joining). The rest is the plan the next implementation PRs follow and update;
 sections say what is built.
 
-Goal: several people edit the same `.figcraft` file at the same time and see each other's edits,
+Goal: several people edit the same `.lizard` file at the same time and see each other's edits,
 cursors and selections live, on the desktop app and in the browser, without a central cloud
 service being required.
 
@@ -80,7 +80,7 @@ fit Lizard's architecture:
 - An id is never *allocated* twice. A deleted node can come back with its id only by being
   created again whole (what undo does): the server accepts creating an id that doesn't exist only
   if it was deleted before or lies in the sender's own id space.
-- **Document-level ids** (`figcraft_doc::ids`): styles, variables, variable collections, modes
+- **Document-level ids** (`lizard_doc::ids`): styles, variables, variable collections, modes
   and comment threads created during a session take a number from the same allocator as node ids
   (`client_id << 32 | counter`, never handed out twice): `S:<n>`, `VariableID:<n>`,
   `VariableCollectionId:<n>`, `<collection>/mode<n>` and comment id `n`. So two people creating a
@@ -107,7 +107,7 @@ fit Lizard's architecture:
 
 ## The document as objects and properties
 
-*Built* (`figcraft_collab::{Change, Prop, DocProp, Entry, Replica}`).
+*Built* (`lizard_collab::{Change, Prop, DocProp, Entry, Replica}`).
 
 Every synced thing is an **object** with an id, a type and a set of **properties**:
 
@@ -132,7 +132,7 @@ As built:
   modes, instance source, overrides, property references, plugin data, handoff status and note,
   annotations). `children` is not a property: it follows from the children's `parent` and
   `position`. The build fails when `Node` gains a field that isn't listed.
-- **Positions** are fractional keys (`figcraft_collab::frac`: base-62 digits after a length-coded
+- **Positions** are fractional keys (`lizard_collab::frac`: base-62 digits after a length-coded
   integer part, so appending keeps keys short; deterministic; never ending in `0`). A replica
   orders every parent's children, and the pages, by `(key, id)`; equal keys from simultaneous
   inserts fall back to id order. Existing documents get keys in their current order on first sync.
@@ -151,7 +151,7 @@ As built:
   differ from a new node of that kind), `Set {id, prop, value}`, `Delete {id}` (the subtree; a
   delete of something already gone does nothing), and for document-level data
   `SetDoc {prop, value}`, `Put {entry, value}` and `Remove {entry}`. Values are JSON.
-- **Diff** (`figcraft_collab::diff(replica, edited_document)`): only nodes whose `Arc` differs are
+- **Diff** (`lizard_collab::diff(replica, edited_document)`): only nodes whose `Arc` differs are
   visited (the persistent map skips shared structure), so the cost follows the size of the edit. A
   batch lists field writes, creations (parents first), moves, deletions (one per subtree, after
   the moves out of it), then document-level changes. `Replica::apply` applies a batch strictly
@@ -161,7 +161,7 @@ As built:
 
 ## Messages
 
-*Built* (`figcraft_collab::message`): the types below and both encodings. Protocol version 2 (the
+*Built* (`lizard_collab::message`): the types below and both encodings. Protocol version 2 (the
 `Hello`'s `protocol`): the welcome says what the client may do, and a connection can manage a
 server's files or use a file's team library instead of joining one; a client of another version is
 refused with the reason. (The library messages came later within version 2: a server from before
@@ -228,7 +228,7 @@ Client → server:
 | `OpenHosting {protocol, client_version, file, owner}` | Instead of `Hello`: ask about the server's hosting; publish without the key (`Admin publish`) when it is open to the public; with a file's id and owner token, manage that file (`Admin links \| createLink \| revoke \| rename \| remove` of it). Answered with `Hosting` or `Refused`. |
 | `Admin {rename {file, name} \| listing \| reports \| block {ip} \| unblock {ip} \| blocked}` | Later managing requests: rename a file on the server, the files with what the operator moderates by, the reports, blocking addresses (an IPv6 address: its /64). Owner tokens may only rename their file. |
 | `Report {reason}` | On a joined connection, only to a server that sent `Hosting`: report the file to the operator (at most 500 characters kept; ten an hour per address). |
-| `Plugins {list {query} \| fetch {id, version?} \| publish {bundle} \| unpublish {id, version?}}` | A request on a plugin directory connection; each gets one `Plugins` reply, in order. `bundle` is a plugin bundle's bytes (`figcraft_plugin::bundle`). |
+| `Plugins {list {query} \| fetch {id, version?} \| publish {bundle} \| unpublish {id, version?}}` | A request on a plugin directory connection; each gets one `Plugins` reply, in order. `bundle` is a plugin bundle's bytes (`lizard_plugin::bundle`). |
 | `Resolve {protocol, client_version, code}` | Instead of `Hello`: ask which file a join code opens (the code's nine symbols). Answered with `Resolved`, then the server closes the connection; a code it doesn't know, too many wrong ones from the address, or a session hosted by an app is `Refused` with the reason. |
 | `Admin {code {file, token}}` | A later managing request (with the server key, or the file's owner token on an open hosting connection): a new join code for the link of `file` whose token this is. A link has one code; asking again replaces it. |
 | `Admin {owned {files: [[file, owner]]}}` | A later request, on any open hosting connection (also one that named no file when it opened): what became of the files these `(file id, owner token)` pairs own, at most 200 a request. Answered with `Admin owned`. |
@@ -244,7 +244,7 @@ Server → client:
 | `Refused {reason}` | The connection is refused (protocol version, token, session full, a message out of place). |
 | `Pong` | Keep-alive. |
 | `Admin {ready \| published {file, edit, view} \| files \| links \| link \| done \| failed {reason}}` | A managing connection's answer: the key is right, a published file with its first two links (tokens shown once), listings, a new link, done, or why not. |
-| `Library {ready {access} \| library {version, archive} \| unchanged {version} \| empty \| published {version} \| usage [{usage, updated}] \| failed {reason}}` | A library connection's answer: the link is right (with its access), the library (a `.figcraft` archive holding it), no newer version, no library yet, kept, the usage reports, or why not. |
+| `Library {ready {access} \| library {version, archive} \| unchanged {version} \| empty \| published {version} \| usage [{usage, updated}] \| failed {reason}}` | A library connection's answer: the link is right (with its access), the library (a `.lizard` archive holding it), no newer version, no library yet, kept, the usage reports, or why not. |
 | `Signal {client_id, signal: {kind, text}}` | Someone's cursor chat or spotlight, cleaned by the server; `ready` (about the client itself, after its welcome): signals may be sent. Only to clients whose hello announced `signals`. |
 | `Hosting {open, operator, terms, idle_secs, max_file_mb, expires?}` | The answer to `OpenHosting`, and after a welcome to clients whose hello announced `hosting`: anyone may publish, how to reach the operator, the terms (a URL), how long files published without the key are kept unopened, the largest file, and this file's expiry (seconds since 1970). |
 | `Admin {hosted {file, edit, view, owner, expires?} \| listing [row] \| reports [report] \| blocked [ip]}` | A file published without the key with its links and owner token (shown once), and the answers to the later managing requests. |
@@ -262,7 +262,7 @@ reconnect). A whole batch is accepted or rejected.
 
 ## Ordering, optimism and convergence
 
-*Built* (`figcraft_collab::{Server, Client}`: pure state machines; the transport only moves
+*Built* (`lizard_collab::{Server, Client}`: pure state machines; the transport only moves
 messages).
 
 1. A user action runs locally as today (one command or gesture = one undo step). The client diffs
@@ -282,7 +282,7 @@ comments not in another client's space), then either commits it with the next se
 number or rejects it with the current values of what it touched as fixes. The client keeps the
 confirmed state, applies its own batches at once, and on someone else's batch or a rejection
 rebuilds its view as the confirmed state with its pending batches replayed leniently (the fixes
-are for clients that keep no confirmed copy). `figcraft_collab::sim` runs a server and N clients
+are for clients that keep no confirmed copy). `lizard_collab::sim` runs a server and N clients
 over in-memory links that deliver in order per connection after random delays, through the binary
 or the JSON encoding. Tests drive it with synthetic edits and, in the engine, with random real
 commands (creating, moving and reparenting layers including cycle attempts, deleting, grouping,
@@ -317,7 +317,7 @@ the UI's toast (`Session::message`).
   batch was ordered before it, that client (only the author) runs the recompute hook over the
   nodes its batch touched, on the confirmed state, and sends any difference as a follow-up batch
   (leaving out properties its own later pending batches write). The engine's hook is its normalize
-  pass (`figcraft_engine::collab::EngineRecompute`). Because only the author recomputes, clients
+  pass (`lizard_engine::collab::EngineRecompute`). Because only the author recomputes, clients
   never fight over a value, even with different fonts; a test checks that a derived invariant
   broken by concurrent edits is restored.
 - **Not synced:** each person's selection, viewport, tool and text caret (presence), the id
@@ -375,7 +375,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
 
 ## Presence
 
-*Built* (`figcraft_engine::live`, `crates/collab-net`, `crates/ui-egui/src/live.rs`).
+*Built* (`lizard_engine::live`, `crates/collab-net`, `crates/ui-egui/src/live.rs`).
 
 - Cursor position in page coordinates plus the page id; selection ids; viewport rectangle; whether
   the user is typing in a text layer, with their caret and selection inside it
@@ -448,7 +448,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
 - **Host from the app** (first step, no public server): "Share ▸ Local network ▸ Start sharing"
   (or `collab.host`) starts the embedded server on the local machine for the open file and shows
   a join code and an invite link
-  (`figcraft://join?host=192.168.1.20:47900&file=<id>&token=<secret>`; also a plain
+  (`lizard://join?host=192.168.1.20:47900&file=<id>&token=<secret>`; also a plain
   `ws://`/`wss://` URL). Others on the same network (or through a forwarded port / VPN such as a
   mesh VPN) join with "File ▸ Join live session" or by opening the link. When the host leaves, the
   session ends; everyone keeps a local copy.
@@ -493,7 +493,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   the user chooses the local network (`lan`: the address of the interface the default route uses)
   or names an interface (`bind: "<ip>"`, e.g. a VPN's). It runs the core's `Server` as the
   authority and takes part itself without a socket.
-- Links: `figcraft://join?host=<ip:port>&file=<id>&token=<secret>` or
+- Links: `lizard://join?host=<ip:port>&file=<id>&token=<secret>` or
   `ws://<ip:port>/?file=<id>&token=<secret>` (either works for joining). The client connects to
   `ws://<ip:port>/` and sends the token only inside its `Hello`. Links are pasted into the Join
   dialog (its field has the keyboard when it opens; Escape closes it), or opened from anywhere:
@@ -505,7 +505,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   the messages it read and sends them in its next `Hello` (see Offline and reconnect).
 - The browser build joins (see *Built (the browser client)*); hosting needs the desktop app.
 
-*Built* (sharing with a join code; `figcraft_collab::code`, `collab.share`, `collab.join {code}`):
+*Built* (sharing with a join code; `lizard_collab::code`, `collab.share`, `collab.join {code}`):
 
 - **Why codes.** An invite link is long and carries a 128-bit secret; a code is what one person
   reads to another. Both kinds use Crockford's base32 alphabet (digits and capitals without `I`,
@@ -563,7 +563,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
 - **In the browser** a code joins like a link (the page asks the server over its own WebSocket,
   then opens the session's); sharing needs the desktop app.
 
-*Built* (your online files; `figcraft_engine::online`, `collab.files`, `collab.openFile`,
+*Built* (your online files; `lizard_engine::online`, `collab.files`, `collab.openFile`,
 `collab.forgetFile`, `collab.manageFile`):
 
 - **What is recorded, and where.** When a file reaches a server without the server's key
@@ -674,7 +674,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   browser opens them; see *Built (the standalone server)*). Some browsers also ask before a public
   site may reach private network addresses.
 
-*Built* (the standalone server, `apps/figcraft-server`; running it: [`server.md`](server.md)):
+*Built* (the standalone server, `apps/lizard-server`; running it: [`server.md`](server.md)):
 
 - **One hub for both hosts.** The app's session host and the server run the same hub
   (`crates/collab-net/src/hub.rs`): the listener, a reader and a writer thread per connection,
@@ -691,11 +691,11 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   (people in the file are told as when a host stops: close code 1001 with the reason, final)
   (or removing a file) disconnects whoever joined with it, with the reason; the link no longer
   joins.
-- **Links** name the server's endpoint: `figcraft://join?host=<host:port>&file=…&token=…` for a
-  plain `ws://` endpoint at `/`, `figcraft://join?server=<ws(s)://host[:port][/path]>&file=…&token=…`
+- **Links** name the server's endpoint: `lizard://join?host=<host:port>&file=…&token=…` for a
+  plain `ws://` endpoint at `/`, `lizard://join?server=<ws(s)://host[:port][/path]>&file=…&token=…`
   for any endpoint (TLS, a path behind a proxy), or `ws(s)://…?file=…&token=…`. The desktop app,
-  `figcraft-cli` and the browser all open `wss://`: natively through rustls (ring, Mozilla's root
-  certificates compiled in, plus any authority in the PEM file `FIGCRAFT_CA_FILE` names), always
+  `lizard-cli` and the browser all open `wss://`: natively through rustls (ring, Mozilla's root
+  certificates compiled in, plus any authority in the PEM file `LIZARD_CA_FILE` names), always
   verifying the certificate; the browser through its own WebSocket.
 - **Managing files.** A connection that opens with `Manage {key}` instead of `Hello` sends
   `Admin` requests: publish a document (its snapshot) as a new file, which returns an edit link
@@ -732,7 +732,7 @@ resuming with its offline edits, and leaving the session going back to snapshot 
   version (edit links only), or read the usage reports. Requests are one-shot: the app opens a
   connection, asks and closes it.
 - **What is kept.** The published library a library file holds (manifest and snapshot with
-  per-asset versions) travels as a small `.figcraft` archive holding only it. The server reads it
+  per-asset versions) travels as a small `.lizard` archive holding only it. The server reads it
   in full with the limits a library file is read with, requires the file's library id once one is
   kept and a newer version, then writes it beside the file in a file of its own
   (`library-<version>.bin`, atomically) and only then records id, name and version in the file's
@@ -804,12 +804,12 @@ installing: [`plugins.md`](plugins.md#plugin-directories)):
 
 *Built* (opening invite links):
 
-- The desktop app takes an invite link on its command line (`figcraft "figcraft://join?…"`): once
+- The desktop app takes an invite link on its command line (`lizard "lizard://join?…"`): once
   the window is up it joins (`collab.join`); a link it can't use opens the Join dialog with the
   link and the reason. Other arguments are files, as paths or `file://` URLs.
-- **Windows**: the app registers itself per user as the opener of `figcraft://` under
-  `HKEY_CURRENT_USER\Software\Classes\figcraft` (no administrator rights): the scheme, its icon
-  and `"<figcraft.exe>" "%1"`. Preferences ▸ **Open invite links in Lizard** (and
+- **Windows**: the app registers itself per user as the opener of `lizard://` under
+  `HKEY_CURRENT_USER\Software\Classes\lizard` (no administrator rights): the scheme, its icon
+  and `"<lizard.exe>" "%1"`. Preferences ▸ **Open invite links in Lizard** (and
   `collab.registerLinks {on?}`) turns it on or off; it defaults to on for installed builds, which
   register on first run, and off for builds from source (inside a Cargo build directory, or debug
   builds), which leave any registration alone. Turning it off removes only this copy's
@@ -817,7 +817,7 @@ installing: [`plugins.md`](plugins.md#plugin-directories)):
 - **macOS**: the bundle declares the scheme (`CFBundleURLTypes`), so links open Lizard; the
   link itself arrives as an Apple Event, which the windowing layer doesn't pass on yet, so the app
   opens without joining (paste the link) until it does.
-- **Linux and FreeBSD**: the desktop entry declares `x-scheme-handler/figcraft` and passes URLs
+- **Linux and FreeBSD**: the desktop entry declares `x-scheme-handler/lizard` and passes URLs
   (`%U`); the app joins from its command line.
 - An app that is already running doesn't receive the link: a second window starts and joins.
 
@@ -875,12 +875,12 @@ Everything stays a command: `collab.share`, `collab.host`, `collab.join`, `colla
 `collab.forgetFile` and `collab.manageFile` are ordinary commands, so the CLI, the control channel and MCP can
 host, publish and join sessions and manage the files they put online; an agent can be a participant with its own cursor.
 
-*Built*: the desktop app (control channel) and the MCP server's headless session (`figcraft-cli
+*Built*: the desktop app (control channel) and the MCP server's headless session (`lizard-cli
 mcp`) both have the network link installed; `collab.join` returns at once with status
 `"connecting"` and `collab.peers` tells when it is live (or why it failed) and who is typing in
 which text layer. Sessions are per document there too: the commands are about the active
 document's session (`doc.switch` changes it) and `sessions` in `collab.peers` lists them all. An agent's pointer is `collab.cursor {x, y}`; it can chat next to it
-(`collab.cursorChat {text}`) and spotlight (`collab.spotlight`). The one-shot CLI (`figcraft-cli run`) has no link: there the commands say
+(`collab.cursorChat {text}`) and spotlight (`collab.spotlight`). The one-shot CLI (`lizard-cli run`) has no link: there the commands say
 live sessions aren't available.
 
 ## Security
@@ -918,7 +918,7 @@ chooses to share on the network; the default is the invite link with a random to
   decodes in full is answered with `Refused` and a close; the first message must be `Hello` (for
   this file) or, on a server, `Manage`. The invite parser and the host's reader are fuzzed
   (`crates/collab-net`), and so are the server's readers of its own files and its port
-  (`apps/figcraft-server`).
+  (`apps/lizard-server`).
 
 *Built* (the standalone server), and what it adds to the threat model:
 
@@ -978,9 +978,9 @@ chooses to share on the network; the default is the invite link with a random to
    resuming connection), followed by client-scoped ids for document-level objects and remote text
    carets on the canvas.
 4. **Browser client** (WebSocket through `web-sys`). **Done** (the web build joins
-   desktop-hosted sessions; `figcraft://` links open the desktop app and join).
+   desktop-hosted sessions; `lizard://` links open the desktop app and join).
 5. **Standalone `lizard-server`** with persistence, compaction, share links and permissions.
-   **Done** (`apps/figcraft-server` on the shared hub; edit and view links, the server key,
+   **Done** (`apps/lizard-server` on the shared hub; edit and view links, the server key,
    publishing from the app; see [`server.md`](server.md)), followed by open hosting for a public
    server (owner tokens, limits per address, idle expiry, reports and blocks), by sharing with
    join codes (online through the server, or carrying the host's address on the local network)

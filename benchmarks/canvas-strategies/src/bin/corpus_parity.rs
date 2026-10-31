@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view};
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_render::{Options, View, render_view};
+use lizard_doc::{Document, NodeId, NodeKind};
+use lizard_render::{Options, View, render_view};
 
 const SIDE: u32 = 512;
 const LIMIT: usize = 16;
@@ -88,7 +88,7 @@ fn save_png(path: &Path, pixels: &[u8]) -> Result<(), Box<dyn Error>> {
 }
 
 fn run(path: &Path, gpu: &mut GpuCanvas) -> Result<(), Box<dyn Error>> {
-    let (doc, warnings) = figcraft_format::load_file(path)?;
+    let (doc, warnings) = lizard_format::load_file(path)?;
     if !warnings.is_empty() {
         eprintln!("{}: {} load warnings", path.display(), warnings.len());
     }
@@ -143,13 +143,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::env::args_os().skip(1).map(PathBuf::from).collect()
     } else {
         [
-            "examples/ridgeline-studio-dashboard.figcraft",
-            "examples/ridgeline-design-system.figcraft",
-            "examples/glass-and-vectors.figcraft",
-            "examples/ridgeline-app.figcraft",
-            "examples/ridgeline-onboarding.figcraft",
-            "benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft",
-            "/Users/matheuspires/Documents/Lizard-new-icon.figcraft",
+            "examples/ridgeline-studio-dashboard.lizard",
+            "examples/ridgeline-design-system.lizard",
+            "examples/glass-and-vectors.lizard",
+            "examples/ridgeline-app.lizard",
+            "examples/ridgeline-onboarding.lizard",
+            "benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard",
+            "/Users/matheuspires/Documents/Lizard-new-icon.lizard",
         ]
         .into_iter()
         .map(PathBuf::from)

@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use figcraft_doc::{Document, NodeId, NodeKind, StyleKind, VariableValue, Variables};
+use lizard_doc::{Document, NodeId, NodeKind, StyleKind, VariableValue, Variables};
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;
@@ -23,7 +23,7 @@ pub struct Missing {
 
 /// The families `doc` names that the font database doesn't have, by name. On the desktop the
 /// installed fonts are indexed in the background: ask once that's done
-/// (`figcraft_text::installed_fonts_known`), or every installed family counts as missing.
+/// (`lizard_text::installed_fonts_known`), or every installed family counts as missing.
 pub fn missing(doc: &Document) -> Vec<Missing> {
     // Lower-case family → (spelling, layers).
     let mut used: BTreeMap<String, (String, usize)> = BTreeMap::new();
@@ -61,7 +61,7 @@ pub fn missing(doc: &Document) -> Vec<Missing> {
             }
         }
     }
-    used.into_values().filter(|(family, _)| !figcraft_text::has_family(family)).map(|(family, layers)| Missing { family, layers }).collect()
+    used.into_values().filter(|(family, _)| !lizard_text::has_family(family)).map(|(family, layers)| Missing { family, layers }).collect()
 }
 
 /// Every string value of variable `id` in any mode, following aliases (at most 32 deep).
@@ -98,7 +98,7 @@ pub fn refit(doc: &mut Document, under: Option<&[NodeId]>, families: Option<&[St
                     || t.spans().iter().any(|(_, _, st)| w.contains(&st.font_family.trim().to_lowercase()))
             };
             want.as_ref().is_none_or(uses)
-                && figcraft_text::auto_size(n).is_some_and(|(w, h)| (w - n.width).abs() > 1e-6 || (h - n.height).abs() > 1e-6)
+                && lizard_text::auto_size(n).is_some_and(|(w, h)| (w - n.width).abs() > 1e-6 || (h - n.height).abs() > 1e-6)
         })
         .map(|n| n.id)
         .collect();

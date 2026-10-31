@@ -4,8 +4,8 @@
 //! Lizard does. The player's side (gestures, overlays, timers, scrolling, smart animate) is
 //! `ui-egui`'s `present_behaviour_tests`.
 
-use figcraft_doc::proto::{Action, Direction, Easing, KeyMods, Transition, Trigger};
-use figcraft_doc::{Document, NodeId};
+use lizard_doc::proto::{Action, Direction, Easing, KeyMods, Transition, Trigger};
+use lizard_doc::{Document, NodeId};
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -183,7 +183,7 @@ fn interactive_button() -> (Session, NodeId, NodeId, NodeId, NodeId) {
         .subtree(button)
         .into_iter()
         .skip(1)
-        .find(|i| matches!(s.doc().unwrap().node(*i).map(|n| &n.kind), Some(figcraft_doc::NodeKind::Instance { .. })));
+        .find(|i| matches!(s.doc().unwrap().node(*i).map(|n| &n.kind), Some(lizard_doc::NodeKind::Instance { .. })));
     (s, screen, button, nested.unwrap(), pressed)
 }
 

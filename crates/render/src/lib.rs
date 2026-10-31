@@ -76,9 +76,9 @@ fn interruption_is_local_to_the_superseded_render() {
     assert!(!render_interrupted());
 }
 
-use figcraft_color::{Color, ColorProfile};
-use figcraft_doc::{Document, ExportFormat, NodeId, NodeKind};
-use figcraft_geom::{Affine, Rect};
+use lizard_color::{Color, ColorProfile};
+use lizard_doc::{Document, ExportFormat, NodeId, NodeKind};
+use lizard_geom::{Affine, Rect};
 
 /// Which part of a page to draw, and how big.
 #[derive(Clone, Debug)]
@@ -142,7 +142,7 @@ fn new_pixmap(w: u32, h: u32) -> Option<Pixmap> {
     Pixmap::new(w, h)
 }
 
-/// The largest backdrop radius (background blur, glass: see [`figcraft_doc::Effect::backdrop_radius`])
+/// The largest backdrop radius (background blur, glass: see [`lizard_doc::Effect::backdrop_radius`])
 /// in the document (0 without any).
 pub(crate) fn max_backdrop_blur(doc: &Document) -> f64 {
     doc.max_backdrop_radius()
@@ -332,13 +332,11 @@ pub fn render_alone(doc: &Document, id: NodeId, view: &View, how: Alone) -> Opti
     let n = tmp.node_mut(id)?;
     n.is_mask = false;
     match how {
-        Alone::WithEffects => {
-            n.effects.retain(|e| !matches!(e.kind, figcraft_doc::EffectKind::BackgroundBlur(_) | figcraft_doc::EffectKind::Glass(_)))
-        }
+        Alone::WithEffects => n.effects.retain(|e| !matches!(e.kind, lizard_doc::EffectKind::BackgroundBlur(_) | lizard_doc::EffectKind::Glass(_))),
         Alone::Plain => {
             n.effects.clear();
             n.opacity = 1.0;
-            n.blend = figcraft_color::BlendMode::Normal;
+            n.blend = lizard_color::BlendMode::Normal;
         }
     }
     let mut pix = Pixmap::new(view.width.clamp(1, 16_384), view.height.clamp(1, 16_384))?;

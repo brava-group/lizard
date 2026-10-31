@@ -450,7 +450,7 @@ fn within(what: &str, v: Option<f64>, lo: f64, hi: f64) -> Result<(), String> {
 
 /// `s` as `#RRGGBB(AA)`.
 fn hex(what: &str, s: &str) -> Result<String, String> {
-    let parsed = Some(s).filter(|s| s.len() <= 9).and_then(figcraft_color::Color::from_hex);
+    let parsed = Some(s).filter(|s| s.len() <= 9).and_then(lizard_color::Color::from_hex);
     Ok(parsed.ok_or_else(|| format!("`{what}` must be a hex colour like #FF5A5F"))?.to_css_hex())
 }
 

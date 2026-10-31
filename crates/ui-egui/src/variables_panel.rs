@@ -8,11 +8,11 @@
 //! undoable and the same over MCP.
 
 use egui::{Align2, Context, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
-use figcraft_doc::{Collection, Document, PublishedLibrary, Variable, VariableType, VariableValue, Variables, scopes_for};
-use figcraft_engine::library;
+use lizard_doc::{Collection, Document, PublishedLibrary, Variable, VariableType, VariableValue, Variables, scopes_for};
+use lizard_engine::library;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::{tr, tr_noop, trf, trn};
@@ -129,7 +129,7 @@ impl<'a> View<'a> {
 }
 
 /// Show the editor while it's open (call once per frame).
-pub fn show(app: &mut FigApp, ctx: &Context) {
+pub fn show(app: &mut LizardApp, ctx: &Context) {
     let Some(mut st) = app.ui.variables.take() else { return };
     let Ok(doc) = app.session.ds().map(|d| d.doc.clone()) else { return };
     let libs = crate::variable_ui::libraries(app, &doc);
@@ -233,7 +233,7 @@ fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool) {
 
 /// Export this file's collections through a save dialog, or as a download where the platform has
 /// no save dialogs (the browser).
-pub(crate) fn export_dialog(app: &mut FigApp, format: &str) {
+pub(crate) fn export_dialog(app: &mut LizardApp, format: &str) {
     let name = app.session.doc().map(|d| format!("{}.variables.{format}", d.name)).unwrap_or_else(|_| format!("variables.{format}"));
     if app.services.downloads() {
         let Some(r) = app.run("variable.export", json!({"format": format})) else { return };
@@ -256,7 +256,7 @@ pub(crate) fn export_dialog(app: &mut FigApp, format: &str) {
 }
 
 /// Import a variables JSON picked in an open dialog.
-fn import_dialog(app: &mut FigApp) {
+fn import_dialog(app: &mut LizardApp) {
     app.pick_open(tr("Import variables"), &["json"], |app, p| {
         let Some(r) = app.run("variable.import", json!({"variables": p.to_string_lossy()})) else { return };
         let (added, updated) = (r["variables"].as_u64().unwrap_or(0), r["updated"].as_u64().unwrap_or(0));
@@ -270,7 +270,7 @@ fn import_dialog(app: &mut FigApp) {
 }
 
 /// Extend library `lib`'s collection `c` and show the new collection.
-fn extend(app: &mut FigApp, lib: &str, c: &str, st: &mut Editor) {
+fn extend(app: &mut LizardApp, lib: &str, c: &str, st: &mut Editor) {
     if let Some(id) = app.run("library.extendCollection", json!({"library": lib, "collection": c})).and_then(|r| r["id"].as_str().map(str::to_string))
     {
         st.library = None;
@@ -308,7 +308,7 @@ fn unique(base: &str, taken: impl Fn(&str) -> bool) -> String {
     (1..10_000).map(|k| if k == 1 { base.to_string() } else { format!("{base} {k}") }).find(|n| !taken(n)).unwrap_or_else(|| base.to_string())
 }
 
-fn sidebar(app: &mut FigApp, ui: &mut Ui, views: &[View], local: &Variables, st: &mut Editor) {
+fn sidebar(app: &mut LizardApp, ui: &mut Ui, views: &[View], local: &Variables, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     let (hr, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 40.0), Sense::hover());
     ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Collections"), semibold(11.0), t.text);
@@ -380,7 +380,7 @@ fn library_title(ui: &mut Ui, name: &str) {
 }
 
 /// One collection in the sidebar (with its groups while selected).
-fn collection_row(app: &mut FigApp, ui: &mut Ui, view: &View, c: &Collection, st: &mut Editor) {
+fn collection_row(app: &mut LizardApp, ui: &mut Ui, view: &View, c: &Collection, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 32.0), Sense::click());
     let r = r.shrink2(vec2(10.0, 4.0));
@@ -453,7 +453,7 @@ fn groups<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
 
 /// "All variables" and the collection's groups (indented by depth): picking one filters the
 /// table; this file's groups can be renamed (every variable in them follows) or deleted.
-fn group_rows(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor) {
+fn group_rows(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     let members: Vec<&Variable> = view.in_collection(&coll.id).collect();
     let names: Vec<&str> = members.iter().map(|v| v.name.as_str()).collect();
@@ -521,7 +521,7 @@ fn group_rows(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
 
 /// Rename the last part of group `g` of a collection (its variables `members`) to `new`: every
 /// variable under it moves along (one undo step).
-fn rename_group(app: &mut FigApp, members: &[&Variable], g: &str, new: &str, st: &mut Editor) {
+fn rename_group(app: &mut LizardApp, members: &[&Variable], g: &str, new: &str, st: &mut Editor) {
     let new = new.trim().replace('/', "-");
     if new.is_empty() {
         return;
@@ -543,7 +543,7 @@ fn rename_group(app: &mut FigApp, members: &[&Variable], g: &str, new: &str, st:
     }
 }
 
-fn create_collection(app: &mut FigApp, vars: &Variables, st: &mut Editor) {
+fn create_collection(app: &mut LizardApp, vars: &Variables, st: &mut Editor) {
     let name = unique("Collection", |n| vars.collections.iter().any(|c| c.name == n));
     if let Some(id) =
         app.run("variable.createCollection", json!({"name": name, "modes": ["Mode 1"]})).and_then(|r| r["id"].as_str().map(str::to_string))
@@ -559,7 +559,7 @@ fn group_of(name: &str) -> &str {
     name.rsplit_once('/').map(|(g, _)| g).unwrap_or("")
 }
 
-fn table(app: &mut FigApp, ui: &mut Ui, view: &View, st: &mut Editor) {
+fn table(app: &mut LizardApp, ui: &mut Ui, view: &View, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     // A sidebar click this frame picked another source: shown next frame.
     if !view.is(st.library.as_deref()) {
@@ -607,7 +607,7 @@ fn table(app: &mut FigApp, ui: &mut Ui, view: &View, st: &mut Editor) {
     create_row(app, ui, view, coll, st);
 }
 
-fn header_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor, width: f32) {
+fn header_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor, width: f32) {
     let t = Tokens::get(ui.ctx());
     // An extended collection has the modes of the one it extends.
     let editable = view.editable() && coll.extends.is_none();
@@ -696,7 +696,7 @@ fn table_grid(ui: &Ui, row: Rect, mode_count: usize) {
     ui.painter().line_segment([pos2(trailing, row.top()), pos2(trailing, row.bottom())], stroke);
 }
 
-fn var_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Variable, st: &mut Editor, width: f32) {
+fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Variable, st: &mut Editor, width: f32) {
     let t = Tokens::get(ui.ctx());
     let editable = view.editable();
     let (r, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click());
@@ -775,13 +775,13 @@ fn value_json(val: &VariableValue) -> Value {
     }
 }
 
-fn set(app: &mut FigApp, v: &Variable, mode: &str, value: Value) {
+fn set(app: &mut LizardApp, v: &Variable, mode: &str, value: Value) {
     app.run("variable.set", json!({"variable": v.id, "mode": mode, "value": value}));
 }
 
 /// One value cell: an editor for the value, or the aliased variable's chip; the variable button
 /// on the right makes it an alias. A library's values only show.
-fn value_cell(app: &mut FigApp, ui: &mut Ui, view: &View, v: &Variable, coll: &Collection, mode: &str, rect: Rect) {
+fn value_cell(app: &mut LizardApp, ui: &mut Ui, view: &View, v: &Variable, coll: &Collection, mode: &str, rect: Rect) {
     let t = Tokens::get(ui.ctx());
     let Some(val) = v.values.get(mode) else { return };
     let editable = view.editable();
@@ -828,14 +828,14 @@ fn value_cell(app: &mut FigApp, ui: &mut Ui, view: &View, v: &Variable, coll: &C
     }
     match val {
         VariableValue::Color(c) => {
-            let paint = figcraft_color::Paint::solid(*c);
+            let paint = lizard_color::Paint::solid(*c);
             let hex = c.to_hex();
             let edit = ColorControl::new(id, &paint, ColorValue::EditableHex(&hex), f64::from(c.a) * 100.0).inline().show_at(ui, body);
             if edit.open_picker {
                 app.ui.picker = Some(PickerTarget::Variable { id: v.id.clone(), mode: mode.to_string() });
             }
             if let Some(h) = edit.edited_hex
-                && let Some(nc) = figcraft_color::Color::from_hex_or_name(&h)
+                && let Some(nc) = lizard_color::Color::from_hex_or_name(&h)
             {
                 // Six digits (or a colour name) keep the alpha; eight digits set it.
                 let digits = h.trim().trim_start_matches('#');
@@ -883,7 +883,7 @@ fn read_only_value(ui: &Ui, val: &VariableValue, body: Rect) {
     let mut x = body.min.x;
     if let VariableValue::Color(c) = val {
         let sw = Rect::from_center_size(pos2(body.min.x + 8.0, body.center().y), vec2(16.0, 16.0));
-        widgets::paint_swatch(ui.painter(), sw, &figcraft_color::Paint::solid(*c));
+        widgets::paint_swatch(ui.painter(), sw, &lizard_color::Paint::solid(*c));
         x = sw.max.x + 4.0;
     }
     let text = match val {
@@ -894,7 +894,7 @@ fn read_only_value(ui: &Ui, val: &VariableValue, body: Rect) {
     ui.painter().with_clip_rect(text_r).text(text_r.left_center(), Align2::LEFT_CENTER, text, regular(11.0), t.text);
 }
 
-fn create_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor) {
+fn create_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor) {
     let (footer, _) = ui.allocate_exact_size(vec2(ui.available_width(), 41.0), Sense::hover());
     ui.painter().line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, Tokens::get(ui.ctx()).border));
     if view.editable() {
@@ -940,7 +940,7 @@ fn create_row(app: &mut FigApp, ui: &mut Ui, view: &View, coll: &Collection, st:
 
 /// The details of one of this file's variables: name, description, where pickers offer it and
 /// whether publishing the file as a library leaves it out.
-fn details(app: &mut FigApp, ctx: &Context, vars: &Variables, st: &mut Editor) {
+fn details(app: &mut LizardApp, ctx: &Context, vars: &Variables, st: &mut Editor) {
     let Some(v) = st.details.as_ref().filter(|_| st.library.is_none()).and_then(|id| vars.get(id)).cloned() else {
         st.details = None;
         return;

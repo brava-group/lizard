@@ -15,10 +15,10 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel}
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use figcraft_collab::Replica;
-use figcraft_collab::message::{self, Admin, AdminReply, ClientMsg, HostInfo, Presence, ServerMsg};
-use figcraft_doc::Document;
-use figcraft_engine::live::{Event, Published, Status};
+use lizard_collab::Replica;
+use lizard_collab::message::{self, Admin, AdminReply, ClientMsg, HostInfo, Presence, ServerMsg};
+use lizard_doc::Document;
+use lizard_engine::live::{Event, Published, Status};
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::{CloseFrame, Role as WsRole, WebSocket};
 use tungstenite::{Bytes, Message};

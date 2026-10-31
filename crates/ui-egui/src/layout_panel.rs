@@ -5,10 +5,10 @@
 //! commands.
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::*;
+use lizard_doc::*;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon, LayoutIcon, SizingIcon};
@@ -24,7 +24,7 @@ fn parent_of(doc: &Document, id: NodeId) -> Option<&Node> {
     doc.node(id).and_then(|n| n.parent).and_then(|p| doc.node(p))
 }
 
-pub fn layout_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn layout_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let frames = sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.is_frame_like()));
     let al = common(doc, sel, |n| n.layout.clone());
@@ -33,8 +33,8 @@ pub fn layout_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[Node
     let title = if has_al { tr("Auto layout") } else { tr("Layout") };
     // An instance's auto layout is its main's (only padding, gap and alignment are its own); the
     // layers inside it override their size and resizing, not their place in the layout.
-    let in_instance = sel.iter().any(|i| figcraft_engine::components::owning_instance(doc, *i).is_some());
-    let nested = sel.iter().any(|i| figcraft_engine::components::inside_instance(doc, *i));
+    let in_instance = sel.iter().any(|i| lizard_engine::components::owning_instance(doc, *i).is_some());
+    let nested = sel.iter().any(|i| lizard_engine::components::inside_instance(doc, *i));
     let header_action = if has_al && !in_instance {
         layout_header(ui, title, Some((LayoutIcon::AutoLayout, tr("Remove auto layout"))), true)
     } else if frames && !in_instance {
@@ -170,7 +170,7 @@ fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> eg
     response
 }
 
-fn direction(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
+fn direction(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     row(ui, 24.0, |ui| {
         let items = [
             (LayoutIcon::Free, tr("Free")),
@@ -325,7 +325,7 @@ fn limit(n: &Node, horizontal: bool, is_min: bool) -> Option<f64> {
     }
 }
 
-fn dimensions(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], has_al: bool) {
+fn dimensions(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], has_al: bool) {
     let ids = sel.to_vec();
     let w_of = |n: &Node| (n.width * 100.0).round() / 100.0;
     let h_of = |n: &Node| (n.height * 100.0).round() / 100.0;
@@ -415,7 +415,7 @@ fn dimensions(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], has
                     sizing_menu_separator(ui);
                     let apply_variable = format!("{}…", tr("Apply variable"));
                     if sizing_menu_option(ui, &apply_variable, SizingIcon::Variable, false, true) {
-                        crate::variable_ui::open(ui, &ids, field, figcraft_doc::VariableType::Number, selector.rect.left_bottom());
+                        crate::variable_ui::open(ui, &ids, field, lizard_doc::VariableType::Number, selector.rect.left_bottom());
                         ui.close();
                     }
                 });
@@ -462,7 +462,7 @@ fn dimensions(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], has
 
 /// The min/max fields of one axis (shown once either is set): min in the first column, max in the
 /// second, an empty slot offers to add the missing one; the button removes both.
-fn limit_row(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], horizontal: bool, axis: &Axis, col: f32) {
+fn limit_row(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], horizontal: bool, axis: &Axis, col: f32) {
     let nodes: Vec<&Node> = sel.iter().filter_map(|i| doc.node(*i)).collect();
     let has = |is_min: bool| nodes.iter().any(|n| limit(n, horizontal, is_min).is_some());
     if !has(true) && !has(false) {
@@ -499,7 +499,7 @@ fn add_slot(ui: &mut Ui, label: &str, tip: &str, width: f32) -> egui::Response {
     resp
 }
 
-fn alignment(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
+fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     let t = Tokens::get(ui.ctx());
     let grid_mode = l.mode == LayoutMode::Grid;
     block(ui, 64.0, 0.0, |ui| {
@@ -638,7 +638,7 @@ fn alignment(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
 
 /// The Spacing row: the H/V padding pair, or, with Individual padding on, two rows of one field
 /// per side (like Individual corners).
-fn spacing(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
+fn spacing(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     let col = widgets::col_width(ui.available_width());
     let [pt, pr, pb, pl] = l.padding;
     let individual_id = Id::new(("individual_padding", ids));
@@ -735,17 +735,17 @@ fn spacing(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     }
 }
 
-fn padding_side_field(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], key: &str, icon: LayoutIcon, name: &str, value: f64, width: f32) {
+fn padding_side_field(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], key: &str, icon: LayoutIcon, name: &str, value: f64, width: f32) {
     let edit =
         crate::variable_ui::number_field(app, ui, ids, key, Id::new(("al_padding", key)), Lead::LayoutIcon(icon, name), Some(value), "", width);
     app.field(ids, key, edit, |v| json!(v.max(0.0)));
 }
 
 /// Track sizes of a single grid frame: one row per column / row with its size and sizing.
-fn tracks(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[NodeId]) {
+fn tracks(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ids: &[NodeId]) {
     let Some(id) = ids.first().copied() else { return };
     let Some(l) = doc.node(id).and_then(|n| n.layout.clone()) else { return };
-    let Some(g) = figcraft_layout::grid_geometry(doc, id) else { return };
+    let Some(g) = lizard_layout::grid_geometry(doc, id) else { return };
     let col = widgets::col_width(ui.available_width());
     for (axis, specs, ranges) in [("columns", &l.column_tracks, &g.columns), ("rows", &l.row_tracks, &g.rows)] {
         widgets::sublabels(ui, if axis == "columns" { tr("Column sizes") } else { tr("Row sizes") }, None);
@@ -797,12 +797,12 @@ fn tracks(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[NodeId]) {
 
 /// A grid child's cell (single selection: column and row, 1-based; auto placement resets them)
 /// and its spans.
-fn grid_cell(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn grid_cell(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let col = widgets::col_width(ui.available_width());
     if let [id] = sel
         && let Some(cell) =
-            parent_of(doc, *id).and_then(|p| figcraft_layout::grid_geometry(doc, p.id)).and_then(|g| g.cells.into_iter().find(|c| c.id == *id))
+            parent_of(doc, *id).and_then(|p| lizard_layout::grid_geometry(doc, p.id)).and_then(|g| g.cells.into_iter().find(|c| c.id == *id))
     {
         let anchored = doc.node(*id).is_some_and(|n| n.child_layout.grid_column.is_some() || n.child_layout.grid_row.is_some());
         widgets::sublabels(ui, tr("Column"), Some(tr("Row")));

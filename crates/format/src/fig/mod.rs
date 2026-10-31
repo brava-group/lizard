@@ -46,7 +46,7 @@ mod text_style_tests;
 use std::collections::BTreeMap;
 use std::io::Read;
 
-use figcraft_doc::Document;
+use lizard_doc::Document;
 
 pub use export::export;
 

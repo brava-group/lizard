@@ -3,8 +3,8 @@
 //! middle of the view as one group. The grid needs a name: without one the field says so and
 //! Generate is greyed out.
 
-use figcraft_plugin_sdk::ui::{disabled, divider, image, invalid, progress, section, slider};
-use figcraft_plugin_sdk::{Event, Input, Result, Value, call, close_ui, entry, json, notify, show_ui};
+use lizard_plugin_sdk::ui::{disabled, divider, image, invalid, progress, section, slider};
+use lizard_plugin_sdk::{Event, Input, Result, Value, call, close_ui, entry, json, notify, show_ui};
 
 /// The preview's side in pixels, and the most dots on a side.
 const PREVIEW: u32 = 96;

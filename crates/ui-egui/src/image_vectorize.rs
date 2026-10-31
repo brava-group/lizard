@@ -8,12 +8,12 @@ use web_time::Instant;
 
 use base64::Engine as _;
 use egui::{Color32, Rect as UiRect, TextureHandle, Ui, pos2, vec2};
-use figcraft_color::PaintKind;
-use figcraft_doc::{Document, Node, NodeId};
-use figcraft_geom::Rect;
+use lizard_color::PaintKind;
+use lizard_doc::{Document, Node, NodeId};
+use lizard_geom::Rect;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::primitives::{Button, ButtonSize, ButtonVariant, ControlWidth, Menu, Slider, Surface};
@@ -67,7 +67,7 @@ pub(crate) struct Pending {
     page: NodeId,
 }
 
-pub(crate) fn start(app: &mut FigApp, ctx: &egui::Context, id: NodeId, index: usize) {
+pub(crate) fn start(app: &mut LizardApp, ctx: &egui::Context, id: NodeId, index: usize) {
     if app.pending_image_vectorize.is_some() {
         app.toast(tr("Image vectorization is already running"));
         return;
@@ -149,7 +149,7 @@ fn launch(pending: &mut Pending, ctx: &egui::Context) -> Result<(), String> {
     Ok(())
 }
 
-fn source_unchanged(app: &FigApp, pending: &Pending) -> bool {
+fn source_unchanged(app: &LizardApp, pending: &Pending) -> bool {
     app.session.ds().ok().is_some_and(|ds| {
         ds.uid == pending.doc_uid
             && ds.selection.as_slice() == [pending.id]
@@ -158,7 +158,7 @@ fn source_unchanged(app: &FigApp, pending: &Pending) -> bool {
     })
 }
 
-pub(crate) fn poll(app: &mut FigApp, ctx: &egui::Context) {
+pub(crate) fn poll(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut pending) = app.pending_image_vectorize.take() else { return };
     if !source_unchanged(app, &pending) {
         app.toast(tr("Vectorization canceled because the image changed"));
@@ -203,7 +203,7 @@ pub(crate) fn poll(app: &mut FigApp, ctx: &egui::Context) {
 
 /// Draw the trace over a rendering of the page without the source image. This preserves other
 /// layers showing through transparent regions while the actual document stays untouched.
-pub(crate) fn paint_preview(app: &FigApp, painter: &egui::Painter, canvas_background: Color32) {
+pub(crate) fn paint_preview(app: &LizardApp, painter: &egui::Painter, canvas_background: Color32) {
     let Some(pending) = app.pending_image_vectorize.as_ref() else { return };
     let Some(preview) = pending.preview.as_ref() else { return };
     let min = app.to_screen(pending.bounds.x0, pending.bounds.y0);
@@ -220,7 +220,7 @@ pub(crate) fn paint_preview(app: &FigApp, painter: &egui::Painter, canvas_backgr
     painter.image(preview.image.id(), rect, uv, Color32::WHITE);
 }
 
-pub(crate) fn toolbar(app: &mut FigApp, ui: &mut Ui) {
+pub(crate) fn toolbar(app: &mut LizardApp, ui: &mut Ui) {
     let Some(pending) = app.pending_image_vectorize.as_mut() else { return };
     let main = crate::toolbar::pill_rect(app.canvas.rect, crate::toolbar::main_width());
     // Surface margins plus the exact width of every cell and separator.
@@ -349,7 +349,7 @@ fn paint_mode(ui: &Ui, rect: UiRect, mode: Mode) {
     painter.rect_stroke(swatch, egui::CornerRadius::same(2), egui::Stroke::new(1.0, Color32::from_gray(125)), egui::StrokeKind::Inside);
 }
 
-fn confirm(app: &mut FigApp) {
+fn confirm(app: &mut LizardApp) {
     let Some(pending) = app.pending_image_vectorize.take() else { return };
     if !source_unchanged(app, &pending) {
         app.toast(tr("Vectorization canceled because the image changed"));
@@ -365,11 +365,11 @@ fn confirm(app: &mut FigApp) {
 
 fn render_background(doc: &Document, page: NodeId, id: NodeId, bounds: Rect, size: [usize; 2]) -> Option<egui::ColorImage> {
     let (width, height) = (u32::try_from(size[0]).ok()?, u32::try_from(size[1]).ok()?);
-    let view = figcraft_render::View { origin: (bounds.x0, bounds.y0), scale: f64::from(width) / bounds.width(), width, height };
+    let view = lizard_render::View { origin: (bounds.x0, bounds.y0), scale: f64::from(width) / bounds.width(), width, height };
     let mut background = doc.clone();
     background.node_mut(id)?.visible = false;
-    let pixels = figcraft_engine::cmd::file::render_page_screen_pixels(&background, page, &view)?;
-    Some(crate::render_worker::screen_image(&pixels, figcraft_color::ColorProfile::Srgb))
+    let pixels = lizard_engine::cmd::file::render_page_screen_pixels(&background, page, &view)?;
+    Some(crate::render_worker::screen_image(&pixels, lizard_color::ColorProfile::Srgb))
 }
 
 fn trace(png: &[u8], settings: Settings) -> Result<(String, egui::ColorImage), String> {
@@ -467,15 +467,15 @@ fn quantize_palette(image: &image::RgbaImage, count: usize) -> Vec<[u8; 3]> {
 }
 
 fn raster_svg(svg: &str, width: u32, height: u32) -> Result<egui::ColorImage, String> {
-    let pixels = figcraft_engine::cmd::file::render_svg_preview_pixels(svg, width, height)?;
-    Ok(crate::render_worker::screen_image(&pixels, figcraft_color::ColorProfile::Srgb))
+    let pixels = lizard_engine::cmd::file::render_svg_preview_pixels(svg, width, height)?;
+    Ok(crate::render_worker::screen_image(&pixels, lizard_color::ColorProfile::Srgb))
 }
 
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
-    use figcraft_color::PaintKind;
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use lizard_color::PaintKind;
     use serde_json::json;
 
     use super::{Mode, Settings, confirm, prepare_pixels, start, trace};
@@ -510,7 +510,7 @@ mod tests {
                 &json!({"data": base64::engine::general_purpose::STANDARD.encode(png), "x": 20, "y": 30, "width": 48, "height": 48}),
             )
             .unwrap();
-        let id = figcraft_doc::NodeId(result["id"].as_u64().unwrap());
+        let id = lizard_doc::NodeId(result["id"].as_u64().unwrap());
         harness.app.session.execute("select.set", &json!({"ids": [id.0]})).unwrap();
         start(&mut harness.app, &harness.ctx, id, 0);
         for _ in 0..100 {
@@ -542,7 +542,7 @@ mod tests {
         assert_eq!(preview.pixels[0].a(), 0);
         assert!(preview.pixels[24 * 48 + 24].r() > 150);
 
-        let mut session = figcraft_engine::Session::new();
+        let mut session = lizard_engine::Session::new();
         let original = session
             .execute(
                 "image.place",
@@ -555,9 +555,9 @@ mod tests {
         let vector_id = vector["id"].as_u64().unwrap();
         assert!(vector["paths"].as_u64().unwrap() > 0);
         let doc = session.doc().unwrap();
-        assert!(doc.node(figcraft_doc::NodeId(id)).is_none());
-        let traced = doc.node(figcraft_doc::NodeId(vector_id)).unwrap();
-        assert_eq!(doc.world_bounds(figcraft_doc::NodeId(vector_id)), Some(figcraft_geom::Rect::new(12.0, 24.0, 108.0, 120.0)));
+        assert!(doc.node(lizard_doc::NodeId(id)).is_none());
+        let traced = doc.node(lizard_doc::NodeId(vector_id)).unwrap();
+        assert_eq!(doc.world_bounds(lizard_doc::NodeId(vector_id)), Some(lizard_geom::Rect::new(12.0, 24.0, 108.0, 120.0)));
         assert!(!traced.children.is_empty());
 
         let exported = session.execute("file.export", &json!({"ids": [vector_id], "format": "png", "includeBoundingBox": true})).unwrap();
@@ -567,7 +567,7 @@ mod tests {
         assert!(result.get_pixel(48, 48)[0] > 150 && result.get_pixel(48, 48)[3] > 200);
 
         session.execute("edit.undo", &json!({})).unwrap();
-        let restored = session.doc().unwrap().node(figcraft_doc::NodeId(id)).unwrap();
+        let restored = session.doc().unwrap().node(lizard_doc::NodeId(id)).unwrap();
         assert!(matches!(&restored.fills[0].kind, PaintKind::Image(_)));
     }
 }

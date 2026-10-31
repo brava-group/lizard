@@ -1,6 +1,6 @@
 //! Image adjustments run after image decoding, without a CPU pixel pass or GPU readback.
 
-use figcraft_color::ImageFilters;
+use lizard_color::ImageFilters;
 use wgpu::util::DeviceExt;
 
 const SHADER: &str = r#"

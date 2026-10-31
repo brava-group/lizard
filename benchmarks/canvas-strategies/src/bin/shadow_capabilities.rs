@@ -5,11 +5,11 @@ use std::error::Error;
 use std::path::Path;
 
 use canvas_strategies_bench::gpu_scene::gpu_drop_shadow_supported;
-use figcraft_doc::{EffectKind, NodeKind};
+use lizard_doc::{EffectKind, NodeKind};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    for path in ["benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft", "/Users/matheuspires/Documents/Lizard-new-icon.figcraft"] {
-        let (doc, warnings) = figcraft_format::load_file(Path::new(path))?;
+    for path in ["benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard", "/Users/matheuspires/Documents/Lizard-new-icon.lizard"] {
+        let (doc, warnings) = lizard_format::load_file(Path::new(path))?;
         if !warnings.is_empty() {
             return Err(format!("{path}: {warnings:?}").into());
         }

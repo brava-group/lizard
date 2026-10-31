@@ -30,12 +30,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use figcraft_collab::message::{
+use lizard_collab::message::{
     self, Access, Admin, AdminReply, ClientMsg, Hello, HostInfo, LibraryReply, LibraryReq, Manage, OpenHosting, OpenLibrary, OpenPlugins, PROTOCOL,
     PluginReply, PluginReq, Presence, Resolve, ServerMsg, reads_hosting,
 };
-use figcraft_collab::{Outgoing, Server};
-use figcraft_engine::live::{Event, MAX_NAME, PEOPLE, sanitize};
+use lizard_collab::{Outgoing, Server};
+use lizard_engine::live::{Event, MAX_NAME, PEOPLE, sanitize};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::{CloseFrame, Role, WebSocket};

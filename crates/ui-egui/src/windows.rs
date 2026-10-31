@@ -5,19 +5,19 @@
 //! other window holds. The browser has one window.
 //!
 //! Other windows are egui deferred viewports: each draws only when it needs to. Their draw
-//! callbacks run on the main thread but must be `Send`, so the desktop app keeps its [`FigApp`] in
+//! callbacks run on the main thread but must be `Send`, so the desktop app keeps its [`LizardApp`] in
 //! a thread-local ([`install`], [`with_app`]).
 
 use std::cell::RefCell;
 
 use egui::{Context, Pos2, Vec2, ViewportBuilder, ViewportCommand, ViewportId};
-use figcraft_engine::DocState;
+use lizard_engine::DocState;
 use serde_json::{Value, json};
 
 use crate::canvas::CanvasState;
 use crate::i18n::{tr, trf};
 use crate::render_worker::Worker;
-use crate::{FigApp, TitleBar, UiState};
+use crate::{LizardApp, TitleBar, UiState};
 
 /// Another window: its tabs and the UI state it swaps into the app while it draws.
 pub struct Window {
@@ -70,30 +70,30 @@ impl Windows {
 
 /// Window `id`'s egui viewport.
 pub fn viewport(id: u64) -> ViewportId {
-    if id == 0 { ViewportId::ROOT } else { ViewportId::from_hash_of(("figcraft_window", id)) }
+    if id == 0 { ViewportId::ROOT } else { ViewportId::from_hash_of(("lizard_window", id)) }
 }
 
 thread_local! {
-    static APP: RefCell<Option<FigApp>> = const { RefCell::new(None) };
+    static APP: RefCell<Option<LizardApp>> = const { RefCell::new(None) };
 }
 
 /// Keep the app where other windows' draw callbacks find it (the desktop app, once, on the main
 /// thread).
-pub fn install(app: FigApp) {
+pub fn install(app: LizardApp) {
     APP.with(|a| *a.borrow_mut() = Some(app));
 }
 
 /// Run `f` on the installed app (`None` before [`install`]).
-pub fn with_app<R>(f: impl FnOnce(&mut FigApp) -> R) -> Option<R> {
+pub fn with_app<R>(f: impl FnOnce(&mut LizardApp) -> R) -> Option<R> {
     APP.with(|a| a.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
 /// Last-resort guard around a frame: a panic becomes a message and recovery copies of unsaved
 /// files, not a lost document.
-pub fn guard(app: &mut FigApp, ctx: &Context, f: impl FnOnce(&mut FigApp)) {
+pub fn guard(app: &mut LizardApp, ctx: &Context, f: impl FnOnce(&mut LizardApp)) {
     // Started with automation roots, everything the window and the control channel do is confined.
     let roots = app.automation_roots.clone();
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| figcraft_engine::file_access::confined(roots.as_ref(), || f(&mut *app))));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lizard_engine::file_access::confined(roots.as_ref(), || f(&mut *app))));
     if let Err(e) = res {
         let msg = e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into());
         log::error!("UI panic: {msg}");
@@ -104,7 +104,7 @@ pub fn guard(app: &mut FigApp, ctx: &Context, f: impl FnOnce(&mut FigApp)) {
 }
 
 /// Control-channel input events (`ui.input`) for the window `viewport` draws next.
-pub fn take_input(app: &mut FigApp, viewport_id: ViewportId) -> Vec<egui::Event> {
+pub fn take_input(app: &mut LizardApp, viewport_id: ViewportId) -> Vec<egui::Event> {
     match app.windows.list.iter_mut().find(|w| viewport(w.id) == viewport_id) {
         Some(w) => std::mem::take(&mut w.pane.control_input),
         None if viewport_id == ViewportId::ROOT => std::mem::take(&mut app.control_input),
@@ -119,7 +119,7 @@ fn title_of(ds: Option<&DocState>) -> String {
     }
 }
 
-impl FigApp {
+impl LizardApp {
     /// The window drawing now shows this open file as a tab.
     pub fn shows(&self, uid: u64) -> bool {
         self.windows.of(uid) == self.windows.current
@@ -143,7 +143,7 @@ impl FigApp {
 
 /// Make the session's active file one the window drawing now shows: `want`, else the one active
 /// now, else its first.
-fn show_own(app: &mut FigApp, want: Option<u64>) {
+fn show_own(app: &mut LizardApp, want: Option<u64>) {
     let mine = |d: &DocState| app.shows(d.uid);
     let pick = want
         .and_then(|u| app.session.docs.iter().position(|d| d.uid == u && mine(d)))
@@ -155,7 +155,7 @@ fn show_own(app: &mut FigApp, want: Option<u64>) {
 }
 
 /// Swap a window's UI state with the app's; what the app shares between windows stays.
-fn exchange(app: &mut FigApp, p: &mut Pane) {
+fn exchange(app: &mut LizardApp, p: &mut Pane) {
     std::mem::swap(&mut app.ui, &mut p.ui);
     std::mem::swap(&mut app.ui.last_copy, &mut p.ui.last_copy);
     std::mem::swap(&mut app.ui.quit, &mut p.ui.quit);
@@ -169,7 +169,7 @@ fn exchange(app: &mut FigApp, p: &mut Pane) {
 /// Open a window (`window.new`) with open file `index` moved into it, the file at `path`, or a new
 /// file, at screen point `at` (else beside this window). Returns its id. With one window (the
 /// browser) or a screen reader running, a file opens as a tab here instead (and the error says so).
-pub fn open(app: &mut FigApp, ctx: &Context, index: Option<usize>, path: Option<&str>, at: Option<Pos2>) -> Result<u64, String> {
+pub fn open(app: &mut LizardApp, ctx: &Context, index: Option<usize>, path: Option<&str>, at: Option<Pos2>) -> Result<u64, String> {
     // shortcut: eframe 0.36 gives only the main window an AccessKit adapter, so other windows have
     // no screen-reader tree; while a screen reader runs files stay tabs here. Upgrade when eframe
     // adapts every viewport.
@@ -232,7 +232,7 @@ pub fn open(app: &mut FigApp, ctx: &Context, index: Option<usize>, path: Option<
 }
 
 /// Bring window `id` to the front; control requests go to it from now on.
-pub fn focus(app: &mut FigApp, ctx: &Context, id: u64) -> Result<Value, String> {
+pub fn focus(app: &mut LizardApp, ctx: &Context, id: u64) -> Result<Value, String> {
     if !app.windows.exists(id) {
         return Err(format!("no window {id}"));
     }
@@ -243,7 +243,7 @@ pub fn focus(app: &mut FigApp, ctx: &Context, id: u64) -> Result<Value, String> 
 
 /// Act on `window.new` / `window.focus` asked for by commands (menus, the Actions palette,
 /// `engine.execute`).
-pub(crate) fn requests(app: &mut FigApp, ctx: &Context) {
+pub(crate) fn requests(app: &mut LizardApp, ctx: &Context) {
     for r in std::mem::take(&mut app.window_requests) {
         let n = |k: &str| r.data.get(k).and_then(Value::as_u64);
         if r.kind == "window.fullscreen" {
@@ -264,7 +264,7 @@ pub(crate) fn requests(app: &mut FigApp, ctx: &Context) {
 }
 
 /// Every window: id, title, its files and the one it shows (`window.list`).
-pub fn list(app: &FigApp) -> Value {
+pub fn list(app: &LizardApp) -> Value {
     let active_of = |id: u64| -> Option<u64> {
         if id == app.windows.current {
             app.session.ds().ok().map(|d| d.uid)
@@ -296,7 +296,7 @@ pub fn list(app: &FigApp) -> Value {
 /// with it, after asking when one has unsaved changes. The main window closes last: while other
 /// windows are open it takes over one of them. The desktop app calls it from the main window's
 /// `logic` (which runs even while the window is minimised); other windows call it themselves.
-pub fn on_close_request(app: &mut FigApp, ctx: &Context) {
+pub fn on_close_request(app: &mut LizardApp, ctx: &Context) {
     if app.ui.quit || !ctx.input(|i| i.viewport().close_requested()) {
         return;
     }
@@ -308,7 +308,7 @@ pub fn on_close_request(app: &mut FigApp, ctx: &Context) {
 }
 
 /// The custom title bar's Close button uses the same unsaved-file check as a system close event.
-pub(crate) fn request_close(app: &mut FigApp, ctx: &Context) {
+pub(crate) fn request_close(app: &mut LizardApp, ctx: &Context) {
     if !app.unsaved().is_empty() {
         app.ui.confirm_close = true;
         ctx.request_repaint();
@@ -317,13 +317,13 @@ pub(crate) fn request_close(app: &mut FigApp, ctx: &Context) {
     }
 }
 
-fn close_current(app: &mut FigApp, ctx: &Context) {
+fn close_current(app: &mut LizardApp, ctx: &Context) {
     app.windows.closing.push(app.windows.current);
     ctx.request_repaint_of(ViewportId::ROOT);
 }
 
 /// The unsaved-changes question when a window closes.
-pub(crate) fn confirm_close(app: &mut FigApp, ctx: &Context) {
+pub(crate) fn confirm_close(app: &mut LizardApp, ctx: &Context) {
     if !app.ui.confirm_close {
         return;
     }
@@ -351,7 +351,7 @@ pub(crate) fn confirm_close(app: &mut FigApp, ctx: &Context) {
 
 /// Before the main window draws: windows asked to close close, closed files leave their windows
 /// (a window left with none closes) and the main window shows one of its own files.
-pub(crate) fn begin(app: &mut FigApp, ctx: &Context) {
+pub(crate) fn begin(app: &mut LizardApp, ctx: &Context) {
     app.windows.current = 0;
     for id in std::mem::take(&mut app.windows.closing) {
         if id == 0 && app.windows.list.is_empty() {
@@ -396,7 +396,7 @@ pub(crate) fn begin(app: &mut FigApp, ctx: &Context) {
 /// After a window drew: when a command showed another window's file (Ctrl+Tab, opening a file
 /// open there), that window comes to the front with it. Not when files closed: the session's
 /// fallback file isn't a choice.
-pub(crate) fn settle(app: &mut FigApp, ctx: &Context, files_before: usize) {
+pub(crate) fn settle(app: &mut LizardApp, ctx: &Context, files_before: usize) {
     let Some(uid) = app.session.ds().ok().map(|d| d.uid) else { return };
     let owner = app.windows.of(uid);
     if owner == app.windows.current || app.session.docs.len() < files_before {
@@ -413,14 +413,14 @@ pub(crate) fn settle(app: &mut FigApp, ctx: &Context, files_before: usize) {
 }
 
 /// Something every window shows changed (the preferences, the theme): the others draw again.
-pub(crate) fn repaint_others(app: &FigApp, ctx: &Context) {
+pub(crate) fn repaint_others(app: &LizardApp, ctx: &Context) {
     for id in std::iter::once(0).chain(app.windows.list.iter().map(|w| w.id)).filter(|id| *id != app.windows.current) {
         ctx.request_repaint_of(viewport(id));
     }
 }
 
 /// Keep the other windows open (each draws itself when it needs to).
-pub(crate) fn show(app: &FigApp, ctx: &Context) {
+pub(crate) fn show(app: &LizardApp, ctx: &Context) {
     for w in &app.windows.list {
         let title = title_of(app.session.docs.iter().find(|d| Some(d.uid) == w.active));
         let mut b = ViewportBuilder::default().with_title(title).with_inner_size(w.size).with_min_inner_size([800.0, 500.0]).with_drag_and_drop(true);
@@ -451,7 +451,7 @@ struct Entered {
 }
 
 /// Swap window `id`'s state into the app and show its file; `None` when there is no such window.
-fn enter(app: &mut FigApp, id: u64) -> Option<Entered> {
+fn enter(app: &mut LizardApp, id: u64) -> Option<Entered> {
     let k = app.windows.list.iter().position(|w| w.id == id)?;
     let main_active = app.session.ds().ok().map(|d| d.uid);
     let newest = app.session.docs.iter().map(|d| d.uid).max().unwrap_or(0);
@@ -466,7 +466,7 @@ fn enter(app: &mut FigApp, id: u64) -> Option<Entered> {
 }
 
 /// Files the entered window opened are its own.
-fn adopt(app: &mut FigApp, e: &Entered) {
+fn adopt(app: &mut LizardApp, e: &Entered) {
     let new: Vec<u64> = app.session.docs.iter().map(|d| d.uid).filter(|u| *u > e.newest && app.windows.of(*u) == 0).collect();
     if let Some(w) = app.windows.list.iter_mut().find(|w| w.id == e.id) {
         w.docs.extend(new);
@@ -475,7 +475,7 @@ fn adopt(app: &mut FigApp, e: &Entered) {
 
 /// Swap the entered window's state back out (with where it is on screen, when known) and the
 /// main window's back in.
-fn leave(app: &mut FigApp, mut e: Entered, outer: Option<egui::Rect>, inner: Option<egui::Rect>) {
+fn leave(app: &mut LizardApp, mut e: Entered, outer: Option<egui::Rect>, inner: Option<egui::Rect>) {
     let shown = app.session.ds().ok().map(|d| d.uid).filter(|u| app.windows.of(*u) == e.id);
     exchange(app, &mut e.pane);
     if let Some(w) = app.windows.list.iter_mut().find(|w| w.id == e.id) {
@@ -492,7 +492,7 @@ fn leave(app: &mut FigApp, mut e: Entered, outer: Option<egui::Rect>, inner: Opt
 /// Run `f` as window `id` (0: the main window) outside its frame, with its state swapped in as
 /// while it draws; `None` when there is no such window. For a window that draws nothing now
 /// (minimized, or occluded: behind other windows or on another Space).
-pub(crate) fn as_window<R>(app: &mut FigApp, id: u64, f: impl FnOnce(&mut FigApp) -> R) -> Option<R> {
+pub(crate) fn as_window<R>(app: &mut LizardApp, id: u64, f: impl FnOnce(&mut LizardApp) -> R) -> Option<R> {
     if id == 0 {
         // Between frames the app holds the main window's state.
         return Some(f(app));
@@ -505,7 +505,7 @@ pub(crate) fn as_window<R>(app: &mut FigApp, id: u64, f: impl FnOnce(&mut FigApp
 }
 
 /// One frame of window `id`, with its state swapped in.
-fn draw(app: &mut FigApp, id: u64, ui: &mut egui::Ui) {
+fn draw(app: &mut LizardApp, id: u64, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let files_before = app.session.docs.len();
     let prefs = app.session.prefs.clone();

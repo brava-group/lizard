@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-engine"
+name = "lizard-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,21 +9,21 @@ description = "Lizard engine: sessions, undo history, the command registry every
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-color = { workspace = true }
-figcraft-doc = { workspace = true }
-figcraft-collab = { workspace = true }
-figcraft-layout = { workspace = true }
-figcraft-text = { workspace = true }
-figcraft-pathops = { workspace = true }
-figcraft-render = { workspace = true }
-figcraft-shader = { workspace = true }
-figcraft-format = { workspace = true }
-figcraft-svg = { workspace = true }
-figcraft-pdf = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-color = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-collab = { workspace = true }
+lizard-layout = { workspace = true }
+lizard-text = { workspace = true }
+lizard-pathops = { workspace = true }
+lizard-render = { workspace = true }
+lizard-shader = { workspace = true }
+lizard-format = { workspace = true }
+lizard-svg = { workspace = true }
+lizard-pdf = { workspace = true }
 craft-docpath = { workspace = true }
-figcraft-plugin = { workspace = true }
-figcraft-figma-plugin = { workspace = true }
+lizard-plugin = { workspace = true }
+lizard-figma-plugin = { workspace = true }
 sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -41,4 +41,4 @@ wat = { workspace = true }
 zip = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-figcraft-canvas-gpu = { workspace = true }
+lizard-canvas-gpu = { workspace = true }

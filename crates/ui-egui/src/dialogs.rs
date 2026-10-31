@@ -4,12 +4,12 @@
 use std::path::Path;
 
 use egui::{Align2, Context, CornerRadius, RichText, Sense, Stroke, vec2};
-use figcraft_color::ColorProfile;
-use figcraft_doc::{ExportFormat, ExportSetting, ExportSize, NodeId};
-use figcraft_engine::cmd::file::{export_jobs, exportable_layers};
+use lizard_color::ColorProfile;
+use lizard_doc::{ExportFormat, ExportSetting, ExportSize, NodeId};
+use lizard_engine::cmd::file::{export_jobs, exportable_layers};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
@@ -33,7 +33,7 @@ pub fn window_failed(error: &str, backend_set: bool) -> String {
             "{}
 
 set WGPU_BACKEND=gl
-figcraft.exe",
+lizard.exe",
             tr("Updating the graphics driver often helps. To use OpenGL only, start Lizard from a Command Prompt with:")
         )
     } else {
@@ -123,7 +123,7 @@ fn about_body(ui: &mut egui::Ui, t: &Tokens) {
     ui.add_space(12.0);
     ui.label(tr("Lizard is an open-source interface design and prototyping app built with Rust."));
     ui.add_space(8.0);
-    ui.hyperlink_to("getartcraft.com/apps/figcraft", "https://getartcraft.com/apps/figcraft");
+    ui.hyperlink_to("getartcraft.com/apps/lizard", "https://getartcraft.com/apps/lizard");
     ui.hyperlink_to(tr("Join us on Discord"), "https://discord.gg/artcraft");
     ui.hyperlink_to("Background removal: withoutBG Open Model", "https://withoutbg.com/open-model/license");
     ui.hyperlink_to("Built with DINOv3", "https://ai.meta.com/resources/models-and-libraries/dinov3-license/");
@@ -136,7 +136,7 @@ fn about_body(ui: &mut egui::Ui, t: &Tokens) {
 /// Escape closes the topmost simple dialog (one without menus of its own), before the canvas's
 /// shortcuts see it (it doesn't deselect), like a system dialog: from one of its fields too. A menu
 /// open over the dialog (Preferences ▸ Interface size) takes the first Escape and closes alone.
-pub fn keys(app: &mut FigApp, ctx: &Context) {
+pub fn keys(app: &mut LizardApp, ctx: &Context) {
     if egui::Popup::is_any_open(ctx) {
         return;
     }
@@ -171,7 +171,7 @@ pub fn keys(app: &mut FigApp, ctx: &Context) {
     }
 }
 
-pub fn show(app: &mut FigApp, ctx: &Context) {
+pub fn show(app: &mut LizardApp, ctx: &Context) {
     // Dropped files waiting to open: their card, then (once it has shown) the files.
     crate::pending_open::pending_opens(app, ctx);
     crate::import_report::show(app, ctx);
@@ -229,11 +229,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 if crate::widgets::checkbox(ui, on, tr("Open invite links in Lizard")) {
                     app.run("collab.registerLinks", json!({"on": !on}));
                 }
-                crate::widgets::label(
-                    ui,
-                    tr("figcraft:// links from a browser, chat or email open this app and join the session."),
-                    t.text_secondary,
-                );
+                crate::widgets::label(ui, tr("lizard:// links from a browser, chat or email open this app and join the session."), t.text_secondary);
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -251,7 +247,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 if let Some(url) = crate::widgets::text_field_named(ui, egui::Id::new("pref_publish_server"), &prefs.publish_server, 220.0, name) {
                     app.run("pref.publishServer", json!({"url": url}));
                 }
-                let usual = prefs.publish_server == figcraft_engine::live::DEFAULT_SERVER;
+                let usual = prefs.publish_server == lizard_engine::live::DEFAULT_SERVER;
                 if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Clear saved server")).clicked() {
                     app.run("pref.publishServer", json!({}));
                 }
@@ -373,7 +369,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
 
 /// Menus and Actions cannot pass a value themselves. Gather it here, then run the regular
 /// command so the same validation and undo behaviour apply as for programmatic callers.
-fn menu_input_dialog(app: &mut FigApp, ctx: &Context) {
+fn menu_input_dialog(app: &mut LizardApp, ctx: &Context) {
     let Some(mut input) = app.ui.menu_input.take() else { return };
     let t = Tokens::get(ctx);
     let title = match &input {
@@ -455,9 +451,9 @@ pub struct BatchRenameUi {
 const PREVIEW_ROWS: usize = 5;
 
 /// Open the Rename layers dialog for `ids` (several layers: Cmd/Ctrl+R, F2, the context menu).
-pub(crate) fn open_batch_rename(app: &mut FigApp, ids: &[NodeId]) {
+pub(crate) fn open_batch_rename(app: &mut LizardApp, ids: &[NodeId]) {
     let Ok(doc) = app.session.doc() else { return };
-    let ids = figcraft_engine::cmd::edit::z_sorted(doc, ids);
+    let ids = lizard_engine::cmd::edit::z_sorted(doc, ids);
     app.ui.batch_rename = Some(BatchRenameUi { ids, start: 1, ..Default::default() });
 }
 
@@ -476,7 +472,7 @@ pub(crate) fn batch_rename_params(b: &BatchRenameUi) -> serde_json::Value {
 /// Preferences ▸ Interface size: a size relative to the system's display scale (100 % is the
 /// system's own), as a drop-down that takes effect at once. The browser has its own zoom, so there
 /// the row only says so.
-fn interface_size(app: &mut FigApp, ui: &mut egui::Ui, chosen: f64) {
+fn interface_size(app: &mut LizardApp, ui: &mut egui::Ui, chosen: f64) {
     let t = Tokens::get(ui.ctx());
     if cfg!(target_arch = "wasm32") {
         ui.label(tr("Interface size"));
@@ -515,11 +511,11 @@ fn interface_size(app: &mut FigApp, ui: &mut egui::Ui, chosen: f64) {
 
 /// Rename layers: Match, Rename to with buttons for the current name and numbers, where numbers
 /// start, a preview of the first new names, then one `object.batchRename`.
-fn batch_rename_dialog(app: &mut FigApp, ctx: &Context) {
+fn batch_rename_dialog(app: &mut LizardApp, ctx: &Context) {
     let Some(mut b) = app.ui.batch_rename.clone() else { return };
     let t = Tokens::get(ctx);
     let find = (!b.find.is_empty()).then_some(b.find.as_str());
-    let rename = figcraft_engine::rename::BatchRename::new(find, b.regex, &b.to, find.is_none().then_some(b.to.as_str()), Some(f64::from(b.start)));
+    let rename = lizard_engine::rename::BatchRename::new(find, b.regex, &b.to, find.is_none().then_some(b.to.as_str()), Some(f64::from(b.start)));
     let n = b.ids.len();
     let ready = rename.is_ok() && !(b.find.is_empty() && b.to.is_empty());
     let preview: Vec<(String, String)> = match (&rename, app.session.doc()) {
@@ -591,7 +587,7 @@ fn batch_rename_dialog(app: &mut FigApp, ctx: &Context) {
 
 /// File ▸ Color profile: pick sRGB or Display P3, then keep the colours' appearance (convert the
 /// values) or keep the values (reinterpret them in the new space).
-fn color_profile_dialog(app: &mut FigApp, ctx: &Context) {
+fn color_profile_dialog(app: &mut LizardApp, ctx: &Context) {
     let Some(mut chosen) = app.ui.color_profile else { return };
     let Ok(current) = app.session.doc().map(|d| d.color_profile) else {
         app.ui.color_profile = None;
@@ -648,7 +644,7 @@ fn color_profile_dialog(app: &mut FigApp, ctx: &Context) {
 }
 
 /// A `.fig` Save as result is an export; only native saves report that the document was saved.
-pub(crate) fn file_saved(app: &mut FigApp, result: &Value) {
+pub(crate) fn file_saved(app: &mut LizardApp, result: &Value) {
     if result["format"] == "fig" {
         fig_exported(app, result);
     } else {
@@ -661,7 +657,7 @@ fn result_file_name(result: &Value) -> String {
 }
 
 /// The `.fig` result stays an export: native save state is unchanged, and omissions are reported.
-pub(crate) fn fig_exported(app: &mut FigApp, result: &Value) {
+pub(crate) fn fig_exported(app: &mut LizardApp, result: &Value) {
     let file = result_file_name(result);
     let left_out = result["warnings"].as_array().map_or(0, Vec::len);
     app.toast(match left_out {
@@ -671,7 +667,7 @@ pub(crate) fn fig_exported(app: &mut FigApp, result: &Value) {
 }
 
 /// Save the whole file as `.fig`; the toast says how much was left out.
-fn save_fig(app: &mut FigApp, name: &str) {
+fn save_fig(app: &mut LizardApp, name: &str) {
     let filename = format!("{name}.fig");
     app.pick_save(tr("Export"), &filename, &["fig"], |app, p| {
         if let Some(r) = app.run("file.export", json!({"format": "fig", "path": p.to_string_lossy()})) {
@@ -692,7 +688,7 @@ enum ExportChoice {
 
 /// The Export dialog: the layers' own export settings when they have some, and one-off presets for
 /// the selection (or the page) as one file.
-fn export_dialog(app: &mut FigApp, ctx: &Context) {
+fn export_dialog(app: &mut LizardApp, ctx: &Context) {
     let t = Tokens::get(ctx);
     let mut open = true;
     let sel = app.session.selection();

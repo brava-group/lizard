@@ -1,4 +1,4 @@
-"""Regenerate vector UI3 SVG data and the FigCraft icon map from 3icons."""
+"""Regenerate vector UI3 SVG data and the Lizard icon map from 3icons."""
 
 import json
 from pathlib import Path
@@ -36,7 +36,7 @@ out = ROOT / "crates/ui-egui/assets/ui3-vectors.json"
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(vectors, separators=(",", ":")))
 
-# The FigCraft variant names are stable across the UI. Keep the semantic
+# The Lizard variant names are stable across the UI. Keep the semantic
 # mapping explicit: some UI3 glyph names differ from the editor's terms.
 mapping = """
 Move move

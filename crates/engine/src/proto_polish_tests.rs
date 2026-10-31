@@ -4,8 +4,8 @@
 //! Overlays opened through the commands close on a click outside unless told not to, as in the
 //! interaction editor.
 
-use figcraft_doc::proto::{Action, Expr, ExprOp};
-use figcraft_doc::{NodeId, VariableValue};
+use lizard_doc::proto::{Action, Expr, ExprOp};
+use lizard_doc::{NodeId, VariableValue};
 use serde_json::{Value, json};
 
 use crate::Session;

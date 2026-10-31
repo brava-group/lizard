@@ -13,8 +13,8 @@ use canvas_strategies_bench::compositor::Compositor;
 use canvas_strategies_bench::gpu_residual::GpuResidual;
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view};
 use canvas_strategies_bench::residual::Residual;
-use figcraft_doc::{Document, EffectKind, NodeId, NodeKind};
-use figcraft_render::{Options, Pixmap, View, render_view};
+use lizard_doc::{Document, EffectKind, NodeId, NodeKind};
+use lizard_render::{Options, Pixmap, View, render_view};
 use rayon::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -709,7 +709,7 @@ impl State {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
-        let (doc, warnings) = figcraft_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
+        let (doc, warnings) = lizard_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.lizard"))?;
         if !warnings.is_empty() {
             return Err(format!("fixture warnings: {warnings:?}").into());
         }
@@ -1780,7 +1780,7 @@ mod tests {
 
     #[test]
     fn parallel_sharp_bands_match_one_render() -> Result<(), Box<dyn Error>> {
-        let (doc, warnings) = figcraft_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
+        let (doc, warnings) = lizard_format::load_file(&Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.lizard"))?;
         assert!(warnings.is_empty());
         let page = doc.current_page.ok_or("fixture page missing")?;
         let view = View { origin: (320.0, 610.0), scale: 2.0, width: 511, height: 257 };

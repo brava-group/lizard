@@ -3,11 +3,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use crate::variables_panel::export_dialog;
-use crate::{FigApp, NoServices, Services};
+use crate::{LizardApp, NoServices, Services};
 
 type Downloads = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -42,12 +42,12 @@ fn session() -> Session {
     s
 }
 
-fn browser(deliver: bool) -> (FigApp, Downloads) {
+fn browser(deliver: bool) -> (LizardApp, Downloads) {
     let got = Downloads::default();
-    (FigApp::new(session(), Box::new(Browser { got: got.clone(), deliver })), got)
+    (LizardApp::new(session(), Box::new(Browser { got: got.clone(), deliver })), got)
 }
 
-fn toast(app: &FigApp) -> String {
+fn toast(app: &LizardApp) -> String {
     app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default()
 }
 
@@ -87,7 +87,7 @@ fn a_refused_download_says_so() {
 #[test]
 fn platforms_with_save_dialogs_keep_them() {
     // No dialog answer (cancelled) and no downloads: nothing happens, as before.
-    let mut app = FigApp::new(session(), Box::new(NoServices));
+    let mut app = LizardApp::new(session(), Box::new(NoServices));
     export_dialog(&mut app, "json");
     assert!(app.ui.toast.is_none());
 }

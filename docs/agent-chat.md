@@ -45,8 +45,8 @@ corresponding executable:
 
 The other agents use [ACP](https://agentclientprotocol.com/) and their own CLI account
 configuration. The panel links to each provider's installation instructions when its executable
-is missing. Lizard starts `figcraft-cli mcp --attach <private-port>` for the agent; installed builds
-should keep `figcraft-cli` beside `figcraft`, or make it available on `PATH`. The private MCP
+is missing. Lizard starts `lizard-cli mcp --attach <private-port>` for the agent; installed builds
+should keep `lizard-cli` beside `lizard`, or make it available on `PATH`. The private MCP
 bridge checks the active document before accepting an operation and is revoked when the chat
 session changes. ACP tool approvals appear in the chat before the adapter continues.
 

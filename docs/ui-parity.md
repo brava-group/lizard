@@ -116,7 +116,7 @@ interaction feel not yet compared.
 
 ## Keyboard shortcuts
 
-One keymap (`figcraft_engine::keymap`) drives the menus, the canvas, the shortcuts panel, the
+One keymap (`lizard_engine::keymap`) drives the menus, the canvas, the shortcuts panel, the
 control channel and MCP `key`. `crates/engine/src/shortcut_parity_tests.rs` holds one row per
 shortcut in the public documentation (the help centre's feature articles: keyboard layouts, text
 properties, alignment, frames, components, prototypes, plugins, keyboard navigation…), with the

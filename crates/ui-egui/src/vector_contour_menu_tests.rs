@@ -1,8 +1,8 @@
 //! The vector edit context menu exposes topology selection on a nested vector.
 
 use egui::Pos2;
-use figcraft_doc::{NodeKind, Segment, Vertex, WindingRule};
-use figcraft_engine::Session;
+use lizard_doc::{NodeKind, Segment, Vertex, WindingRule};
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -31,7 +31,7 @@ fn context_menu_selects_outer_and_inner_contours() {
     }
     network.regions[0].loops.push(vec![4, 5, 6, 7]);
     network.regions[0].winding = WindingRule::EvenOdd;
-    figcraft_engine::vectoredit::refit(doc, vector).unwrap();
+    lizard_engine::vectoredit::refit(doc, vector).unwrap();
     session.execute("vector.edit.begin", &json!({"id": vector})).unwrap();
     let mut ui = Ui::new(session);
     assert!(ui.app.session.ds().unwrap().vector_edit.is_some());

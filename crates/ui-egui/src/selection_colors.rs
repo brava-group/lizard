@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use egui::{Id, Ui};
-use figcraft_color::Color;
-use figcraft_doc::{Document, NodeId, StyleKind};
-use figcraft_engine::selection_colors::{PaintTarget, SelectionColor, collect};
+use lizard_color::Color;
+use lizard_doc::{Document, NodeId, StyleKind};
+use lizard_engine::selection_colors::{PaintTarget, SelectionColor, collect};
 use serde_json::json;
 
 use crate::a11y::Tip;
@@ -14,7 +14,7 @@ use crate::colorpicker::PickerTarget;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
-use crate::{FigApp, widgets};
+use crate::{LizardApp, widgets};
 
 #[derive(Clone)]
 struct Cache {
@@ -44,12 +44,12 @@ fn colors(ui: &Ui, document: u64, doc: &Arc<Document>, ids: &[NodeId], interacti
     colors
 }
 
-pub(crate) fn open_picker(app: &mut FigApp, targets: Vec<PaintTarget>) {
+pub(crate) fn open_picker(app: &mut LizardApp, targets: Vec<PaintTarget>) {
     let Ok(ds) = app.session.ds() else { return };
     app.ui.picker = Some(PickerTarget::SelectionColor { targets, selection: ds.selection.clone(), document: ds.uid });
 }
 
-pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId]) {
+pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId]) {
     let Ok(ds) = app.session.ds() else { return };
     let interacting = ds.interaction.is_some();
     let colors = colors(ui, ds.uid, doc, ids, interacting);
@@ -82,7 +82,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
                             if let Some(hex) = widgets::text_field_named(ui, ui.id().with("hex"), &color.to_hex(), width, tr("Color")) {
                                 if let Some(color) = Color::from_hex(&hex) {
                                     let mut paint = group.paint.clone();
-                                    paint.kind = figcraft_color::PaintKind::Solid { color: color.with_alpha(1.0) };
+                                    paint.kind = lizard_color::PaintKind::Solid { color: color.with_alpha(1.0) };
                                     if color.a < 1.0 {
                                         paint.opacity = color.a;
                                     }
@@ -97,7 +97,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
                                 open_picker(app, group.targets.clone());
                             }
                         }
-                        let alpha = format!("{}%", figcraft_doc::trim_num(f64::from(group.paint.opacity) * 100.0));
+                        let alpha = format!("{}%", lizard_doc::trim_num(f64::from(group.paint.opacity) * 100.0));
                         if let Some(value) = widgets::text_field_named(ui, ui.id().with("opacity"), &alpha, 44.0, tr("Opacity"))
                             && let Ok(value) = value.trim().trim_end_matches('%').parse::<f32>()
                             && value.is_finite()
@@ -141,11 +141,11 @@ mod tests {
     use super::*;
     use crate::NoServices;
     use egui::{Event, Pos2, RawInput, Rect, Shape, vec2};
-    use figcraft_engine::Session;
+    use lizard_engine::Session;
 
     struct Panel {
         ctx: egui::Context,
-        app: FigApp,
+        app: LizardApp,
         time: f64,
     }
 
@@ -158,7 +158,7 @@ mod tests {
                 ids.push(NodeId(value["id"].as_u64().unwrap()));
             }
             s.execute("select.set", &json!({"ids":ids})).unwrap();
-            let mut p = Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0 };
+            let mut p = Self { ctx: egui::Context::default(), app: LizardApp::new(s, Box::new(NoServices)), time: 0.0 };
             crate::theme::install_fonts(&p.ctx, false, 0);
             crate::theme::apply(&p.ctx, crate::theme::Tokens::light());
             for _ in 0..3 {

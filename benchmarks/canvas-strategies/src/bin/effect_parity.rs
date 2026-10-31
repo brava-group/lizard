@@ -6,9 +6,9 @@ use std::io::BufWriter;
 use std::time::Instant;
 
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view};
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, EffectKind, NodeKind};
-use figcraft_render::{Options, View, render_view};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, Effect, EffectKind, NodeKind};
+use lizard_render::{Options, View, render_view};
 
 const SIDE: u32 = 512;
 

@@ -8,14 +8,12 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-use figcraft_color::{
-    BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, PatternPaint, ShaderFill,
-};
-use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
-use figcraft_geom::{Affine, BezPath, Point, Rect, Shape};
-use figcraft_render::{FillRule, View, draw};
+use lizard_color::{BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, PatternPaint, ShaderFill};
+use lizard_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
+use lizard_geom::{Affine, BezPath, Point, Rect, Shape};
+use lizard_render::{FillRule, View, draw};
 #[cfg(test)]
-use figcraft_render::{Options, render_view};
+use lizard_render::{Options, render_view};
 use vello_common::TextureId;
 use vello_common::filter_effects::{EdgeMode, Filter, FilterFunction, FilterPrimitive};
 use vello_common::geometry::RectU16;
@@ -40,8 +38,8 @@ pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 600;
 
 #[cfg(test)]
-fn unsupported_test_shadow() -> figcraft_doc::Effect {
-    let mut effect = figcraft_doc::Effect::drop_shadow();
+fn unsupported_test_shadow() -> lizard_doc::Effect {
+    let mut effect = lizard_doc::Effect::drop_shadow();
     if let EffectKind::DropShadow(shadow) = &mut effect.kind {
         shadow.blend = BlendMode::PassThrough;
     }
@@ -62,10 +60,10 @@ mod shader_cache_tests {
         let mut doc = Document::new("shader cache");
         let page = doc.current_page.ok_or("page missing")?;
         let id = doc.create(page, NodeKind::Rectangle, "Shader", 0.0, 0.0, 32.0, 32.0)?;
-        let definition = figcraft_shader::demo();
+        let definition = lizard_shader::demo();
         doc.shaders.insert(definition.id.clone(), definition);
         doc.node_mut(id).ok_or("shader node missing")?.fills = vec![Paint {
-            kind: PaintKind::Shader(ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: Default::default() }),
+            kind: PaintKind::Shader(ShaderFill { shader_id: lizard_shader::DEMO_ID.into(), values: Default::default() }),
             ..Paint::solid(Color::WHITE)
         }];
         assert_eq!(canvas.register_images_at_scale(&doc, 0.0, 1.0)?, 1);
@@ -96,7 +94,7 @@ mod shader_cache_tests {
         let pane = doc.create(frame, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
         pane_node.fills.clear();
-        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        pane_node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
         assert!(backdrop_requires_cpu(&doc, pane, page));
         assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((frame, 0.7)));
@@ -118,8 +116,8 @@ mod shader_cache_tests {
         frame_node.corners.radii = [10.0; 4];
         frame_node.opacity = 0.7;
         frame_node.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
         ];
         let nested = doc.create(frame, NodeKind::Frame, "Nested frame", 15.0, 15.0, 60.0, 60.0)?;
         let nested_node = doc.node_mut(nested).ok_or("nested frame missing")?;
@@ -147,7 +145,7 @@ mod shader_cache_tests {
         let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
         pane_node.opacity = 0.5;
         pane_node.fills.clear();
-        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        pane_node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
         assert!(!backdrop_requires_cpu(&doc, pane, page));
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -165,7 +163,7 @@ mod shader_cache_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Glass", 20.0, 20.0, 80.0, 80.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.opacity = 0.5;
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
         assert!(backdrop_requires_cpu(&doc, pane, page));
         assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((pane, 0.5)));
@@ -183,7 +181,7 @@ mod shader_cache_tests {
         doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
         let pane = doc.create(page, NodeKind::Group, "Blur group", 20.0, 20.0, 80.0, 80.0)?;
         doc.node_mut(pane).ok_or("pane missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let mask = doc.create(pane, NodeKind::Rectangle, "Mask", 0.0, 0.0, 80.0, 80.0)?;
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
@@ -203,10 +201,10 @@ mod shader_cache_tests {
         doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
         let group = doc.create(page, NodeKind::Frame, "Effect frame", 10.0, 10.0, 100.0, 100.0)?;
         doc.node_mut(group).ok_or("group missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(2.0)), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(2.0)), visible: true }];
         let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         doc.node_mut(pane).ok_or("pane missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
         assert!(isolated_group_for_backdrop(&doc, pane, page).is_none());
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -230,7 +228,7 @@ mod shader_cache_tests {
             let pane = doc.create(group, NodeKind::Rectangle, "Backdrop pane", 20.0, 20.0, 60.0, 60.0)?;
             let node = doc.node_mut(pane).ok_or("pane missing")?;
             node.fills.clear();
-            node.effects = vec![figcraft_doc::Effect {
+            node.effects = vec![lizard_doc::Effect {
                 kind: if index == 0 { EffectKind::BackgroundBlur(Blur::uniform(8.0)) } else { EffectKind::Glass(Glass::default()) },
                 visible: true,
             }];
@@ -242,7 +240,7 @@ mod shader_cache_tests {
         let standalone = doc.create(page, NodeKind::Rectangle, "Standalone backdrop", 200.0, 20.0, 30.0, 30.0)?;
         let node = doc.node_mut(standalone).ok_or("standalone missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(4.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(4.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 240, height: 140 };
         let index = BackdropIndex::new(&doc, page);
         assert_eq!(independent_backdrop_groups(&doc, page, &view, &index).map(|groups| groups.len()), Some(3));
@@ -265,7 +263,7 @@ mod shader_cache_tests {
         let glass = Glass { frost: 0.0, depth: 10.0, ..Default::default() };
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(glass.clone()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Glass(glass.clone()), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 1600, height: 1400 };
         let region = gpu_glass_region(&doc, pane, &view, &glass).ok_or("large glass region rejected")?;
         assert!(u32::from(region.2) * u32::from(region.3) > 2_000_000);
@@ -395,7 +393,7 @@ fn cached_effects_survive_geometry_edit(
         }
         &restored == old
             && before.world_transform(id).as_coeffs() == after.world_transform(id).as_coeffs()
-            && figcraft_render::raster_bounds(before, id) == figcraft_render::raster_bounds(after, id)
+            && lizard_render::raster_bounds(before, id) == lizard_render::raster_bounds(after, id)
     };
     isolated.into_iter().all(|id| stable(id, false)) && shape_shadows.into_iter().all(|id| stable(id, true))
 }
@@ -459,7 +457,7 @@ fn scaled_kind_matches(old: &NodeKind, new: &NodeKind, k: f64) -> bool {
     }
 }
 
-fn scaled_vector_matches(old: &figcraft_doc::VectorNetwork, new: &figcraft_doc::VectorNetwork, kx: f64, ky: f64) -> bool {
+fn scaled_vector_matches(old: &lizard_doc::VectorNetwork, new: &lizard_doc::VectorNetwork, kx: f64, ky: f64) -> bool {
     let mut expected = old.clone();
     expected.scale(kx, ky);
     if expected.vertices.len() != new.vertices.len() || expected.segments.len() != new.segments.len() {
@@ -785,7 +783,7 @@ mod cached_shadow_capability_tests {
         let page = doc.current_page.ok_or("missing page")?;
         let id = doc.create(page, NodeKind::Rectangle, "Rectangle", 20.0, 20.0, 100.0, 80.0)?;
         doc.node_mut(id).ok_or("missing rectangle")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::InnerShadow(Shadow::default()), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::InnerShadow(Shadow::default()), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 200, height: 200 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
@@ -806,7 +804,7 @@ mod cached_shadow_capability_tests {
         shadow.color.a = 0.35;
         let node = doc.node_mut(id).ok_or("missing frame")?;
         node.corners.smoothing = 0.6;
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 200, height: 200 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
@@ -826,7 +824,7 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Grain", 20.0, 20.0, 100.0, 80.0)?;
         let node = doc.node_mut(id).ok_or("grain missing")?;
         node.fills = vec![Paint::solid(Color::new(0.2, 0.4, 0.7, 1.0))];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
         node.transform = Affine::new([1.0, 0.0, 0.4, 1.0, 30.0, 20.0]);
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 320, height: 320 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -851,7 +849,7 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Grain", 20.0, 20.0, 80.0, 80.0)?;
         let node = doc.node_mut(id).ok_or("grain node missing")?;
         node.fills = vec![Paint::solid(Color::BLACK)];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 512, height: 512 };
         assert!(has_unhandled_effects_in_view(&doc, &view));
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -882,7 +880,7 @@ mod effect_capability_tests {
             }
         }
         doc.node_mut(id).ok_or("grain node missing")?.transform = Affine::translate((20.0, 20.0));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::Noise(noise), .. }) = doc.node_mut(id).ok_or("grain node missing")?.effects.first_mut() {
+        if let Some(lizard_doc::Effect { kind: EffectKind::Noise(noise), .. }) = doc.node_mut(id).ok_or("grain node missing")?.effects.first_mut() {
             noise.blend = BlendMode::Multiply;
         }
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -899,7 +897,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("grain missing")?;
         node.transform = Affine::translate((60.0, 50.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
         for opacity in [0.25, 0.5, 0.75] {
             doc.node_mut(id).ok_or("grain missing")?.opacity = opacity;
             for scale in [1.0, 2.0] {
@@ -939,8 +937,8 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         for (name, effects) in
             [("blur-noise", vec![blur(), noise()]), ("noise-blur", vec![noise(), blur()]), ("blur-noise-blur", vec![blur(), noise(), blur()])]
         {
@@ -985,10 +983,10 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 8.0;
                 value.offset = (4.0, 6.0);
@@ -1052,22 +1050,22 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Shadow", 20.0, 20.0, 80.0, 80.0)?;
         let node = doc.node_mut(id).ok_or("shadow node missing")?;
         node.fills.push(Paint::solid(Color::BLACK));
-        node.effects.push(figcraft_doc::Effect::drop_shadow());
+        node.effects.push(lizard_doc::Effect::drop_shadow());
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 512, height: 512 };
         assert!(!has_unhandled_effects_in_view(&doc, &view));
         let node = doc.node_mut(id).ok_or("shadow node missing")?;
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = node.effects.first_mut() {
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = node.effects.first_mut() {
             shadow.spread = -2.0;
         }
         assert!(has_unhandled_effects_in_view(&doc, &view));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
             doc.node_mut(id).ok_or("shadow node missing")?.effects.first_mut()
         {
             shadow.spread = 0.0;
             shadow.color.a = 0.7;
         }
         assert!(has_unhandled_effects_in_view(&doc, &view));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) =
             doc.node_mut(id).ok_or("shadow node missing")?.effects.first_mut()
         {
             shadow.color.a = 0.25;
@@ -1088,7 +1086,7 @@ mod effect_capability_tests {
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
         node.corners.radii = [12.0; 4];
         for inner in [false, true] {
-            let mut effect = if inner { figcraft_doc::Effect::inner_shadow() } else { figcraft_doc::Effect::drop_shadow() };
+            let mut effect = if inner { lizard_doc::Effect::inner_shadow() } else { lizard_doc::Effect::drop_shadow() };
             match &mut effect.kind {
                 EffectKind::DropShadow(shadow) | EffectKind::InnerShadow(shadow) => {
                     shadow.radius = 8.0;
@@ -1145,7 +1143,7 @@ mod effect_capability_tests {
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 82.0, 54.0, 40.0, 40.0)?;
         doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
         for inner in [false, true] {
-            let mut effect = if inner { figcraft_doc::Effect::inner_shadow() } else { figcraft_doc::Effect::drop_shadow() };
+            let mut effect = if inner { lizard_doc::Effect::inner_shadow() } else { lizard_doc::Effect::drop_shadow() };
             match &mut effect.kind {
                 EffectKind::DropShadow(shadow) | EffectKind::InnerShadow(shadow) => {
                     shadow.radius = 8.0;
@@ -1194,7 +1192,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
         node.corners.radii = [12.0; 4];
-        let mut effect = figcraft_doc::Effect::drop_shadow();
+        let mut effect = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut effect.kind {
             shadow.radius = 8.0;
             shadow.offset = (4.0, 6.0);
@@ -1246,7 +1244,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
         node.corners.radii = [12.0; 4];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
         for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             for opacity in [1.0, 0.25, 0.5, 0.75] {
@@ -1293,7 +1291,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0)), Paint::solid(Color::new(0.28, 0.75, 0.9, 0.65))];
         node.corners.radii = [12.0; 4];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
         for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             for opacity in [1.0, 0.25, 0.5, 0.75] {
@@ -1340,7 +1338,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0)), Paint::solid(Color::new(0.28, 0.75, 0.9, 0.65))];
         node.corners.radii = [12.0; 4];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
         let blends = BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)).collect::<Vec<_>>();
         for (index, node_blend) in blends.iter().copied().enumerate() {
@@ -1408,7 +1406,7 @@ mod effect_capability_tests {
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Normal;
         doc.node_mut(content).ok_or("content missing")?.effects.clear();
         doc.node_mut(content).ok_or("content missing")?.fills =
-            vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))];
+            vec![Paint::gradient(lizard_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))];
         assert!(!has_unhandled_effects_in_view(&doc, &view));
         Ok(())
     }
@@ -1450,9 +1448,9 @@ mod effect_capability_tests {
         let page = doc.current_page.ok_or("new document has no page")?;
         let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 100.0, 100.0)?;
         let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 0.0, 100.0, 100.0)?;
-        let mut gradient = figcraft_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
+        let mut gradient = lizard_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
         gradient.stops =
-            vec![figcraft_color::ColorStop { position: 0.0, color: Color::WHITE }, figcraft_color::ColorStop { position: 1.0, color: Color::BLACK }];
+            vec![lizard_color::ColorStop { position: 0.0, color: Color::WHITE }, lizard_color::ColorStop { position: 1.0, color: Color::BLACK }];
         let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
         mask_node.is_mask = true;
         mask_node.mask_type = MaskType::Luminance;
@@ -1514,10 +1512,10 @@ mod effect_capability_tests {
                 assert!(pixels[offset + channel].abs_diff(reference.data()[offset + channel]) <= 16, "stroke mask at ({x},{y})");
             }
         }
-        let mut gradient = figcraft_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
+        let mut gradient = lizard_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
         gradient.stops = vec![
-            figcraft_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
-            figcraft_color::ColorStop { position: 1.0, color: Color::new(0.2, 0.2, 0.2, 0.5) },
+            lizard_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
+            lizard_color::ColorStop { position: 1.0, color: Color::new(0.2, 0.2, 0.2, 0.5) },
         ];
         doc.node_mut(mask).ok_or("mask missing")?.strokes = vec![Paint::gradient(gradient)];
         assert!(!has_unhandled_effects_in_view(&doc, &view));
@@ -1538,7 +1536,7 @@ mod effect_capability_tests {
         let mut doc = Document::new("GPU text luminance mask");
         let page = doc.current_page.ok_or("page missing")?;
         let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 200.0, 100.0)?;
-        let mut text = figcraft_doc::TextData::new("Lizard");
+        let mut text = lizard_doc::TextData::new("Lizard");
         text.style.font_size = 52.0;
         let mask = doc.create(group, NodeKind::Text(text), "Text mask", 12.0, 10.0, 180.0, 70.0)?;
         let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
@@ -1552,10 +1550,10 @@ mod effect_capability_tests {
         }
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 200, height: 100 };
         let mut gpu = GpuCanvas::new(view.width, view.height)?;
-        let mut gradient = figcraft_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
+        let mut gradient = lizard_color::Gradient::default_for(GradientKind::Linear, Color::WHITE);
         gradient.stops = vec![
-            figcraft_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
-            figcraft_color::ColorStop { position: 1.0, color: Color::new(0.3, 0.3, 0.3, 0.5) },
+            lizard_color::ColorStop { position: 0.0, color: Color::new(1.0, 1.0, 1.0, 0.8) },
+            lizard_color::ColorStop { position: 1.0, color: Color::new(0.3, 0.3, 0.3, 0.5) },
         ];
         for (label, paint) in [("solid", Paint::solid(Color::new(0.8, 0.8, 0.8, 0.75))), ("gradient", Paint::gradient(gradient))] {
             doc.node_mut(mask).ok_or("mask missing")?.fills = vec![paint];
@@ -1577,7 +1575,7 @@ mod effect_capability_tests {
             text.style.fills = Some(vec![Paint::solid(Color::new(0.2, 0.3, 0.8, 1.0))]);
             let mut style = text.style.clone();
             style.fills = Some(vec![Paint::solid(Color::new(0.9, 0.8, 0.1, 0.7))]);
-            text.runs.push(figcraft_doc::StyleRun { start: 3, end: 6, style });
+            text.runs.push(lizard_doc::StyleRun { start: 3, end: 6, style });
         }
         assert!(!has_unhandled_effects_in_view(&doc, &view));
         let reference = render_view(&doc, page, &view, &Options::default()).ok_or("styled reference rendering failed")?;
@@ -1617,7 +1615,7 @@ mod effect_capability_tests {
         let mut baseline = HashMap::<u64, Vec<u8>>::new();
         for shadowed in [false, true] {
             if shadowed {
-                let mut effect = figcraft_doc::Effect::drop_shadow();
+                let mut effect = lizard_doc::Effect::drop_shadow();
                 if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                     shadow.radius = 6.0;
                     shadow.offset = (3.0, 4.0);
@@ -1719,7 +1717,7 @@ mod effect_capability_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(lizard_doc::Blur::uniform(12.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
         let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
@@ -1746,10 +1744,10 @@ mod effect_capability_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect {
-            kind: EffectKind::BackgroundBlur(figcraft_doc::Blur {
+        node.effects = vec![lizard_doc::Effect {
+            kind: EffectKind::BackgroundBlur(lizard_doc::Blur {
                 radius: 16.0,
-                blur_type: figcraft_doc::BlurType::Progressive,
+                blur_type: lizard_doc::BlurType::Progressive,
                 start_radius: 0.0,
                 start: (0.5, 0.0),
                 end: (0.5, 1.0),
@@ -1784,10 +1782,10 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Blurred shape", 55.0, 45.0, 110.0, 100.0)?;
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.25, 0.15, 0.8, 1.0))];
-        node.effects = vec![figcraft_doc::Effect {
-            kind: EffectKind::LayerBlur(figcraft_doc::Blur {
+        node.effects = vec![lizard_doc::Effect {
+            kind: EffectKind::LayerBlur(lizard_doc::Blur {
                 radius: 16.0,
-                blur_type: figcraft_doc::BlurType::Progressive,
+                blur_type: lizard_doc::BlurType::Progressive,
                 start_radius: 0.0,
                 start: (0.0, 0.0),
                 end: (1.0, 1.0),
@@ -1828,7 +1826,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         for opacity in [0.25, 0.5, 0.75] {
             doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
             for scale in [1.0, 2.0] {
@@ -1865,8 +1863,8 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
         node.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
         ];
         for blur_first in [true, false] {
             if !blur_first {
@@ -1906,9 +1904,9 @@ mod effect_capability_tests {
         }
         doc.node_mut(id).ok_or("shape missing")?.transform = Affine::rotate(0.5);
         doc.node_mut(id).ok_or("shape missing")?.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
         ];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 300, height: 260 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "rotated blur/noise stacks should use the GPU cache");
@@ -1921,29 +1919,31 @@ mod effect_capability_tests {
         let page = doc.current_page.ok_or("new document has no page")?;
         let id = doc.create(page, NodeKind::Rectangle, "Effects", 40.0, 36.0, 120.0, 96.0)?;
         doc.node_mut(id).ok_or("shape missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
-        for (name, effects) in [
-            ("blur-noise-blur", vec![blur(), noise(), blur()]),
-            ("noise-blur-noise", vec![noise(), blur(), noise()]),
-            ("blur-noise-blur-noise", vec![blur(), noise(), blur(), noise()]),
-        ] {
-            doc.node_mut(id).ok_or("shape missing")?.effects = effects;
-            for scale in [1.0, 2.0] {
-                let view = View { origin: (0.0, 0.0), scale, width: (220.0 * scale) as u32, height: (200.0 * scale) as u32 };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (220.0 * scale) as u32, height: (200.0 * scale) as u32 };
+            let mut variants = Vec::new();
+            for (name, effects) in [
+                ("blur-noise-blur", vec![blur(), noise(), blur()]),
+                ("noise-blur-noise", vec![noise(), blur(), noise()]),
+                ("blur-noise-blur-noise", vec![blur(), noise(), blur(), noise()]),
+            ] {
+                doc.node_mut(id).ok_or("shape missing")?.effects = effects;
                 assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} capability");
-                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
                 let mut gpu = GpuCanvas::new(view.width, view.height)?;
                 assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
                 gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-                let changed = gpu
-                    .pixels()?
-                    .chunks_exact(4)
-                    .zip(reference.data().chunks_exact(4))
-                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
-                    .count();
-                assert!(changed * 100 < view.width as usize * view.height as usize, "{name} at {scale}x changed {changed} pixels");
+                let pixels = gpu.pixels()?;
+                let center = ((view.height / 2 * view.width + view.width / 2) * 4) as usize;
+                assert!(pixels[center..center + 3].iter().any(|channel| channel.abs_diff(245) > 20), "{name} at {scale}x lost the shape");
+                variants.push(pixels);
             }
+            // A final noise pass is intentionally not compared pixel-for-pixel with the CPU
+            // generator. Distinct effect orders must still produce distinct GPU images.
+            assert!(variants[0] != variants[1], "blur/noise order was lost at {scale}x");
+            assert!(variants[0] != variants[2], "final noise pass was lost at {scale}x");
+            assert!(variants[1] != variants[2], "effect stack order was lost at {scale}x");
         }
         Ok(())
     }
@@ -1956,8 +1956,8 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((100.0, 80.0)) * Affine::rotate(0.4);
         node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         for (name, effects) in [
             ("blur-noise-blur", vec![blur(), noise(), blur()]),
             ("noise-blur-noise", vec![noise(), blur(), noise()]),
@@ -2008,10 +2008,10 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((100.0, 80.0)) * Affine::rotate(0.4);
         node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                 shadow.radius = 8.0;
                 shadow.offset = (4.0, 6.0);
@@ -2078,14 +2078,14 @@ mod effect_capability_tests {
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 82.0, 54.0, 40.0, 40.0)?;
         doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
-        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        let mut shadow = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
             value.radius = 8.0;
             value.offset = (4.0, 6.0);
             value.color = Color::new(0.2, 0.1, 0.3, 0.4);
         }
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         for (name, effects) in [
             ("blur-noise-shadow", vec![blur(), noise(), shadow.clone()]),
             ("noise-blur-shadow", vec![noise(), blur(), shadow.clone()]),
@@ -2155,14 +2155,14 @@ mod effect_capability_tests {
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 82.0, 54.0, 40.0, 40.0)?;
         doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
-        let texture = || figcraft_doc::Effect {
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let texture = || lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 8.0;
                 value.offset = (4.0, 6.0);
@@ -2247,8 +2247,8 @@ mod effect_capability_tests {
             for blur_first in [true, false] {
                 let node = doc.node_mut(id).ok_or("blended shape missing")?;
                 node.blend = blend;
-                let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-                let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+                let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+                let noise = lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
                 node.effects = if blur_first { vec![blur, noise] } else { vec![noise, blur] };
                 for scale in [1.0, 2.0] {
                     let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
@@ -2313,13 +2313,13 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((75.0, 58.0)) * Affine::rotate(0.3);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0)), Paint::solid(Color::new(0.15, 0.8, 0.3, 0.7))];
-        let texture = || figcraft_doc::Effect {
+        let texture = || lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(5.0)), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(5.0)), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 8.0;
                 value.offset = (4.0, 6.0);
@@ -2386,13 +2386,13 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
-        let texture = || figcraft_doc::Effect {
+        let texture = || lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 8.0;
                 value.offset = (4.0, 6.0);
@@ -2497,8 +2497,8 @@ mod effect_capability_tests {
                     let node = doc.node_mut(id).ok_or("shape missing")?;
                     node.blend = blend;
                     node.opacity = opacity;
-                    let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-                    let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+                    let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+                    let noise = lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
                     node.effects = if blur_first { vec![blur, noise] } else { vec![noise, blur] };
                     for scale in [1.0, 2.0] {
                         let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
@@ -2565,8 +2565,8 @@ mod effect_capability_tests {
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 85.0, 65.0, 50.0, 50.0)?;
         doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.4, 0.8, 0.2, 0.9))];
         for blur_first in [true, false] {
-            let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
-            let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+            let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
+            let noise = lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
             doc.node_mut(group).ok_or("group missing")?.effects = if blur_first { vec![blur, noise] } else { vec![noise, blur] };
             let group_node = doc.node(group).ok_or("group missing")?;
             assert!(gpu_isolated_grain_supported(&doc, group_node), "group source capability");
@@ -2602,10 +2602,10 @@ mod effect_capability_tests {
         doc.node_mut(back).ok_or("back missing")?.fills = vec![Paint::solid(Color::new(0.3, 0.6, 0.9, 0.85))];
         let front = doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Front", 65.0, 0.0, 75.0, 95.0)?;
         doc.node_mut(front).ok_or("front missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.3, 0.2, 0.75))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                 shadow.radius = 8.0;
                 shadow.offset = (4.0, 6.0);
@@ -2664,8 +2664,8 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
         node.transform = Affine::translate((100.0, 100.0)) * Affine::rotate(0.5);
-        let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
-        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
+        let mut shadow = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
             value.radius = 8.0;
             value.offset = (4.0, 6.0);
@@ -2699,13 +2699,13 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Shadowed shape", 70.0, 55.0, 100.0, 80.0)?;
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::WHITE)];
-        let mut close = figcraft_doc::Effect::drop_shadow();
+        let mut close = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut close.kind {
             shadow.radius = 5.0;
             shadow.offset = (3.0, 4.0);
             shadow.color = Color::new(0.1, 0.2, 0.3, 0.18);
         }
-        let mut far = figcraft_doc::Effect::drop_shadow();
+        let mut far = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut far.kind {
             shadow.radius = 12.0;
             shadow.offset = (-4.0, 7.0);
@@ -2734,7 +2734,7 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 25.0, 22.0, 118.0, 97.0)?;
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.7, 0.6, 1.0))];
-        node.effects = vec![figcraft_doc::Effect {
+        node.effects = vec![lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         }];
@@ -2810,7 +2810,7 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 30.0, 25.0, 120.0, 90.0)?;
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.7, 0.6, 1.0))];
-        node.effects = vec![figcraft_doc::Effect {
+        node.effects = vec![lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         }];
@@ -2847,14 +2847,14 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("shape missing")?;
         node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let texture = || figcraft_doc::Effect {
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let texture = || lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         let shadow = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 8.0;
                 value.offset = (4.0, 6.0);
@@ -2863,7 +2863,7 @@ mod effect_capability_tests {
             effect
         };
         let shadow2 = || {
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
                 value.radius = 4.0;
                 value.offset = (-3.0, 2.0);
@@ -2995,7 +2995,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("texture missing")?;
         node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
-        node.effects = vec![figcraft_doc::Effect {
+        node.effects = vec![lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         }];
@@ -3033,7 +3033,7 @@ mod effect_capability_tests {
     fn vector_texture_effect_stacks_preserve_faces_and_order() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU vector texture stack");
         let page = doc.current_page.ok_or("page missing")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
+        let network = lizard_doc::VectorNetwork::from_points(
             &[Point::new(10.0, 10.0), Point::new(140.0, 25.0), Point::new(95.0, 65.0), Point::new(110.0, 150.0), Point::new(20.0, 140.0)],
             true,
         );
@@ -3041,12 +3041,12 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("vector missing")?;
         node.transform = Affine::translate((35.0, 30.0)) * Affine::rotate(0.2);
         node.fills = vec![Paint::solid(Color::new(0.8, 0.5, 0.3, 0.8))];
-        let texture = || figcraft_doc::Effect {
+        let texture = || lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
-        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
-        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = || lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
         for (name, effects) in [("texture-blur", vec![texture(), blur()]), ("blur-noise-texture", vec![blur(), noise(), texture()])] {
             doc.node_mut(id).ok_or("vector missing")?.effects = effects;
             for opacity in [1.0, 0.5] {
@@ -3092,7 +3092,7 @@ mod effect_capability_tests {
     fn translucent_vector_without_shadow_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Translucent vector baseline");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
+        let network = lizard_doc::VectorNetwork::from_points(
             &[Point::new(10.0, 10.0), Point::new(140.0, 25.0), Point::new(95.0, 65.0), Point::new(110.0, 150.0), Point::new(20.0, 140.0)],
             true,
         );
@@ -3118,7 +3118,7 @@ mod effect_capability_tests {
             NodeKind::Polygon { count: 6 },
             NodeKind::Star { count: 5, inner_ratio: 0.4 },
             NodeKind::Vector {
-                network: figcraft_doc::VectorNetwork::from_points(
+                network: lizard_doc::VectorNetwork::from_points(
                     &[Point::new(10.0, 10.0), Point::new(120.0, 20.0), Point::new(105.0, 130.0), Point::new(20.0, 125.0)],
                     true,
                 ),
@@ -3129,13 +3129,13 @@ mod effect_capability_tests {
             let id = doc.create(page, kind.clone(), "Shape", 40.0, 35.0, 130.0, 140.0)?;
             let node = doc.node_mut(id).ok_or("shape missing")?;
             node.fills = vec![Paint::solid(Color::WHITE)];
-            let mut close = figcraft_doc::Effect::drop_shadow();
+            let mut close = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut close.kind {
                 shadow.radius = 5.0;
                 shadow.offset = (3.0, 4.0);
                 shadow.color = Color::new(0.1, 0.2, 0.3, 0.18);
             }
-            let mut far = figcraft_doc::Effect::drop_shadow();
+            let mut far = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut far.kind {
                 shadow.radius = 12.0;
                 shadow.offset = (-4.0, 7.0);
@@ -3165,14 +3165,14 @@ mod effect_capability_tests {
     fn translucent_vector_shadow_clips_to_silhouette_on_gpu() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU translucent vector shadow");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
+        let network = lizard_doc::VectorNetwork::from_points(
             &[Point::new(10.0, 10.0), Point::new(140.0, 25.0), Point::new(95.0, 65.0), Point::new(110.0, 150.0), Point::new(20.0, 140.0)],
             true,
         );
         let id = doc.create(page, NodeKind::Vector { network }, "Vector", 35.0, 30.0, 140.0, 150.0)?;
         let node = doc.node_mut(id).ok_or("vector missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 0.5))];
-        let mut effect = figcraft_doc::Effect::drop_shadow();
+        let mut effect = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut effect.kind {
             shadow.radius = 16.0;
             shadow.offset = (5.0, 9.0);
@@ -3229,7 +3229,7 @@ mod effect_capability_tests {
             let id = doc.create(page, kind.clone(), "Shape", 35.0, 30.0, 140.0, 150.0)?;
             let node = doc.node_mut(id).ok_or("shape missing")?;
             node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 0.5))];
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                 shadow.radius = 12.0;
                 shadow.offset = (5.0, 7.0);
@@ -3273,14 +3273,14 @@ mod effect_capability_tests {
     fn vector_inner_shadow_matches_reference_at_multiple_opacities() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU vector inner shadow");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
+        let network = lizard_doc::VectorNetwork::from_points(
             &[Point::new(10.0, 10.0), Point::new(140.0, 25.0), Point::new(95.0, 65.0), Point::new(110.0, 150.0), Point::new(20.0, 140.0)],
             true,
         );
         let id = doc.create(page, NodeKind::Vector { network }, "Vector", 35.0, 30.0, 140.0, 150.0)?;
         let node = doc.node_mut(id).ok_or("vector missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 1.0))];
-        let mut effect = figcraft_doc::Effect::inner_shadow();
+        let mut effect = lizard_doc::Effect::inner_shadow();
         if let EffectKind::InnerShadow(shadow) = &mut effect.kind {
             shadow.radius = 12.0;
             shadow.offset = (5.0, 7.0);
@@ -3325,7 +3325,7 @@ mod effect_capability_tests {
         let id = doc.create(page, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Ellipse", 35.0, 30.0, 140.0, 150.0)?;
         let node = doc.node_mut(id).ok_or("ellipse missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 1.0))];
-        let mut effect = figcraft_doc::Effect::inner_shadow();
+        let mut effect = lizard_doc::Effect::inner_shadow();
         if let EffectKind::InnerShadow(shadow) = &mut effect.kind {
             shadow.radius = 12.0;
             shadow.offset = (5.0, 7.0);
@@ -3356,7 +3356,7 @@ mod effect_capability_tests {
             let id = doc.create(page, kind, "Shape", 35.0, 30.0, 140.0, 150.0)?;
             let node = doc.node_mut(id).ok_or("shape missing")?;
             node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 1.0))];
-            let mut effect = figcraft_doc::Effect::inner_shadow();
+            let mut effect = lizard_doc::Effect::inner_shadow();
             if let EffectKind::InnerShadow(shadow) = &mut effect.kind {
                 shadow.radius = 12.0;
                 shadow.offset = (5.0, 7.0);
@@ -3392,7 +3392,7 @@ mod effect_capability_tests {
             let id = doc.create(page, kind, "Shape", 35.0, 30.0, 140.0, 150.0)?;
             let node = doc.node_mut(id).ok_or("shape missing")?;
             node.fills = vec![Paint::solid(Color::new(0.8, 0.8, 0.85, 1.0))];
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                 shadow.radius = 12.0;
                 shadow.offset = (5.0, 7.0);
@@ -3431,12 +3431,12 @@ mod effect_capability_tests {
     fn text_drop_shadow_without_spread_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU text shadow");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let mut text = figcraft_doc::TextData::new("Lizard");
+        let mut text = lizard_doc::TextData::new("Lizard");
         text.style.font_size = 48.0;
         let id = doc.create(page, NodeKind::Text(text), "Text", 25.0, 35.0, 180.0, 70.0)?;
         let node = doc.node_mut(id).ok_or("text missing")?;
         node.fills = vec![Paint::solid(Color::WHITE)];
-        let mut effect = figcraft_doc::Effect::drop_shadow();
+        let mut effect = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut effect.kind {
             shadow.spread = 0.0;
             shadow.radius = 8.0;
@@ -3468,14 +3468,14 @@ mod effect_capability_tests {
     fn styled_text_run_fills_render_on_gpu() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU styled text runs");
         let page = doc.current_page.ok_or("page missing")?;
-        let mut text = figcraft_doc::TextData::new("Lizard");
+        let mut text = lizard_doc::TextData::new("Lizard");
         text.style.font_size = 48.0;
         let mut style = text.style.clone();
         style.fills = Some(vec![Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0))]);
-        text.runs.push(figcraft_doc::StyleRun { start: 3, end: 6, style });
+        text.runs.push(lizard_doc::StyleRun { start: 3, end: 6, style });
         let id = doc.create(page, NodeKind::Text(text), "Text", 25.0, 35.0, 220.0, 70.0)?;
         doc.node_mut(id).ok_or("text missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))];
-        let Some((layout, _)) = figcraft_text::layout_node(doc.node(id).ok_or("text missing")?) else { return Ok(()) };
+        let Some((layout, _)) = lizard_text::layout_node(doc.node(id).ok_or("text missing")?) else { return Ok(()) };
         if layout.glyphs.is_empty() {
             return Ok(());
         }
@@ -3513,13 +3513,13 @@ mod effect_capability_tests {
     fn styled_text_run_with_unsupported_blend_keeps_fallback() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Unsupported styled run blend");
         let page = doc.current_page.ok_or("page missing")?;
-        let mut text = figcraft_doc::TextData::new("Lizard");
+        let mut text = lizard_doc::TextData::new("Lizard");
         text.style.font_size = 48.0;
         let mut paint = Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0));
         paint.blend = BlendMode::PassThrough;
         let mut style = text.style.clone();
         style.fills = Some(vec![paint]);
-        text.runs.push(figcraft_doc::StyleRun { start: 0, end: 6, style });
+        text.runs.push(lizard_doc::StyleRun { start: 0, end: 6, style });
         let id = doc.create(page, NodeKind::Text(text), "Text", 25.0, 35.0, 220.0, 70.0)?;
         doc.node_mut(id).ok_or("text missing")?.fills = vec![Paint::solid(Color::WHITE)];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 150 };
@@ -3533,7 +3533,7 @@ mod effect_capability_tests {
             NodeKind::Star { count: 5, inner_ratio: 0.4 },
             NodeKind::Line,
             NodeKind::Vector {
-                network: figcraft_doc::VectorNetwork::from_points(
+                network: lizard_doc::VectorNetwork::from_points(
                     &[
                         Point::new(8.0, 10.0),
                         Point::new(110.0, 5.0),
@@ -3554,8 +3554,8 @@ mod effect_capability_tests {
             node.fills = if is_line { Vec::new() } else { vec![Paint::solid(Color::new(0.9, 0.9, 0.95, 1.0))] };
             node.strokes = vec![Paint::solid(Color::new(0.2, 0.3, 0.5, 1.0))];
             node.stroke.weight = 6.0;
-            node.stroke.align = figcraft_doc::StrokeAlign::Outside;
-            let mut effect = figcraft_doc::Effect::drop_shadow();
+            node.stroke.align = lizard_doc::StrokeAlign::Outside;
+            let mut effect = lizard_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(shadow) = &mut effect.kind {
                 shadow.radius = 12.0;
                 shadow.offset = (5.0, 7.0);
@@ -3615,7 +3615,7 @@ mod effect_capability_tests {
         stroke_child.fills.clear();
         stroke_child.strokes = vec![Paint::solid(Color::WHITE)];
         stroke_child.stroke.weight = 4.0;
-        stroke_child.stroke.align = figcraft_doc::StrokeAlign::Outside;
+        stroke_child.stroke.align = lizard_doc::StrokeAlign::Outside;
         stroke_child.stroke.dashes = vec![4.0, 2.0];
         stroke_child.opacity = 0.7;
         let nested = doc.create(group, NodeKind::Group, "Nested", 100.0, 85.0, 30.0, 30.0)?;
@@ -3625,7 +3625,7 @@ mod effect_capability_tests {
         let gradient_child =
             doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Gradient", 45.0, 42.0, 48.0, 48.0)?;
         doc.node_mut(gradient_child).ok_or("gradient child missing")?.fills =
-            vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Linear, Color::new(0.2, 0.7, 0.6, 1.0)))];
+            vec![Paint::gradient(lizard_color::Gradient::default_for(GradientKind::Linear, Color::new(0.2, 0.7, 0.6, 1.0)))];
         let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 95.0, 25.0, 25.0)?;
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 0.0, 95.0, 55.0, 25.0)?;
@@ -3643,7 +3643,7 @@ mod effect_capability_tests {
         mask_node.mask_type = MaskType::Alpha;
         let masked_by_group = doc.create(group, NodeKind::Rectangle, "Masked by group", 90.0, 95.0, 50.0, 30.0)?;
         doc.node_mut(masked_by_group).ok_or("masked by group missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.7, 0.5, 0.9))];
-        let mut effect = figcraft_doc::Effect::inner_shadow();
+        let mut effect = lizard_doc::Effect::inner_shadow();
         if let EffectKind::InnerShadow(shadow) = &mut effect.kind {
             shadow.radius = 12.0;
             shadow.offset = (5.0, 7.0);
@@ -3724,7 +3724,7 @@ mod effect_capability_tests {
         stroke_child.fills.clear();
         stroke_child.strokes = vec![Paint::solid(Color::WHITE)];
         stroke_child.stroke.weight = 4.0;
-        stroke_child.stroke.align = figcraft_doc::StrokeAlign::Outside;
+        stroke_child.stroke.align = lizard_doc::StrokeAlign::Outside;
         stroke_child.stroke.dashes = vec![4.0, 2.0];
         let nested = doc.create(group, NodeKind::Group, "Nested", 100.0, 85.0, 30.0, 30.0)?;
         doc.node_mut(outlined).ok_or("outlined child missing")?.opacity = 0.7;
@@ -3734,7 +3734,7 @@ mod effect_capability_tests {
         let gradient_child =
             doc.create(group, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Gradient", 45.0, 42.0, 48.0, 48.0)?;
         doc.node_mut(gradient_child).ok_or("gradient child missing")?.fills =
-            vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Linear, Color::new(0.2, 0.7, 0.6, 1.0)))];
+            vec![Paint::gradient(lizard_color::Gradient::default_for(GradientKind::Linear, Color::new(0.2, 0.7, 0.6, 1.0)))];
         let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 95.0, 25.0, 25.0)?;
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
         let masked = doc.create(group, NodeKind::Rectangle, "Masked", 0.0, 95.0, 55.0, 25.0)?;
@@ -3752,7 +3752,7 @@ mod effect_capability_tests {
         mask_node.mask_type = MaskType::Vector;
         let masked_by_group = doc.create(group, NodeKind::Rectangle, "Masked by group", 90.0, 95.0, 50.0, 30.0)?;
         doc.node_mut(masked_by_group).ok_or("masked by group missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.7, 0.5, 0.9))];
-        let mut effect = figcraft_doc::Effect::drop_shadow();
+        let mut effect = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(shadow) = &mut effect.kind {
             shadow.radius = 12.0;
             shadow.offset = (5.0, 7.0);
@@ -3816,11 +3816,11 @@ mod effect_capability_tests {
         let dark = doc.create(page, NodeKind::Rectangle, "Soft dark half", 0.0, 0.0, 50.0, 100.0)?;
         let node = doc.node_mut(dark).ok_or("dark half missing")?;
         node.fills = vec![Paint::solid(Color::BLACK)];
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(figcraft_doc::Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(lizard_doc::Blur::uniform(8.0)), visible: true }];
         let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(lizard_doc::Blur::uniform(12.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
@@ -3855,7 +3855,7 @@ mod effect_capability_tests {
         let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(lizard_doc::Blur::uniform(12.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         let focused = focused_document(&doc, page, group).ok_or("focus document missing")?;
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -3895,7 +3895,7 @@ mod effect_capability_tests {
         let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 35.0, 20.0, 70.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
         let above = doc.create(page, NodeKind::Rectangle, "Above", 115.0, 10.0, 30.0, 100.0)?;
         doc.node_mut(above).ok_or("above missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.6, 0.3, 0.8))];
         for opacity in [0.25, 0.5, 0.75] {
@@ -3921,7 +3921,7 @@ mod effect_capability_tests {
         let second = doc.create(group, NodeKind::Rectangle, "Second blur pane", 55.0, 30.0, 60.0, 50.0)?;
         let node = doc.node_mut(second).ok_or("second pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         doc.node_mut(group).ok_or("group missing")?.opacity = 0.5;
         for scale in [1.0, 2.0] {
             let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
@@ -3952,7 +3952,7 @@ mod effect_capability_tests {
                 [245.0 / 255.0; 3],
                 &index,
                 &outlined,
-                figcraft_render::Outline::default(),
+                lizard_render::Outline::default(),
             )?;
             let actual = gpu.pixels()?;
             let changed = actual
@@ -3963,10 +3963,10 @@ mod effect_capability_tests {
             let limit = if outlined == [dark] || outlined == [pane] { 2 } else { 1 };
             assert!(changed < (view.width * view.height * limit / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
         }
-        doc.node_mut(pane).ok_or("pane missing")?.effects = vec![figcraft_doc::Effect {
+        doc.node_mut(pane).ok_or("pane missing")?.effects = vec![lizard_doc::Effect {
             kind: EffectKind::BackgroundBlur(Blur {
                 radius: 16.0,
-                blur_type: figcraft_doc::BlurType::Progressive,
+                blur_type: lizard_doc::BlurType::Progressive,
                 start_radius: 0.0,
                 start: (0.0, 0.5),
                 end: (1.0, 0.5),
@@ -3986,7 +3986,7 @@ mod effect_capability_tests {
             .count();
         assert!(changed < (view.width * view.height / 100) as usize, "progressive group: {changed} changed pixels");
         doc.node_mut(pane).ok_or("pane missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true }];
         let index = BackdropIndex::new(&doc, page);
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         let reference = render_view(&doc, page, &view, &Options::default()).ok_or("glass group reference failed")?;
@@ -4002,15 +4002,7 @@ mod effect_capability_tests {
         let outlined = vec![dark];
         let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
             .ok_or("glass group outline reference failed")?;
-        gpu.render_with_backdrop_blurs_indexed_outlined(
-            &doc,
-            page,
-            &view,
-            [245.0 / 255.0; 3],
-            &index,
-            &outlined,
-            figcraft_render::Outline::default(),
-        )?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, [245.0 / 255.0; 3], &index, &outlined, lizard_render::Outline::default())?;
         let actual = gpu.pixels()?;
         let changed = actual
             .chunks_exact(4)
@@ -4073,8 +4065,8 @@ mod effect_capability_tests {
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "rounded clipped glass: {changed} changed pixels");
         doc.node_mut(pane).ok_or("pane missing")?.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
         ];
         let index = BackdropIndex::new(&doc, page);
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -4089,8 +4081,8 @@ mod effect_capability_tests {
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "glass blur stack group: {changed} changed pixels");
         doc.node_mut(pane).ok_or("pane missing")?.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
         ];
         let index = BackdropIndex::new(&doc, page);
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -4108,17 +4100,17 @@ mod effect_capability_tests {
             (
                 "glass blur noise group",
                 vec![
-                    figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-                    figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
-                    figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
                 ],
             ),
             (
                 "glass noise blur group",
                 vec![
-                    figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-                    figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-                    figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+                    lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
                 ],
             ),
         ] {
@@ -4137,7 +4129,7 @@ mod effect_capability_tests {
             assert!(changed < (view.width * view.height / 20) as usize, "{name}: {changed} changed pixels");
         }
         doc.node_mut(second).ok_or("second pane missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true }];
         let index = BackdropIndex::new(&doc, page);
         assert_eq!(index.visible_ids(&view), vec![pane, second]);
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "two ordered glass panes rejected");
@@ -4182,7 +4174,7 @@ mod effect_capability_tests {
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(4, 4, image::Rgba([120, 180, 240, 110])))
             .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
         let image_key = "group-glass-image".to_string();
-        doc.images.insert(image_key.clone(), figcraft_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: 4, height: 4 });
+        doc.images.insert(image_key.clone(), lizard_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: 4, height: 4 });
         doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::image(image_key, ImageScaleMode::Fill)];
         let index = BackdropIndex::new(&doc, page);
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "image glass stack rejected");
@@ -4197,10 +4189,10 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "image glass stack: {changed} changed pixels");
-        let shader = figcraft_shader::demo();
+        let shader = lizard_shader::demo();
         doc.shaders.insert(shader.id.clone(), shader);
         doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint {
-            kind: PaintKind::Shader(ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: Default::default() }),
+            kind: PaintKind::Shader(ShaderFill { shader_id: lizard_shader::DEMO_ID.into(), values: Default::default() }),
             opacity: 0.35,
             ..Paint::solid(Color::WHITE)
         }];
@@ -4326,15 +4318,7 @@ mod effect_capability_tests {
         let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
             .ok_or("masked glass outline reference failed")?;
         let mut gpu = GpuCanvas::new(view.width, view.height)?;
-        gpu.render_with_backdrop_blurs_indexed_outlined(
-            &doc,
-            page,
-            &view,
-            [245.0 / 255.0; 3],
-            &index,
-            &outlined,
-            figcraft_render::Outline::default(),
-        )?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, [245.0 / 255.0; 3], &index, &outlined, lizard_render::Outline::default())?;
         let actual = gpu.pixels()?;
         let changed = actual
             .chunks_exact(4)
@@ -4400,7 +4384,7 @@ mod effect_capability_tests {
         let nested_pane = doc.create(nested, NodeKind::Rectangle, "Nested Glass", 20.0, 12.0, 65.0, 50.0)?;
         let nested_node = doc.node_mut(nested_pane).ok_or("nested pane missing")?;
         nested_node.fills.clear();
-        nested_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+        nested_node.effects = vec![lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true }];
         for scale in [1.0, 2.0] {
             let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
             let index = BackdropIndex::new(&doc, page);
@@ -4462,7 +4446,7 @@ mod effect_capability_tests {
             let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", x, 20.0, 60.0, 60.0)?;
             let node = doc.node_mut(pane).ok_or("pane missing")?;
             node.fills.clear();
-            node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(radius)), visible: true }];
+            node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(lizard_doc::Blur::uniform(radius)), visible: true }];
         }
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 100 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
@@ -4489,7 +4473,7 @@ mod effect_capability_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Glass pane", 80.0, 80.0, 96.0, 96.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width, height };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, false));
         let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
@@ -4518,7 +4502,7 @@ mod effect_capability_tests {
         for kind in [
             NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 },
             NodeKind::Vector {
-                network: figcraft_doc::VectorNetwork::from_points(
+                network: lizard_doc::VectorNetwork::from_points(
                     &[Point::new(12.0, 12.0), Point::new(92.0, 25.0), Point::new(76.0, 88.0), Point::new(4.0, 76.0)],
                     true,
                 ),
@@ -4553,8 +4537,8 @@ mod effect_capability_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Glass pane", 80.0, 80.0, 96.0, 96.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        let glass = figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true };
-        let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
+        let glass = lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true };
+        let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
         for effects in [vec![glass.clone(), blur.clone()], vec![blur.clone(), glass.clone()]] {
             doc.node_mut(pane).ok_or("pane missing")?.effects = effects;
             for angle in [0.0, 0.5] {
@@ -4590,9 +4574,9 @@ mod effect_capability_tests {
         doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.45, 0.8, 1.0))];
         let pane = doc.create(page, NodeKind::Rectangle, "Glass pane", 160.0, 160.0, 96.0, 96.0)?;
         doc.node_mut(pane).ok_or("pane missing")?.fills.clear();
-        let glass = figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true };
-        let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
-        let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
+        let glass = lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true };
+        let noise = lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let blur = lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true };
         for effects in [
             vec![glass.clone(), noise.clone()],
             vec![noise.clone(), glass.clone()],
@@ -4637,9 +4621,9 @@ mod effect_capability_tests {
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills = vec![Paint::solid(Color::new(0.8, 0.3, 0.6, 0.7))];
         node.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
         ];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         for blend in BlendMode::ALL.into_iter().filter(|blend| gpu_blend_mode(*blend).is_some()) {
@@ -4670,8 +4654,8 @@ mod effect_capability_tests {
         doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.45, 0.8, 1.0))];
         let pane = doc.create(page, NodeKind::Rectangle, "Glass pane", 160.0, 160.0, 96.0, 96.0)?;
         doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.9, 1.0, 1.0))];
-        let glass = figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true };
-        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        let glass = lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true };
+        let mut shadow = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
             value.radius = 8.0;
             value.spread = 2.0;
@@ -4724,7 +4708,7 @@ mod effect_capability_tests {
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.transform = Affine::translate((180.0, 180.0)) * Affine::rotate(0.25);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.9, 1.0, 0.6))];
-        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        let mut shadow = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
             value.radius = 12.0;
             value.spread = 4.0;
@@ -4733,9 +4717,9 @@ mod effect_capability_tests {
         }
         node.effects = vec![
             shadow,
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Glass(lizard_doc::Glass::default()), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
         ];
         for scale in [1.0, 2.0] {
             let view = View { origin: (0.0, 0.0), scale, width: (480.0 * scale) as u32, height: (480.0 * scale) as u32 };
@@ -4760,12 +4744,12 @@ mod effect_capability_tests {
     fn individually_painted_vector_regions_use_gpu_when_supported() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Vector region capability");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let mut network = figcraft_doc::VectorNetwork::from_points(
+        let mut network = lizard_doc::VectorNetwork::from_points(
             &[
-                figcraft_geom::Point::new(0.0, 0.0),
-                figcraft_geom::Point::new(40.0, 0.0),
-                figcraft_geom::Point::new(40.0, 40.0),
-                figcraft_geom::Point::new(0.0, 40.0),
+                lizard_geom::Point::new(0.0, 0.0),
+                lizard_geom::Point::new(40.0, 0.0),
+                lizard_geom::Point::new(40.0, 40.0),
+                lizard_geom::Point::new(0.0, 40.0),
             ],
             true,
         );
@@ -4778,7 +4762,7 @@ mod effect_capability_tests {
         doc.node_mut(id).ok_or("vector node missing")?.kind = NodeKind::Vector { network: network.clone() };
         assert!(!has_unhandled_effects_in_view(&doc, &view));
         if let Some(region) = network.regions.first_mut() {
-            region.fills = Some(vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))]);
+            region.fills = Some(vec![Paint::gradient(lizard_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))]);
         }
         doc.node_mut(id).ok_or("vector node missing")?.kind = NodeKind::Vector { network };
         assert!(!has_unhandled_effects_in_view(&doc, &view));
@@ -4789,28 +4773,25 @@ mod effect_capability_tests {
     fn isolated_opaque_vector_shadow_uses_gpu_and_translucent_fill_needs_cache() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Vector shadow capability");
         let page = doc.current_page.ok_or("new document has no page")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
-            &[figcraft_geom::Point::new(0.0, 0.0), figcraft_geom::Point::new(40.0, 0.0), figcraft_geom::Point::new(20.0, 35.0)],
+        let network = lizard_doc::VectorNetwork::from_points(
+            &[lizard_geom::Point::new(0.0, 0.0), lizard_geom::Point::new(40.0, 0.0), lizard_geom::Point::new(20.0, 35.0)],
             true,
         );
         let id = doc.create(page, NodeKind::Vector { network }, "Vector", 20.0, 20.0, 40.0, 35.0)?;
         let node = doc.node_mut(id).ok_or("vector missing")?;
         node.fills = vec![Paint::solid(Color::BLACK)];
-        node.effects = vec![figcraft_doc::Effect::drop_shadow()];
+        node.effects = vec![lizard_doc::Effect::drop_shadow()];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 };
         assert!(!has_unhandled_effects_in_view(&doc, &view));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut()
-        {
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut() {
             shadow.spread = 3.0;
         }
         assert!(!has_unhandled_effects_in_view(&doc, &view));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut()
-        {
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut() {
             shadow.spread = 10.0;
         }
         assert!(!has_unhandled_effects_in_view(&doc, &view));
-        if let Some(figcraft_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut()
-        {
+        if let Some(lizard_doc::Effect { kind: EffectKind::DropShadow(shadow), .. }) = doc.node_mut(id).ok_or("vector missing")?.effects.first_mut() {
             shadow.spread = 0.0;
         }
         doc.node_mut(id).ok_or("vector missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 0.0, 0.5))];
@@ -4867,7 +4848,7 @@ impl BackdropIndex {
                     EffectKind::Glass(glass) if effect.visible => Some(glass.frost),
                     _ => None,
                 })?;
-                Some((id, radius, figcraft_render::raster_bounds(doc, id)?, backdrop_requires_cpu(doc, id, page)))
+                Some((id, radius, lizard_render::raster_bounds(doc, id)?, backdrop_requires_cpu(doc, id, page)))
             })
             .collect();
         Self { candidates }
@@ -4971,7 +4952,7 @@ struct BackdropRenderContext<'a> {
     view: &'a View,
     clear: [f32; 4],
     outlined: &'a [NodeId],
-    options: figcraft_render::Outline,
+    options: lizard_render::Outline,
 }
 
 fn independent_backdrop_groups(doc: &Document, page: NodeId, view: &View, index: &BackdropIndex) -> Option<Vec<BackdropGroupBatch>> {
@@ -5022,7 +5003,7 @@ fn backdrop_clip_rect(doc: &Document, id: NodeId, page: NodeId, view: &View) -> 
         let parent = node.parent?;
         let ancestor = doc.node(parent)?;
         if ancestor.clip {
-            let frame = figcraft_geom::transform_rect_bbox(doc.world_transform(parent), Rect::new(0.0, 0.0, ancestor.width, ancestor.height));
+            let frame = lizard_geom::transform_rect_bbox(doc.world_transform(parent), Rect::new(0.0, 0.0, ancestor.width, ancestor.height));
             bounds = Some(bounds.map_or(frame, |current| current.intersect(frame)));
         }
         current = parent;
@@ -5206,7 +5187,7 @@ fn set_paint(scene: &mut Scene, doc: &Document, paint: &Paint, node: &Node, imag
         }
         PaintKind::Image(img) => {
             let Some(info) = images.and_then(|entries| entries.get(&image_key(img))) else { return false };
-            let placement = figcraft_render::paint::image_transform(img, f64::from(info.width), f64::from(info.height), node.width, node.height);
+            let placement = lizard_render::paint::image_transform(img, f64::from(info.width), f64::from(info.height), node.width, node.height);
             scene.set_paint_transform(Affine::new([
                 f64::from(placement.sx),
                 f64::from(placement.ky),
@@ -5308,7 +5289,7 @@ fn draw_content(
         }
         for (index, region) in drawn.regions.iter().enumerate() {
             let Some(path) = drawn.region_path(index) else { continue };
-            set_rule(scene, if region.winding == figcraft_doc::WindingRule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding });
+            set_rule(scene, if region.winding == lizard_doc::WindingRule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding });
             for paint in region.fills.as_ref().unwrap_or(&node.fills) {
                 scene.reset_paint_transform();
                 if set_paint(scene, doc, paint, node, images) {
@@ -5319,7 +5300,7 @@ fn draw_content(
     } else if let NodeKind::Text(text) = &node.kind
         && (!text.runs.is_empty() || text.style.fills.is_some())
     {
-        if let Some((layout, dy)) = figcraft_text::layout_node(node) {
+        if let Some((layout, dy)) = lizard_text::layout_node(node) {
             let mut paths = std::collections::BTreeMap::<usize, BezPath>::new();
             for glyph in &layout.glyphs {
                 paths.entry(glyph.style).or_default().extend(glyph.path().elements().iter().copied());
@@ -5421,7 +5402,7 @@ struct CachedEffects<'a> {
     noise: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     texture: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     outlined: &'a [NodeId],
-    outline_options: figcraft_render::Outline,
+    outline_options: lizard_render::Outline,
 }
 
 impl CachedEffects<'_> {
@@ -5434,7 +5415,7 @@ impl CachedEffects<'_> {
             noise: None,
             texture: None,
             outlined: &[],
-            outline_options: figcraft_render::Outline::default(),
+            outline_options: lizard_render::Outline::default(),
         }
     }
 }
@@ -5451,7 +5432,7 @@ pub fn gpu_drop_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -
         let inv = doc.world_transform(node.id).inverse();
         node.children.iter().all(|child| {
             doc.world_render_bounds(*child)
-                .map(|bounds| figcraft_geom::transform_rect_bbox(inv, bounds))
+                .map(|bounds| lizard_geom::transform_rect_bbox(inv, bounds))
                 .is_some_and(|bounds| bounds.x0 >= safe.x0 && bounds.y0 >= safe.y0 && bounds.x1 <= safe.x1 && bounds.y1 <= safe.y1)
         })
     } else {
@@ -5567,7 +5548,7 @@ fn draw_shadow(scene: &mut Scene, doc: &Document, node: &Node, camera: Affine) {
                 peniko::kurbo::Stroke::new(shadow.spread * 2.0)
                     .with_join(peniko::kurbo::Join::Miter)
                     .with_caps(peniko::kurbo::Cap::Butt)
-                    .with_miter_limit(figcraft_doc::SPREAD_MITER_LIMIT),
+                    .with_miter_limit(lizard_doc::SPREAD_MITER_LIMIT),
             );
             scene.stroke_path(&path);
         }
@@ -5588,7 +5569,7 @@ fn draw_node(
     size: (u16, u16),
 ) {
     let selected = cached.outlined.contains(&id);
-    if depth > 64 || !selected && !figcraft_render::raster_bounds(doc, id).is_some_and(|bounds| bounds.intersect(view).area() > 0.0) {
+    if depth > 64 || !selected && !lizard_render::raster_bounds(doc, id).is_some_and(|bounds| bounds.intersect(view).area() > 0.0) {
         return;
     }
     let Some(node) = doc.node(id) else { return };
@@ -5972,17 +5953,17 @@ pub fn make_scene(doc: &Document, page: NodeId, view: &View) -> Scene {
 }
 
 /// Build outline mode as GPU strokes. Effects and fills do not participate in this view.
-pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: figcraft_render::Outline) -> Scene {
+pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: lizard_render::Outline) -> Scene {
     let roots = doc.node(page).map(|node| node.paint_order().collect::<Vec<_>>()).unwrap_or_default();
     make_outline_scene_roots(doc, &roots, view, options)
 }
 
 /// Outline only the focused subtree, keeping its normal document-space position.
-pub fn make_focused_outline_scene(doc: &Document, focus: NodeId, view: &View, options: figcraft_render::Outline) -> Scene {
+pub fn make_focused_outline_scene(doc: &Document, focus: NodeId, view: &View, options: lizard_render::Outline) -> Scene {
     make_outline_scene_roots(doc, &[focus], view, options)
 }
 
-fn make_outline_scene_roots(doc: &Document, roots: &[NodeId], view: &View, options: figcraft_render::Outline) -> Scene {
+fn make_outline_scene_roots(doc: &Document, roots: &[NodeId], view: &View, options: lizard_render::Outline) -> Scene {
     let mut scene = Scene::new(view.width as u16, view.height as u16);
     let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
     for id in roots {
@@ -6003,7 +5984,7 @@ mod outline_gpu_tests {
         let focused = doc.create(page, NodeKind::Rectangle, "Focused", 10.0, 10.0, 20.0, 20.0)?;
         let _sibling = doc.create(page, NodeKind::Rectangle, "Sibling", 60.0, 10.0, 20.0, 20.0)?;
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 50 };
-        let options = figcraft_render::Outline { hidden: false, bounds: false, light: false };
+        let options = lizard_render::Outline { hidden: false, bounds: false, light: false };
         gpu.render_with_clear(&make_outline_scene(&doc, page, &view, options), [1.0; 3])?;
         let full = gpu.pixels()?;
         gpu.render_with_clear(&make_focused_outline_scene(&doc, focused, &view, options), [1.0; 3])?;
@@ -6025,7 +6006,7 @@ mod outline_gpu_tests {
         let _group = doc.create(page, NodeKind::Group, "bounds", 10.0, 50.0, 70.0, 15.0)?;
         doc.node_mut(hidden).ok_or("hidden rectangle missing")?.visible = false;
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 70 };
-        let options = figcraft_render::Outline { hidden: false, bounds: false, light: false };
+        let options = lizard_render::Outline { hidden: false, bounds: false, light: false };
         let scene = make_outline_scene(&doc, page, &view, options);
         gpu.render_with_clear(&scene, [1.0; 3])?;
         let pixels = gpu.pixels()?;
@@ -6033,18 +6014,18 @@ mod outline_gpu_tests {
         assert!(red(&pixels, 10, 20) < 180, "visible outline missing");
         assert!(red(&pixels, 20, 20) > 230, "outline mode filled a shape");
         assert!(red(&pixels, 60, 20) > 230, "hidden outline appeared without the option");
-        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { hidden: true, ..options });
+        let scene = make_outline_scene(&doc, page, &view, lizard_render::Outline { hidden: true, ..options });
         gpu.render_with_clear(&scene, [1.0; 3])?;
         let pixels = gpu.pixels()?;
         if let Ok(path) = std::env::var("LIZARD_GPU_OUTLINE_SCREENSHOT") {
             image::save_buffer(path, &pixels, view.width, view.height, image::ColorType::Rgba8)?;
         }
         assert!(red(&pixels, 60, 20) < 180, "hidden outline option did not draw the shape");
-        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { bounds: true, ..options });
+        let scene = make_outline_scene(&doc, page, &view, lizard_render::Outline { bounds: true, ..options });
         gpu.render_with_clear(&scene, [1.0; 3])?;
         let pixels = gpu.pixels()?;
         assert!(red(&pixels, 10, 55) < 180, "group bounds option did not draw the box");
-        let scene = make_outline_scene(&doc, page, &view, figcraft_render::Outline { light: true, ..options });
+        let scene = make_outline_scene(&doc, page, &view, lizard_render::Outline { light: true, ..options });
         gpu.render_with_clear(&scene, [0.0; 3])?;
         let pixels = gpu.pixels()?;
         assert!(red(&pixels, 10, 20) > 100, "light outline missing on a dark canvas: {}", red(&pixels, 10, 20));
@@ -6105,13 +6086,13 @@ mod selected_outline_gpu_tests {
         let pane = doc.create(page, NodeKind::Rectangle, "background blur", 40.0, 10.0, 40.0, 60.0)?;
         let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
         pane_node.fills.clear();
-        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        pane_node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 80 };
         let clear = [245.0 / 255.0; 3];
         let index = BackdropIndex::new(&doc, page);
         for outlined in [[selected], [pane]] {
             assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &outlined));
-            gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &index, &outlined, figcraft_render::Outline::default())?;
+            gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &index, &outlined, lizard_render::Outline::default())?;
             let actual = gpu.pixels()?;
             let reference = render_view(&doc, page, &view, &Options { outlined: outlined.to_vec(), ..Default::default() })
                 .ok_or("CPU outline backdrop reference unavailable")?;
@@ -6123,10 +6104,10 @@ mod selected_outline_gpu_tests {
             }
         }
         doc.node_mut(pane).ok_or("pane missing for glass")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
         let glass_index = BackdropIndex::new(&doc, page);
         assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[selected]));
-        gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &glass_index, &[selected], figcraft_render::Outline::default())?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(&doc, page, &view, clear, &glass_index, &[selected], lizard_render::Outline::default())?;
         let glass_actual = gpu.pixels()?;
         let glass_reference = render_view(&doc, page, &view, &Options { outlined: vec![selected], ..Default::default() })
             .ok_or("CPU outlined glass reference unavailable")?;
@@ -6164,16 +6145,16 @@ mod selected_outline_gpu_tests {
         let sibling = doc.create(page, NodeKind::Rectangle, "blurred sibling", 55.0, 20.0, 25.0, 25.0)?;
         let outlined = doc.node_mut(selected).ok_or("selected shape missing")?;
         outlined.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
-        outlined.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
+        outlined.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
         let other = doc.node_mut(sibling).ok_or("sibling missing")?;
         other.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
-        other.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
+        other.effects = vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(10.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 80 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         gpu.prepare_static_effects(&doc)?;
         assert!(gpu.layer_blurs.contains_key(&selected));
         assert!(gpu.layer_blurs.contains_key(&sibling));
-        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[selected], figcraft_render::Outline::default());
+        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[selected], lizard_render::Outline::default());
         let background = Color::DEFAULT_PAGE;
         gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
         let actual = gpu.pixels()?;
@@ -6200,7 +6181,7 @@ mod selected_outline_gpu_tests {
         doc.node_mut(first).ok_or("first missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
         doc.node_mut(second).ok_or("second missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 50 };
-        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[first], figcraft_render::Outline::default());
+        let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[first], lizard_render::Outline::default());
         let background = Color::DEFAULT_PAGE;
         gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
         let pixels = gpu.pixels()?;
@@ -6214,7 +6195,7 @@ mod selected_outline_gpu_tests {
             );
         }
         doc.node_mut(first).ok_or("first missing")?.visible = false;
-        let options = figcraft_render::Outline { hidden: true, ..Default::default() };
+        let options = lizard_render::Outline { hidden: true, ..Default::default() };
         let scene = gpu.make_scene_selected_outlines(&doc, page, &view, &[first], options);
         gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
         let pixels = gpu.pixels()?;
@@ -6249,7 +6230,7 @@ mod focused_selected_outline_tests {
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 110, height: 60 };
         assert!(has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[]));
         assert!(!has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[selected]));
-        let options = figcraft_render::Outline::default();
+        let options = lizard_render::Outline::default();
         let scene = gpu.make_scene_roots_outlined(&doc, &[focus], &view, &[selected], options);
         let background = Color::DEFAULT_PAGE;
         gpu.render_with_clear(&scene, [background.r, background.g, background.b])?;
@@ -6283,14 +6264,14 @@ mod focused_selected_outline_tests {
         let pane = doc.create(focus, NodeKind::Rectangle, "background blur", 40.0, 10.0, 40.0, 60.0)?;
         let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
         pane_node.fills.clear();
-        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        pane_node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 110, height: 80 };
         assert!(!has_unhandled_effects_except_outlined_in_focused_subtree(&doc, &view, true, focus, &[selected]));
         let focused = focused_document(&doc, page, focus).ok_or("focused document missing")?;
         let index = BackdropIndex::new(&focused, page);
         assert_eq!(index.visible_ids(&view), vec![pane]);
         let clear = [245.0 / 255.0; 3];
-        gpu.render_with_backdrop_blurs_indexed_outlined(&focused, page, &view, clear, &index, &[selected], figcraft_render::Outline::default())?;
+        gpu.render_with_backdrop_blurs_indexed_outlined(&focused, page, &view, clear, &index, &[selected], lizard_render::Outline::default())?;
         let actual = gpu.pixels()?;
         let reference = render_view(&doc, page, &view, &Options { solo: Some(focus), outlined: vec![selected], ..Default::default() })
             .ok_or("focused selected backdrop reference unavailable")?;
@@ -6304,7 +6285,7 @@ mod focused_selected_outline_tests {
     }
 }
 
-fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Affine, scale: f64, options: figcraft_render::Outline, depth: usize) {
+fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Affine, scale: f64, options: lizard_render::Outline, depth: usize) {
     if depth > 64 {
         return;
     }
@@ -6398,7 +6379,7 @@ mod page_capability_tests {
         let center = ((32 * view.width + 32) * 4) as usize;
         assert!(actual[center..center + 3].iter().zip(&reference.data()[center..center + 3]).all(|(a, b)| a.abs_diff(*b) <= 8));
         doc.node_mut(child).ok_or("child missing")?.effects.clear();
-        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        let mut shadow = lizard_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
             value.blend = BlendMode::PassThrough;
         }
@@ -6416,21 +6397,21 @@ mod page_capability_tests {
         let hidden_group = doc.create(page, NodeKind::Group, "Hidden", 0.0, 0.0, 80.0, 80.0)?;
         let hidden_blur = doc.create(hidden_group, NodeKind::Rectangle, "Hidden blur", 0.0, 0.0, 40.0, 40.0)?;
         doc.node_mut(hidden_blur).ok_or("blur node missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true }];
         let hidden_texture = doc.create(hidden_group, NodeKind::Rectangle, "Hidden texture", 20.0, 20.0, 40.0, 40.0)?;
         doc.node_mut(hidden_texture).ok_or("texture node missing")?.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
+            lizard_doc::Effect { kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }), visible: true },
+            lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
         ];
         let hidden_scatter = doc.create(hidden_group, NodeKind::Rectangle, "Hidden scatter", 5.0, 5.0, 30.0, 30.0)?;
-        doc.node_mut(hidden_scatter).ok_or("scatter node missing")?.effects = vec![figcraft_doc::Effect {
+        doc.node_mut(hidden_scatter).ok_or("scatter node missing")?.effects = vec![lizard_doc::Effect {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         }];
         doc.node_mut(hidden_group).ok_or("hidden group missing")?.visible = false;
         let visible = doc.create(page, NodeKind::Rectangle, "Visible", 95.0, 20.0, 50.0, 50.0)?;
         doc.node_mut(visible).ok_or("visible node missing")?.effects =
-            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true }];
+            vec![lizard_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true }];
         let mut gpu = GpuCanvas::new(180, 120)?;
         assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
         assert!(gpu.layer_blurs.contains_key(&visible));
@@ -6528,7 +6509,7 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
             && (if node.is_mask {
                 node.parent.and_then(|parent| doc.world_render_bounds(parent))
             } else {
-                figcraft_render::raster_bounds(doc, node.id)
+                lizard_render::raster_bounds(doc, node.id)
             })
             .is_none_or(|bounds| bounds.intersect(rect).area() > 0.0)
     })
@@ -6697,7 +6678,7 @@ fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture:
     {
         return false;
     }
-    let Some(bounds) = figcraft_render::raster_bounds(doc, node.id) else { return false };
+    let Some(bounds) = lizard_render::raster_bounds(doc, node.id) else { return false };
     let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
     let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
     // A fractional camera origin interpolates the cached grain. That changes a few edge
@@ -6712,7 +6693,7 @@ fn gpu_cached_shadow_bounds_supported(doc: &Document, node: &Node) -> bool {
             || (0.0..=1.0).contains(&node.opacity) && matches!(node.kind, NodeKind::Rectangle | NodeKind::Frame | NodeKind::Group))
         && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
         && node.effects.iter().filter(|effect| effect.visible).count() == 1
-        && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
+        && lizard_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
             let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
             bounds.width().is_finite() && bounds.height().is_finite() && bounds.width() > 0.0 && bounds.height() > 0.0 && scale >= 0.5
         })
@@ -6814,7 +6795,7 @@ fn gpu_path_inner_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow)
 }
 
 fn shadow_cache_offset_aligned(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
-    figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
+    lizard_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
         let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
         [shadow.offset.0 * scale, shadow.offset.1 * scale]
             .into_iter()
@@ -6833,7 +6814,7 @@ fn gpu_simple_group_shadow_supported(doc: &Document, node: &Node, shadow: &Shado
         && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
         && node.effects.iter().filter(|effect| effect.visible).count() == 1
         && shadow.spread.is_finite()
-        && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
+        && lizard_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
             let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
             (shadow.spread * scale).abs() <= 64.0
         })
@@ -6898,7 +6879,7 @@ fn gpu_cached_source_paint_supported(doc: &Document, paint: &Paint) -> bool {
 
 fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
     let [a, b, c, d, _, _] = doc.world_transform(node.id).as_coeffs();
-    let bounds = figcraft_render::raster_bounds(doc, node.id);
+    let bounds = lizard_render::raster_bounds(doc, node.id);
     let visible_effect_count = node.effects.iter().filter(|effect| effect.visible).count();
     let partial_grain = (0.0..=1.0).contains(&node.opacity)
         && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough)
@@ -6958,7 +6939,7 @@ fn gpu_progressive_layer_blur_supported(doc: &Document, node: &Node, blur: &Blur
     {
         return false;
     }
-    figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
+    lizard_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
         let width = bounds.width();
         let height = bounds.height();
         let scale = (4096.0 / width.max(height)).min(2.0);
@@ -6986,7 +6967,7 @@ fn gpu_glass_supported(doc: &Document, node: &Node, view: &View, glass: &Glass) 
 }
 
 fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> Option<(u16, u16, u16, u16)> {
-    let bounds = figcraft_render::backdrop::shape_bounds(doc, id)?;
+    let bounds = lizard_render::backdrop::shape_bounds(doc, id)?;
     let safe = glass.sanitized();
     let layer_blur_reach = doc.node(id).map_or(0.0, |node| {
         node.effects
@@ -7101,7 +7082,7 @@ fn has_matching_effects_excluding_in_view(
                         })
             })
             && !has_hidden_ancestor(doc, node)
-            && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| bounds.intersect(rect).area() > 0.0)
+            && lizard_render::raster_bounds(doc, node.id).is_some_and(|bounds| bounds.intersect(rect).area() > 0.0)
     })
 }
 
@@ -7380,7 +7361,7 @@ impl GpuCanvas {
                 {
                     return None;
                 }
-                let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = lizard_render::raster_bounds(doc, node.id)?;
                 if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
                     return None;
                 }
@@ -7455,7 +7436,7 @@ impl GpuCanvas {
                 {
                     return None;
                 }
-                let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = lizard_render::raster_bounds(doc, node.id)?;
                 let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
                 if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
                     return None;
@@ -7501,7 +7482,7 @@ impl GpuCanvas {
                     return None;
                 }
                 let effects = node.effects.iter().filter(|effect| effect.visible).map(|effect| effect.kind.clone()).collect::<Vec<_>>();
-                let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = lizard_render::raster_bounds(doc, node.id)?;
                 let bounds = if gpu_stacked_blur_texture_supported(doc, node) {
                     Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil())
                 } else {
@@ -7576,7 +7557,7 @@ impl GpuCanvas {
                     let silhouette = (spread_px > 0)
                         .then(|| doc.node(id).filter(|node| node.children.is_empty()))
                         .flatten()
-                        .and_then(|node| figcraft_render::shadow::silhouette(doc, node));
+                        .and_then(|node| lizard_render::shadow::silhouette(doc, node));
                     let geometric_caster = if let Some(outlines) = silhouette {
                         let mut mask_scene = Scene::new(width, height);
                         mask_scene.set_transform(camera * doc.world_transform(id));
@@ -7588,7 +7569,7 @@ impl GpuCanvas {
                                 peniko::kurbo::Stroke::new(shadow.spread * 2.0)
                                     .with_join(peniko::kurbo::Join::Miter)
                                     .with_caps(peniko::kurbo::Cap::Butt)
-                                    .with_miter_limit(figcraft_doc::SPREAD_MITER_LIMIT),
+                                    .with_miter_limit(lizard_doc::SPREAD_MITER_LIMIT),
                             );
                             mask_scene.stroke_path(&path);
                         }
@@ -7662,7 +7643,7 @@ impl GpuCanvas {
                 let same_node = doc.node(*id).is_some_and(|node| node == &state.node && node.visible && !has_hidden_ancestor(doc, node));
                 let same_world = doc.world_transform(*id).as_coeffs() == state.world;
                 let same_bounds =
-                    figcraft_render::raster_bounds(doc, *id).is_some_and(|bounds| [bounds.x0, bounds.y0, bounds.x1, bounds.y1] == state.bounds);
+                    lizard_render::raster_bounds(doc, *id).is_some_and(|bounds| [bounds.x0, bounds.y0, bounds.x1, bounds.y1] == state.bounds);
                 (!same_node || !same_world || !same_bounds).then_some(*id)
             })
             .collect();
@@ -7712,7 +7693,7 @@ impl GpuCanvas {
                 if !gpu_noise_supported(doc, node, noise) {
                     return None;
                 }
-                let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = lizard_render::raster_bounds(doc, node.id)?;
                 if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
                     return None;
                 }
@@ -7779,7 +7760,7 @@ impl GpuCanvas {
                 if !gpu_texture_cache_supported(doc, node, texture) {
                     return None;
                 }
-                let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = lizard_render::raster_bounds(doc, node.id)?;
                 let bounds = Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil());
                 let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
                 let width = (bounds.width() * scale).ceil() as u32;
@@ -7908,7 +7889,7 @@ impl GpuCanvas {
                 let mut mask_scene = Scene::new(width_u16, height_u16);
                 mask_scene.set_transform(transform);
                 mask_scene.set_paint(peniko::Color::new([1.0; 4]));
-                if let Some(outlines) = figcraft_render::shadow::silhouette(doc, node) {
+                if let Some(outlines) = lizard_render::shadow::silhouette(doc, node) {
                     for (path, rule) in outlines {
                         set_rule(&mut mask_scene, rule);
                         mask_scene.fill_path(&path);
@@ -7916,7 +7897,7 @@ impl GpuCanvas {
                             peniko::kurbo::Stroke::new(shadow.spread * 2.0)
                                 .with_join(peniko::kurbo::Join::Miter)
                                 .with_caps(peniko::kurbo::Cap::Butt)
-                                .with_miter_limit(figcraft_doc::SPREAD_MITER_LIMIT),
+                                .with_miter_limit(lizard_doc::SPREAD_MITER_LIMIT),
                         );
                         mask_scene.stroke_path(&path);
                     }
@@ -8035,7 +8016,7 @@ impl GpuCanvas {
     /// Build a scene for selected roots, preserving their world transforms and descendants.
     /// Callers must check any backdrop dependency before using this outside export.
     pub fn make_scene_roots(&self, doc: &Document, roots: &[NodeId], view: &View) -> Scene {
-        self.make_scene_roots_outlined(doc, roots, view, &[], figcraft_render::Outline::default())
+        self.make_scene_roots_outlined(doc, roots, view, &[], lizard_render::Outline::default())
     }
 
     /// Draw selected outlines within the supplied roots without traversing page siblings.
@@ -8045,7 +8026,7 @@ impl GpuCanvas {
         roots: &[NodeId],
         view: &View,
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Scene {
         let mut scene = Scene::new(view.width as u16, view.height as u16);
         let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
@@ -8080,7 +8061,7 @@ impl GpuCanvas {
     }
 
     fn make_scene_document_with_backdrops(&self, doc: &Document, page: NodeId, view: &View, backdrops: Option<&HashMap<NodeId, ImageInfo>>) -> Scene {
-        self.make_scene_document_with_backdrops_and_outlines(doc, page, view, backdrops, &[], figcraft_render::Outline::default())
+        self.make_scene_document_with_backdrops_and_outlines(doc, page, view, backdrops, &[], lizard_render::Outline::default())
     }
 
     fn make_scene_document_with_backdrops_and_outlines(
@@ -8090,7 +8071,7 @@ impl GpuCanvas {
         view: &View,
         backdrops: Option<&HashMap<NodeId, ImageInfo>>,
         outlined: &[NodeId],
-        outline_options: figcraft_render::Outline,
+        outline_options: lizard_render::Outline,
     ) -> Scene {
         make_scene_with_cached_layers(
             doc,
@@ -8118,7 +8099,7 @@ impl GpuCanvas {
         page: NodeId,
         view: &View,
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Scene {
         // A selected subtree is outlined before draw_node checks its effect cache. Keep the
         // caches available for siblings so their blur, grain and shadow survive this view.
@@ -8533,7 +8514,7 @@ impl GpuCanvas {
         clear: [f32; 4],
         index: &BackdropIndex,
     ) -> Result<(f64, usize), Box<dyn Error>> {
-        self.render_with_backdrop_blurs_indexed_outlined_rgba(doc, page, view, clear, index, &[], figcraft_render::Outline::default())
+        self.render_with_backdrop_blurs_indexed_outlined_rgba(doc, page, view, clear, index, &[], lizard_render::Outline::default())
     }
 
     /// Draw selected roots as contours while other roots retain their ordered GPU backdrops.
@@ -8545,7 +8526,7 @@ impl GpuCanvas {
         clear: [f32; 3],
         index: &BackdropIndex,
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         self.render_with_backdrop_blurs_indexed_outlined_rgba(doc, page, view, [clear[0], clear[1], clear[2], 1.0], index, outlined, options)
     }
@@ -8558,7 +8539,7 @@ impl GpuCanvas {
         clear: [f32; 4],
         index: &BackdropIndex,
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let world = Rect::new(
@@ -8626,7 +8607,7 @@ impl GpuCanvas {
             let glass_region = glass.and_then(|effect| gpu_glass_region(doc, id, view, effect));
             let cropped_prefix = glass_region.is_some() && backdrops.is_empty();
             let mut beneath = doc.clone();
-            figcraft_render::backdrop::hide_above(&mut beneath, id, roots);
+            lizard_render::backdrop::hide_above(&mut beneath, id, roots);
             let prefix_texture = if let Some((x, y, width, height)) = glass_region.filter(|_| cropped_prefix) {
                 let cropped_view = View {
                     origin: (view.origin.0 + f64::from(x) / view.scale, view.origin.1 + f64::from(y) / view.scale),
@@ -8813,7 +8794,7 @@ impl GpuCanvas {
             if let Some(previous_id) = previous {
                 hide_below(doc, &mut segment, previous_id, page);
             }
-            figcraft_render::backdrop::hide_above(&mut segment, id, roots);
+            lizard_render::backdrop::hide_above(&mut segment, id, roots);
             let scene = make_scene_with_backdrops(&segment, page, view, Some(&self.image_info), Some(&backdrops));
             prefix_prepare_ms += stage.elapsed().as_secs_f64() * 1000.0;
             let stage = Instant::now();
@@ -8890,7 +8871,7 @@ impl GpuCanvas {
         roots: &[NodeId],
         range: std::ops::Range<usize>,
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Result<(), Box<dyn Error>> {
         if range.is_empty() {
             return Ok(());
@@ -8916,7 +8897,7 @@ impl GpuCanvas {
         clear: [f32; 4],
         groups: &[BackdropGroupBatch],
         outlined: &[NodeId],
-        options: figcraft_render::Outline,
+        options: lizard_render::Outline,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let context = BackdropRenderContext { doc, page, view, clear, outlined, options };
@@ -8959,7 +8940,7 @@ impl GpuCanvas {
             previous.clone()
         } else {
             let mut base_doc = doc.clone();
-            figcraft_render::backdrop::hide_above(&mut base_doc, group, roots);
+            lizard_render::backdrop::hide_above(&mut base_doc, group, roots);
             let base_scene = self.make_scene_document_with_backdrops_and_outlines(&base_doc, page, view, None, outlined, options);
             self.render_submit_with_clear_rgba(&base_scene, clear)?;
             self.snapshot_submit()
@@ -8970,7 +8951,7 @@ impl GpuCanvas {
         let mut composited_glass_layers = Vec::new();
         for &(id, radius) in candidates {
             let mut prefix_doc = doc.clone();
-            figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
+            lizard_render::backdrop::hide_above(&mut prefix_doc, id, roots);
             if previous.is_some() {
                 hide_below(doc, &mut prefix_doc, group, page);
             }
@@ -9133,8 +9114,8 @@ impl GpuCanvas {
                     active_shader_keys.insert(key.clone());
                     let scale = if scale.is_finite() { scale.clamp(1.0, 64.0) } else { 1.0 };
                     let texture_scale = scale.log2().ceil().exp2();
-                    let width = (node.width.abs() * texture_scale).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u16;
-                    let height = (node.height.abs() * texture_scale).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u16;
+                    let width = (node.width.abs() * texture_scale).ceil().clamp(1.0, f64::from(lizard_shader::MAX_DIMENSION)) as u16;
+                    let height = (node.height.abs() * texture_scale).ceil().clamp(1.0, f64::from(lizard_shader::MAX_DIMENSION)) as u16;
                     let signature = format!("{:?}", definition);
                     let frame_time = if definition.features.animated && time.is_finite() { time.max(0.0) as f32 } else { 0.0 };
                     let state = (width, height, signature, frame_time.to_bits());
@@ -9177,9 +9158,9 @@ impl GpuCanvas {
                     continue;
                 }
                 let data = doc.images.get(&img.image);
-                let raw_filters = figcraft_color::ImageFilters::NONE;
-                let Some(pm) = figcraft_render::images::frame_at(&img.image, data, &raw_filters, doc.color_profile, time)
-                    .or_else(|| figcraft_render::images::get(&img.image, data, &raw_filters, doc.color_profile))
+                let raw_filters = lizard_color::ImageFilters::NONE;
+                let Some(pm) = lizard_render::images::frame_at(&img.image, data, &raw_filters, doc.color_profile, time)
+                    .or_else(|| lizard_render::images::get(&img.image, data, &raw_filters, doc.color_profile))
                 else {
                     continue;
                 };

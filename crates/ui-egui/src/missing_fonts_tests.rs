@@ -1,4 +1,4 @@
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use crate::import_report::Report;
@@ -10,7 +10,7 @@ fn saved(name: &str, families: &[&str]) -> String {
     for (i, f) in families.iter().chain(families.first()).enumerate() {
         s.execute("text.create", &json!({"text": "Hamburgefonstiv", "x": 0, "y": 40 * i, "props": {"fontFamily": f}})).unwrap();
     }
-    let path = std::env::temp_dir().join(format!("figcraft-missing-fonts-{name}-{}.figcraft", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lizard-missing-fonts-{name}-{}.lizard", std::process::id()));
     let path = path.to_string_lossy().into_owned();
     s.execute("file.saveAs", &json!({"path": path})).unwrap();
     path
@@ -18,8 +18,8 @@ fn saved(name: &str, families: &[&str]) -> String {
 
 /// The installed fonts are indexed, as the desktop app does at startup.
 fn fonts_indexed() -> bool {
-    figcraft_text::scan_system_fonts();
-    figcraft_text::installed_fonts_known()
+    lizard_text::scan_system_fonts();
+    lizard_text::installed_fonts_known()
 }
 
 fn listed(u: &Ui) -> Value {
@@ -32,7 +32,7 @@ fn opening_a_file_lists_its_missing_fonts_and_not_the_installed_ones() {
         eprintln!("skipped: system fonts opted out");
         return;
     }
-    let installed = figcraft_text::family_names().into_iter().next();
+    let installed = lizard_text::family_names().into_iter().next();
     let mut families = vec!["Lizard Missing UI"];
     families.extend(installed.as_deref());
     let path = saved("open", &families);
@@ -63,7 +63,7 @@ fn a_file_without_missing_fonts_opens_no_window() {
         eprintln!("skipped: system fonts opted out");
         return;
     }
-    let Some(installed) = figcraft_text::family_names().into_iter().next() else {
+    let Some(installed) = lizard_text::family_names().into_iter().next() else {
         eprintln!("skipped: no fonts on this machine");
         return;
     };
@@ -130,7 +130,7 @@ fn asked_for_before_the_fonts_are_indexed_it_lists_them_once_they_are() {
 fn placing_images_or_clearing_recents_does_not_bring_it_back() {
     assert!(fonts_indexed());
     let path = saved("place", &["Lizard Missing Place"]);
-    let svg = std::env::temp_dir().join(format!("figcraft-missing-fonts-place-{}.svg", std::process::id()));
+    let svg = std::env::temp_dir().join(format!("lizard-missing-fonts-place-{}.svg", std::process::id()));
     std::fs::write(&svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#).unwrap();
     let mut u = Ui::new(Session::new());
     u.app.run_user("file.open", json!({"path": path}));

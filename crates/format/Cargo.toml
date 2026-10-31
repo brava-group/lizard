@@ -1,16 +1,16 @@
 [package]
-name = "figcraft-format"
+name = "lizard-format"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Lizard native file format (.figcraft: zip of document.json + images), image import helpers, REST API file JSON import and .fig import"
+description = "Lizard native file format (.lizard: zip of document.json + images), image import helpers, REST API file JSON import and .fig import"
 
 [lints]
 workspace = true
 
 [dependencies]
-figcraft-doc = { workspace = true }
-figcraft-pathops = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-pathops = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 zip = { workspace = true }

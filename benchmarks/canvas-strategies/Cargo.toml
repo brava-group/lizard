@@ -6,13 +6,13 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-figcraft-doc = { path = "../../crates/doc" }
-figcraft-color = { path = "../../crates/color" }
-figcraft-geom = { path = "../../crates/geom" }
-figcraft-format = { path = "../../crates/format" }
-figcraft-render = { path = "../../crates/render" }
-figcraft-engine = { path = "../../crates/engine" }
-figcraft-canvas-gpu = { path = "../../crates/canvas-gpu" }
+lizard-doc = { path = "../../crates/doc" }
+lizard-color = { path = "../../crates/color" }
+lizard-geom = { path = "../../crates/geom" }
+lizard-format = { path = "../../crates/format" }
+lizard-render = { path = "../../crates/render" }
+lizard-engine = { path = "../../crates/engine" }
+lizard-canvas-gpu = { path = "../../crates/canvas-gpu" }
 vello_cpu = "0.3"
 wgpu = "30.0.1"
 winit = "0.30.13"

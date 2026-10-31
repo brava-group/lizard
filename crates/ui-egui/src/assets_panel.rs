@@ -16,12 +16,12 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_doc::{Document, NodeId, NodeKind, Style, StyleKind};
-use figcraft_engine::library;
-use figcraft_engine::library_server::{is_server_link, shown_path};
+use lizard_doc::{Document, NodeId, NodeKind, Style, StyleKind};
+use lizard_engine::library;
+use lizard_engine::library_server::{is_server_link, shown_path};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, Icon};
@@ -191,21 +191,21 @@ fn same_layers(a: &Document, b: &Document, id: NodeId) -> bool {
 
 pub(crate) fn thumbnail(ctx: &egui::Context, doc: &Document, id: NodeId, px: f32) -> Option<egui::TextureHandle> {
     let pix = thumbnail_pixmap_with(doc, id, px, true)?;
-    let img = crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb);
+    let img = crate::render_worker::screen_image(&pix, lizard_color::ColorProfile::Srgb);
     Some(ctx.load_texture(format!("asset-thumb-{}", id.0), img, egui::TextureOptions::LINEAR))
 }
 
 /// The pixels a thumbnail shows. A slice paints nothing itself, so it shows the page content
-/// under it, exactly as exporting one does (`figcraft_engine::cmd::file::drawn_layers`): without
+/// under it, exactly as exporting one does (`lizard_engine::cmd::file::drawn_layers`): without
 /// this a slice's preview is a blank checkerboard next to a correct export.
 #[cfg(test)]
-pub(crate) fn thumbnail_pixmap(doc: &Document, id: NodeId, px: f32) -> Option<figcraft_render::Pixmap> {
+pub(crate) fn thumbnail_pixmap(doc: &Document, id: NodeId, px: f32) -> Option<lizard_render::Pixmap> {
     thumbnail_pixmap_with(doc, id, px, false)
 }
 
-fn thumbnail_pixmap_with(doc: &Document, id: NodeId, px: f32, screen: bool) -> Option<figcraft_render::Pixmap> {
+fn thumbnail_pixmap_with(doc: &Document, id: NodeId, px: f32, screen: bool) -> Option<lizard_render::Pixmap> {
     let slice = doc.node(id).is_some_and(|n| matches!(n.kind, NodeKind::Slice));
-    let b = if slice { doc.world_bounds(id)? } else { figcraft_render::export_bounds(doc, id)? };
+    let b = if slice { doc.world_bounds(id)? } else { lizard_render::export_bounds(doc, id)? };
     let side = b.width().max(b.height());
     if !(side.is_finite() && side > 0.0) {
         return None;
@@ -214,15 +214,15 @@ fn thumbnail_pixmap_with(doc: &Document, id: NodeId, px: f32, screen: bool) -> O
     if slice {
         let layers = doc.page_of(id).and_then(|p| doc.node(p)).map(|p| p.children.clone()).unwrap_or_default();
         return if screen {
-            figcraft_engine::cmd::file::render_export_area_screen(doc, &layers, b, scale)
+            lizard_engine::cmd::file::render_export_area_screen(doc, &layers, b, scale)
         } else {
-            figcraft_engine::cmd::file::render_export_area(doc, &layers, b, scale)
+            lizard_engine::cmd::file::render_export_area(doc, &layers, b, scale)
         };
     }
     if screen {
-        figcraft_engine::cmd::file::render_node_screen_pixels(doc, id, scale)
+        lizard_engine::cmd::file::render_node_screen_pixels(doc, id, scale)
     } else {
-        figcraft_engine::cmd::file::render_node_pixels(doc, id, scale)
+        lizard_engine::cmd::file::render_node_pixels(doc, id, scale)
     }
 }
 
@@ -231,7 +231,7 @@ fn matches(name: &str, q: &str) -> bool {
 }
 
 /// A fingerprint of what the session read for the enabled libraries.
-fn libraries_key(app: &FigApp, doc: &Document) -> u64 {
+fn libraries_key(app: &LizardApp, doc: &Document) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for l in &doc.libraries.enabled {
         l.id.hash(&mut h);
@@ -244,7 +244,7 @@ fn libraries_key(app: &FigApp, doc: &Document) -> u64 {
     h.finish()
 }
 
-fn build_listing(app: &FigApp, doc: &Document, q: &str, key: (u64, String, u64)) -> Listing {
+fn build_listing(app: &LizardApp, doc: &Document, q: &str, key: (u64, String, u64)) -> Listing {
     let local = library::local_components(doc)
         .into_iter()
         .filter_map(|id| {
@@ -282,7 +282,7 @@ fn build_listing(app: &FigApp, doc: &Document, q: &str, key: (u64, String, u64))
 }
 
 /// Re-read enabled library files that changed on disk (throttled).
-fn refresh_libraries(app: &mut FigApp, ui: &Ui) {
+fn refresh_libraries(app: &mut LizardApp, ui: &Ui) {
     let Ok(doc) = app.session.doc() else { return };
     if doc.libraries.enabled.is_empty() {
         return;
@@ -309,7 +309,7 @@ fn refresh_libraries(app: &mut FigApp, ui: &Ui) {
 }
 
 /// The search field with the libraries button; returns the lowercase query.
-fn search_row(app: &mut FigApp, ui: &mut Ui, w: f32) -> String {
+fn search_row(app: &mut LizardApp, ui: &mut Ui, w: f32) -> String {
     let t = Tokens::get(ui.ctx());
     let filter_id = Id::new("asset_filter");
     let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
@@ -348,7 +348,7 @@ fn search_row(app: &mut FigApp, ui: &mut Ui, w: f32) -> String {
 }
 
 /// "Library updates available" with a button that pulls them in.
-fn updates_banner(app: &mut FigApp, ui: &mut Ui, w: f32, count: usize) {
+fn updates_banner(app: &mut LizardApp, ui: &mut Ui, w: f32, count: usize) {
     let t = Tokens::get(ui.ctx());
     let (row, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
     let r = Rect::from_min_max(pos2(row.min.x + 12.0, row.min.y + 4.0), pos2(row.max.x - 12.0, row.max.y - 4.0));
@@ -577,7 +577,7 @@ fn render_thumbs(ui: &Ui, w: f32, thumbs: &mut Thumbs, wanted: &[(Source, NodeId
         let Some(doc) = thumbs.docs.get(&key.0).cloned() else { continue };
         // A component set shows its default (top-left) variant.
         let shown = match doc.node(key.1).map(|n| &n.kind) {
-            Some(NodeKind::ComponentSet { .. }) => figcraft_engine::components::default_variant(&doc, key.1).unwrap_or(key.1),
+            Some(NodeKind::ComponentSet { .. }) => lizard_engine::components::default_variant(&doc, key.1).unwrap_or(key.1),
             _ => key.1,
         };
         thumbs.map.insert(key.clone(), thumbnail(ui.ctx(), &doc, shown, px));
@@ -592,7 +592,7 @@ fn render_thumbs(ui: &Ui, w: f32, thumbs: &mut Thumbs, wanted: &[(Source, NodeId
     }
 }
 
-pub fn show(app: &mut FigApp, ui: &mut Ui) {
+pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     refresh_libraries(app, ui);
     if app.ui.libraries {
         libraries_view(app, ui);
@@ -695,14 +695,14 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 }
 
 /// Place component `id` of `src` centred on page point (`x`, `y`).
-fn place(app: &mut FigApp, src: &Source, id: NodeId, x: f64, y: f64) {
+fn place(app: &mut LizardApp, src: &Source, id: NodeId, x: f64, y: f64) {
     match src {
         Source::Local => app.run("instance.place", json!({"component": id, "x": x, "y": y})),
         Source::Library(lib) => app.run("library.place", json!({"library": lib, "component": id, "x": x, "y": y})),
     };
 }
 
-fn apply_style(app: &mut FigApp, src: &Source, style: &str) {
+fn apply_style(app: &mut LizardApp, src: &Source, style: &str) {
     if app.session.selection().is_empty() {
         app.toast(tr("Select layers to apply the style to"));
         return;
@@ -714,7 +714,7 @@ fn apply_style(app: &mut FigApp, src: &Source, style: &str) {
 }
 
 /// Swap the instance at page point (`x`, `y`) to component `id` of `src`.
-fn swap_at(app: &mut FigApp, src: &Source, id: NodeId, x: f64, y: f64) {
+fn swap_at(app: &mut LizardApp, src: &Source, id: NodeId, x: f64, y: f64) {
     match src {
         Source::Local => app.run("instance.swapAt", json!({"component": id, "x": x, "y": y})),
         Source::Library(lib) => app.run("library.swapAt", json!({"library": lib, "component": id, "x": x, "y": y})),
@@ -732,13 +732,13 @@ fn drag_family(doc: &Document, libs: &HashMap<String, Arc<Document>>, drag: &Ass
     if matches!(n.kind, NodeKind::ComponentSet { .. }) {
         return Some(n.name.clone());
     }
-    figcraft_engine::drop::swap_family(d, drag.component)
+    lizard_engine::drop::swap_family(d, drag.component)
 }
 
 /// While a component is dragged: a ghost at the pointer and, over the canvas, the frame or auto
 /// layout slot it would drop into, or with Alt held the instance it would swap. Releasing over the
 /// canvas places the instance (or swaps that one).
-fn drag_feedback(app: &mut FigApp, ui: &mut Ui, doc: &Document, libs: &HashMap<String, Arc<Document>>, tex: Option<egui::TextureHandle>) {
+fn drag_feedback(app: &mut LizardApp, ui: &mut Ui, doc: &Document, libs: &HashMap<String, Arc<Document>>, tex: Option<egui::TextureHandle>) {
     let Some(drag) = ui.data(|d| d.get_temp::<AssetDrag>(drag_id())) else { return };
     let (pointer, released, alt) = ui.input(|i| (i.pointer.hover_pos(), i.pointer.any_released(), i.modifiers.alt));
     let over_canvas = pointer.filter(|p| app.canvas.rect.contains(*p));
@@ -747,9 +747,9 @@ fn drag_feedback(app: &mut FigApp, ui: &mut Ui, doc: &Document, libs: &HashMap<S
     // With Alt: the instance under the pointer (never one inside the dragged component itself).
     let swap = at.filter(|_| alt).and_then(|(pt, page)| {
         let own = matches!(drag.src, Source::Local).then_some(drag.component);
-        figcraft_engine::drop::swap_target(doc, page, pt, drag_family(doc, libs, &drag).as_deref(), own)
+        lizard_engine::drop::swap_target(doc, page, pt, drag_family(doc, libs, &drag).as_deref(), own)
     });
-    let slot = at.filter(|_| swap.is_none()).map(|(pt, page)| (pt, figcraft_engine::drop::slot(doc, page, pt)));
+    let slot = at.filter(|_| swap.is_none()).map(|(pt, page)| (pt, lizard_engine::drop::slot(doc, page, pt)));
     let ov = &mut app.session.tool.overlay;
     ov.swap_target = swap;
     ov.drop_target = slot.as_ref().and_then(|(_, s)| (Some(s.parent) != page).then_some(s.parent));
@@ -806,7 +806,7 @@ struct PublishForm {
 }
 
 /// The libraries view: publish this file, and the library files this file uses.
-fn libraries_view(app: &mut FigApp, ui: &mut Ui) {
+fn libraries_view(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
@@ -830,7 +830,7 @@ fn libraries_view(app: &mut FigApp, ui: &mut Ui) {
     });
 }
 
-fn publish_form(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
+fn publish_form(app: &mut LizardApp, ui: &mut Ui, w: f32, doc: &Document) {
     let form_id = Id::new("asset_publish_form");
     let mut form: PublishForm = ui.data(|d| d.get_temp(form_id)).unwrap_or_default();
     title(ui, w, tr("This file"));
@@ -960,7 +960,7 @@ fn publish_form(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
 
 /// How other files use this file's library on its server (asked for with a button: it is a
 /// request to the server).
-fn usage(app: &mut FigApp, ui: &mut Ui, w: f32, link: &str) {
+fn usage(app: &mut LizardApp, ui: &mut Ui, w: f32, link: &str) {
     let usage_id = Id::new(("asset_library_usage", link));
     let loading = app.session.waiting_for(USAGE);
     let (mut ask, mut stop) = (false, false);
@@ -1006,11 +1006,11 @@ fn usage(app: &mut FigApp, ui: &mut Ui, w: f32, link: &str) {
     ui.add_space(8.0);
 }
 
-fn enabled_libraries(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
+fn enabled_libraries(app: &mut LizardApp, ui: &mut Ui, w: f32, doc: &Document) {
     let t = Tokens::get(ui.ctx());
     title(ui, w, tr("Libraries in this file"));
     if doc.libraries.enabled.is_empty() {
-        hint(ui, tr("No libraries yet. Add a .figcraft file that was published as a library, or paste a team library's link."));
+        hint(ui, tr("No libraries yet. Add a .lizard file that was published as a library, or paste a team library's link."));
     }
     let (mut remove, mut swap) = (None, None);
     let swappable = doc.libraries.enabled.len() > 1;
@@ -1115,7 +1115,7 @@ fn enabled_libraries(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
         });
     }
     if add {
-        app.pick_open(tr("Add library"), &["figcraft"], |app, p| {
+        app.pick_open(tr("Add library"), &["lizard"], |app, p| {
             if let Some(r) = app.run(ADD, json!({"path": p.to_string_lossy()})) {
                 added(app, &r);
             }
@@ -1124,7 +1124,7 @@ fn enabled_libraries(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
 }
 
 /// "Added the library …" after `library.add` answered `r`.
-fn added(app: &mut FigApp, r: &Value) {
+fn added(app: &mut LizardApp, r: &Value) {
     app.toast(trf("Added the library \"{name}\"", &[("name", &r["name"].as_str().unwrap_or_default())]));
 }
 

@@ -4,20 +4,20 @@
   <p>A native interface design editor built with Rust and egui.</p>
 </div>
 
-Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It is an independent continuation of [FigCraft](https://github.com/storytold/figcraft). The original contributors retain their credits and copyrights; see [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE), and [ATTRIBUTION.md](ATTRIBUTION.md).
+Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It is an independent continuation of earlier open-source work. The original contributors retain their credits and copyrights; see [contributors](contributors/contributors.json), [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
 
 ## Run the editor
 
 Install a current Rust toolchain, then run from the repository root:
 
 ```sh
-cargo run -p figcraft --bin lizard
+cargo run -p lizard --bin lizard
 ```
 
-The desktop executable and product name are **Lizard**. Some Cargo packages and APIs still have `figcraft` names for compatibility. Existing `.figcraft` files remain supported. The CLI and browser build are available through the workspace:
+The desktop executable and product name are **Lizard**. Native documents use `.lizard`. The CLI and browser build are available through the workspace:
 
 ```sh
-cargo run -p figcraft-cli -- --help
+cargo run -p lizard-cli -- --help
 cargo xtask wasm
 ```
 
@@ -25,7 +25,7 @@ cargo xtask wasm
 
 Lizard has **no default online collaboration server**. Local editing and local network sharing work without one. To publish a document online, configure a server you operate or trust under **Preferences → Server for online sharing**, or use **File → Publish to server** with that server's address. Builds can optionally embed an organization-specific default with `LIZARD_DEFAULT_SERVER=wss://your-host/`.
 
-The collaboration server source is included in [`apps/figcraft-server`](apps/figcraft-server). Its Cargo package retains the old internal name; its executable is `lizard-server`. It stores shared files, manages edit and view links, and serves live sessions. Each server operator controls their own storage, access, retention, and terms. See [online sharing and privacy](docs/online-sharing-terms.md).
+The collaboration server source is included in [`apps/lizard-server`](apps/lizard-server). Its executable is `lizard-server`. It stores shared files, manages edit and view links, and serves live sessions. Each server operator controls their own storage, access, retention, and terms. See [online sharing and privacy](docs/online-sharing-terms.md).
 
 ## Self-host on a VPS
 
@@ -38,7 +38,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 . "$HOME/.cargo/env"
 git clone https://github.com/brava-group/lizard.git
 cd lizard
-cargo build --release --locked -p figcraft-server
+cargo build --release --locked -p lizard-server
 sudo install -m 755 target/release/lizard-server /usr/local/bin/lizard-server
 sudo useradd --system --home-dir /var/lib/lizard-server --shell /usr/sbin/nologin lizard
 sudo install -d -o lizard -g lizard -m 700 /var/lib/lizard-server
@@ -75,12 +75,13 @@ The final command prints the address and server key for publishing. Keep the key
 
 - [Roadmap](ROADMAP.md) and [known gaps](docs/gaps.md)
 - [Architecture](docs/architecture.md)
+- [Workbench UI component library and catalog](docs/ui-library.md)
 - [Control protocol](docs/control-protocol.md) and [MCP](docs/mcp.md)
 - [Plugin support](docs/plugins.md)
 - [Contributor instructions](AGENTS.md)
 
-Run `cargo xtask ci` before committing when resources permit. The editor targets macOS, Windows, Linux, FreeBSD, and WebAssembly. Platform packaging still contains some inherited identifiers and requires separate migration before Lizard release automation is enabled.
+Run `cargo xtask ci` before committing when resources permit. The editor targets macOS, Windows, Linux, FreeBSD, and WebAssembly.
 
 ## License
 
-MIT OR Apache-2.0. See [NOTICE](NOTICE) and [ATTRIBUTION.md](ATTRIBUTION.md) for contributor and asset notices.
+MIT OR Apache-2.0. See [NOTICE](NOTICE) for contributor and asset notices.

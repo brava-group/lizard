@@ -5,12 +5,12 @@
 //! `plugin.directory.*` and `widget.*` commands.
 
 use egui::{Align2, Context, Id, RichText, Ui};
-use figcraft_engine::plugin_directory::{PluginEntry, installed_version, newer_version};
-use figcraft_engine::plugins::{Access, InstalledPlugin, Param, ParamKind, WidgetFit};
-use figcraft_figma_plugin::catalog::{self, Page};
+use lizard_engine::plugin_directory::{PluginEntry, installed_version, newer_version};
+use lizard_engine::plugins::{Access, InstalledPlugin, Param, ParamKind, WidgetFit};
+use lizard_figma_plugin::catalog::{self, Page};
 use serde_json::{Map, Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::colorpicker::PickerTarget;
 use crate::dialogs::{floating, tab_strip, window};
 use crate::i18n::{tr, trf};
@@ -61,7 +61,7 @@ pub struct PluginsWindow {
     pub figma_report: Option<Value>,
     pub figma_parameters: Map<String, Value>,
     pub figma_feedback: Map<String, Value>,
-    pub figma_review_target: Option<(figcraft_doc::NodeId, String)>,
+    pub figma_review_target: Option<(lizard_doc::NodeId, String)>,
     pub community_query: String,
     pub community_page: Option<Page>,
     pub community_error: Option<String>,
@@ -92,7 +92,7 @@ pub struct FigmaTextReview {
     plugins: Vec<String>,
     #[cfg(not(target_arch = "wasm32"))]
     document: Option<u64>,
-    pub(crate) node: Option<figcraft_doc::NodeId>,
+    pub(crate) node: Option<lizard_doc::NodeId>,
     #[cfg(not(target_arch = "wasm32"))]
     text: String,
     #[cfg(not(target_arch = "wasm32"))]
@@ -133,7 +133,7 @@ enum Used {
 
 /// The value of colour field `control` of plugin `plugin`'s parameters form (when it's open) or
 /// panel, as hex.
-pub(crate) fn field_value(app: &FigApp, plugin: &str, control: &str) -> Option<String> {
+pub(crate) fn field_value(app: &LizardApp, plugin: &str, control: &str) -> Option<String> {
     let values = match &app.ui.plugin_form {
         Some(f) if f.id == plugin => &f.values,
         _ => &app.session.plugins.panel(plugin)?.values,
@@ -143,7 +143,7 @@ pub(crate) fn field_value(app: &FigApp, plugin: &str, control: &str) -> Option<S
 
 /// Where the window holding plugin `plugin`'s colour fields is (its parameters form when it's
 /// open, else its panel), as last drawn.
-pub(crate) fn field_window(app: &FigApp, ctx: &Context, plugin: &str) -> Option<egui::Rect> {
+pub(crate) fn field_window(app: &LizardApp, ctx: &Context, plugin: &str) -> Option<egui::Rect> {
     let id = match &app.ui.plugin_form {
         Some(f) if f.id == plugin => Id::new("plugin_form"),
         _ => Id::new(("plugin_panel", plugin)),
@@ -153,7 +153,7 @@ pub(crate) fn field_window(app: &FigApp, ctx: &Context, plugin: &str) -> Option<
 
 /// Set colour field `control` of plugin `plugin`'s parameters form (when it's open), or of its
 /// panel (calling the plugin back), to `hex`.
-pub(crate) fn set_field(app: &mut FigApp, plugin: &str, control: &str, hex: &str) {
+pub(crate) fn set_field(app: &mut LizardApp, plugin: &str, control: &str, hex: &str) {
     match &mut app.ui.plugin_form {
         Some(f) if f.id == plugin => {
             f.values.insert(control.to_string(), json!(hex));
@@ -163,7 +163,7 @@ pub(crate) fn set_field(app: &mut FigApp, plugin: &str, control: &str, hex: &str
 }
 
 /// Start plugin `id`'s `command` (empty: its first): ask for its parameters first when it has any.
-pub fn start(app: &mut FigApp, id: &str, command: &str) {
+pub fn start(app: &mut LizardApp, id: &str, command: &str) {
     let found = app.session.prefs.plugins.iter().find(|p| p.manifest.id == id).and_then(|p| p.manifest.command(Some(command)));
     match found {
         Some(c) if !c.params.is_empty() => {
@@ -176,7 +176,7 @@ pub fn start(app: &mut FigApp, id: &str, command: &str) {
 
 /// Run `plugin.run` or `plugin.event`; a text output is shown as a toast unless the plugin showed
 /// a message.
-fn run(app: &mut FigApp, cmd: &str, params: Value) {
+fn run(app: &mut LizardApp, cmd: &str, params: Value) {
     let toast = app.ui.toast.clone();
     let Some(out) = app.run(cmd, params) else { return };
     if app.ui.toast == toast
@@ -186,8 +186,8 @@ fn run(app: &mut FigApp, cmd: &str, params: Value) {
     }
 }
 
-/// Plugins ▸ Development ▸ Import plugin from manifest…: pick a `figcraft-plugin.json`.
-pub fn import_dialog(app: &mut FigApp) {
+/// Plugins ▸ Development ▸ Import plugin from manifest…: pick a `lizard-plugin.json`.
+pub fn import_dialog(app: &mut LizardApp) {
     app.pick_open(tr("Import plugin from manifest"), &["json"], |app, p| {
         if let Some(v) = app.run("plugin.import", json!({"path": p.to_string_lossy()})) {
             app.toast(trf("Imported {name}", &[("name", &v["name"].as_str().unwrap_or(tr("the plugin")))]));
@@ -197,7 +197,7 @@ pub fn import_dialog(app: &mut FigApp) {
 
 /// The installed plugins at the top of the Plugins menu: a plugin with one command is an item, one
 /// with several a submenu. True when one was clicked.
-pub fn menu(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> bool {
+pub fn menu(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> bool {
     if app.session.prefs.plugins.is_empty() {
         return false;
     }
@@ -244,7 +244,7 @@ pub fn menu(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> bool {
 }
 
 /// The plugin windows (Manage plugins, a command's parameters, the plugins' panels).
-pub fn show(app: &mut FigApp, ctx: &Context) {
+pub fn show(app: &mut LizardApp, ctx: &Context) {
     if app.ui.plugins_window {
         manage_window(app, ctx);
     }
@@ -257,7 +257,7 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
     figma_ui_window(app, ctx);
 }
 
-fn figma_ui_window(app: &mut FigApp, ctx: &Context) {
+fn figma_ui_window(app: &mut LizardApp, ctx: &Context) {
     let Some(open) = app.ui.figma_ui.as_mut() else { return };
     let mut keep = true;
     let mut rect = None;
@@ -274,14 +274,14 @@ fn figma_ui_window(app: &mut FigApp, ctx: &Context) {
 }
 
 /// Called by the desktop WebView bridge after a plugin page posts `pluginMessage`.
-pub fn figma_ui_message(app: &mut FigApp, payload: Value) {
+pub fn figma_ui_message(app: &mut LizardApp, payload: Value) {
     let Some(id) = app.ui.figma_ui.as_ref().map(|open| open.id.clone()) else { return };
     if app.run("plugin.figma.ui.message", json!({"id": id, "payload": payload})).is_none() {
         app.ui.figma_ui = None;
     }
 }
 
-pub(crate) fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
+pub(crate) fn accept_ui_reply(app: &mut LizardApp, id: &str, reply: &Value) {
     if reply["closed"] == true {
         if let Some(message) = reply["message"].as_str().filter(|text| !text.is_empty()) {
             app.toast(message.to_string());
@@ -318,7 +318,7 @@ pub(crate) fn accept_ui_reply(app: &mut FigApp, id: &str, reply: &Value) {
 /// Run registered text-review callbacks after typing settles, then paint their returned ranges
 /// over the native canvas text. The worker runs only when the text changes, never every frame.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn text_review_tick(app: &mut FigApp, ctx: &Context) {
+pub(crate) fn text_review_tick(app: &mut LizardApp, ctx: &Context) {
     let registry: Vec<_> = app.session.prefs.figma_plugins.iter().map(|plugin| (plugin.id.clone(), plugin.digest.clone())).collect();
     if app.ui.figma_text_review.registry != registry {
         let plugins = registry
@@ -333,7 +333,7 @@ pub(crate) fn text_review_tick(app: &mut FigApp, ctx: &Context) {
     let current = app.session.ds().ok().and_then(|ds| {
         let edit = ds.text_edit.as_ref()?;
         let node = ds.doc.node(edit.id)?;
-        let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+        let lizard_doc::NodeKind::Text(text) = &node.kind else { return None };
         Some((ds.uid, edit.id, text.characters.clone()))
     });
     let state = &mut app.ui.figma_text_review;
@@ -415,7 +415,7 @@ fn replace_review_range(text: &str, start: usize, end: usize, replacement: &str)
 /// The panels running plugins show, at first beside the properties panel and each other (they
 /// can be moved): a pressed button or a changed value calls its plugin
 /// back (`plugin.event`); closing one ends its plugin's session.
-fn panel_windows(app: &mut FigApp, ctx: &Context) {
+fn panel_windows(app: &mut LizardApp, ctx: &Context) {
     let t = Tokens::get(ctx);
     let right = ctx.content_rect().right() - 252.0;
     // (plugin, what was used; None: closed)
@@ -474,7 +474,7 @@ const INSTALL: &str = "plugin.directory.install";
 const MANAGE_W: f32 = 400.0;
 const ROW_TEXT_W: f32 = 300.0;
 
-fn manage_window(app: &mut FigApp, ctx: &Context) {
+fn manage_window(app: &mut LizardApp, ctx: &Context) {
     poll_community(app);
     let t = Tokens::get(ctx);
     let mut open = true;
@@ -522,7 +522,7 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
                     let node_id = *app.session.selection().first()?;
                     let doc = app.session.doc().ok()?;
                     let node = doc.node(node_id)?;
-                    let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+                    let lizard_doc::NodeKind::Text(text) = &node.kind else { return None };
                     Some((node_id, text.characters.clone()))
                 })
                 .flatten();
@@ -555,7 +555,7 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
         Some(Manage::AcceptReview(start, end, replacement)) => {
             if let Some((node_id, original)) = app.ui.plugins_manage.figma_review_target.clone() {
                 let current = app.session.doc().ok().and_then(|doc| doc.node(node_id)).and_then(|node| {
-                    let figcraft_doc::NodeKind::Text(text) = &node.kind else { return None };
+                    let lizard_doc::NodeKind::Text(text) = &node.kind else { return None };
                     Some(text.characters.clone())
                 });
                 if current.as_deref() != Some(original.as_str()) {
@@ -595,7 +595,7 @@ fn manage_window(app: &mut FigApp, ctx: &Context) {
     }
 }
 
-fn inspect_figma_dialog(app: &mut FigApp) {
+fn inspect_figma_dialog(app: &mut LizardApp) {
     app.pick_open("Escolher manifest.json do plugin Figma", &["json"], |app, path| {
         if let Some(report) = app.run("plugin.figma.inspect", json!({"path": path.to_string_lossy()})) {
             app.ui.plugins_manage.figma_report = Some(report);
@@ -604,7 +604,7 @@ fn inspect_figma_dialog(app: &mut FigApp) {
     });
 }
 
-fn figma_local_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+fn figma_local_tab(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     widgets::label(
         ui,
         "Registre um plugin local confiável. A execução aceita um subconjunto de nós, estilos, variáveis e mensagens de UI.",
@@ -787,7 +787,7 @@ fn figma_local_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> 
 
 /// Search the read-only public catalogue. This is an internal endpoint: errors and schema changes
 /// are shown in the window, and the response never reaches the plugin runner.
-fn search_community(app: &mut FigApp, ctx: &Context, from: usize) {
+fn search_community(app: &mut LizardApp, ctx: &Context, from: usize) {
     let query = app.ui.plugins_manage.community_query.clone();
     let url = match catalog::search_url(&query, from) {
         Ok(url) => url,
@@ -825,7 +825,7 @@ fn search_community(app: &mut FigApp, ctx: &Context, from: usize) {
     });
 }
 
-fn poll_community(app: &mut FigApp) {
+fn poll_community(app: &mut LizardApp) {
     let Some(receiver) = app.figma_catalog_rx.as_ref() else { return };
     let result = match receiver.try_recv() {
         Ok(result) => result,
@@ -846,7 +846,7 @@ fn poll_community(app: &mut FigApp) {
     }
 }
 
-fn community_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+fn community_tab(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     let state = &mut app.ui.plugins_manage;
     let mut asked = None;
     ui.horizontal(|ui| {
@@ -931,11 +931,11 @@ fn community_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     asked
 }
 
-fn installed_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+fn installed_tab(app: &LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     let mut asked = None;
     let plugins = &app.session.prefs.plugins;
     if plugins.is_empty() {
-        widgets::label(ui, tr("No plugins yet. Import a development plugin from its figcraft-plugin.json."), t.text_secondary);
+        widgets::label(ui, tr("No plugins yet. Import a development plugin from its lizard-plugin.json."), t.text_secondary);
     }
     for (i, p) in plugins.iter().enumerate() {
         if i > 0 {
@@ -963,7 +963,7 @@ fn installed_tab(app: &FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
 
 /// A server's plugin directory: its address, a search, and its plugins with Install, Update or
 /// Remove. Nothing is fetched until Browse is pressed.
-fn browse_tab(app: &mut FigApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
+fn browse_tab(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manage> {
     let mut asked = None;
     let mut server = app.ui.plugins_manage.server.clone().or_else(|| app.session.prefs.plugin_directory.clone()).unwrap_or_default();
     let loading = app.session.waiting_for(LIST);
@@ -1066,7 +1066,7 @@ fn size(bytes: u64) -> String {
 
 /// Installing runs a plugin's code: this window shows what it asks permission for, where it comes
 /// from and its SHA-256, and installs only when Install is pressed.
-fn confirm_window(app: &mut FigApp, ctx: &Context, t: &Tokens) {
+fn confirm_window(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
     let id = app.ui.plugins_manage.confirm.clone().unwrap_or_default();
     let found = app.session.plugins.directory.as_ref().and_then(|l| Some((l.server.clone(), l.entries.iter().find(|e| e.id == id)?.clone())));
     let Some((server, e)) = found else {
@@ -1150,7 +1150,7 @@ fn summary(p: &InstalledPlugin) -> String {
     parts.join(" · ")
 }
 
-fn form_window(app: &mut FigApp, ctx: &Context) {
+fn form_window(app: &mut LizardApp, ctx: &Context) {
     let Some(mut form) = app.ui.plugin_form.clone() else { return };
     let Some((name, command)) = app
         .session
@@ -1415,7 +1415,7 @@ fn grid(ui: &mut Ui, salt: Id, p: &Param, values: &Map<String, Value>, t: &Token
 /// A grid cell's texture, rasterised once per path, picture, colour and stroke. The key is
 /// hashed every frame, but bounded: picture `data` can be hundreds of KB, so only its
 /// length and edge bytes feed the hash (paths, colours and strokes hash in full).
-fn cell_texture(ui: &mut Ui, id: Id, item: &figcraft_engine::plugins::GridItem) -> Option<egui::TextureHandle> {
+fn cell_texture(ui: &mut Ui, id: Id, item: &lizard_engine::plugins::GridItem) -> Option<egui::TextureHandle> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     item.path.hash(&mut hasher);
@@ -1439,14 +1439,14 @@ fn cell_texture(ui: &mut Ui, id: Id, item: &figcraft_engine::plugins::GridItem) 
 
 /// A grid cell's pixels: a picture decoded, or SVG path data rasterised in its colour (dark
 /// icons on a light theme, light icons on a dark one, unless the cell names one).
-fn cell_pixels(item: &figcraft_engine::plugins::GridItem, dark: bool) -> Option<egui::ColorImage> {
+fn cell_pixels(item: &lizard_engine::plugins::GridItem, dark: bool) -> Option<egui::ColorImage> {
     if !item.data.trim().is_empty() {
         return decode(&item.data);
     }
     let color = if item.color.is_empty() { if dark { "#EDEDED" } else { "#1E1E1E" } } else { item.color.as_str() };
     let rgba = match item.stroke {
-        Some(w) => figcraft_engine::cmd::file::render_plugin_icon_pixels(&item.path, None, Some((color, w)), GRID_ICON_PX),
-        None => figcraft_engine::cmd::file::render_plugin_icon_pixels(&item.path, Some(color), None, GRID_ICON_PX),
+        Some(w) => lizard_engine::cmd::file::render_plugin_icon_pixels(&item.path, None, Some((color, w)), GRID_ICON_PX),
+        None => lizard_engine::cmd::file::render_plugin_icon_pixels(&item.path, Some(color), None, GRID_ICON_PX),
     }?;
     Some(egui::ColorImage::from_rgba_unmultiplied([GRID_ICON_PX as usize, GRID_ICON_PX as usize], &rgba))
 }
@@ -1545,8 +1545,8 @@ fn field(ui: &mut Ui, id: Id, p: &Param, current: &Value) -> Option<Used> {
             let hex = current.as_str().unwrap_or_default();
             let (picked, typed) = ui
                 .horizontal(|ui| {
-                    let color = figcraft_color::Color::from_hex(hex).unwrap_or(figcraft_color::Color::BLACK);
-                    let picked = widgets::swatch(ui, &figcraft_color::Paint::solid(color), widgets::FIELD_H).clicked();
+                    let color = lizard_color::Color::from_hex(hex).unwrap_or(lizard_color::Color::BLACK);
+                    let picked = widgets::swatch(ui, &lizard_color::Paint::solid(color), widgets::FIELD_H).clicked();
                     (picked, widgets::text_field_named(ui, id, hex, FIELD_W - widgets::FIELD_H - 8.0, name).and_then(|s| p.coerce(&json!(s)).ok()))
                 })
                 .inner;

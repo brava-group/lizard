@@ -6,11 +6,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, vec2};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::json;
 
-use crate::{FigApp, Services};
+use crate::{LizardApp, Services};
 
 /// What the system clipboard holds when a paste chord is pressed (#716).
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +48,7 @@ impl Services for Desktop {
 
 struct Win {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
     clip: Rc<RefCell<Clip>>,
     shapes: Vec<Shape>,
@@ -61,7 +61,7 @@ impl Win {
         s.execute("select.none", &json!({})).unwrap();
         let ctx = egui::Context::default();
         let clip = Rc::new(RefCell::new(Clip::default()));
-        let app = FigApp::new(s, Box::new(Desktop(clip.clone())));
+        let app = LizardApp::new(s, Box::new(Desktop(clip.clone())));
         let mut w = Self { ctx, app, time: 0.0, clip, shapes: Vec::new() };
         for _ in 0..3 {
             w.frame(vec![]);
@@ -134,7 +134,7 @@ impl Win {
     }
 
     fn fill(&self, id: NodeId) -> String {
-        let n = figcraft_engine::inspect::node_json(self.app.session.doc().unwrap(), id, 0);
+        let n = lizard_engine::inspect::node_json(self.app.session.doc().unwrap(), id, 0);
         n["fills"][0]["color"].as_str().unwrap_or_default().to_string()
     }
 
@@ -156,7 +156,7 @@ impl Win {
     }
 
     fn texts(&self) -> usize {
-        self.app.session.doc().unwrap().nodes().filter(|n| matches!(n.kind, figcraft_doc::NodeKind::Text(_))).count()
+        self.app.session.doc().unwrap().nodes().filter(|n| matches!(n.kind, lizard_doc::NodeKind::Text(_))).count()
     }
 
     fn rects(&self) -> usize {
@@ -195,11 +195,11 @@ fn cmd_v_fills_a_selected_oval_without_adding_a_layer() {
     let doc = w.app.session.doc().unwrap();
     let node = doc.node(oval).unwrap();
     assert_eq!(doc.node_count(), before);
-    assert!(matches!(node.kind, figcraft_doc::NodeKind::Ellipse { .. }));
-    assert!(matches!(node.fills[0].kind, figcraft_color::PaintKind::Image(_)));
+    assert!(matches!(node.kind, lizard_doc::NodeKind::Ellipse { .. }));
+    assert!(matches!(node.fills[0].kind, lizard_color::PaintKind::Image(_)));
     assert_eq!((node.width, node.height), (120.0, 80.0));
     assert_eq!(w.app.session.selection(), vec![oval]);
-    let png = figcraft_engine::cmd::file::export_bytes(doc, &[oval], figcraft_doc::ExportFormat::Png, 1.0).unwrap();
+    let png = lizard_engine::cmd::file::export_bytes(doc, &[oval], lizard_doc::ExportFormat::Png, 1.0).unwrap();
     let pixels = image::load_from_memory(&png).unwrap().to_rgba8();
     assert_eq!(pixels.get_pixel(0, 0)[3], 0, "the picture stays inside the oval");
     assert_eq!(pixels.get_pixel(60, 40)[3], 255, "the oval contains the picture");
@@ -221,12 +221,12 @@ fn pasting_an_image_detaches_the_replaced_fill_variable() {
     w.copy_image_elsewhere();
     w.cmd_v(CMD);
     let node = w.app.session.doc().unwrap().node(oval).unwrap();
-    assert!(matches!(node.fills[0].kind, figcraft_color::PaintKind::Image(_)));
+    assert!(matches!(node.fills[0].kind, lizard_color::PaintKind::Image(_)));
     assert!(node.bound.is_empty(), "the old colour variable must not remain on the image fill");
 }
 
 #[test]
-fn cmd_v_fills_a_selected_oval_with_an_image_copied_in_figcraft() {
+fn cmd_v_fills_a_selected_oval_with_an_image_copied_in_lizard() {
     let mut w = Win::new();
     w.copy_image_elsewhere();
     w.cmd_v(CMD);
@@ -241,7 +241,7 @@ fn cmd_v_fills_a_selected_oval_with_an_image_copied_in_figcraft() {
     let doc = w.app.session.doc().unwrap();
     assert_eq!(doc.node_count(), before);
     assert!(doc.contains(source));
-    assert!(matches!(doc.node(oval).unwrap().fills[0].kind, figcraft_color::PaintKind::Image(_)));
+    assert!(matches!(doc.node(oval).unwrap().fills[0].kind, lizard_color::PaintKind::Image(_)));
     assert_eq!(w.app.session.selection(), vec![oval]);
 }
 

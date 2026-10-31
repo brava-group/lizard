@@ -1,13 +1,13 @@
 # Hosting Lizard for the web
 
-`figcraft-web-<version>.zip` (from the GitHub release, or `packaging/web/package.sh`) holds a
-static site in `figcraft-web-<version>/`:
+`lizard-web-<version>.zip` (from the GitHub release, or `packaging/web/package.sh`) holds a
+static site in `lizard-web-<version>/`:
 
 | File | What it is |
 |---|---|
 | `index.html` | The page. It loads everything through relative URLs. |
-| `figcraft-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
-| `figcraft-web-<hash>_bg.wasm.gz` | The app, precompressed for hosts with a 25 MiB per-file limit |
+| `lizard-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
+| `lizard-web-<hash>_bg.wasm.gz` | The app, precompressed for hosts with a 25 MiB per-file limit |
 | `_headers`, `.htaccess` | Sample header rules for Netlify/Cloudflare Pages and Apache |
 
 There is no server-side code. The package adds a small loader to Trunk's generated page that
@@ -33,7 +33,7 @@ Measured on the 2026-10-30 WebGPU build (`trunk build --release`; Python gzip le
 
 | File | Raw development build | Packaged gzip |
 |---|---:|---:|
-| `figcraft-web-<hash>_bg.wasm` | 30,760,930 bytes (29.3 MiB) | 14,142,387 bytes (13.5 MiB) |
+| `lizard-web-<hash>_bg.wasm` | 30,760,930 bytes (29.3 MiB) | 14,142,387 bytes (13.5 MiB) |
 
 Per-file upload limits: Cloudflare Pages and Workers static assets reject any file over
 **25 MiB** (26,214,400 bytes). `packaging/web/package.sh` checks the packaged `.wasm.gz` against
@@ -41,9 +41,9 @@ a 24 MiB threshold. `trunk serve` keeps the uncompressed WASM for development.
 
 ## Any path works
 
-All URLs in `index.html` are relative (`public_url = "./"` in `apps/figcraft-web/Trunk.toml`),
+All URLs in `index.html` are relative (`public_url = "./"` in `apps/lizard-web/Trunk.toml`),
 so the site works at a domain root (`https://example.com/`), under a prefix
-(`https://example.com/tools/figcraft/`) and from a CDN bucket. The asset names carry a content
+(`https://example.com/tools/lizard/`) and from a CDN bucket. The asset names carry a content
 hash, so they can be cached forever. Only `index.html` needs revalidation.
 
 ## Required server settings
@@ -56,7 +56,7 @@ hash, so they can be cached forever. Only `index.html` needs revalidation.
   `.js` files, and `no-cache` on `index.html`.
 - **HTTPS:** WebGPU (and the clipboard) only work in a secure context, which means `https://`
   or `http://localhost`. Over plain HTTP elsewhere, the app falls back to WebGL2.
-- **No special isolation headers:** FigCraft doesn't use `SharedArrayBuffer`, so it doesn't
+- **No special isolation headers:** Lizard doesn't use `SharedArrayBuffer`, so it doesn't
   need `Cross-Origin-Opener-Policy` or `Cross-Origin-Embedder-Policy`. If your site already sends
   COEP `require-corp`, also send `Cross-Origin-Resource-Policy: same-origin` (or `cross-origin`
   when the files live on a CDN) on the app's files.
@@ -64,7 +64,7 @@ hash, so they can be cached forever. Only `index.html` needs revalidation.
 nginx example:
 
 ```nginx
-location /figcraft/ {
+location /lizard/ {
     types { application/gzip gz; text/javascript js; text/html html; }
     gzip on;
     gzip_types text/javascript text/html;
@@ -79,8 +79,8 @@ Local test: `python3 -m http.server 8767` inside the folder, then open http://lo
 
 ```html
 <iframe
-  src="https://example.com/figcraft/"
-  title="FigCraft interface design tool"
+  src="https://example.com/lizard/"
+  title="Lizard interface design tool"
   style="width: 100%; height: 720px; border: 0;"
   allow="fullscreen; clipboard-read; clipboard-write"
   allowfullscreen>
@@ -104,7 +104,7 @@ A URL query flag overrides the backend, and it works on the iframe `src` too:
 | *(none)* | WebGPU if available, otherwise WebGL2 |
 | `?webgl` | Force the WebGL2 backend (useful when a WebGPU driver misbehaves, and in headless browsers) |
 
-For example: `<iframe src="https://example.com/figcraft/?webgl" ...>`.
+For example: `<iframe src="https://example.com/lizard/?webgl" ...>`.
 
 A browser with neither WebGPU nor WebGL2 gets a message in place of the app.
 

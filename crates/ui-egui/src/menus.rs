@@ -2,14 +2,14 @@
 //! Actions palette (⌘K / ⌘/).
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_engine::catalog::{MENU, SEP};
+use lizard_engine::catalog::{MENU, SEP};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use web_time::Instant;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y;
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
@@ -38,10 +38,10 @@ pub const UI_COMMANDS: &[&str] = &[
 /// from another design app, an image, SVG or text from another app); otherwise our copied layers.
 /// `event_text` is the text the platform handed over with the paste event (the browser has no
 /// other way to read it). `at` is the page point for Paste here.
-pub fn paste(app: &mut FigApp, event_text: Option<&str>, at: Option<(f64, f64)>) {
+pub fn paste(app: &mut LizardApp, event_text: Option<&str>, at: Option<(f64, f64)>) {
     // Only HTML that holds readable design data takes this path; other HTML pastes as before.
-    if let Some(html) = app.services.clipboard_get_html().filter(|h| figcraft_engine::cmd::edit::design_clipboard_buffer(h).is_some()) {
-        let urls = figcraft_engine::cmd::edit::design_clipboard_image_urls(&html);
+    if let Some(html) = app.services.clipboard_get_html().filter(|h| lizard_engine::cmd::edit::design_clipboard_buffer(h).is_some()) {
+        let urls = lizard_engine::cmd::edit::design_clipboard_image_urls(&html);
         let mut params = json!({"html": html});
         if let Some((x, y)) = at {
             params["x"] = json!(x);
@@ -91,7 +91,7 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>, at: Option<(f64, f64)>)
     }
     let selected_layer = match app.session.selection().as_slice() {
         [id] if at.is_none()
-            && app.session.doc().ok().and_then(|d| d.node(*id)).is_some_and(|n| figcraft_engine::cmd::create::accepts_image_fill(&n.kind)) =>
+            && app.session.doc().ok().and_then(|d| d.node(*id)).is_some_and(|n| lizard_engine::cmd::create::accepts_image_fill(&n.kind)) =>
         {
             Some(*id)
         }
@@ -120,9 +120,9 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>, at: Option<(f64, f64)>)
         // Text from elsewhere when it's newer than our copy, or when we have nothing to paste.
         if let Some(text) = sys_text.filter(|_| app.ui.last_copy.is_some() || app.session.clipboard.nodes.is_empty()) {
             // A comment's link opens its thread.
-            if text.trim().starts_with("figcraft://comment/") {
+            if text.trim().starts_with("lizard://comment/") {
                 app.run("comment.open", json!({"link": text.trim()}));
-            } else if figcraft_engine::looks_like_svg(&text) {
+            } else if lizard_engine::looks_like_svg(&text) {
                 use base64::Engine as _;
                 let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
                 app.run_user("file.import", json!({"data": b64, "name": "Pasted SVG.svg", "x": cx, "y": cy, "center": at.is_none()}));
@@ -146,7 +146,7 @@ pub(crate) struct PendingDesignPaste {
     started: Instant,
 }
 
-pub(crate) fn poll_design_paste(app: &mut FigApp, ctx: &egui::Context) {
+pub(crate) fn poll_design_paste(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut pending) = app.pending_design_paste.take() else { return };
     use base64::Engine as _;
     while let Ok((hash, bytes)) = pending.rx.try_recv() {
@@ -168,7 +168,7 @@ pub(crate) fn poll_design_paste(app: &mut FigApp, ctx: &egui::Context) {
     finish_design_paste(app, pending.params, pending.last_copy);
 }
 
-fn finish_design_paste(app: &mut FigApp, params: serde_json::Value, last_copy: String) {
+fn finish_design_paste(app: &mut LizardApp, params: serde_json::Value, last_copy: String) {
     if let Some(r) = app.run("edit.pasteDesignLayers", params) {
         // The pasted layers are now our copy: text another app puts on the clipboard later is newer.
         app.ui.last_copy = Some(last_copy);
@@ -180,11 +180,11 @@ fn finish_design_paste(app: &mut FigApp, params: serde_json::Value, last_copy: S
 }
 
 /// The system clipboard's image as PNG bytes, with its size.
-fn clipboard_png(app: &mut FigApp) -> Option<(Vec<u8>, u32, u32)> {
+fn clipboard_png(app: &mut LizardApp) -> Option<(Vec<u8>, u32, u32)> {
     clipboard_png_with_limit(app, 4096, 4096 * 4096)
 }
 
-fn clipboard_png_with_limit(app: &mut FigApp, max_side: u32, max_pixels: u64) -> Option<(Vec<u8>, u32, u32)> {
+fn clipboard_png_with_limit(app: &mut LizardApp, max_side: u32, max_pixels: u64) -> Option<(Vec<u8>, u32, u32)> {
     let (w, h, rgba) = app.services.clipboard_get_image()?;
     let mut img = image::RgbaImage::from_raw(w, h, rgba)?;
     // The editable-layer preview can keep more detail than a plain pasted image, but both
@@ -213,19 +213,19 @@ pub enum PaletteTab {
 }
 
 /// Remember an action run from the palette for its Recents (newest first, capped).
-pub fn record_recent(app: &mut FigApp, key: &str) {
+pub fn record_recent(app: &mut LizardApp, key: &str) {
     let r = &mut app.session.prefs.recent_actions;
     if r.first().is_some_and(|f| f == key) {
         return;
     }
     r.retain(|k| k != key);
     r.insert(0, key.to_string());
-    r.truncate(figcraft_engine::MAX_RECENT_ACTIONS);
+    r.truncate(lizard_engine::MAX_RECENT_ACTIONS);
 }
 
 /// Run a menu, shortcut or palette action by id: actions that need the UI (dialogs, panels, the
 /// clipboard) are handled here, the rest go to the engine.
-pub fn invoke(app: &mut FigApp, id: &str) {
+pub fn invoke(app: &mut LizardApp, id: &str) {
     match id {
         // Edit ▸ Delete (and the Delete binding) with an interaction open in the Prototype tab
         // removes that interaction, not the layer (#767).
@@ -260,22 +260,22 @@ pub fn invoke(app: &mut FigApp, id: &str) {
         "edit.copyAsCss" => {
             let ids = app.session.selection();
             if let (Some(first), Ok(doc)) = (ids.first(), app.session.doc()) {
-                let css = figcraft_engine::codegen::code_for(doc, *first, figcraft_engine::codegen::CodeLang::Css);
+                let css = lizard_engine::codegen::code_for(doc, *first, lizard_engine::codegen::CodeLang::Css);
                 app.services.clipboard_set_text(&css);
                 app.toast(tr("Copied as CSS"));
             }
         }
         "edit.copyAsSvg" => {
             let ids = app.session.selection();
-            if let Some(svg) = app.session.doc().ok().and_then(|d| figcraft_svg_export(d, &ids)) {
+            if let Some(svg) = app.session.doc().ok().and_then(|d| lizard_svg_export(d, &ids)) {
                 app.services.clipboard_set_text(&svg);
                 app.toast(tr("Copied as SVG"));
             }
         }
         "edit.copyAsPng" => {
             let ids = app.session.selection();
-            if let Some(pix) = app.session.doc().ok().and_then(|d| figcraft_engine::cmd::file::copy_png_screen(d, &ids)) {
-                let rgba = figcraft_render::to_rgba8(&pix);
+            if let Some(pix) = app.session.doc().ok().and_then(|d| lizard_engine::cmd::file::copy_png_screen(d, &ids)) {
+                let rgba = lizard_render::to_rgba8(&pix);
                 app.services.clipboard_set_png(pix.width(), pix.height(), &rgba);
                 app.toast(tr("Copied as PNG"));
             }
@@ -293,7 +293,7 @@ pub fn invoke(app: &mut FigApp, id: &str) {
         }
         "edit.copyLink" => {
             let ids = app.session.selection();
-            app.services.clipboard_set_text(&format!("figcraft://node/{}", ids.first().map(|i| i.0).unwrap_or(0)));
+            app.services.clipboard_set_text(&format!("lizard://node/{}", ids.first().map(|i| i.0).unwrap_or(0)));
         }
         "edit.findReplace" => app.ui.find = Some((String::new(), String::new())),
         // The Actions palette invokes commands without parameters. These values are edited in
@@ -330,11 +330,11 @@ pub fn invoke(app: &mut FigApp, id: &str) {
             let ids = app.session.selection();
             // For other apps: text layers' text, other layers as SVG; taken before a cut removes them.
             let doc = app.session.doc().ok();
-            let mirror = doc.and_then(|d| text_layers_text(d, &ids).or_else(|| figcraft_svg_export(d, &ids)));
+            let mirror = doc.and_then(|d| text_layers_text(d, &ids).or_else(|| lizard_svg_export(d, &ids)));
             app.run(id, json!({}));
             // Mirror to the system clipboard (text or SVG, else a marker) and remember it, so a
             // later paste knows whether the clipboard still holds our layers.
-            let text = mirror.unwrap_or_else(|| format!("figcraft://clipboard/{}", ids.len()));
+            let text = mirror.unwrap_or_else(|| format!("lizard://clipboard/{}", ids.len()));
             app.services.clipboard_set_text(&text);
             app.ui.last_copy = Some(text);
         }
@@ -353,7 +353,7 @@ pub fn invoke(app: &mut FigApp, id: &str) {
 }
 
 /// Every visible top-level frame of the page as one PDF page each, through a save dialog.
-fn export_frames_pdf(app: &mut FigApp) {
+fn export_frames_pdf(app: &mut LizardApp) {
     let name = app.session.doc().map(|d| d.name.clone()).unwrap_or_else(|_| "Untitled".into());
     app.pick_save(tr("Export"), &format!("{name}.pdf"), &["pdf"], |app, p| {
         if app.run("file.exportFramesPdf", json!({"path": p.to_string_lossy()})).is_some() {
@@ -364,24 +364,24 @@ fn export_frames_pdf(app: &mut FigApp) {
 
 /// The text of a selection made only of text layers, one layer per line (None for any other
 /// selection, or when there is no text).
-fn text_layers_text(doc: &figcraft_doc::Document, ids: &[figcraft_doc::NodeId]) -> Option<String> {
+fn text_layers_text(doc: &lizard_doc::Document, ids: &[lizard_doc::NodeId]) -> Option<String> {
     let texts: Option<Vec<&str>> = ids.iter().map(|i| doc.node(*i).and_then(|n| n.kind.text()).map(|t| t.characters.as_str())).collect();
     texts.map(|t| t.join("\n")).filter(|t| !t.is_empty())
 }
 
 /// The layers as SVG text for other apps (None when the export fails).
-fn figcraft_svg_export(doc: &figcraft_doc::Document, ids: &[figcraft_doc::NodeId]) -> Option<String> {
-    let bytes = figcraft_engine::cmd::file::export_bytes(doc, ids, figcraft_doc::ExportFormat::Svg, 1.0).ok()?;
+fn lizard_svg_export(doc: &lizard_doc::Document, ids: &[lizard_doc::NodeId]) -> Option<String> {
+    let bytes = lizard_engine::cmd::file::export_bytes(doc, ids, lizard_doc::ExportFormat::Svg, 1.0).ok()?;
     String::from_utf8(bytes).ok()
 }
 
 /// Whether a menu id is available (registered in the engine or handled by the UI).
 pub fn available(id: &str) -> bool {
-    !id.is_empty() && (figcraft_engine::find_command(id).is_some() || UI_COMMANDS.contains(&id))
+    !id.is_empty() && (lizard_engine::find_command(id).is_some() || UI_COMMANDS.contains(&id))
 }
 
 /// Draw one level of the main menu: `prefix` is the menu path ("File", "Edit/Copy as").
-fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
+fn menu_level(app: &mut LizardApp, ui: &mut Ui, prefix: &str) -> bool {
     let t = Tokens::get(ui.ctx());
     // The installed plugins head the Plugins menu.
     if prefix == "Plugins" && crate::plugins_ui::menu(app, ui, &t) {
@@ -408,7 +408,7 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
             }
             // One window in the browser.
             let enabled = available(m.id) && !(m.id == "window.new" && ui.ctx().embed_viewports());
-            let checked = figcraft_engine::cmd::view::checked(&app.session, m.id).unwrap_or(false);
+            let checked = lizard_engine::cmd::view::checked(&app.session, m.id).unwrap_or(false);
             if item(ui, &i18n::menu_item(m.id, m.label), crate::shortcuts::shortcut(m.id).unwrap_or(""), enabled, checked, &t) && enabled {
                 clicked = Some(m.id);
             }
@@ -433,7 +433,7 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
 
 /// File ▸ Open recent: the recent files (greyed when the file is gone) and Clear recent. `key` is
 /// the menu's English label, `label` the one shown. Returns whether an item ran.
-fn recent_menu(app: &mut FigApp, ui: &mut Ui, prefix: &str, key: &str, label: &str, t: &Tokens) -> bool {
+fn recent_menu(app: &mut LizardApp, ui: &mut Ui, prefix: &str, key: &str, label: &str, t: &Tokens) -> bool {
     let picked = submenu(ui, &format!("{prefix}/{key}"), label, t, |ui| {
         let recents: Vec<&String> = crate::home_recents::listed(&app.session.prefs.recent_files).collect();
         let mut picked = None;
@@ -863,7 +863,7 @@ const TOP_MENUS: &[&str] = &[
     tr_noop("Help"),
 ];
 
-pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
+pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     // A closed menu forgets its open submenus (and a context menu opened somewhere else starts
     // afresh), so neither reopens with a stale submenu showing.
@@ -938,7 +938,7 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
                     let secs: Vec<bool> = ids
                         .iter()
                         .filter_map(|i| doc.node(*i))
-                        .filter(|n| matches!(n.kind, figcraft_doc::NodeKind::Section { .. }))
+                        .filter(|n| matches!(n.kind, lizard_doc::NodeKind::Section { .. }))
                         .map(|n| n.hides_contents())
                         .collect();
                     (!secs.is_empty()).then(|| if secs.iter().all(|h| *h) { tr("Show section contents") } else { tr("Hide section contents") })
@@ -946,14 +946,14 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
                 // Frames on the page (or in a section) convert to sections, and sections to frames.
                 let convert = app.session.doc().ok().and_then(|doc| {
                     let nodes: Vec<_> = ids.iter().filter_map(|i| doc.node(*i)).collect();
-                    let on_board = |n: &figcraft_doc::Node| {
-                        n.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.is_page() || matches!(p.kind, figcraft_doc::NodeKind::Section { .. }))
+                    let on_board = |n: &lizard_doc::Node| {
+                        n.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.is_page() || matches!(p.kind, lizard_doc::NodeKind::Section { .. }))
                     };
                     if nodes.is_empty() {
                         None
-                    } else if nodes.iter().all(|n| matches!(n.kind, figcraft_doc::NodeKind::Section { .. })) {
+                    } else if nodes.iter().all(|n| matches!(n.kind, lizard_doc::NodeKind::Section { .. })) {
                         Some((tr("Convert to frame"), "object.convertToFrame"))
-                    } else if nodes.iter().all(|n| matches!(n.kind, figcraft_doc::NodeKind::Frame) && on_board(n)) {
+                    } else if nodes.iter().all(|n| matches!(n.kind, lizard_doc::NodeKind::Frame) && on_board(n)) {
                         Some((tr("Convert to section"), "object.convertToSection"))
                     } else {
                         None
@@ -965,14 +965,14 @@ pub fn popups(app: &mut FigApp, ctx: &egui::Context) {
                     .session
                     .doc()
                     .ok()
-                    .filter(|doc| figcraft_engine::cmd::component::can_combine_variants(doc, &app.session.selection()))
+                    .filter(|doc| lizard_engine::cmd::component::can_combine_variants(doc, &app.session.selection()))
                     .map(|_| i18n::command("component.combineVariants", "Combine as variants"));
                 let vector_contours = app.session.ds().ok().and_then(|ds| {
                     let edit = ds.vector_edit.as_ref()?;
                     if !ids.contains(&edit.id) {
                         return None;
                     }
-                    let figcraft_doc::NodeKind::Vector { network } = &ds.doc.node(edit.id)?.kind else { return None };
+                    let lizard_doc::NodeKind::Vector { network } = &ds.doc.node(edit.id)?.kind else { return None };
                     Some((!network.outer_contours().is_empty(), !network.inner_contours().is_empty()))
                 });
                 let mut entries: Vec<(&str, &str)> = if has_sel {
@@ -1096,15 +1096,15 @@ pub fn open_select_layer(ctx: &egui::Context, open: bool) {
 
 /// The context menu's "Select layer" submenu (right-click on the canvas): every layer under the
 /// click, nested ones indented, the selected ones checked. Returns whether one was picked.
-fn select_layer_menu(app: &mut FigApp, ui: &mut Ui, pos: egui::Pos2, t: &Tokens) -> bool {
+fn select_layer_menu(app: &mut LizardApp, ui: &mut Ui, pos: egui::Pos2, t: &Tokens) -> bool {
     if !app.canvas.rect.contains(pos) {
         return false;
     }
     let p = app.to_page(pos);
     let Ok(ds) = app.session.ds() else { return false };
     let tol = 2.0 / ds.view.zoom.max(1e-6);
-    let layers: Vec<(figcraft_doc::NodeId, usize, String)> =
-        figcraft_doc::geometry::layers_at(&ds.doc, ds.page, p, tol, Some(&figcraft_engine::booleans::result_outline(&ds.doc, &ds.selection)))
+    let layers: Vec<(lizard_doc::NodeId, usize, String)> =
+        lizard_doc::geometry::layers_at(&ds.doc, ds.page, p, tol, Some(&lizard_engine::booleans::result_outline(&ds.doc, &ds.selection)))
             .into_iter()
             .take(40)
             .filter_map(|(id, depth)| {
@@ -1155,7 +1155,7 @@ pub fn toggle_palette(ui: &mut crate::UiState) {
 /// The Actions palette: search over commands, assets and plugins, with tabs, recents and grouped
 /// sections, floating above the toolbar. Rows run on click; Up and Down move the highlight and
 /// Enter runs the highlighted row.
-fn palette(app: &mut FigApp, ctx: &egui::Context) {
+fn palette(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut q) = app.ui.palette.clone() else { return };
     let t = Tokens::get(ctx);
     // Centre on the canvas toolbar, 8 px above it. Tab changes keep the same panel size.
@@ -1270,7 +1270,7 @@ fn palette(app: &mut FigApp, ctx: &egui::Context) {
 
 /// The rows a palette tab shows for the query, by section: All has Recents, the commands by menu,
 /// then plugins and widgets; Assets this file's components and styles; Plugins & widgets those.
-pub(crate) fn palette_sections(app: &FigApp, q: &str, tab: PaletteTab) -> Vec<(String, Vec<ActionRow>)> {
+pub(crate) fn palette_sections(app: &LizardApp, q: &str, tab: PaletteTab) -> Vec<(String, Vec<ActionRow>)> {
     let mut out = match tab {
         PaletteTab::All => {
             let recents = app.session.prefs.recent_actions.iter().filter_map(|key| recent_row(app, key, q)).collect();
@@ -1291,7 +1291,7 @@ pub(crate) fn palette_sections(app: &FigApp, q: &str, tab: PaletteTab) -> Vec<(S
 
 /// Run a palette row: `command:<id>`, `plugin:<plugin>/<command>`, `widget:<plugin>`,
 /// `component:<node>` or `style:<id>`.
-pub(crate) fn run_action(app: &mut FigApp, key: &str) {
+pub(crate) fn run_action(app: &mut LizardApp, key: &str) {
     if let Some(id) = key.strip_prefix("command:") {
         record_recent(app, key);
         invoke(app, id);
@@ -1397,7 +1397,7 @@ pub(crate) fn command_sections(q: &str) -> Vec<(String, Vec<ActionRow>)> {
         menu_of.entry(m.id).or_insert(m);
     }
     let menu_items = MENU.iter().filter(|m| m.label != SEP).map(|m| (m.id, m.label));
-    let engine = figcraft_engine::all_commands().iter().map(|c| (c.id, c.label));
+    let engine = lizard_engine::all_commands().iter().map(|c| (c.id, c.label));
     let candidates: Box<dyn Iterator<Item = (&str, &str)>> = if ql.is_empty() { Box::new(menu_items) } else { Box::new(menu_items.chain(engine)) };
     let mut seen = std::collections::HashSet::new();
     // By top-level menu; `None`: no menu lists it.
@@ -1435,7 +1435,7 @@ pub(crate) fn command_sections(q: &str) -> Vec<(String, Vec<ActionRow>)> {
 }
 
 /// Installed plugins' commands, filtered by the query.
-fn plugin_rows(app: &FigApp, q: &str) -> Vec<ActionRow> {
+fn plugin_rows(app: &LizardApp, q: &str) -> Vec<ActionRow> {
     let ql = q.to_lowercase();
     let mut rows = Vec::new();
     for p in &app.session.prefs.plugins {
@@ -1464,7 +1464,7 @@ fn plugin_rows(app: &FigApp, q: &str) -> Vec<ActionRow> {
 }
 
 /// Installed widgets, filtered by the query.
-fn widget_rows(app: &FigApp, q: &str) -> Vec<ActionRow> {
+fn widget_rows(app: &LizardApp, q: &str) -> Vec<ActionRow> {
     let ql = q.to_lowercase();
     app.session
         .prefs
@@ -1482,16 +1482,16 @@ fn widget_rows(app: &FigApp, q: &str) -> Vec<ActionRow> {
 }
 
 /// This file's components and styles, filtered by the query.
-fn asset_sections(app: &FigApp, q: &str) -> Vec<(String, Vec<ActionRow>)> {
+fn asset_sections(app: &LizardApp, q: &str) -> Vec<(String, Vec<ActionRow>)> {
     let ql = q.to_lowercase();
     let Ok(doc) = app.session.doc() else { return Vec::new() };
-    let components: Vec<ActionRow> = figcraft_engine::library::local_components(doc)
+    let components: Vec<ActionRow> = lizard_engine::library::local_components(doc)
         .iter()
         .filter_map(|id| doc.node(*id))
         .filter(|n| matches(&ql, &n.name, ""))
         .map(|n| ActionRow { key: format!("component:{}", n.id.0), label: n.name.clone(), hint: tr("Component").to_string(), tile: None })
         .collect();
-    let styles: Vec<ActionRow> = figcraft_engine::library::local_styles(doc)
+    let styles: Vec<ActionRow> = lizard_engine::library::local_styles(doc)
         .filter(|s| matches(&ql, &s.name, ""))
         .map(|s| ActionRow { key: format!("style:{}", s.id), label: s.name.clone(), hint: tr("Style").to_string(), tile: None })
         .collect();
@@ -1506,11 +1506,11 @@ fn asset_sections(app: &FigApp, q: &str) -> Vec<(String, Vec<ActionRow>)> {
 }
 
 /// A recent action back as a row (gone commands, plugins or assets drop out).
-pub(crate) fn recent_row(app: &FigApp, key: &str, q: &str) -> Option<ActionRow> {
+pub(crate) fn recent_row(app: &LizardApp, key: &str, q: &str) -> Option<ActionRow> {
     let ql = q.to_lowercase();
     if let Some(id) = key.strip_prefix("command:") {
-        let spec = figcraft_engine::find_command(id);
-        let menu_label = figcraft_engine::catalog::MENU.iter().find(|m| m.id == id);
+        let spec = lizard_engine::find_command(id);
+        let menu_label = lizard_engine::catalog::MENU.iter().find(|m| m.id == id);
         let english = menu_label.map(|m| m.label).or_else(|| spec.map(|s| s.label)).unwrap_or(id);
         let label = i18n::command(id, english);
         if !available(id) || !matches(&ql, &label, &format!("{english} {id}")) {

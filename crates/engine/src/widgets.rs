@@ -25,12 +25,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use figcraft_color::{Color, ColorStop, Gradient, GradientKind, ImageScaleMode, Paint};
-use figcraft_doc::{Document, Effect, EffectKind, Node, NodeId, NodeKind, Shadow, TextData, VectorNetwork};
-use figcraft_geom::{Affine, Point, Shape};
-use figcraft_plugin::widget::{GradientShape, MAX_IMAGE_BYTES, MAX_SIZE, MAX_STATE_BYTES, MAX_TEXT, WidgetHover, check_menu};
-use figcraft_plugin::{Instance, Manifest, RunOutput, WidgetFit, WidgetKind, WidgetNode, WidgetRender};
-pub use figcraft_plugin::{MenuItem, MenuKind};
+use lizard_color::{Color, ColorStop, Gradient, GradientKind, ImageScaleMode, Paint};
+use lizard_doc::{Document, Effect, EffectKind, Node, NodeId, NodeKind, Shadow, TextData, VectorNetwork};
+use lizard_geom::{Affine, Point, Shape};
+use lizard_plugin::widget::{GradientShape, MAX_IMAGE_BYTES, MAX_SIZE, MAX_STATE_BYTES, MAX_TEXT, WidgetHover, check_menu};
+use lizard_plugin::{Instance, Manifest, RunOutput, WidgetFit, WidgetKind, WidgetNode, WidgetRender};
+pub use lizard_plugin::{MenuItem, MenuKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use web_time::{Duration, Instant};
@@ -41,19 +41,19 @@ use crate::plugins::{InstalledPlugin, call_plugin, installed, limits, module_of,
 use crate::{EngineError, Result, Session, bad, spec};
 
 /// Layer data Lizard keeps for widgets starts with this; plugins can't write it.
-pub const DATA_PREFIX: &str = "figcraft.widget";
+pub const DATA_PREFIX: &str = "lizard.widget";
 /// On a widget's own layer: its plugin's id, its state (JSON), its property menu (JSON) and the
 /// stamp of the session whose timer for it is running.
-const PLUGIN: &str = "figcraft.widget";
-const STATE: &str = "figcraft.widget.state";
-const MENU: &str = "figcraft.widget.menu";
-const TIMER: &str = "figcraft.widget.timer";
+const PLUGIN: &str = "lizard.widget";
+const STATE: &str = "lizard.widget.state";
+const MENU: &str = "lizard.widget.menu";
+const TIMER: &str = "lizard.widget.timer";
 /// On a layer inside a widget: the name its plugin gets when it's clicked, the editable text it
 /// is ([`Input`] as JSON), its hover style (JSON) and its tooltip.
-const TARGET: &str = "figcraft.widget.target";
-const INPUT: &str = "figcraft.widget.input";
-const HOVER: &str = "figcraft.widget.hover";
-const TOOLTIP: &str = "figcraft.widget.tooltip";
+const TARGET: &str = "lizard.widget.target";
+const INPUT: &str = "lizard.widget.input";
+const HOVER: &str = "lizard.widget.hover";
+const TOOLTIP: &str = "lizard.widget.tooltip";
 /// Images in a widget are at most this many pixels on a side.
 const MAX_IMAGE_SIDE: u32 = 4096;
 /// The stored menu and hover style are read back only up to this size.
@@ -448,7 +448,7 @@ fn add(doc: &mut Document, parent: NodeId, d: &WidgetNode, cmd: &str) -> Result<
         if bytes.len() > MAX_IMAGE_BYTES {
             return Err(bad(cmd, format!("an image is larger than {} KB", MAX_IMAGE_BYTES / 1024)));
         }
-        let (hash, iw, ih) = figcraft_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
+        let (hash, iw, ih) = lizard_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
         if iw > MAX_IMAGE_SIDE || ih > MAX_IMAGE_SIDE {
             return Err(bad(cmd, format!("an image is larger than {MAX_IMAGE_SIDE} pixels on a side")));
         }
@@ -555,7 +555,7 @@ fn props(d: &WidgetNode, root: bool) -> Map<String, Value> {
         set("strokes", json!([]));
     }
     if matches!(d.kind, WidgetKind::Frame | WidgetKind::Rectangle | WidgetKind::Image) {
-        set("cornerRadius", json!(d.radius.map_or([0.0; 4], figcraft_plugin::Sides::each)));
+        set("cornerRadius", json!(d.radius.map_or([0.0; 4], lizard_plugin::Sides::each)));
     }
     set("opacity", json!(d.opacity.unwrap_or(1.0)));
     if d.kind == WidgetKind::Frame {
@@ -563,7 +563,7 @@ fn props(d: &WidgetNode, root: bool) -> Map<String, Value> {
             Some(l) => {
                 set("layout", json!(l));
                 set("gap", json!(d.gap.unwrap_or(0.0)));
-                set("padding", json!(d.padding.map_or([0.0; 4], figcraft_plugin::Sides::each)));
+                set("padding", json!(d.padding.map_or([0.0; 4], lizard_plugin::Sides::each)));
                 set("crossAlign", json!(d.align.map_or(json!("center"), |a| json!(a))));
                 set("mainAlign", json!(d.justify.map_or(json!("min"), |a| json!(a))));
                 set("sizingH", json!(if d.width.is_some() { "fixed" } else { "hug" }));

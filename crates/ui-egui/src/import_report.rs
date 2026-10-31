@@ -4,7 +4,7 @@
 use egui::RichText;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, trn, try_tr};
 use crate::theme::{Tokens, regular};
 
@@ -113,14 +113,14 @@ pub(crate) fn note_text(note: &str) -> String {
 
 /// Show the report for a file the user opened or imported (menus, drops, pastes, recents, the
 /// system's open event); commands from the control channel, MCP or scripts never call this.
-pub fn capture(app: &mut FigApp, command: &str, params: &Value, result: &Value) {
+pub fn capture(app: &mut LizardApp, command: &str, params: &Value, result: &Value) {
     if let Some(mut report) = Report::from_result(command, params, result) {
         report.uid = app.session.ds().map_or(0, |d| d.uid);
         app.ui.import_report = Some(report);
     }
 }
 
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     // The report goes with its document.
     if app.ui.import_report.as_ref().is_some_and(|r| !app.session.docs.iter().any(|d| d.uid == r.uid)) {
         app.ui.import_report = None;

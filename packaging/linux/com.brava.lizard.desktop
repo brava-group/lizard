@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Lizard
+GenericName=Interface Design Tool
+Comment=Design and prototype user interfaces
+Exec=lizard %U
+TryExec=lizard
+Icon=com.brava.lizard
+Terminal=false
+StartupNotify=true
+StartupWMClass=com.brava.lizard
+Categories=Graphics;2DGraphics;VectorGraphics;X-Design;
+Keywords=design;interface;ui;ux;prototype;wireframe;mockup;vector;layout;components;
+MimeType=application/x-lizard;image/svg+xml;image/png;image/jpeg;x-scheme-handler/lizard;

@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_doc::{Collection, Document, ModeId, NodeId, PublishedLibrary, Variable, VariableId, VariableType, VariableValue, Variables};
-use figcraft_engine::library;
+use lizard_doc::{Collection, Document, ModeId, NodeId, PublishedLibrary, Variable, VariableId, VariableType, VariableValue, Variables};
+use lizard_engine::library;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
@@ -64,7 +64,7 @@ pub struct Pick {
 }
 
 /// Bind `field` of `ids` to `pick` (a library variable is copied in first).
-pub fn bind(app: &mut FigApp, ids: &[NodeId], field: &str, pick: &Pick) {
+pub fn bind(app: &mut LizardApp, ids: &[NodeId], field: &str, pick: &Pick) {
     match &pick.library {
         Some(lib) => app.run("library.bindVariable", json!({"library": lib, "variable": pick.id, "ids": ids, "field": field})),
         None => app.run("variable.bind", json!({"ids": ids, "field": field, "variable": pick.id})),
@@ -72,7 +72,7 @@ pub fn bind(app: &mut FigApp, ids: &[NodeId], field: &str, pick: &Pick) {
 }
 
 /// The enabled libraries this session has read, for pickers and the Variables editor.
-pub fn libraries(app: &FigApp, doc: &Document) -> Vec<Arc<PublishedLibrary>> {
+pub fn libraries(app: &LizardApp, doc: &Document) -> Vec<Arc<PublishedLibrary>> {
     library::read_libraries(&app.session.libraries, doc).map(|(_, lib)| lib.clone()).collect()
 }
 
@@ -158,7 +158,7 @@ pub fn variable_row(ui: &mut Ui, vars: &Variables, v: &Variable, width: f32) -> 
     let value = vars.resolve(&v.id, &std::collections::BTreeMap::new());
     let lead = Rect::from_center_size(pos2(r.min.x + 12.0, r.center().y), vec2(14.0, 14.0));
     match &value {
-        Some(VariableValue::Color(c)) => widgets::paint_swatch(ui.painter(), lead, &figcraft_color::Paint::solid(*c)),
+        Some(VariableValue::Color(c)) => widgets::paint_swatch(ui.painter(), lead, &lizard_color::Paint::solid(*c)),
         _ => icons::paint(ui.painter(), lead.shrink(1.0), Icon::Variable, t.menu_text),
     }
     let name_r = Rect::from_min_max(pos2(r.min.x + 26.0, r.min.y), pos2(r.max.x - 6.0, r.max.y));
@@ -219,7 +219,7 @@ pub fn open_at_pointer(ui: &Ui, ids: &[NodeId], field: &str, kind: VariableType)
 }
 
 /// Act on a bound field's event: change the variable, or detach it.
-fn handle(app: &mut FigApp, ui: &Ui, ids: &[NodeId], field: &str, kind: VariableType, ev: Option<BindEvent>) {
+fn handle(app: &mut LizardApp, ui: &Ui, ids: &[NodeId], field: &str, kind: VariableType, ev: Option<BindEvent>) {
     match ev {
         Some(BindEvent::Open(at)) => open(ui, ids, field, kind, at),
         Some(BindEvent::Detach) => {
@@ -232,7 +232,7 @@ fn handle(app: &mut FigApp, ui: &Ui, ids: &[NodeId], field: &str, kind: Variable
 /// A number field whose value can be bound to a number variable. `suffix` follows the number
 /// ("%" for opacity, whose variables hold percentages).
 pub fn number_field(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -247,7 +247,7 @@ pub fn number_field(
 
 /// A bindable number field with a joined preset menu.
 pub fn number_field_with_options(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -267,7 +267,7 @@ pub fn number_field_with_options(
 
 /// [`number_field`] showing `empty` (e.g. "Auto") for no value.
 pub fn number_field_or(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -284,7 +284,7 @@ pub fn number_field_or(
 /// [`number_field_or`] for a field where 0 is its automatic value (a layout grid's width or
 /// count): typing the word for Auto sets 0 ([`Empty::Auto`]).
 pub fn number_field_auto(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -298,9 +298,9 @@ pub fn number_field_auto(
 }
 
 /// [`number_field`] over several layers: a relative edit of mixed values comes back as one for
-/// each layer ([`Edit::Each`]; see `FigApp::field_of`).
+/// each layer ([`Edit::Each`]; see `LizardApp::field_of`).
 pub fn number_field_mixed(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -315,7 +315,7 @@ pub fn number_field_mixed(
 
 /// A bindable dimension value with a sizing mode selector sharing its 24 pt field.
 pub fn dimension_field(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -332,7 +332,7 @@ pub fn dimension_field(
 }
 
 fn number_field_edit(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
@@ -354,7 +354,7 @@ fn number_field_edit(
 
 /// When `field` of `ids` is bound: the variable's chip in `rect` (change or detach it) and true;
 /// otherwise nothing and false.
-pub fn bound_chip(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], field: &str, kind: VariableType, rect: Rect) -> bool {
+pub fn bound_chip(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], field: &str, kind: VariableType, rect: Rect) -> bool {
     let Some(name) = app.session.doc().ok().and_then(|d| bound_name(d, ids, field)) else { return false };
     let ev = widgets::bound_field(ui, Id::new(("bound_chip", field, ids)), Lead::None, rect, &name);
     handle(app, ui, ids, field, kind, ev);
@@ -365,13 +365,13 @@ pub fn bound_chip(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], field: &str, ki
 /// variable's chip (`width` wide) stands in for it; otherwise `control` lays it out in the current
 /// row and a variable button shows over that area on hover.
 pub fn bindable(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     field: &str,
     kind: VariableType,
     width: f32,
-    control: impl FnOnce(&mut FigApp, &mut Ui),
+    control: impl FnOnce(&mut LizardApp, &mut Ui),
 ) {
     let area = Rect::from_min_size(ui.cursor().min, vec2(width, widgets::FIELD_H));
     if app.session.doc().ok().and_then(|d| bound_name(d, ids, field)).is_some() {
@@ -409,7 +409,7 @@ pub fn variable_button(ui: &mut Ui, rect: Rect, id: Id) -> bool {
 
 /// A field showing the variable `field` of `ids` is bound to, for bindings without a value field
 /// of their own (text content, visibility): `width` wide, at most the row. Nothing when unbound.
-pub fn bound_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], field: &str, kind: VariableType, lead: Lead, width: f32) {
+pub fn bound_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], field: &str, kind: VariableType, lead: Lead, width: f32) {
     let Some(name) = app.session.doc().ok().and_then(|d| bound_name(d, ids, field)) else { return };
     crate::right::row(ui, 32.0, |ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(width.min(ui.available_width()), widgets::FIELD_H), Sense::hover());
@@ -425,7 +425,7 @@ fn kind_fits(want: Option<VariableType>, field: Option<&str>, have: VariableType
 }
 
 /// The picker popover (call once per frame).
-pub fn picker(app: &mut FigApp, ctx: &egui::Context) {
+pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(p) = ctx.data(|d| d.get_temp::<Picker>(picker_id())) else { return };
     let Ok(doc) = app.session.ds().map(|d| d.doc.clone()) else { return };
     let libs = libraries(app, &doc);
@@ -436,7 +436,7 @@ pub fn picker(app: &mut FigApp, ctx: &egui::Context) {
     // Bindings offer variables scoped to the property; aliases, any that wouldn't loop (library
     // variables never lead back to this file's).
     let (scope, own) = match &p.target {
-        Target::Bind { ids, field } => (ids.first().and_then(|id| figcraft_engine::cmd::variables::field_scope(&doc, *id, field)), None),
+        Target::Bind { ids, field } => (ids.first().and_then(|id| lizard_engine::cmd::variables::field_scope(&doc, *id, field)), None),
         Target::Alias { variable, .. } => (None, doc.variables.get(variable)),
         Target::Proto(_) | Target::Style { .. } => (None, None),
     };
@@ -451,7 +451,7 @@ pub fn picker(app: &mut FigApp, ctx: &egui::Context) {
             && !(local_only && lib.is_some())
             && (q.is_empty() || v.name.to_lowercase().contains(&q))
             && scope.is_none_or(|s| v.in_scope(s))
-            && (lib.is_some() || own.is_none_or(|o| figcraft_engine::cmd::variables::alias_target(&doc.variables, o, &v.id).is_ok()))
+            && (lib.is_some() || own.is_none_or(|o| lizard_engine::cmd::variables::alias_target(&doc.variables, o, &v.id).is_ok()))
     };
     let groups = groups(&doc, &libs, keep);
     let mut chosen: Option<Pick> = None;

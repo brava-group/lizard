@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use canvas_strategies_bench::geometry_atlas::GeometryAtlas;
 use canvas_strategies_bench::gpu_scene::GpuCanvas;
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{EffectKind, NodeKind};
-use figcraft_render::{Options, View, render_view};
+use lizard_color::{Color, Paint};
+use lizard_doc::{EffectKind, NodeKind};
+use lizard_render::{Options, View, render_view};
 
 const SIDE: u32 = 1024;
 
@@ -37,10 +37,10 @@ fn wait_for_view(atlas: &mut GeometryAtlas, view: &View) -> Result<f64, Box<dyn 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let path = std::env::args().find_map(|arg| arg.strip_prefix("--file=").map(str::to_owned)).ok_or("pass --file=<saved .figcraft file>")?;
+    let path = std::env::args().find_map(|arg| arg.strip_prefix("--file=").map(str::to_owned)).ok_or("pass --file=<saved .lizard file>")?;
     let bleed = std::env::args().find_map(|arg| arg.strip_prefix("--bleed=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(128).min(512);
     let slots = std::env::args().find_map(|arg| arg.strip_prefix("--slots=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(32);
-    let (doc, warnings) = figcraft_format::load_file(Path::new(&path))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new(&path))?;
     if !warnings.is_empty() {
         return Err(format!("document warnings: {warnings:?}").into());
     }

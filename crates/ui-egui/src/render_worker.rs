@@ -1,7 +1,7 @@
 //! Canvas rendering off the UI thread (desktop) or inline (web). The latest request wins (queued
 //! older ones are skipped); the UI shows each finished image, re-projected to the current view,
 //! until the next one arrives.
-//! Small viewports keep a whole image ([`figcraft_render::Retained`]): a pan renders only the
+//! Small viewports keep a whole image ([`lizard_render::Retained`]): a pan renders only the
 //! uncovered strips and an edit only the areas of the layers that changed. Wide viewports keep
 //! page-aligned regions, rendered in parallel and composed as separate GPU textures. The UI keeps
 //! its current image during zoom rather than displaying the worker's lower-resolution preview.
@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
-use figcraft_color::ColorProfile;
-use figcraft_doc::{Document, NodeId};
-use figcraft_render::{DamageRect, Pixmap, Retained, View, Work};
+use lizard_color::ColorProfile;
+use lizard_doc::{Document, NodeId};
+use lizard_render::{DamageRect, Pixmap, Retained, View, Work};
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 // A monotonic clock in the browser too: preview decisions rest on how long renders take there.
@@ -34,7 +34,7 @@ pub fn uses_tiles(view: &View, doc: &Document, proof: bool) -> bool {
     let pixels = u64::from(view.width) * u64::from(view.height);
     // Each tile would otherwise build and blur the same padded layer again. A broad shadow can
     // cost more across 16 tiles than one viewport render, even with parallel workers.
-    let effect_reach = doc.nodes().filter(|n| n.visible).map(figcraft_render::draw::effect_margin).fold(0.0, f64::max) * view.scale;
+    let effect_reach = doc.nodes().filter(|n| n.visible).map(lizard_render::draw::effect_margin).fold(0.0, f64::max) * view.scale;
     (pixels >= TILED_MIN_PIXELS || view.scale >= 8.0 && pixels >= HIGH_ZOOM_TILED_MIN_PIXELS)
         && !proof
         && effect_reach <= f64::from(TILE_SIDE)
@@ -52,7 +52,7 @@ pub struct RenderTile {
 #[derive(Clone, PartialEq, Eq)]
 pub struct RenderStyle {
     outline: bool,
-    outline_extras: figcraft_render::Outline,
+    outline_extras: lizard_render::Outline,
     outlined: Vec<NodeId>,
     skip: Vec<NodeId>,
     solo: Option<NodeId>,
@@ -68,7 +68,7 @@ pub struct Job {
     pub time: f64,
     pub outline: bool,
     /// Outline mode's options (hidden layers, object bounds).
-    pub outline_extras: figcraft_render::Outline,
+    pub outline_extras: lizard_render::Outline,
     /// Layers drawn as outlines (outlines for the selection).
     pub outlined: Vec<NodeId>,
     pub skip: Vec<NodeId>,
@@ -76,7 +76,7 @@ pub struct Job {
     pub solo: Option<NodeId>,
     /// Soft-proof sRGB: stripe the colours sRGB can't show.
     pub proof: bool,
-    /// The document's [`figcraft_engine::DocState::uid`]: images of other files are never shown.
+    /// The document's [`lizard_engine::DocState::uid`]: images of other files are never shown.
     pub uid: u64,
     /// A coarse preview may come first when the zoom changes (not in pixel preview, whose pixels
     /// are the point).
@@ -251,7 +251,7 @@ fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
         width: view.width + bleed * 2,
         height: view.height + bleed * 2,
     };
-    let opts = figcraft_render::Options {
+    let opts = lizard_render::Options {
         time: job.time,
         outline_mode: job.outline,
         outline: job.outline_extras,
@@ -261,7 +261,7 @@ fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
         lod: true,
         ..Default::default()
     };
-    let pix = figcraft_render::render_view(&job.doc, job.page, &expanded, &opts)?;
+    let pix = lizard_render::render_view(&job.doc, job.page, &expanded, &opts)?;
     let (_, image) = patch_image(&pix, job.doc.color_profile, DamageRect { x: bleed, y: bleed, width: TILE_SIDE, height: TILE_SIDE })?;
     Some(Arc::new(image))
 }
@@ -270,7 +270,7 @@ fn render_tile(job: &Job, view: &View) -> Option<Arc<egui::ColorImage>> {
 fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, skip_effects: bool, base_doc: Option<Arc<Document>>) -> Option<Done> {
     let t0 = Instant::now();
     // The canvas is a preview: what's too small to see in detail at this zoom is approximated.
-    let opts = figcraft_render::Options {
+    let opts = lizard_render::Options {
         time: job.time,
         outline_mode: job.outline,
         outline: job.outline_extras,
@@ -292,7 +292,7 @@ fn run(job: &Job, view: &View, retained: &mut Retained, coarse: bool, skip_effec
             let from_shown = if base_doc.as_ref().is_some_and(|base| Arc::ptr_eq(base, shown)) {
                 damage.clone()
             } else if work != Work::Full {
-                figcraft_render::retained::damage_between(shown, &job.doc, job.page, &view)
+                lizard_render::retained::damage_between(shown, &job.doc, job.page, &view)
             } else {
                 None
             };
@@ -459,7 +459,7 @@ impl Renders {
             && self.last_doc.as_ref().is_some_and(|old| Arc::ptr_eq(old, &job.doc))
             && self.full_style.as_ref() == Some(&job.style())
             && self.full_time == job.time.to_bits()
-            && figcraft_render::retained::snap(&job.view).is_some_and(|(requested, _)| {
+            && lizard_render::retained::snap(&job.view).is_some_and(|(requested, _)| {
                 self.zoom_cache.iter().any(|entry| entry.scale == job.view.scale.to_bits() && same_view(&entry.view, &requested))
             })
         {
@@ -580,7 +580,7 @@ impl Renders {
             let reuse = cached.is_some_and(|_| {
                 self.tile_doc.as_ref().is_some_and(|old| {
                     Arc::ptr_eq(old, &job.doc)
-                        || figcraft_render::retained::damage_between(old, &job.doc, job.page, tile_view).is_some_and(|damage| damage.is_empty())
+                        || lizard_render::retained::damage_between(old, &job.doc, job.page, tile_view).is_some_and(|damage| damage.is_empty())
                 })
             });
             let image = if reuse { cached?.image.clone() } else { render_tile(job, tile_view)? };
@@ -665,7 +665,7 @@ impl Worker {
         let requested = latest.clone();
         // The window that renders with it (each window has its own worker).
         let viewport = ctx.viewport_id();
-        let spawned = std::thread::Builder::new().name("figcraft-render".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("lizard-render".into()).spawn(move || {
             let mut renders = Renders::default();
             let mut next = None;
             loop {
@@ -684,7 +684,7 @@ impl Worker {
                     renders.zoom_cache.clear();
                 }
                 let saved = renders.needs_cancel_snapshot(&job).then(|| renders.clone());
-                let preview = figcraft_render::with_interruption(requested.clone(), seq, || renders.preview(&job));
+                let preview = lizard_render::with_interruption(requested.clone(), seq, || renders.preview(&job));
                 if requested.load(std::sync::atomic::Ordering::Acquire) != seq {
                     renders = saved.unwrap_or_default();
                     continue;
@@ -700,7 +700,7 @@ impl Worker {
                         continue;
                     }
                 }
-                let refined = figcraft_render::with_interruption(requested.clone(), seq, || renders.refine(&job));
+                let refined = lizard_render::with_interruption(requested.clone(), seq, || renders.refine(&job));
                 if requested.load(std::sync::atomic::Ordering::Acquire) != seq {
                     renders = saved.unwrap_or_default();
                     continue;
@@ -839,19 +839,19 @@ fn stable_tile_grid_covers_pans_without_changing_existing_cells() {
 #[cfg(test)]
 #[test]
 fn high_zoom_uses_regions_before_a_whole_view_effect_buffer_grows_large() {
-    let doc = figcraft_doc::Document::new("high zoom");
+    let doc = lizard_doc::Document::new("high zoom");
     let view = View { origin: (0.0, 0.0), scale: 8.0, width: 1300, height: 1200 };
     assert!(uses_tiles(&view, &doc, false));
     assert!(!uses_tiles(&View { scale: 4.0, ..view.clone() }, &doc, false));
     assert!(!uses_tiles(&View { width: 900, height: 900, ..view }, &doc, false));
 
-    let mut session = figcraft_engine::Session::new();
+    let mut session = lizard_engine::Session::new();
     let shape = session.execute("shape.rectangle", &serde_json::json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap();
-    let id = figcraft_engine::params::id_of(&shape["id"]).unwrap();
+    let id = lizard_engine::params::id_of(&shape["id"]).unwrap();
     session.execute("effect.add", &serde_json::json!({"ids": [id], "type": "dropShadow"})).unwrap();
     let mut with_shadow = (*session.ds().unwrap().doc).clone();
     let node = with_shadow.node_mut(id).unwrap();
-    if let figcraft_doc::EffectKind::DropShadow(shadow) = &mut node.effects[0].kind {
+    if let lizard_doc::EffectKind::DropShadow(shadow) = &mut node.effects[0].kind {
         shadow.radius = 80.0;
     }
     assert!(!uses_tiles(&view, &with_shadow, false));
@@ -860,7 +860,7 @@ fn high_zoom_uses_regions_before_a_whole_view_effect_buffer_grows_large() {
 #[cfg(test)]
 #[test]
 fn zoom_changes_do_not_clone_the_retained_view_for_cancellation() {
-    let mut session = figcraft_engine::Session::new();
+    let mut session = lizard_engine::Session::new();
     let ds = session.ds().unwrap();
     let mut job = Job {
         doc: ds.doc.clone(),
@@ -894,7 +894,7 @@ fn zoom_changes_do_not_clone_the_retained_view_for_cancellation() {
 #[test]
 fn adjacent_tiles_match_one_vector_render_through_a_blur() {
     use serde_json::json;
-    let mut session = figcraft_engine::Session::new();
+    let mut session = lizard_engine::Session::new();
     let back = session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 2048, "height": 1024})).unwrap();
     let front = session.execute("shape.rectangle", &json!({"x": 980, "y": 160, "width": 120, "height": 600})).unwrap();
     let _ = back;
@@ -920,7 +920,7 @@ fn adjacent_tiles_match_one_vector_render_through_a_blur() {
         texture_view: None,
         texture_style: None,
     };
-    let reference = figcraft_render::render_view(&ds.doc, ds.page, &view, &figcraft_render::Options { lod: true, ..Default::default() }).unwrap();
+    let reference = lizard_render::render_view(&ds.doc, ds.page, &view, &lizard_render::Options { lod: true, ..Default::default() }).unwrap();
     let full = screen_image(&reference, ds.doc.color_profile);
     for x in [0.0, 512.0, 1024.0, 1536.0] {
         for y0 in [0.0, 512.0] {
@@ -939,7 +939,7 @@ fn adjacent_tiles_match_one_vector_render_through_a_blur() {
 #[cfg(test)]
 #[test]
 fn wide_pan_reuses_gpu_tile_images() {
-    let session = figcraft_engine::Session::new();
+    let session = lizard_engine::Session::new();
     let ds = session.ds().unwrap();
     let mut job = Job {
         doc: ds.doc.clone(),
@@ -977,9 +977,9 @@ fn wide_pan_reuses_gpu_tile_images() {
 #[test]
 fn wide_edit_replaces_only_the_affected_tile() {
     use serde_json::json;
-    let mut session = figcraft_engine::Session::new();
+    let mut session = lizard_engine::Session::new();
     let made = session.execute("shape.rectangle", &json!({"x": 80, "y": 80, "width": 100, "height": 100})).unwrap();
-    let id = figcraft_engine::params::id_of(&made["id"]).unwrap();
+    let id = lizard_engine::params::id_of(&made["id"]).unwrap();
     let ds = session.ds().unwrap();
     let mut job = Job {
         doc: ds.doc.clone(),

@@ -1,7 +1,7 @@
 //! Paint stacks owned by vector faces. An unset stack inherits the layer's fills.
 
-use figcraft_color::{Color, Paint, PaintKind};
-use figcraft_doc::NodeKind;
+use lizard_color::{Color, Paint, PaintKind};
+use lizard_doc::NodeKind;
 use serde_json::{Value, json};
 
 use super::{editing, indices};

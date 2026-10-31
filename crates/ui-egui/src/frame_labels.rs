@@ -6,10 +6,10 @@
 
 use egui::layers::ShapeIdx;
 use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Shape, Vec2, emath::Rot2, pos2, vec2};
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_geom::Point;
+use lizard_doc::{Document, NodeId, NodeKind};
+use lizard_geom::Point;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::canvas::status_badge;
 use crate::i18n::tr;
 use crate::theme::{COMPONENT, Tokens, regular, semibold};
@@ -89,7 +89,7 @@ fn turn(shape: &mut Shape, rot: Rot2, angle: f32, pivot: Pos2) {
 
 /// Draw the label of `id` (a top-level frame or a section); the area it covers on screen (its
 /// corners) for hit testing.
-pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: NodeId, selected: bool, hovered: bool) -> Option<[Pos2; 4]> {
+pub fn draw(app: &LizardApp, painter: &Painter, t: &Tokens, doc: &Document, id: NodeId, selected: bool, hovered: bool) -> Option<[Pos2; 4]> {
     let n = doc.node(id)?;
     let w = doc.world_transform(id);
     let at = |x: f64, y: f64| {
@@ -115,12 +115,9 @@ pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: Nod
         let hidden = n.hides_contents();
         let fill = n.fills.iter().rev().find(|p| p.visible).and_then(|p| p.solid_color());
         let bg = fill.map(|c| crate::theme::doc_c32(painter.ctx(), c.with_alpha(1.0))).unwrap_or(t.hover);
-        let colour = figcraft_color::Color::from_rgba8(bg.r(), bg.g(), bg.b(), 255);
-        let fg = if colour.contrast(figcraft_color::Color::WHITE) >= colour.contrast(figcraft_color::Color::BLACK) {
-            Color32::WHITE
-        } else {
-            Color32::BLACK
-        };
+        let colour = lizard_color::Color::from_rgba8(bg.r(), bg.g(), bg.b(), 255);
+        let fg =
+            if colour.contrast(lizard_color::Color::WHITE) >= colour.contrast(lizard_color::Color::BLACK) { Color32::WHITE } else { Color32::BLACK };
         let eye = if hidden { 16.0 } else { 0.0 };
         let galley = crate::bidi::name_galley(painter, &n.name, semibold(11.0), fg, (edge.len - 16.0 - eye).clamp(20.0, 480.0));
         let size = galley.size() + vec2(16.0 + eye, 10.0);
@@ -162,7 +159,7 @@ pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: Nod
 /// The field over a frame's or section's name label being renamed (`UiState::rename_label`, from a
 /// double-click on the label): Enter or a click elsewhere renames the layer, Escape keeps the name.
 /// The rename ends when the field lets go of the keyboard or the label is gone.
-pub fn rename_field(app: &mut FigApp, ui: &mut egui::Ui) {
+pub fn rename_field(app: &mut LizardApp, ui: &mut egui::Ui) {
     let Some(r) = app.ui.rename_label else { return };
     let quad = app.session.tool.labels.iter().find(|(i, _)| *i == r.id).map(|(_, q)| q.map(|p| app.to_screen(p.x, p.y)));
     let name = app.session.doc().ok().and_then(|d| d.node(r.id)).map(|n| n.name.clone());

@@ -4,11 +4,11 @@
 //! was there before as a text layer instead of the copied layers.
 
 use egui::{Event, Key, Modifiers, OutputCommand, Pos2, RawInput, Rect, vec2};
-use figcraft_doc::NodeKind;
-use figcraft_engine::Session;
+use lizard_doc::NodeKind;
+use lizard_engine::Session;
 use serde_json::json;
 
-use crate::{FigApp, Services, egui_copy_png, egui_copy_text};
+use crate::{LizardApp, Services, egui_copy_png, egui_copy_text};
 
 /// The browser shell's clipboard: writes go out as egui output commands.
 struct Browser(egui::Context);
@@ -24,7 +24,7 @@ impl Services for Browser {
 
 struct Page {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
     /// The system clipboard's text.
     clipboard: String,
@@ -36,7 +36,7 @@ impl Page {
         let r = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 100, "height": 50})).unwrap();
         s.execute("select.set", &json!({"ids": [r["id"]]})).unwrap();
         let ctx = egui::Context::default();
-        let app = FigApp::new(s, Box::new(Browser(ctx.clone())));
+        let app = LizardApp::new(s, Box::new(Browser(ctx.clone())));
         let mut p = Self { ctx, app, time: 0.0, clipboard: "text copied in another app".into() };
         for _ in 0..3 {
             p.frame(vec![]);
@@ -50,7 +50,7 @@ impl Page {
     }
 
     /// One frame that runs `then` after the app's own UI (a menu item clicked during the frame).
-    fn frame_then(&mut self, events: Vec<Event>, then: impl FnOnce(&mut FigApp)) -> Vec<OutputCommand> {
+    fn frame_then(&mut self, events: Vec<Event>, then: impl FnOnce(&mut LizardApp)) -> Vec<OutputCommand> {
         self.time += 1.0 / 60.0;
         let input =
             RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(self.time), events, ..Default::default() };
@@ -97,13 +97,13 @@ impl Page {
     }
 
     /// Copy the selected rectangle A (made red) and its properties, then select a new rectangle B.
-    fn copy_a_select_b(&mut self) -> figcraft_doc::NodeId {
+    fn copy_a_select_b(&mut self) -> lizard_doc::NodeId {
         self.app.session.execute("fill.set", &json!({"color": "#e53935"})).unwrap();
         self.copy();
         self.app.session.execute("edit.copyProperties", &json!({})).unwrap();
         let b = self.app.session.execute("shape.rectangle", &json!({"x": 400, "y": 250, "width": 100, "height": 50})).unwrap();
         self.app.session.execute("select.set", &json!({"ids": [b["id"]]})).unwrap();
-        figcraft_doc::NodeId(b["id"].as_u64().unwrap())
+        lizard_doc::NodeId(b["id"].as_u64().unwrap())
     }
 
     fn count(&self, kind: fn(&NodeKind) -> bool) -> usize {
@@ -187,7 +187,7 @@ fn alt_cmd_v_pastes_properties_once_and_no_text() {
         p.chord(Modifiers::ALT);
         assert_eq!(p.count(rect), 2, "foreign text {foreign}: no layer pasted");
         assert_eq!(p.count(text), 0, "foreign text {foreign}: the paste event pasted nothing");
-        let fill = figcraft_engine::inspect::node_json(p.app.session.doc().unwrap(), b, 0)["fills"][0]["color"].clone();
+        let fill = lizard_engine::inspect::node_json(p.app.session.doc().unwrap(), b, 0)["fills"][0]["color"].clone();
         assert_eq!(fill, "#E53935", "foreign text {foreign}: B took A's fill");
     }
 }

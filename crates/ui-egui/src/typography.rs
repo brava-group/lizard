@@ -8,10 +8,10 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::*;
+use lizard_doc::*;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
 use crate::right::{common, menu_popup, row};
@@ -64,16 +64,16 @@ pub(crate) fn target_styles(doc: &Document, ids: &[NodeId], range: Option<(NodeI
     out
 }
 
-pub fn typography(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn typography(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids: Vec<NodeId> = sel.iter().copied().filter(|i| matches!(doc.node(*i).map(|n| &n.kind), Some(NodeKind::Text(_)))).collect();
     if ids.is_empty() {
         return;
     }
     // While editing a range, character edits apply to it.
-    let range = figcraft_engine::textedit::selected_range(&app.session);
+    let range = lizard_engine::textedit::selected_range(&app.session);
     let editing = range.is_some();
     let styles = target_styles(doc, &ids, range);
-    let apply_style = |app: &mut FigApp, key: &str, v: Value| commit_text(app, &ids, range, json!({ key: v }));
+    let apply_style = |app: &mut LizardApp, key: &str, v: Value| commit_text(app, &ids, range, json!({ key: v }));
 
     let hdr = widgets::section_header(ui, tr("Typography"), &[(Icon::Styles, tr("Text styles"))], false);
     if hdr == Some(0) {
@@ -92,12 +92,12 @@ pub fn typography(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
 
 /// Text on a path: where the text starts, which side it runs on, and taking it off the path; or,
 /// with a text and a path selected, putting the text on the path.
-fn path_row(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], ids: &[NodeId]) {
+fn path_row(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], ids: &[NodeId]) {
     let paths: Option<Vec<(f64, bool)>> =
         ids.iter().map(|i| doc.node(*i).and_then(|n| n.kind.text()).and_then(|t| t.path.as_ref()).map(|p| (p.start(), p.flip))).collect();
     let Some(paths) = paths else {
         let other = sel.iter().find(|i| !ids.contains(i)).and_then(|i| doc.node(*i));
-        if ids.len() == 1 && sel.len() == 2 && other.is_some_and(|n| figcraft_doc::geometry::stroke_geometry(n).is_some()) {
+        if ids.len() == 1 && sel.len() == 2 && other.is_some_and(|n| lizard_doc::geometry::stroke_geometry(n).is_some()) {
             row(ui, 32.0, |ui| {
                 if widgets::button(ui, tr("Put text on path"), false, true).clicked() {
                     app.run("text.onPath", json!({ "ids": sel }));
@@ -128,7 +128,7 @@ fn path_row(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], ids: 
 
 /// Set character `props` on the selected chars of the text being edited, else on whole layers
 /// (through `node.set`, which records overrides inside instances).
-fn commit_text(app: &mut FigApp, ids: &[NodeId], range: Option<(NodeId, usize, usize)>, props: Value) {
+fn commit_text(app: &mut LizardApp, ids: &[NodeId], range: Option<(NodeId, usize, usize)>, props: Value) {
     match range {
         Some((_, a, b)) if a != b => {
             app.run("text.style", text_style_params(ids, range, props));
@@ -152,9 +152,16 @@ fn text_style_params(ids: &[NodeId], range: Option<(NodeId, usize, usize)>, mut 
 }
 
 /// The font rows: family, style and size, line height and letter spacing.
-fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle], editing: bool, apply_style: &dyn Fn(&mut FigApp, &str, Value)) {
+fn font_rows(
+    app: &mut LizardApp,
+    ui: &mut Ui,
+    ids: &[NodeId],
+    styles: &[TextStyle],
+    editing: bool,
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
+) {
     let t = Tokens::get(ui.ctx());
-    let range = figcraft_engine::textedit::selected_range(&app.session);
+    let range = lizard_engine::textedit::selected_range(&app.session);
 
     // Font family.
     let family = uniform(styles, |s| s.font_family.clone());
@@ -198,7 +205,7 @@ fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle]
         let fam = family.clone();
         menu_popup(&resp).width(200.0).show(|ui| match &fam {
             Some(fam) => {
-                let list = figcraft_text::family_styles(fam);
+                let list = lizard_text::family_styles(fam);
                 if list.is_empty() {
                     widgets::label(ui, tr("Font not installed"), t.text_tertiary);
                 }
@@ -269,12 +276,12 @@ fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle]
 
 /// Paragraph spacing, resizing, alignment and the Type settings popover.
 fn paragraph_rows(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     ids: &[NodeId],
     styles: &[TextStyle],
-    apply_style: &dyn Fn(&mut FigApp, &str, Value),
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
 ) {
     // Alignment + Type settings.
     let align = common(doc, ids, |n| n.kind.text().map(|t| (t.align_h, t.align_v))).flatten();
@@ -339,7 +346,7 @@ fn menu_item_hover(ui: &mut Ui, label: &str) -> (bool, bool) {
 
 /// Run `cmd` as a live preview while scrubbing; the gesture becomes one undo step when `done`.
 /// (While text is edited, run commands directly: the editing session already groups undo.)
-pub(crate) fn live(app: &mut FigApp, label: &str, cmd: &str, params: Value, done: bool) {
+pub(crate) fn live(app: &mut LizardApp, label: &str, cmd: &str, params: Value, done: bool) {
     let _ = app.session.begin_interaction(label);
     if let Err(e) = app.session.execute(cmd, &params) {
         app.toast(e.to_string());
@@ -350,9 +357,9 @@ pub(crate) fn live(app: &mut FigApp, label: &str, cmd: &str, params: Value, done
 }
 
 /// The variable font the shown styles use (one family, one variable face), if any.
-fn variable_face(styles: &[TextStyle]) -> Option<Arc<figcraft_text::Face>> {
+fn variable_face(styles: &[TextStyle]) -> Option<Arc<lizard_text::Face>> {
     let family = uniform(styles, |s| s.font_family.clone())?;
-    let face = figcraft_text::find_face(&family, &styles.first()?.font_style)?;
+    let face = lizard_text::find_face(&family, &styles.first()?.font_style)?;
     (face.is_variable() && face.family.eq_ignore_ascii_case(&family)).then_some(face)
 }
 
@@ -567,7 +574,7 @@ pub(crate) fn text_style_settings(ui: &mut Ui, style: &TextStyle, tab: usize, bu
         }
         2 => {
             ui.set_min_height(TYPE_SETTINGS_BASIC_HEIGHT);
-            if let Some(face) = figcraft_text::find_face(&style.font_family, &style.font_style).filter(|face| face.is_variable()) {
+            if let Some(face) = lizard_text::find_face(&style.font_family, &style.font_style).filter(|face| face.is_variable()) {
                 let values = face.axis_values(style);
                 egui::Frame::NONE.inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
                     ui.set_width(208.0);
@@ -614,12 +621,12 @@ fn dialog_row<R>(ui: &mut Ui, label: &str, label_width: f32, text_width: f32, ad
 }
 
 fn type_settings_basics(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     ids: &[NodeId],
     styles: &[TextStyle],
-    apply_style: &dyn Fn(&mut FigApp, &str, Value),
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
 ) {
     use crate::primitives::{ControlWidth, NumberField, Segment, SegmentedControl, Select, SelectVariant};
 
@@ -716,7 +723,7 @@ fn type_settings_basics(
             app.set_props(ids, json!({"leadingTrim": if index == 1 { "capHeight" } else { "none" }}));
         }
     });
-    let range = figcraft_engine::textedit::selected_range(&app.session);
+    let range = lizard_engine::textedit::selected_range(&app.session);
     let list = common(doc, ids, |node| {
         node.kind.text().and_then(|text| {
             let (start, end) = range.filter(|range| range.0 == node.id).map_or((0, text.char_count()), |(_, start, end)| (start, end));
@@ -776,12 +783,12 @@ fn type_settings_basics(
 }
 
 fn type_settings(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     ids: &[NodeId],
     styles: &[TextStyle],
-    apply_style: &dyn Fn(&mut FigApp, &str, Value),
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
     tab: usize,
 ) {
     match tab {
@@ -801,19 +808,19 @@ fn type_settings(
 /// The Details body is one scrollable stack of the groups in the reference design. Every
 /// interactive field is a primitive; unsupported OpenType features stay visible but disabled.
 fn type_settings_details(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     ids: &[NodeId],
     styles: &[TextStyle],
-    apply_style: &dyn Fn(&mut FigApp, &str, Value),
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
 ) {
     use crate::primitives::{ControlWidth, NumberField, Segment, SegmentedControl};
 
     ui.set_width(240.0);
     ui.spacing_mut().item_spacing.y = 0.0;
     let face = uniform(styles, |style| (style.font_family.clone(), style.font_style.clone()))
-        .and_then(|(family, style)| figcraft_text::find_face(&family, &style));
+        .and_then(|(family, style)| lizard_text::find_face(&family, &style));
     let face = face.as_deref();
 
     details_section(ui, tr("Indentation"), |ui| {
@@ -934,11 +941,11 @@ fn details_toggle(ui: &mut Ui, label: &str, value: Option<bool>, supported: bool
 }
 
 fn details_feature(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     ids: &[NodeId],
-    face: Option<&figcraft_text::Face>,
+    face: Option<&lizard_text::Face>,
     tag: &str,
     label: &str,
     default_on: bool,
@@ -966,7 +973,14 @@ fn field_row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui, f32) -> R) -
 }
 
 /// How the decoration looks: style, thickness, (underlines) offset and skip ink, and colour.
-fn decoration_details(app: &mut FigApp, ui: &mut Ui, styles: &[TextStyle], apply_style: &dyn Fn(&mut FigApp, &str, Value), underline: bool, w: f32) {
+fn decoration_details(
+    app: &mut LizardApp,
+    ui: &mut Ui,
+    styles: &[TextStyle],
+    apply_style: &dyn Fn(&mut LizardApp, &str, Value),
+    underline: bool,
+    w: f32,
+) {
     caption(ui, tr("Decoration style"));
     let active = uniform(styles, |s| s.look().style as usize);
     let items = [(tr("Solid"), tr_noop("Solid")), (tr("Dotted"), tr_noop("Dotted")), (tr("Wavy"), tr_noop("Wavy"))];
@@ -1025,7 +1039,7 @@ fn decoration_details(app: &mut FigApp, ui: &mut Ui, styles: &[TextStyle], apply
             let s = s.trim();
             if s.is_empty() || s.eq_ignore_ascii_case("auto") {
                 apply_style(app, "textDecorationColor", json!("auto"));
-            } else if let Some(c) = figcraft_color::Color::parse_css(s).or_else(|| figcraft_color::Color::from_hex(s)) {
+            } else if let Some(c) = lizard_color::Color::parse_css(s).or_else(|| lizard_color::Color::from_hex(s)) {
                 apply_style(app, "textDecorationColor", json!(format!("#{}", c.to_hex())));
             } else {
                 app.toast(trf("{value} isn't a colour", &[("value", &s)]));
@@ -1038,15 +1052,15 @@ fn decoration_details(app: &mut FigApp, ui: &mut Ui, styles: &[TextStyle], apply
 /// axis (values the style name implies show until changed; "Mixed" when the shown styles differ).
 /// The canvas previews a hovered instance and a dragged slider or field live; letting go commits
 /// one undo step, Escape cancels.
-fn variable_axes(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle], face: &figcraft_text::Face) {
+fn variable_axes(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle], face: &lizard_text::Face) {
     let t = Tokens::get(ui.ctx());
-    let range = figcraft_engine::textedit::selected_range(&app.session);
+    let range = lizard_engine::textedit::selected_range(&app.session);
     widgets::label(ui, &face.family, t.text_secondary);
     named_instances(app, ui, ids, range, styles, face);
     // Each style's axis values; a style drawn by another face (e.g. a separate italic file) is mixed.
     let per_style: Vec<Option<Vec<f64>>> = styles
         .iter()
-        .map(|s| figcraft_text::find_face(&s.font_family, &s.font_style).filter(|f| f.id == face.id).map(|_| face.axis_values(s)))
+        .map(|s| lizard_text::find_face(&s.font_family, &s.font_style).filter(|f| f.id == face.id).map(|_| face.axis_values(s)))
         .collect();
     let w = ui.available_width();
     let field_w = 52.0;
@@ -1135,12 +1149,12 @@ fn variable_axes(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextSt
 /// The variable font's named instances as a menu: the one the text shows ("Custom" once an axis
 /// moved), hovering one previews it on the canvas, clicking applies it (its custom axis values go).
 fn named_instances(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     range: Option<(NodeId, usize, usize)>,
     styles: &[TextStyle],
-    face: &figcraft_text::Face,
+    face: &lizard_text::Face,
 ) {
     if face.instances.is_empty() {
         return;
@@ -1179,14 +1193,14 @@ fn named_instances(
 }
 
 /// Axis values snap to whole numbers on wide axes (weight, width…) and tenths on narrow ones.
-fn round_axis(axis: &figcraft_text::Axis, v: f64) -> f64 {
+fn round_axis(axis: &lizard_text::Axis, v: f64) -> f64 {
     if axis.max - axis.min > 20.0 { v.round() } else { (v * 10.0).round() / 10.0 }
 }
 
 /// A horizontal slider over an axis's range with a tick at its default. `value` None = mixed.
 /// Returns the new value (None = double-click: back to the style's value) and whether the
 /// gesture ended.
-fn axis_slider(ui: &mut Ui, id: Id, axis: &figcraft_text::Axis, value: Option<f64>, width: f32) -> Option<(Option<f64>, bool)> {
+fn axis_slider(ui: &mut Ui, id: Id, axis: &lizard_text::Axis, value: Option<f64>, width: f32) -> Option<(Option<f64>, bool)> {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
     let resp = ui.interact(rect, id, Sense::click_and_drag());
@@ -1336,10 +1350,17 @@ impl SpacingEdit {
 
 /// Keep typed unit parsing and character-range targeting; only a scrub outside a text-editing
 /// session needs its own interaction. The editing session already owns its undo step.
-fn commit_spacing(app: &mut FigApp, ids: &[NodeId], range: Option<(NodeId, usize, usize)>, field: &SpacingField, edit: &SpacingEdit, value: Value) {
+fn commit_spacing(
+    app: &mut LizardApp,
+    ids: &[NodeId],
+    range: Option<(NodeId, usize, usize)>,
+    field: &SpacingField,
+    edit: &SpacingEdit,
+    value: Value,
+) {
     let props = json!({field.field: value});
     match edit {
-        SpacingEdit::Scrub(_, done) if figcraft_engine::textedit::selected_range(&app.session).is_none() => {
+        SpacingEdit::Scrub(_, done) if lizard_engine::textedit::selected_range(&app.session).is_none() => {
             live(app, field.tip, "node.set", json!({"ids": ids, "props": props}), *done);
         }
         _ => commit_text(app, ids, range, props),
@@ -1403,7 +1424,7 @@ pub(crate) fn style_letter_spacing_field(ui: &mut Ui, id: Id, style: &TextStyle,
 /// chip when bound, else the editable field with a variable button on hover. While a text range is
 /// selected it only takes values. Returns a typed commit or a live scrub.
 fn spacing_field(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     ids: &[NodeId],
     f: &SpacingField,
@@ -1487,7 +1508,7 @@ fn line_height_scrub_start(line_height: Option<LineHeight>, style: Option<&TextS
         LineHeight::Percent(percent) => Some(percent),
         LineHeight::Pixels(px) => (style.font_size.is_finite() && style.font_size > 0.0).then_some(px / style.font_size * 100.0),
         LineHeight::Auto => {
-            let ratio = figcraft_text::find_face(&style.font_family, &style.font_style)
+            let ratio = lizard_text::find_face(&style.font_family, &style.font_style)
                 .map(|face| ((face.ascent + face.descent + face.line_gap.max(0.0)) / face.upem).max(0.5))
                 .unwrap_or(1.2);
             Some(ratio * 100.0)
@@ -1559,7 +1580,7 @@ pub(crate) fn letter_spacing_of(v: &Value) -> Option<LetterSpacing> {
 
 // ---- Font picker ----
 
-const RECENT_KEY: &str = "figcraft_recent_fonts";
+const RECENT_KEY: &str = "lizard_recent_fonts";
 const ROW: f32 = 26.0;
 /// The font list's tallest (it scrolls past that).
 const LIST_HEIGHT: f32 = 380.0;
@@ -1668,7 +1689,7 @@ fn font_picker_impl(ui: &mut Ui, current: Option<&str>, just_opened: bool, panel
     };
     let query_active = ui.data(|d| d.get_temp::<bool>(active_id)).unwrap_or(true);
     let ql = if query_active { q.trim().to_lowercase() } else { String::new() };
-    let all = figcraft_text::family_names();
+    let all = lizard_text::family_names();
     let recent = recent_families(ui.ctx());
     let matches: Vec<String> = all
         .iter()
@@ -1860,8 +1881,8 @@ mod tests {
     #[test]
     fn arrow_keys_step_through_the_families_and_enter_picks() {
         // #345
-        figcraft_text::scan_system_fonts();
-        let all = figcraft_text::family_names();
+        lizard_text::scan_system_fonts();
+        let all = lizard_text::family_names();
         if all.len() < 3 {
             eprintln!("fewer than three font families; skipping");
             return;
@@ -1883,7 +1904,7 @@ mod tests {
 
     #[test]
     fn axis_values_round_by_axis_width() {
-        let axis = |min: f64, max: f64| figcraft_text::Axis { tag: "test".into(), name: "Test".into(), min, default: min, max, hidden: false };
+        let axis = |min: f64, max: f64| lizard_text::Axis { tag: "test".into(), name: "Test".into(), min, default: min, max, hidden: false };
         assert_eq!(round_axis(&axis(100.0, 900.0), 456.6), 457.0);
         assert_eq!(round_axis(&axis(-10.0, 0.0), -4.26), -4.3);
         assert_eq!(round_axis(&axis(0.0, 1.0), 0.04), 0.0);

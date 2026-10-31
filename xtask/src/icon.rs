@@ -3,16 +3,16 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use figcraft_doc::NodeKind;
-use figcraft_render::{Pixmap, View};
 use image::imageops::FilterType;
+use lizard_doc::NodeKind;
+use lizard_render::{Pixmap, View};
 
-const SOURCE: &str = "assets/app-icon/Lizard-new-icon.figcraft";
+const SOURCE: &str = "assets/app-icon/Lizard-new-icon.lizard";
 const MASTER_SIZE: u32 = 1024;
 const MASTER_FRAME: &str = "Lizard New Icon";
 
 fn icon_png(root: &Path) -> Result<Vec<u8>, String> {
-    let (doc, warnings) = figcraft_format::load_file(&root.join(SOURCE)).map_err(|e| e.to_string())?;
+    let (doc, warnings) = lizard_format::load_file(&root.join(SOURCE)).map_err(|e| e.to_string())?;
     if !warnings.is_empty() {
         return Err(format!("icon source has import warnings: {}", warnings.join("; ")));
     }
@@ -33,8 +33,8 @@ fn icon_png(root: &Path) -> Result<Vec<u8>, String> {
     // The owner-designed outer frame already contains the 824 px tile and its 100 px margins.
     let view = View { origin: (xf[4], xf[5]), scale: 1.0, width: MASTER_SIZE, height: MASTER_SIZE };
     let mut pixmap = Pixmap::new(MASTER_SIZE, MASTER_SIZE).ok_or("icon canvas could not be created")?;
-    figcraft_render::render_nodes_into(&doc, &[frame.id], &view, &mut pixmap);
-    figcraft_render::encode_png(&pixmap)
+    lizard_render::render_nodes_into(&doc, &[frame.id], &view, &mut pixmap);
+    lizard_render::encode_png(&pixmap)
 }
 
 fn resized_png(master: &image::DynamicImage, size: u32) -> Result<Vec<u8>, String> {
@@ -54,11 +54,11 @@ fn generate_inner(root: &Path) -> Result<(), String> {
     }
     for size in [16u32, 32, 48, 64, 128, 256, 512, 1024] {
         let png = pngs.get(&size).ok_or("icon size missing")?;
-        std::fs::write(dir.join(format!("figcraft-{size}.png")), png).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("lizard-{size}.png")), png).map_err(|e| e.to_string())?;
         if size <= 512 {
             let hicolor = dir.join(format!("hicolor/{size}x{size}/apps"));
             std::fs::create_dir_all(&hicolor).map_err(|e| e.to_string())?;
-            std::fs::write(hicolor.join("ai.storyteller.figcraft.png"), png).map_err(|e| e.to_string())?;
+            std::fs::write(hicolor.join("com.brava.lizard.png"), png).map_err(|e| e.to_string())?;
         }
     }
     let sizes = [16u32, 20, 24, 32, 40, 48, 64, 128, 256];
@@ -75,7 +75,7 @@ fn generate_inner(root: &Path) -> Result<(), String> {
     for size in sizes {
         ico.extend_from_slice(pngs.get(&size).ok_or("ICO size missing")?);
     }
-    std::fs::write(dir.join("figcraft.ico"), ico).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("lizard.ico"), ico).map_err(|e| e.to_string())?;
     Ok(())
 }
 

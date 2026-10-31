@@ -3,7 +3,7 @@
 //! text, all on the prototype's own copy: the file, its history and its timers stay as they are.
 
 use egui::{Event, Key, PointerButton, Pos2};
-use figcraft_doc::NodeId;
+use lizard_doc::NodeId;
 use serde_json::json;
 
 use crate::present_tests::Ui as Player;
@@ -55,7 +55,7 @@ fn a_presented_widget_takes_hover_typing_and_timers_on_its_own_copy() {
     // The file, its history and its timers are as they were, and restarting starts over.
     let ds = u.app.session.ds().unwrap();
     assert_eq!((state(&ds.doc, w), ds.history.undo.len()), (r#"{"n":1}"#.to_string(), 3));
-    assert!(figcraft_engine::widgets::next_timer(&u.app.session).is_none() && u.app.ui.toast.is_none(), "{:?}", u.app.ui.toast);
+    assert!(lizard_engine::widgets::next_timer(&u.app.session).is_none() && u.app.ui.toast.is_none(), "{:?}", u.app.ui.toast);
     press(&mut u, "Soon");
     u.frame(key(Key::R));
     u.frames(12, Vec::new);

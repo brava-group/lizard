@@ -2,9 +2,9 @@ use serde_json::json;
 
 use super::*;
 use crate::params::id_of;
-use figcraft_doc::{Style, StyleRun, TextStyle};
+use lizard_doc::{Style, StyleRun, TextStyle};
 
-fn text(s: &mut Session, family: &str) -> figcraft_doc::NodeId {
+fn text(s: &mut Session, family: &str) -> lizard_doc::NodeId {
     let id = id_of(&s.execute("text.create", &json!({"text": "Hamburgefonstiv", "x": 0, "y": 0})).unwrap()["id"]).unwrap();
     if let NodeKind::Text(t) = &mut s.doc_mut().unwrap().get_mut(id).unwrap().kind {
         t.style.font_family = family.into();
@@ -19,8 +19,8 @@ fn families(s: &mut Session) -> Vec<(String, u64)> {
 
 /// An installed family (built in, or found by the system scan), if this machine has any.
 fn installed() -> Option<String> {
-    figcraft_text::scan_system_fonts();
-    figcraft_text::family_names().into_iter().next()
+    lizard_text::scan_system_fonts();
+    lizard_text::family_names().into_iter().next()
 }
 
 #[test]
@@ -74,9 +74,9 @@ fn installed_families_are_not_listed() {
 
 #[test]
 fn a_family_found_only_by_the_system_scan_is_not_missing() {
-    figcraft_text::scan_system_fonts();
-    let embedded: Vec<String> = figcraft_text::CRAFT_FONTS.iter().map(|f| f.family.to_lowercase()).collect();
-    let Some(family) = figcraft_text::family_names().into_iter().find(|f| !embedded.contains(&f.to_lowercase())) else {
+    lizard_text::scan_system_fonts();
+    let embedded: Vec<String> = lizard_text::CRAFT_FONTS.iter().map(|f| f.family.to_lowercase()).collect();
+    let Some(family) = lizard_text::family_names().into_iter().find(|f| !embedded.contains(&f.to_lowercase())) else {
         eprintln!("skipped: no system fonts on this machine");
         return;
     };
@@ -126,17 +126,17 @@ fn needs_an_open_document() {
 }
 
 /// Make `id`'s box stale, as if it was measured in another font: `dw` wider than its content.
-fn stale(s: &mut Session, id: figcraft_doc::NodeId, dw: f64) -> f64 {
+fn stale(s: &mut Session, id: lizard_doc::NodeId, dw: f64) -> f64 {
     let doc = s.doc_mut().unwrap();
     let n = doc.get_mut(id).unwrap();
-    let want = figcraft_text::auto_size(n).unwrap().0;
+    let want = lizard_text::auto_size(n).unwrap().0;
     n.width = want + dw;
     doc.take_dirty();
     want
 }
 
 /// The width of layer `id`.
-fn width(s: &Session, id: figcraft_doc::NodeId) -> f64 {
+fn width(s: &Session, id: lizard_doc::NodeId) -> f64 {
     s.doc().unwrap().node(id).unwrap().width
 }
 
@@ -153,7 +153,7 @@ fn refit_measures_stale_text_boxes_again() {
     let b = text(&mut s, "Lizard Refit B");
     let fixed = text(&mut s, "Lizard Refit A");
     if let NodeKind::Text(t) = &mut s.doc_mut().unwrap().get_mut(fixed).unwrap().kind {
-        t.auto_resize = figcraft_doc::TextAutoResize::None;
+        t.auto_resize = lizard_doc::TextAutoResize::None;
     }
     s.execute("select.none", &json!({})).unwrap();
     let want_a = stale(&mut s, a, -30.0);
@@ -204,7 +204,7 @@ fn fonts_load_from_files_and_rescans_report_new_families() {
     assert!(s.execute("text.loadFont", &json!({"data": "bm90IGEgZm9udA=="})).is_err(), "not a font file");
     assert!(s.execute("text.loadFont", &json!({"data": "%%%"})).is_err());
     assert!(s.execute("text.loadFont", &json!({"path": "no-such-dir/x.ttf"})).is_err());
-    if let Some(f) = figcraft_text::CRAFT_FONTS.first() {
+    if let Some(f) = lizard_text::CRAFT_FONTS.first() {
         use base64::Engine as _;
         let data = base64::engine::general_purpose::STANDARD.encode(f.bytes);
         let r = s.execute("text.loadFont", &json!({"data": data})).unwrap();

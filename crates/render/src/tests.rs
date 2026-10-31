@@ -1,6 +1,6 @@
 use super::*;
-use figcraft_color::{Color, ColorStop, Gradient, GradientKind, Paint};
-use figcraft_doc::{Effect, EffectKind, NodeKind, Shadow, StrokeAlign, TextData};
+use lizard_color::{Color, ColorStop, Gradient, GradientKind, Paint};
+use lizard_doc::{Effect, EffectKind, NodeKind, Shadow, StrokeAlign, TextData};
 
 fn px(p: &Pixmap, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * p.width() + x) * 4) as usize;
@@ -8,8 +8,8 @@ fn px(p: &Pixmap, x: u32, y: u32) -> [u8; 4] {
     [d[0], d[1], d[2], d[3]]
 }
 
-fn doc_with_rect(fill: Color) -> (figcraft_doc::Document, figcraft_doc::NodeId, figcraft_doc::NodeId) {
-    let mut d = figcraft_doc::Document::new("t");
+fn doc_with_rect(fill: Color) -> (lizard_doc::Document, lizard_doc::NodeId, lizard_doc::NodeId) {
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let r = d.create(p, NodeKind::Rectangle, "R", 10.0, 10.0, 50.0, 30.0).unwrap();
     d.get_mut(r).unwrap().fills = vec![Paint::solid(fill)];
@@ -30,7 +30,7 @@ fn solid_rect_and_page_background() {
 
 #[test]
 fn vector_faces_render_their_own_fill_without_recoloring_the_layer() -> Result<(), &'static str> {
-    use figcraft_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
+    use lizard_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
     let mut network = VectorNetwork::default();
     for (x0, y0, size) in [(0.0, 0.0, 60.0), (20.0, 20.0, 20.0)] {
         let start = network.vertices.len();
@@ -47,7 +47,7 @@ fn vector_faces_render_their_own_fill_without_recoloring_the_layer() -> Result<(
         Region { loops: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]], winding: WindingRule::EvenOdd, fills: None },
         Region { loops: vec![vec![4, 5, 6, 7]], winding: WindingRule::NonZero, fills: Some(vec![Paint::solid(red)]) },
     ];
-    let mut doc = figcraft_doc::Document::new("region colors");
+    let mut doc = lizard_doc::Document::new("region colors");
     let page = doc.first_page().ok_or("missing page")?;
     let id = doc.create(page, NodeKind::Vector { network }, "Vector", 10.0, 10.0, 60.0, 60.0).map_err(|_| "missing vector")?;
     doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(blue)];
@@ -59,14 +59,14 @@ fn vector_faces_render_their_own_fill_without_recoloring_the_layer() -> Result<(
 
 #[test]
 fn painted_face_with_unassigned_edges_renders_the_whole_face() -> Result<(), &'static str> {
-    use figcraft_doc::{Segment, VectorNetwork, Vertex};
+    use lizard_doc::{Segment, VectorNetwork, Vertex};
     let mut network = VectorNetwork::default();
     let points = [(260.0, 100.0), (260.0, 180.0), (0.0, 180.0), (0.0, 0.0), (100.0, 100.0), (180.0, 180.0), (0.0, 100.0)];
     let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
     network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
     network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
-    assert_eq!(network.paint(figcraft_geom::Point::new(40.0, 150.0)), Some(true));
-    let mut doc = figcraft_doc::Document::new("face plus open edges");
+    assert_eq!(network.paint(lizard_geom::Point::new(40.0, 150.0)), Some(true));
+    let mut doc = lizard_doc::Document::new("face plus open edges");
     let page = doc.first_page().ok_or("missing page")?;
     let id = doc.create(page, NodeKind::Vector { network }, "Vector", 0.0, 0.0, 260.0, 180.0).map_err(|_| "missing vector")?;
     doc.get_mut(id).map_err(|_| "missing node")?.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
@@ -84,7 +84,7 @@ fn painted_face_with_unassigned_edges_renders_the_whole_face() -> Result<(), &'s
     node.fills[0].opacity = 1.0;
     let NodeKind::Vector { network } = &mut node.kind else { return Err("missing vector") };
     network.materialize_faces();
-    let top = network.region_at(figcraft_geom::Point::new(20.0, 60.0)).ok_or("missing top face")?;
+    let top = network.region_at(lizard_geom::Point::new(20.0, 60.0)).ok_or("missing top face")?;
     network.regions[top].fills = Some(Vec::new());
     let without_top = render_view(&doc, page, &view(280, 200), &Options::default()).ok_or("render failed")?;
     assert_eq!(px(&without_top, 20, 60), [0xF5, 0xF5, 0xF5, 255], "Delete removes only the selected fill");
@@ -96,10 +96,10 @@ fn painted_face_with_unassigned_edges_renders_the_whole_face() -> Result<(), &'s
 #[test]
 fn curve_handle_y_changes_the_cached_outline_key() {
     use std::hash::Hasher;
-    let mut first = figcraft_geom::BezPath::new();
+    let mut first = lizard_geom::BezPath::new();
     first.move_to((0.0, 0.0));
     first.curve_to((10.0, 20.0), (30.0, 40.0), (50.0, 60.0));
-    let mut second = figcraft_geom::BezPath::new();
+    let mut second = lizard_geom::BezPath::new();
     second.move_to((0.0, 0.0));
     second.curve_to((10.0, 20.0), (30.0, 41.0), (50.0, 60.0));
     let mut a = std::collections::hash_map::DefaultHasher::new();
@@ -111,7 +111,7 @@ fn curve_handle_y_changes_the_cached_outline_key() {
 
 #[test]
 fn outside_stroke_of_nested_painted_faces_does_not_cross_the_inner_face() -> Result<(), &'static str> {
-    use figcraft_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
+    use lizard_doc::{Region, Segment, VectorNetwork, Vertex, WindingRule};
     let mut network = VectorNetwork::default();
     for (x0, y0, size) in [(0.0, 0.0, 60.0), (20.0, 20.0, 20.0)] {
         let first_vertex = network.vertices.len();
@@ -128,7 +128,7 @@ fn outside_stroke_of_nested_painted_faces_does_not_cross_the_inner_face() -> Res
         Region { loops: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]], winding: WindingRule::EvenOdd, fills: None },
         Region { loops: vec![vec![4, 5, 6, 7]], winding: WindingRule::NonZero, fills: Some(vec![Paint::solid(black)]) },
     ];
-    let mut doc = figcraft_doc::Document::new("outside stroke");
+    let mut doc = lizard_doc::Document::new("outside stroke");
     let page = doc.first_page().ok_or("missing page")?;
     let id = doc.create(page, NodeKind::Vector { network }, "Vector", 10.0, 10.0, 60.0, 60.0).map_err(|_| "missing vector")?;
     let node = doc.get_mut(id).map_err(|_| "missing node")?;
@@ -152,9 +152,9 @@ fn outside_stroke_of_nested_painted_faces_does_not_cross_the_inner_face() -> Res
 
 #[test]
 fn open_vector_with_fill_paints_area_without_closing_stroke() -> Result<(), &'static str> {
-    use figcraft_doc::VectorNetwork;
-    use figcraft_geom::Point;
-    let mut doc = figcraft_doc::Document::new("open vector fill");
+    use lizard_doc::VectorNetwork;
+    use lizard_geom::Point;
+    let mut doc = lizard_doc::Document::new("open vector fill");
     let page = doc.first_page().ok_or("missing page")?;
     let network = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(30.0, 0.0), Point::new(30.0, 30.0), Point::new(0.0, 30.0)], false);
     let id = doc.create(page, NodeKind::Vector { network }, "Open", 10.0, 10.0, 30.0, 30.0).map_err(|_| "missing vector")?;
@@ -162,16 +162,16 @@ fn open_vector_with_fill_paints_area_without_closing_stroke() -> Result<(), &'st
     node.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
     let pix = render_view(&doc, page, &view(60, 60), &Options::default()).ok_or("render failed")?;
     assert_eq!(px(&pix, 25, 25), [0xF6, 0x34, 0x34, 255]);
-    assert_eq!(figcraft_doc::geometry::hit_leaf(&doc, page, Point::new(25.0, 25.0), 1.0, None), Some(id));
+    assert_eq!(lizard_doc::geometry::hit_leaf(&doc, page, Point::new(25.0, 25.0), 1.0, None), Some(id));
     let Some(NodeKind::Vector { network }) = doc.node(id).map(|node| &node.kind) else { return Err("missing vector network") };
     assert!(network.regions.is_empty());
-    assert!(!matches!(network.stroke_path().elements().last(), Some(figcraft_geom::kurbo::PathEl::ClosePath)));
+    assert!(!matches!(network.stroke_path().elements().last(), Some(lizard_geom::kurbo::PathEl::ClosePath)));
     Ok(())
 }
 
 #[test]
 fn mixed_closed_and_open_vector_subpaths_both_paint() -> Result<(), &'static str> {
-    let mut path = figcraft_geom::BezPath::new();
+    let mut path = lizard_geom::BezPath::new();
     path.move_to((0.0, 0.0));
     path.line_to((10.0, 0.0));
     path.line_to((10.0, 10.0));
@@ -181,8 +181,8 @@ fn mixed_closed_and_open_vector_subpaths_both_paint() -> Result<(), &'static str
     path.line_to((30.0, 0.0));
     path.line_to((30.0, 10.0));
     path.line_to((20.0, 10.0));
-    let network = figcraft_doc::VectorNetwork::from_path(&path);
-    let mut doc = figcraft_doc::Document::new("mixed vector fill");
+    let network = lizard_doc::VectorNetwork::from_path(&path);
+    let mut doc = lizard_doc::Document::new("mixed vector fill");
     let page = doc.first_page().ok_or("missing page")?;
     let id = doc.create(page, NodeKind::Vector { network }, "Mixed", 10.0, 10.0, 30.0, 10.0).map_err(|_| "missing vector")?;
     doc.get_mut(id).map_err(|_| "missing vector node")?.fills = vec![Paint::solid(Color::from_hex("F63434").ok_or("invalid test color")?)];
@@ -195,9 +195,9 @@ fn mixed_closed_and_open_vector_subpaths_both_paint() -> Result<(), &'static str
 
 #[test]
 fn animated_shader_fill_changes_canvas_at_explicit_time() {
-    use figcraft_color::{PaintKind, ShaderFill};
+    use lizard_color::{PaintKind, ShaderFill};
     let (mut doc, page, rectangle) = doc_with_rect(Color::BLACK);
-    let Some(aurora) = figcraft_shader::presets().into_iter().find(|shader| shader.id == "lizard.aurora") else { panic!("Aurora preset missing") };
+    let Some(aurora) = lizard_shader::presets().into_iter().find(|shader| shader.id == "lizard.aurora") else { panic!("Aurora preset missing") };
     let shader_id = aurora.id.clone();
     doc.shaders.insert(shader_id.clone(), aurora);
     doc.get_mut(rectangle).unwrap().fills =
@@ -263,7 +263,7 @@ fn inner_shadow_and_blur_dont_crash() {
     n.effects.push(Effect::layer_blur());
     n.effects.push(Effect::background_blur());
     n.effects.push(Effect {
-        kind: EffectKind::Noise(figcraft_doc::Noise { size: 1.0, density: 0.5, color: Color::BLACK, ..Default::default() }),
+        kind: EffectKind::Noise(lizard_doc::Noise { size: 1.0, density: 0.5, color: Color::BLACK, ..Default::default() }),
         visible: true,
     });
     let _ = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
@@ -294,7 +294,7 @@ fn gradients_render() {
 
 #[test]
 fn frame_clips_children() {
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let f = d.create(p, NodeKind::Frame, "F", 0.0, 0.0, 50.0, 50.0).unwrap();
     let r = d.create(f, NodeKind::Rectangle, "R", 25.0, 25.0, 50.0, 50.0).unwrap();
@@ -325,7 +325,7 @@ fn strokes_align() {
 
 #[test]
 fn mask_clips_siblings() {
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let g = d.create(p, NodeKind::Group, "G", 0.0, 0.0, 100.0, 100.0).unwrap();
     let m = d.create(g, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "M", 0.0, 0.0, 50.0, 50.0).unwrap();
@@ -340,7 +340,7 @@ fn mask_clips_siblings() {
 
 #[test]
 fn page_level_mask_clips_only_the_following_run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut doc = figcraft_doc::Document::new("page mask");
+    let mut doc = lizard_doc::Document::new("page mask");
     let page = doc.first_page().ok_or("new document has no page")?;
     let mask = doc.create(page, NodeKind::Rectangle, "Mask", 0.0, 0.0, 50.0, 100.0)?;
     doc.get_mut(mask)?.is_mask = true;
@@ -354,18 +354,18 @@ fn page_level_mask_clips_only_the_following_run() -> Result<(), Box<dyn std::err
 
 #[test]
 fn luminance_and_vector_masks() {
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let g = d.create(p, NodeKind::Group, "G", 0.0, 0.0, 100.0, 100.0).unwrap();
     // The mask: white on the left half, black on the right.
     let m = d.create(g, NodeKind::Rectangle, "M", 0.0, 0.0, 100.0, 100.0).unwrap();
-    let grad = figcraft_color::Gradient {
-        kind: figcraft_color::GradientKind::Linear,
+    let grad = lizard_color::Gradient {
+        kind: lizard_color::GradientKind::Linear,
         stops: vec![
-            figcraft_color::ColorStop { position: 0.0, color: Color::WHITE },
-            figcraft_color::ColorStop { position: 0.49, color: Color::WHITE },
-            figcraft_color::ColorStop { position: 0.51, color: Color::BLACK },
-            figcraft_color::ColorStop { position: 1.0, color: Color::BLACK },
+            lizard_color::ColorStop { position: 0.0, color: Color::WHITE },
+            lizard_color::ColorStop { position: 0.49, color: Color::WHITE },
+            lizard_color::ColorStop { position: 0.51, color: Color::BLACK },
+            lizard_color::ColorStop { position: 1.0, color: Color::BLACK },
         ],
         from: (0.0, 0.5),
         to: (1.0, 0.5),
@@ -379,7 +379,7 @@ fn luminance_and_vector_masks() {
     let pix = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
     assert_eq!(px(&pix, 80, 50), [0, 0, 0, 255]);
     // Luminance: only the white half shows.
-    d.get_mut(m).unwrap().mask_type = figcraft_doc::MaskType::Luminance;
+    d.get_mut(m).unwrap().mask_type = lizard_doc::MaskType::Luminance;
     let pix = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
     assert_eq!(px(&pix, 20, 50), [0, 0, 0, 255]);
     assert_eq!(px(&pix, 80, 50)[0], 0xF5, "black hides");
@@ -387,22 +387,22 @@ fn luminance_and_vector_masks() {
     let e = d.create(g, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "E", 0.0, 0.0, 50.0, 50.0).unwrap();
     d.get_mut(e).unwrap().fills = vec![Paint::solid(Color::new(0.0, 0.0, 0.0, 0.0))];
     d.get_mut(e).unwrap().is_mask = true;
-    d.get_mut(e).unwrap().mask_type = figcraft_doc::MaskType::Vector;
+    d.get_mut(e).unwrap().mask_type = lizard_doc::MaskType::Vector;
     d.get_mut(g).unwrap().children = vec![e, r];
     let pix = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
     assert_eq!(px(&pix, 25, 25), [0, 0, 0, 255], "inside the outline");
     assert_eq!(px(&pix, 80, 80)[0], 0xF5, "outside");
     // As an alpha mask the transparent ellipse hides everything.
-    d.get_mut(e).unwrap().mask_type = figcraft_doc::MaskType::Alpha;
+    d.get_mut(e).unwrap().mask_type = lizard_doc::MaskType::Alpha;
     let pix = render_view(&d, p, &view(100, 100), &Options::default()).unwrap();
     assert_eq!(px(&pix, 25, 25)[0], 0xF5);
 }
 
 #[test]
 fn boolean_subtract_renders_hole() {
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
-    let b = d.create(p, NodeKind::BooleanOp { op: figcraft_doc::BoolOp::Subtract }, "B", 0.0, 0.0, 100.0, 100.0).unwrap();
+    let b = d.create(p, NodeKind::BooleanOp { op: lizard_doc::BoolOp::Subtract }, "B", 0.0, 0.0, 100.0, 100.0).unwrap();
     d.get_mut(b).unwrap().fills = vec![Paint::solid(Color::BLACK)];
     d.create(b, NodeKind::Rectangle, "A", 0.0, 0.0, 100.0, 100.0).unwrap();
     d.create(b, NodeKind::Rectangle, "Hole", 25.0, 25.0, 50.0, 50.0).unwrap();
@@ -413,29 +413,29 @@ fn boolean_subtract_renders_hole() {
 
 #[test]
 fn text_renders_something() {
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let mut td = TextData::new("Hello");
     td.style.font_size = 32.0;
     d.create(p, NodeKind::Text(td), "T", 0.0, 0.0, 200.0, 50.0).unwrap();
     let pix = render_view(&d, p, &view(200, 60), &Options { background: Some(Color::WHITE), ..Default::default() }).unwrap();
     let dark = pix.data().as_chunks::<4>().0.iter().filter(|c| c[0] < 100).count();
-    if figcraft_text::find_face("Inter", "Regular").is_some() {
+    if lizard_text::find_face("Inter", "Regular").is_some() {
         assert!(dark > 50, "{dark}");
     }
 }
 
 /// The machine's colour emoji face, if it has one (this test skips without: no font ships here).
 fn emoji_face() -> Option<(String, String)> {
-    figcraft_text::scan_system_fonts();
-    let mut db = figcraft_text::db().write().unwrap();
+    lizard_text::scan_system_fonts();
+    let mut db = lizard_text::db().write().unwrap();
     db.emoji_fallbacks().into_iter().find(|f| f.has_color()).map(|f| (f.family.clone(), f.style.clone()))
 }
 
 #[test]
 fn colour_emoji_draw_their_pixels() {
     let Some((family, style)) = emoji_face() else { return };
-    let mut d = figcraft_doc::Document::new("t");
+    let mut d = lizard_doc::Document::new("t");
     let p = d.first_page().unwrap();
     let mut td = TextData::new("\u{1F600}");
     (td.style.font_family, td.style.font_style) = (family.clone(), style.clone());
@@ -469,9 +469,9 @@ fn export_png_roundtrip() {
 
 #[test]
 fn exports_carry_the_colour_profile() {
-    use figcraft_color::ColorProfile;
-    use figcraft_doc::ExportFormat;
     use image::ImageDecoder;
+    use lizard_color::ColorProfile;
+    use lizard_doc::ExportFormat;
     let (d, _, r) = doc_with_rect(Color::from_hex("00FF00").unwrap());
     let pix = render_node(&d, r, 1.0).unwrap();
     for profile in ColorProfile::ALL {
@@ -491,11 +491,11 @@ fn exports_carry_the_colour_profile() {
 
 #[test]
 fn images_are_managed_into_the_file_profile() {
-    use figcraft_color::{ColorProfile, ImageScaleMode, Paint};
+    use lizard_color::{ColorProfile, ImageScaleMode, Paint};
     let (mut d, _, r) = doc_with_rect(Color::WHITE);
     let mut red = Pixmap::new(4, 4).unwrap();
     red.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
-    d.images.insert("red".into(), figcraft_doc::ImageData { bytes: std::sync::Arc::new(encode_png(&red).unwrap()), width: 4, height: 4 });
+    d.images.insert("red".into(), lizard_doc::ImageData { bytes: std::sync::Arc::new(encode_png(&red).unwrap()), width: 4, height: 4 });
     d.get_mut(r).unwrap().fills = vec![Paint::image("red", ImageScaleMode::Fill)];
     let center = |d: &Document| {
         let pix = render_node(d, r, 1.0).unwrap();
@@ -520,7 +520,7 @@ fn hostile_sizes() {
     let n = d.get_mut(r).unwrap();
     n.width = f64::NAN;
     n.height = 1e12;
-    n.effects.push(Effect { kind: EffectKind::LayerBlur(figcraft_doc::Blur::uniform(1e9)), visible: true });
+    n.effects.push(Effect { kind: EffectKind::LayerBlur(lizard_doc::Blur::uniform(1e9)), visible: true });
     let _ = render_view(&d, p, &view(64, 64), &Options::default());
     let _ = render_node(&d, r, f64::NAN);
     let _ = render_view(&d, p, &View { origin: (f64::NAN, 0.0), scale: 0.0, width: 0, height: 0 }, &Options::default());
@@ -543,7 +543,7 @@ fn inner_shadow_reaches_every_edge() {
 fn rect_clip_frame_matches_same_rect_fill_on_fractional_edges() {
     let white = Options { background: Some(Color::WHITE), ..Default::default() };
     for (x, y, w, h) in [(0.5, 0.5, 10.0, 10.0), (0.0, 0.0, 10.5, 10.5), (0.0, 0.0, 10.0, 10.0)] {
-        let mut clipped = figcraft_doc::Document::new("clipped");
+        let mut clipped = lizard_doc::Document::new("clipped");
         let p = clipped.first_page().unwrap();
         let f = clipped.create(p, NodeKind::Frame, "F", x, y, w, h).unwrap();
         clipped.get_mut(f).unwrap().fills.clear();
@@ -551,7 +551,7 @@ fn rect_clip_frame_matches_same_rect_fill_on_fractional_edges() {
         let c = clipped.create(f, NodeKind::Rectangle, "C", -5.0, -5.0, w + 10.0, h + 10.0).unwrap();
         clipped.get_mut(c).unwrap().fills = vec![Paint::solid(Color::BLACK)];
 
-        let mut direct = figcraft_doc::Document::new("direct");
+        let mut direct = lizard_doc::Document::new("direct");
         let dp = direct.first_page().unwrap();
         let r = direct.create(dp, NodeKind::Rectangle, "R", x, y, w, h).unwrap();
         direct.get_mut(r).unwrap().fills = vec![Paint::solid(Color::BLACK)];

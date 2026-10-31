@@ -25,8 +25,8 @@ mod width_sides_tests;
 #[cfg(test)]
 mod width_tests;
 
-use figcraft_doc::*;
-use figcraft_geom::{Affine, Point, Rect, Vec2};
+use lizard_doc::*;
+use lizard_geom::{Affine, Point, Rect, Vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -327,12 +327,12 @@ pub fn ensure_vector(doc: &mut Document, id: NodeId) -> Result<()> {
     if !n.kind.is_shape() && !matches!(n.kind, NodeKind::BooleanOp { .. }) {
         return Err(EngineError::Other(format!("{} layers can't be edited as vectors", n.kind.label())));
     }
-    let (path, rule) = figcraft_render::node_outline(doc, &n).ok_or_else(|| EngineError::Other("no outline".into()))?;
+    let (path, rule) = lizard_render::node_outline(doc, &n).ok_or_else(|| EngineError::Other("no outline".into()))?;
     let mut net = VectorNetwork::from_path(&path);
     if matches!(n.kind, NodeKind::Line) {
         net.regions.clear();
     }
-    if rule == figcraft_render::FillRule::EvenOdd {
+    if rule == lizard_render::FillRule::EvenOdd {
         for r in &mut net.regions {
             r.winding = WindingRule::EvenOdd;
         }
@@ -427,7 +427,7 @@ pub fn hit(doc: &Document, ve: &VectorEdit, p: Point, tol: f64) -> Option<VHit> 
     if let Some((index, _)) = nearest_vertex {
         return Some(VHit::Vertex { index });
     }
-    use figcraft_geom::kurbo::ParamCurveNearest;
+    use lizard_geom::kurbo::ParamCurveNearest;
     let nearest_seg = (0..net.segments.len())
         .filter_map(|si| {
             let near = net.cubic(si)?.nearest(lp, 0.01);
@@ -1415,7 +1415,7 @@ pub fn paint_all(doc: &mut Document, id: NodeId, pts: &[Point]) -> Result<bool> 
     .ok_or_else(|| bad("vector.edit.paint", "click inside a closed area"))?;
     let n = doc.get_mut(id)?;
     if filled && n.fills.iter().all(|f| !f.visible) {
-        n.fills = vec![figcraft_color::Paint::solid(figcraft_color::Color::DEFAULT_SHAPE)];
+        n.fills = vec![lizard_color::Paint::solid(lizard_color::Color::DEFAULT_SHAPE)];
     }
     Ok(filled)
 }

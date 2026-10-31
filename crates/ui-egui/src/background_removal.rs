@@ -6,11 +6,11 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use base64::Engine as _;
-use figcraft_color::PaintKind;
-use figcraft_doc::NodeId;
+use lizard_color::PaintKind;
+use lizard_doc::NodeId;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 
 pub(crate) struct Pending {
@@ -21,7 +21,7 @@ pub(crate) struct Pending {
     rx: Receiver<Result<Vec<u8>, String>>,
 }
 
-pub(crate) fn start(app: &mut FigApp, ctx: &egui::Context, id: NodeId, index: usize) {
+pub(crate) fn start(app: &mut LizardApp, ctx: &egui::Context, id: NodeId, index: usize) {
     if app.pending_background_removal.is_some() {
         app.toast(tr("Background removal is already running"));
         return;
@@ -51,7 +51,7 @@ pub(crate) fn start(app: &mut FigApp, ctx: &egui::Context, id: NodeId, index: us
     app.toast(tr("Removing image background locally…"));
 }
 
-pub(crate) fn poll(app: &mut FigApp, ctx: &egui::Context) {
+pub(crate) fn poll(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(pending) = app.pending_background_removal.take() else { return };
     match pending.rx.try_recv() {
         Err(TryRecvError::Empty) => {

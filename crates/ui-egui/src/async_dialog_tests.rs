@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use figcraft_engine::Session;
+use lizard_engine::Session;
 
-use crate::{ContentsFuture, DialogFuture, FigApp, Services};
+use crate::{ContentsFuture, DialogFuture, LizardApp, Services};
 
 struct OpenFile(PathBuf);
 
@@ -14,14 +14,14 @@ impl Services for OpenFile {
 
 #[test]
 fn open_dialog_finishes_after_the_async_picker_returns() {
-    let dir = std::env::temp_dir().join(format!("figcraft-async-open-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lizard-async-open-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("opened.figcraft");
-    let doc = figcraft_doc::Document::new("Opened");
-    std::fs::write(&path, figcraft_format::save_bytes(&doc, None).unwrap()).unwrap();
+    let path = dir.join("opened.lizard");
+    let doc = lizard_doc::Document::new("Opened");
+    std::fs::write(&path, lizard_format::save_bytes(&doc, None).unwrap()).unwrap();
 
-    let mut app = FigApp::new(Session::empty(), Box::new(OpenFile(path.clone())));
+    let mut app = LizardApp::new(Session::empty(), Box::new(OpenFile(path.clone())));
     app.ui.home = true;
     app.open_dialog();
     assert!(app.session.docs.is_empty(), "opening waits for the picker result");
@@ -46,12 +46,12 @@ impl Services for Picks {
 }
 
 /// Two files, A (the first) in front, and where the picker saves.
-fn two_files(tag: &str) -> (FigApp, PathBuf, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("figcraft-async-{tag}-{}", std::process::id()));
+fn two_files(tag: &str) -> (LizardApp, PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("lizard-async-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("a.figcraft");
-    let mut app = FigApp::new(Session::empty(), Box::new(Picks(path.clone())));
+    let path = dir.join("a.lizard");
+    let mut app = LizardApp::new(Session::empty(), Box::new(Picks(path.clone())));
     for _ in 0..2 {
         app.session.execute("file.new", &serde_json::json!({})).unwrap();
     }
@@ -103,7 +103,7 @@ impl Services for Unreadable {
 #[test]
 fn a_picked_file_that_cannot_be_read_says_why_and_opens_nothing() {
     let why = crate::browser_can_read("Huge.fig", 600.0 * 1024.0 * 1024.0).unwrap_err();
-    let mut app = FigApp::new(Session::empty(), Box::new(Unreadable(why.clone())));
+    let mut app = LizardApp::new(Session::empty(), Box::new(Unreadable(why.clone())));
     app.open_dialog();
     app.poll_dialog(&egui::Context::default());
     assert!(app.session.docs.is_empty());
@@ -123,8 +123,8 @@ fn the_browser_reads_files_up_to_512_mib() {
 
 #[test]
 fn open_dialog_opens_picked_contents_as_a_new_unsaved_document() {
-    let bytes = figcraft_format::save_bytes(&figcraft_doc::Document::new("Picked"), None).unwrap();
-    let mut app = FigApp::new(Session::empty(), Box::new(Contents("Picked.figcraft", bytes)));
+    let bytes = lizard_format::save_bytes(&lizard_doc::Document::new("Picked"), None).unwrap();
+    let mut app = LizardApp::new(Session::empty(), Box::new(Contents("Picked.lizard", bytes)));
     app.ui.home = true;
     app.open_dialog();
     assert!(app.session.docs.is_empty(), "opening waits for the picker result");
@@ -138,8 +138,8 @@ fn open_dialog_opens_picked_contents_as_a_new_unsaved_document() {
 #[test]
 fn import_dialog_imports_picked_contents_into_the_file_in_front() {
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>"#.to_vec();
-    let mut app = FigApp::new(Session::new(), Box::new(Contents("Logo.svg", svg)));
-    let rectangles = |app: &FigApp| app.session.doc().unwrap().nodes().filter(|n| matches!(n.kind, figcraft_doc::NodeKind::Rectangle)).count();
+    let mut app = LizardApp::new(Session::new(), Box::new(Contents("Logo.svg", svg)));
+    let rectangles = |app: &LizardApp| app.session.doc().unwrap().nodes().filter(|n| matches!(n.kind, lizard_doc::NodeKind::Rectangle)).count();
     assert_eq!(rectangles(&app), 0);
     app.import_dialog(false);
     app.poll_dialog(&egui::Context::default());

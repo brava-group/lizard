@@ -6,18 +6,18 @@ version = 4
 name = "counter"
 version = "0.1.0"
 dependencies = [
- "figcraft-plugin-sdk",
+ "lizard-plugin-sdk",
 ]
 
 [[package]]
 name = "dot-grid"
 version = "0.1.0"
 dependencies = [
- "figcraft-plugin-sdk",
+ "lizard-plugin-sdk",
 ]
 
 [[package]]
-name = "figcraft-plugin-sdk"
+name = "lizard-plugin-sdk"
 version = "0.1.0"
 dependencies = [
  "serde_json",
@@ -27,7 +27,7 @@ dependencies = [
 name = "focus-list"
 version = "0.1.0"
 dependencies = [
- "figcraft-plugin-sdk",
+ "lizard-plugin-sdk",
 ]
 
 [[package]]
@@ -106,7 +106,7 @@ dependencies = [
 name = "swatch-grid"
 version = "0.1.0"
 dependencies = [
- "figcraft-plugin-sdk",
+ "lizard-plugin-sdk",
 ]
 
 [[package]]
@@ -124,7 +124,7 @@ dependencies = [
 name = "tidy-names"
 version = "0.1.0"
 dependencies = [
- "figcraft-plugin-sdk",
+ "lizard-plugin-sdk",
 ]
 
 [[package]]

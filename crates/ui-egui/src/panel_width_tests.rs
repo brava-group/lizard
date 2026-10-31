@@ -7,11 +7,11 @@
 use std::sync::{Arc, Mutex};
 
 use egui::{Event, Pos2, RawInput, Rect, pos2, vec2};
-use figcraft_engine::{Prefs, Session};
+use lizard_engine::{Prefs, Session};
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
-use crate::{CANVAS_MIN, FigApp, LEFT_PANEL, LeftTab, NoServices, PANEL_DEFAULT, RIGHT_PANEL, Services, fit_panels};
+use crate::{CANVAS_MIN, LEFT_PANEL, LeftTab, LizardApp, NoServices, PANEL_DEFAULT, RIGHT_PANEL, Services, fit_panels};
 
 #[test]
 fn agent_rail_opens_chat_and_restores_explorer_width() {
@@ -235,7 +235,7 @@ fn the_smallest_window_keeps_its_canvas_whatever_the_widths() {
         let mut s = Session::new();
         s.prefs.panel_widths = asked;
         let ctx = egui::Context::default();
-        let mut app = FigApp::new(s, Box::new(NoServices));
+        let mut app = LizardApp::new(s, Box::new(NoServices));
         // The desktop window's minimum inner size.
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 500.0));
         for k in 0..5 {

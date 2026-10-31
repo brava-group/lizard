@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use figcraft_color::{BlendMode, Color, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
-use figcraft_doc::Document;
+use lizard_color::{BlendMode, Color, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind};
+use lizard_doc::Document;
 use tiny_skia::{FilterQuality, GradientStop, IntSize, Pixmap, Point, Shader, SpreadMode, Transform};
 
 pub fn ts_color(c: Color) -> tiny_skia::Color {
@@ -158,8 +158,8 @@ pub fn prepare_at(paint: &Paint, w: f64, h: f64, scale: f64, doc: &Document, tim
         PaintKind::Pattern(pt) => crate::pattern::prepare(doc, pt, w, h, scale, time, op),
         PaintKind::Shader(fill) => {
             let definition = doc.shaders.get(&fill.shader_id)?;
-            let width = (w.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u32;
-            let height = (h.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(figcraft_shader::MAX_DIMENSION)) as u32;
+            let width = (w.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(lizard_shader::MAX_DIMENSION)) as u32;
+            let height = (h.abs() * scale.max(0.01)).ceil().clamp(1.0, f64::from(lizard_shader::MAX_DIMENSION)) as u32;
             let frame_time = if definition.features.animated { time.max(0.0) as f32 } else { 0.0 };
             let key = format!("{}:{}x{}:{:?}:{}", definition.source, width, height, fill.values, frame_time.to_bits());
             static PIXMAPS: OnceLock<Mutex<HashMap<String, Arc<Pixmap>>>> = OnceLock::new();
@@ -168,7 +168,7 @@ pub fn prepare_at(paint: &Paint, w: f64, h: f64, scale: f64, doc: &Document, tim
             let pixmap = match cached {
                 Some(pixmap) => pixmap,
                 None => {
-                    let mut rgba = match figcraft_shader::render_rgba_at(definition, &fill.values, width, height, frame_time) {
+                    let mut rgba = match lizard_shader::render_rgba_at(definition, &fill.values, width, height, frame_time) {
                         Ok(rgba) => rgba,
                         Err(error) => {
                             log::warn!("shader fill {}: {error}", fill.shader_id);

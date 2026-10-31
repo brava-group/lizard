@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use figcraft_color::{BlendMode, Paint};
-use figcraft_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, StrokeJoin, WindingRule};
-use figcraft_geom::{Affine, BezPath, Rect, Shape};
+use lizard_color::{BlendMode, Paint};
+use lizard_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, StrokeJoin, WindingRule};
+use lizard_geom::{Affine, BezPath, Rect, Shape};
 use tiny_skia::{FillRule, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
 
 use crate::backdrop::{self, Under};
@@ -105,7 +105,7 @@ pub fn ts_transform(a: Affine) -> Transform {
 
 /// kurbo path → tiny-skia path (None when empty or degenerate).
 pub fn ts_path(p: &BezPath) -> Option<tiny_skia::Path> {
-    use figcraft_geom::kurbo::PathEl;
+    use lizard_geom::kurbo::PathEl;
     let mut b = tiny_skia::PathBuilder::new();
     for el in p.elements() {
         match *el {
@@ -141,7 +141,7 @@ fn painted_stroke_cache() -> &'static Mutex<PathCache> {
 
 pub(crate) fn hash_path(p: &BezPath, h: &mut impl Hasher) {
     for el in p.elements() {
-        use figcraft_geom::kurbo::PathEl::*;
+        use lizard_geom::kurbo::PathEl::*;
         match *el {
             MoveTo(a) => (0u8, a.x.to_bits(), a.y.to_bits()).hash(h),
             LineTo(a) => (1u8, a.x.to_bits(), a.y.to_bits()).hash(h),
@@ -160,7 +160,7 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
         && matches!(n.kind, NodeKind::Rectangle | NodeKind::Frame | NodeKind::Component { .. } | NodeKind::Instance { .. })
         && n.corners.uniform() == Some(0.0)
     {
-        return Arc::new(figcraft_pathops::rect_side_strokes(n.width, n.height, sides, props.align));
+        return Arc::new(lizard_pathops::rect_side_strokes(n.width, n.height, sides, props.align));
     }
     // Rect/ellipse inside/outside strokes without booleans: an even-odd ring of two outlines.
     if props.dashes.is_empty() && props.profile().is_none() && props.brush.is_none() && closed && props.align != StrokeAlign::Center
@@ -183,12 +183,12 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
                     if n.corners.smoothing == 0.0 =>
                 {
                     let radii = n.corners.radii.map(|r| if r > 0.0 { (r - inset).max(0.0) } else { 0.0 });
-                    let mut p = figcraft_geom::rounded_rect(ww, hh, radii, 0.0);
+                    let mut p = lizard_geom::rounded_rect(ww, hh, radii, 0.0);
                     p.apply_affine(Affine::translate((x0, y0)));
                     Some(p)
                 }
                 NodeKind::Ellipse { sweep, inner, .. } if sweep.abs() >= std::f64::consts::TAU - 1e-9 && inner == 0.0 => {
-                    Some(figcraft_geom::kurbo::Ellipse::from_rect(Rect::new(x0, y0, x0 + ww, y0 + hh)).to_path(0.05))
+                    Some(lizard_geom::kurbo::Ellipse::from_rect(Rect::new(x0, y0, x0 + ww, y0 + hh)).to_path(0.05))
                 }
                 _ => None,
             }
@@ -230,7 +230,7 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
     if let Some(p) = locked(stroke_cache()).get(key) {
         return p;
     }
-    let out = Arc::new(figcraft_pathops::stroke_outline_of(path, props, closed, net));
+    let out = Arc::new(lizard_pathops::stroke_outline_of(path, props, closed, net));
     locked(stroke_cache()).insert(key, out.clone());
     out
 }
@@ -238,7 +238,7 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
 /// The geometry used for a painted stroke. Offset strokes follow the union of filled vector
 /// faces; partition edges between adjacent painted faces are not outer edges of the layer.
 pub fn painted_stroke_geometry(n: &Node) -> Option<BezPath> {
-    let NodeKind::Vector { network } = &n.kind else { return figcraft_doc::geometry::stroke_geometry(n) };
+    let NodeKind::Vector { network } = &n.kind else { return lizard_doc::geometry::stroke_geometry(n) };
     if n.stroke.align == StrokeAlign::Center || network.regions.is_empty() {
         return Some(network.stroke_path());
     }
@@ -269,15 +269,15 @@ pub fn painted_stroke_geometry(n: &Node) -> Option<BezPath> {
     let mut silhouette: Option<BezPath> = None;
     for (path, winding) in regions {
         let simplified = match winding {
-            WindingRule::NonZero => figcraft_pathops::simplify(&path),
-            WindingRule::EvenOdd => figcraft_pathops::simplify_even_odd(&path),
+            WindingRule::NonZero => lizard_pathops::simplify(&path),
+            WindingRule::EvenOdd => lizard_pathops::simplify_even_odd(&path),
         };
         let Ok(path) = simplified else { return Some(network.stroke_path()) };
         if path.elements().is_empty() {
             continue;
         }
         silhouette = Some(match silhouette {
-            Some(acc) => match figcraft_pathops::boolean_step(&acc, &path, BoolOp::Union) {
+            Some(acc) => match lizard_pathops::boolean_step(&acc, &path, BoolOp::Union) {
                 Ok(joined) => joined,
                 Err(_) => return Some(network.stroke_path()),
             },
@@ -295,7 +295,7 @@ pub fn stroke_fill(doc: &Document, n: &Node) -> Option<(Arc<BezPath>, FillRule)>
     if !n.has_visible_stroke() {
         return None;
     }
-    let closed = figcraft_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. });
+    let closed = lizard_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. });
     let geom = match &n.kind {
         NodeKind::BooleanOp { .. } => node_outline(doc, n).map(|(p, _)| p),
         NodeKind::Text(_) | NodeKind::Group | NodeKind::Page { .. } => None,
@@ -323,7 +323,7 @@ pub fn node_outline(doc: &Document, n: &Node) -> Option<(BezPath, FillRule)> {
 fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, FillRule)> {
     match &n.kind {
         NodeKind::BooleanOp { op } => {
-            let operands: Vec<(BezPath, figcraft_doc::BoolOp)> = n
+            let operands: Vec<(BezPath, lizard_doc::BoolOp)> = n
                 .children
                 .iter()
                 .filter_map(|c| doc.node(*c))
@@ -337,14 +337,14 @@ fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, F
             Some((crate::boolean::fold_cached(&operands), FillRule::EvenOdd))
         }
         NodeKind::Text(_) => {
-            let (l, dy) = figcraft_text::layout_node(n)?;
+            let (l, dy) = lizard_text::layout_node(n)?;
             let mut p = l.to_path();
             p.apply_affine(Affine::translate((0.0, dy)));
             Some((p, FillRule::Winding))
         }
         NodeKind::Vector { network } => {
             let rule =
-                if network.regions.iter().any(|r| r.winding == figcraft_doc::WindingRule::EvenOdd) { FillRule::EvenOdd } else { FillRule::Winding };
+                if network.regions.iter().any(|r| r.winding == lizard_doc::WindingRule::EvenOdd) { FillRule::EvenOdd } else { FillRule::Winding };
             let has_region_fill = network.regions.iter().any(|r| r.fills.as_ref().is_some_and(|fills| fills.iter().any(|fill| fill.visible)));
             if n.fills.iter().any(|fill| fill.visible) && !network.regions.is_empty() && !network.regions.iter().any(|region| region.fills.is_some())
             {
@@ -358,11 +358,8 @@ fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, F
                     let mut operands = vec![(unassigned, BoolOp::Union)];
                     for (index, region) in drawn.regions.iter().enumerate() {
                         if let Some(path) = drawn.region_path(index) {
-                            let path = if region.winding == WindingRule::EvenOdd {
-                                figcraft_pathops::simplify_even_odd(&path).unwrap_or(path)
-                            } else {
-                                path
-                            };
+                            let path =
+                                if region.winding == WindingRule::EvenOdd { lizard_pathops::simplify_even_odd(&path).unwrap_or(path) } else { path };
                             operands.push((path, BoolOp::Union));
                         }
                     }
@@ -375,7 +372,7 @@ fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, F
             let path = if n.fills.iter().any(|fill| fill.visible) || has_region_fill { network.paint_path() } else { network.fill_path() };
             Some((path, rule))
         }
-        _ => figcraft_doc::geometry::shape_path(n).map(|p| (p, FillRule::Winding)),
+        _ => lizard_doc::geometry::shape_path(n).map(|p| (p, FillRule::Winding)),
     }
 }
 
@@ -388,7 +385,7 @@ pub fn subtree_outline(doc: &Document, n: &Node, depth: usize) -> Option<(BezPat
         NodeKind::Group | NodeKind::Frame | NodeKind::Component { .. } | NodeKind::Instance { .. } if !n.children.is_empty() => {
             let mut out = BezPath::new();
             if n.kind.is_frame_like()
-                && let Some(p) = figcraft_doc::geometry::shape_path(n)
+                && let Some(p) = lizard_doc::geometry::shape_path(n)
                 && n.fills.iter().any(|f| f.visible)
             {
                 out.extend(p.elements().iter().copied());
@@ -409,7 +406,7 @@ pub fn subtree_outline(doc: &Document, n: &Node, depth: usize) -> Option<(BezPat
 }
 
 fn device_rect(xf: Affine, r: Rect) -> Rect {
-    figcraft_geom::transform_rect_bbox(xf, r)
+    lizard_geom::transform_rect_bbox(xf, r)
 }
 
 /// The area text may paint without its glyphs being looked at: its box, generously grown.
@@ -477,7 +474,7 @@ pub(crate) fn bounds_within<'a>(
                 }
                 let (cb, c_levels) = bounds_within(doc, c, to_page * c.transform, depth + 1, greek_scale, memo);
                 below = below.zip(c_levels).map(|(b, l)| b.max(l));
-                let cb = figcraft_geom::transform_rect_bbox(c.transform, cb);
+                let cb = lizard_geom::transform_rect_bbox(c.transform, cb);
                 children = Some(children.map_or(cb, |bounds| bounds.union(cb)));
             }
             if let Some(children) = children {
@@ -493,10 +490,10 @@ pub(crate) fn bounds_within<'a>(
     if let NodeKind::Text(_) = n.kind {
         r = r.union(grow(text_box_bounds(n)));
         if !greek_scale.is_some_and(|s| lod::greeked(n, s))
-            && let Some((l, dy)) = figcraft_text::layout_node(n)
+            && let Some((l, dy)) = lizard_text::layout_node(n)
             && let Some(ink) = l.ink_bounds()
         {
-            r = r.union(ink + figcraft_geom::kurbo::Vec2::new(0.0, dy));
+            r = r.union(ink + lizard_geom::kurbo::Vec2::new(0.0, dy));
         }
     }
     if let (Some(m), Some(l)) = (memo, levels) {
@@ -514,7 +511,7 @@ pub fn effect_margin(n: &Node) -> f64 {
         .map(|e| match &e.kind {
             EffectKind::LayerBlur(b) => b.max_radius() * 2.0,
             EffectKind::BackgroundBlur { .. } | EffectKind::Glass(_) => e.backdrop_radius() * 2.0,
-            EffectKind::DropShadow(s) => s.radius * 2.0 + s.spread.abs() * figcraft_doc::SPREAD_MITER_LIMIT + s.offset.0.abs() + s.offset.1.abs(),
+            EffectKind::DropShadow(s) => s.radius * 2.0 + s.spread.abs() * lizard_doc::SPREAD_MITER_LIMIT + s.offset.0.abs() + s.offset.1.abs(),
             EffectKind::Texture(t) => t.radius.abs(),
             // A group's inner shadows are cast from around its pixels: a layer cut off at the
             // view would cast one from the cut.
@@ -532,7 +529,7 @@ pub fn paint_bounds(doc: &Document, id: NodeId) -> Option<Rect> {
     let n = doc.node(id)?;
     let world = doc.world_transform(id);
     let local = local_paint_bounds(doc, n, world, 0, None);
-    Some(figcraft_geom::transform_rect_bbox(world, local))
+    Some(lizard_geom::transform_rect_bbox(world, local))
 }
 
 fn to_page(ctx: &Ctx, xf: Affine) -> Affine {
@@ -761,7 +758,7 @@ fn draw_outline(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize)
     let boxed = matches!(n.kind, NodeKind::Rectangle) && n.corners.uniform() == Some(0.0) || n.kind.is_frame_like();
     if ctx.outline.bounds
         && !boxed
-        && let Some(tp) = ts_path(&figcraft_geom::kurbo::Shape::to_path(&n.local_rect(), 0.1))
+        && let Some(tp) = ts_path(&lizard_geom::kurbo::Shape::to_path(&n.local_rect(), 0.1))
     {
         pix.stroke_path(&tp, &paint, &stroke, ts_transform(xf), None);
     }
@@ -791,7 +788,7 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             }
         }
         NodeKind::Text(t) => {
-            let Some((layout, dy)) = figcraft_text::layout_node(n) else { return };
+            let Some((layout, dy)) = lizard_text::layout_node(n) else { return };
             let gxf = xf * Affine::translate((0.0, dy));
             let gs = gxf.determinant().abs().sqrt();
             let prepared = prepared_text(&layout, gs);
@@ -831,7 +828,7 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             let _ = t;
         }
         _ => {
-            let closed = figcraft_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. });
+            let closed = lizard_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. });
             let has_regions = matches!(&n.kind, NodeKind::Vector { network } if !network.regions.is_empty());
             let splatted = ctx.lod && closed && !has_regions && lod::splat_fills(pix, n, xf);
             let clips = n.clip && n.kind.is_frame_like() && !n.children.is_empty();
@@ -839,7 +836,7 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             let outline = if splatted && !(clips && n.corners.uniform() != Some(0.0)) { None } else { node_outline(doc, n) };
             if !splatted
                 && let Some((path, rule)) = &outline
-                && figcraft_doc::geometry::has_fill_geometry(n)
+                && lizard_doc::geometry::has_fill_geometry(n)
                 && let Some(tp) = ts_path(path)
             {
                 if let NodeKind::Vector { network } = &n.kind
@@ -852,7 +849,7 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
                     }
                     for (index, region) in drawn.regions.iter().enumerate() {
                         if let Some(path) = drawn.region_path(index).and_then(|path| ts_path(&path)) {
-                            let rule = if region.winding == figcraft_doc::WindingRule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding };
+                            let rule = if region.winding == lizard_doc::WindingRule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding };
                             fill_with(pix, &path, region.fills.as_ref().unwrap_or(&n.fills), w, h, xf, rule, ctx, None);
                         }
                     }
@@ -910,7 +907,7 @@ fn draw_masked(ctx: &Ctx, pix: &mut Pixmap, mask_id: NodeId, content: &[NodeId],
         let mut m2 = m.clone();
         m2.is_mask = false;
         let mxf = xf * m2.transform;
-        if mask_type == figcraft_doc::MaskType::Vector {
+        if mask_type == lizard_doc::MaskType::Vector {
             if let Some((outline, rule)) = subtree_outline(ctx.doc, &m2, depth + 1)
                 && let Some(path) = ts_path(&outline)
             {
@@ -931,7 +928,7 @@ fn draw_masked(ctx: &Ctx, pix: &mut Pixmap, mask_id: NodeId, content: &[NodeId],
         }
     }
     let Some(mut layer) = Pixmap::new(w, h) else { return };
-    let kind = if mask_type == figcraft_doc::MaskType::Luminance { MaskType::Luminance } else { MaskType::Alpha };
+    let kind = if mask_type == lizard_doc::MaskType::Luminance { MaskType::Luminance } else { MaskType::Alpha };
     let mask = Mask::from_pixmap(mask_px.as_ref(), kind);
     {
         let under = Under { clip: Some(&mask), ..Under::new(pix, (0, 0), ctx.under) };
@@ -995,7 +992,7 @@ struct PreparedStyle {
 }
 
 struct TextCacheEntry {
-    layout: Weak<figcraft_text::TextLayout>,
+    layout: Weak<lizard_text::TextLayout>,
     prepared: Arc<PreparedText>,
 }
 
@@ -1003,7 +1000,7 @@ thread_local! {
     static TEXT_PATHS: RefCell<HashMap<(usize, u64), TextCacheEntry>> = RefCell::new(HashMap::new());
 }
 
-fn prepared_text(layout: &Arc<figcraft_text::TextLayout>, scale: f64) -> Arc<PreparedText> {
+fn prepared_text(layout: &Arc<lizard_text::TextLayout>, scale: f64) -> Arc<PreparedText> {
     let key = (Arc::as_ptr(layout) as usize, scale.to_bits());
     if let Some(hit) = TEXT_PATHS.with(|cache| {
         cache.borrow().get(&key).and_then(|entry| entry.layout.upgrade().filter(|old| Arc::ptr_eq(old, layout)).map(|_| entry.prepared.clone()))
@@ -1016,8 +1013,8 @@ fn prepared_text(layout: &Arc<figcraft_text::TextLayout>, scale: f64) -> Arc<Pre
     let mut outlines: HashMap<usize, BezPath> = HashMap::new();
     for glyph in &layout.glyphs {
         match glyph.color(scale) {
-            Some(figcraft_text::ColorInk::Bitmap(bitmap, place)) => ink.push((glyph.style, Ink::Bitmap(bitmap, place))),
-            Some(figcraft_text::ColorInk::Layers(layers)) => {
+            Some(lizard_text::ColorInk::Bitmap(bitmap, place)) => ink.push((glyph.style, Ink::Bitmap(bitmap, place))),
+            Some(lizard_text::ColorInk::Layers(layers)) => {
                 for layer in layers.iter() {
                     ink.push((glyph.style, Ink::Layer(glyph.layer_path(layer.gid), layer.rgba)));
                 }
@@ -1052,14 +1049,14 @@ fn prepared_text(layout: &Arc<figcraft_text::TextLayout>, scale: f64) -> Arc<Pre
 /// bitmap-strike glyph has no outline to stroke.
 enum Ink {
     /// An embedded bitmap and the transform from its pixels into layout coordinates.
-    Bitmap(Arc<figcraft_text::ColorBitmap>, Affine),
+    Bitmap(Arc<lizard_text::ColorBitmap>, Affine),
     /// One COLR layer: its outline in layout coordinates and the colour to fill it with.
     Layer(BezPath, [u8; 4]),
 }
 
 /// Draw a colour bitmap (premultiplied RGBA) under a transform, sampled smoothly when the
 /// transform scales it.
-fn blit(pix: &mut Pixmap, bitmap: &figcraft_text::ColorBitmap, transform: Transform) {
+fn blit(pix: &mut Pixmap, bitmap: &lizard_text::ColorBitmap, transform: Transform) {
     let Some(image) = tiny_skia::PixmapRef::from_bytes(&bitmap.rgba, bitmap.width, bitmap.height) else { return };
     let paint = PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() };
     pix.draw_pixmap(0, 0, image, &paint, transform, None);

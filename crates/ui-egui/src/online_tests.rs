@@ -9,12 +9,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::{Event, Key, Shape, pos2};
-use figcraft_engine::Prefs;
-use figcraft_engine::figcraft_collab::message::{Admin, AdminReply, ClientMsg, OwnedFile};
-use figcraft_engine::live::{
+use lizard_engine::Prefs;
+use lizard_engine::live::{
     Access, Event as LiveEvent, HostInfo, HostOptions, LiveLink, NetReply, NetRequest, Peer, Presence, PublishOptions, Role, SessionInfo,
     Shared as SharedLinks, SharedLink,
 };
+use lizard_engine::lizard_collab::message::{Admin, AdminReply, ClientMsg, OwnedFile};
 use serde_json::{Value, json};
 
 use crate::live_tests::{Harness, has_text, text_center, texts};
@@ -54,7 +54,7 @@ fn info(role: Role, name: &str) -> SessionInfo {
         color: "#14AE5C".into(),
         file_name: name.into(),
         pages: vec![],
-        link: "figcraft://join?host=192.168.1.20:47900&file=f&token=AbCdEfGhIjKlMnOpQrStUv".into(),
+        link: "lizard://join?host=192.168.1.20:47900&file=f&token=AbCdEfGhIjKlMnOpQrStUv".into(),
         url: String::new(),
         address: "192.168.1.20:47900".into(),
         network: true,
@@ -66,7 +66,7 @@ fn info(role: Role, name: &str) -> SessionInfo {
 fn links(file: &str, n: usize) -> SharedLinks {
     let link = |what: &str, code: String| SharedLink {
         id: format!("{what}{n}"),
-        link: format!("figcraft://join?server={SERVER}&file={file}&token=Shared{what}Shared{what}0{n}"),
+        link: format!("lizard://join?server={SERVER}&file={file}&token=Shared{what}Shared{what}0{n}"),
         code: Some(code),
     };
     SharedLinks { edit: link("edit", format!("NEWED1T0{n}")), view: Some(link("view", format!("NEWV1EW0{n}"))) }
@@ -146,7 +146,7 @@ impl crate::Services for Clipboard {
 }
 
 fn edit_link(server: &str, file: &str) -> String {
-    format!("figcraft://join?server={server}&file={file}&token={EDIT_TOKEN}")
+    format!("lizard://join?server={server}&file={file}&token={EDIT_TOKEN}")
 }
 
 /// A record as the preferences file holds it: `File <id>`, shared with a code or not.
@@ -268,8 +268,8 @@ fn a_row_opens_its_file_as_owner_and_its_tab_shows_when_it_arrives() {
     assert_eq!(script.lock().unwrap().joined, [edit_link(SERVER, "a")]);
     assert!(has_text(&shapes, "Joining…") && h.app.ui.home, "still on the home screen while it joins");
     // The owner's welcome and the document.
-    use figcraft_engine::figcraft_collab::message::ServerMsg;
-    use figcraft_engine::figcraft_collab::{Client, Limits, Outgoing, Server};
+    use lizard_engine::lizard_collab::message::ServerMsg;
+    use lizard_engine::lizard_collab::{Client, Limits, Outgoing, Server};
     let mut server = Server::new(h.app.session.doc().unwrap().clone(), "", Limits::default());
     let ClientMsg::Hello(me) = Client::hello("f", "", "Ada", "") else { panic!("no hello") };
     let (_, outs) = server.join(me).unwrap();

@@ -1,8 +1,8 @@
 //! Outside rectangle strokes preserve the selected corner join.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, NodeKind, StrokeAlign, StrokeJoin};
-use figcraft_geom::kurbo::{Point, Shape};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, NodeKind, StrokeAlign, StrokeJoin};
+use lizard_geom::kurbo::{Point, Shape};
 
 fn winding_at(align: StrokeAlign, join: StrokeJoin, at: Point) -> Result<i32, Box<dyn std::error::Error>> {
     let mut doc = Document::new("join");
@@ -13,7 +13,7 @@ fn winding_at(align: StrokeAlign, join: StrokeJoin, at: Point) -> Result<i32, Bo
     node.stroke.weight = 10.0;
     node.stroke.align = align;
     node.stroke.join = join;
-    let rect = figcraft_geom::kurbo::Rect::new(0.0, 0.0, 60.0, 40.0).to_path(0.1);
+    let rect = lizard_geom::kurbo::Rect::new(0.0, 0.0, 60.0, 40.0).to_path(0.1);
     let node = doc.node(id).ok_or("missing rectangle")?;
     Ok(crate::draw::stroke_area(node, &rect, true).winding(at))
 }

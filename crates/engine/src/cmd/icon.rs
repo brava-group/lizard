@@ -1,8 +1,8 @@
 //! Place one icon from the bundled open-source catalogs as editable, self-contained vectors.
 
-use figcraft_color::{Color, PaintKind};
-use figcraft_doc::{Document, NodeId};
-use figcraft_geom::Affine;
+use lizard_color::{Color, PaintKind};
+use lizard_doc::{Document, NodeId};
+use lizard_geom::Affine;
 use serde_json::{Value, json};
 
 use super::CommandSpec;
@@ -81,7 +81,7 @@ pub fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let name = string(p, "name").unwrap_or_else(|| icon.clone());
     let ds = s.ds_mut()?;
     let doc = ds.doc_mut();
-    let id = figcraft_svg::import_svg(doc, svg.as_bytes(), parent, x, y, &name).map_err(|e| bad(CMD, e.to_string()))?;
+    let id = lizard_svg::import_svg(doc, svg.as_bytes(), parent, x, y, &name).map_err(|e| bad(CMD, e.to_string()))?;
     let (original_w, original_h, children) = {
         let node = doc.get(id)?;
         (node.width, node.height, node.children.clone())
@@ -174,7 +174,7 @@ pub fn set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let doc = s.ds_mut()?.doc_mut();
     if let Some(svg) = new_svg {
-        let artwork = figcraft_svg::import_svg(doc, svg.as_bytes(), id, 0.0, 0.0, "Icon artwork").map_err(|e| bad(CMD, e.to_string()))?;
+        let artwork = lizard_svg::import_svg(doc, svg.as_bytes(), id, 0.0, 0.0, "Icon artwork").map_err(|e| bad(CMD, e.to_string()))?;
         let (source_w, source_h) = {
             let node = doc.get(artwork)?;
             (node.width, node.height)
@@ -233,7 +233,7 @@ pub fn dominant_library(doc: &Document, root: NodeId, max_nodes: usize) -> Optio
 mod tests {
     use super::*;
     use crate::Session;
-    use figcraft_doc::NodeKind;
+    use lizard_doc::NodeKind;
 
     #[test]
     fn icon_creation_is_editable_and_keeps_provenance() -> Result<()> {

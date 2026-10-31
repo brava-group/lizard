@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Build, sign and package FigCraft for Windows.
+  Build, sign and package Lizard for Windows.
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    figcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
-    figcraft-<version>-windows-<arch>-portable.zip   figcraft.exe (+ figcraft-cli.exe) and the licences
+    lizard-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    lizard-<version>-windows-<arch>-portable.zip   lizard.exe (+ lizard-cli.exe) and the licences
 
-  figcraft-cli.exe is built and shipped once apps/figcraft-cli exists in the workspace.
+  lizard-cli.exe is built and shipped once apps/lizard-cli exists in the workspace.
 
   The binaries link the C runtime statically (+crt-static), so neither the MSI nor the portable
   zip needs the Visual C++ redistributable. Signing is delegated to sign.ps1 (skipped with a
@@ -36,7 +36,7 @@ function Invoke-Native([string] $What, [scriptblock] $Block) {
 }
 
 # The version lives in one place: [workspace.package] version in the root Cargo.toml.
-$Version = $env:FIGCRAFT_VERSION
+$Version = $env:LIZARD_VERSION
 if (-not $Version) {
   $inPkg = $false
   foreach ($line in Get-Content (Join-Path $Root 'Cargo.toml')) {
@@ -53,14 +53,14 @@ $Dist = if ($env:DIST) { $env:DIST } else { Join-Path $Root 'dist\release' }
 $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Root 'target' }
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
-if (-not $env:FIGCRAFT_BUILD_SHA) { $env:FIGCRAFT_BUILD_SHA = (git -C $Root rev-parse HEAD 2>$null) }
-if (-not $env:FIGCRAFT_BUILD_DATE) { $env:FIGCRAFT_BUILD_DATE = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
+if (-not $env:LIZARD_BUILD_SHA) { $env:LIZARD_BUILD_SHA = (git -C $Root rev-parse HEAD 2>$null) }
+if (-not $env:LIZARD_BUILD_DATE) { $env:LIZARD_BUILD_DATE = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
 
-# The headless CLI ships next to the app once apps/figcraft-cli exists.
-$HasCli = Test-Path (Join-Path $Root 'apps\figcraft-cli\Cargo.toml')
-$Bins = @('figcraft'); if ($HasCli) { $Bins += 'figcraft-cli' }
+# The headless CLI ships next to the app once apps/lizard-cli exists.
+$HasCli = Test-Path (Join-Path $Root 'apps\lizard-cli\Cargo.toml')
+$Bins = @('lizard'); if ($HasCli) { $Bins += 'lizard-cli' }
 
-Write-Output "FigCraft $Version for Windows $Arch ($Target): $($Bins -join ', ')"
+Write-Output "Lizard $Version for Windows $Arch ($Target): $($Bins -join ', ')"
 
 if (-not $SkipBuild) {
   # Static CRT: no VC++ redistributable needed. Scoped to the target so host build scripts and
@@ -83,7 +83,7 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-$checks = @(, @('figcraft.exe', 2)); if ($HasCli) { $checks += , @('figcraft-cli.exe', 3) }
+$checks = @(, @('lizard.exe', 2)); if ($HasCli) { $checks += , @('lizard-cli.exe', 3) }
 foreach ($check in $checks) {
   $h = Get-PeHeader (Join-Path $Bin $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
@@ -99,7 +99,7 @@ foreach ($exe in $Exes) { Copy-Item (Join-Path $Bin $exe) $Stage }
 & (Join-Path $PSScriptRoot 'sign.ps1') @($Exes | ForEach-Object { Join-Path $Stage $_ })
 
 # ---- MSI ---------------------------------------------------------------------------------------
-# The setup wizard's art, drawn here from the app icon so the MSI shows FigCraft rather than
+# The setup wizard's art, drawn here from the app icon so the MSI shows Lizard rather than
 # WiX's stock bitmaps: a 493x58 banner across the top of the inner pages (the page title is drawn
 # over its left side, so that stays white) and a 493x312 backdrop for the Welcome and Finish pages
 # (their text sits on the right; the left 164 px are ours). Both must be 24-bit BMPs.
@@ -134,15 +134,15 @@ function New-InstallerArt([string] $IconPng, [string] $BannerOut, [string] $Dial
 }
 $Banner = Join-Path $Stage 'installer-banner.bmp'
 $Dialog = Join-Path $Stage 'installer-dialog.bmp'
-New-InstallerArt (Join-Path $Root 'assets\app-icon\hicolor\256x256\apps\ai.storyteller.figcraft.png') $Banner $Dialog
+New-InstallerArt (Join-Path $Root 'assets\app-icon\hicolor\256x256\apps\com.brava.lizard.png') $Banner $Dialog
 
-$Msi = Join-Path $Dist "figcraft-$Version-windows-$Arch.msi"
+$Msi = Join-Path $Dist "lizard-$Version-windows-$Arch.msi"
 & (Join-Path $PSScriptRoot 'check-icons.ps1')
 Invoke-Native 'wix build' {
-  wix build (Join-Path $PSScriptRoot 'figcraft.wxs') -arch $Arch `
+  wix build (Join-Path $PSScriptRoot 'lizard.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-    -culture en-US -loc (Join-Path $PSScriptRoot 'figcraft.en-us.wxl') `
-    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\figcraft.ico')" `
+    -culture en-US -loc (Join-Path $PSScriptRoot 'lizard.en-us.wxl') `
+    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\lizard.ico')" `
     -d "BannerBmp=$Banner" -d "DialogBmp=$Dialog" -d "HasCli=$([int]$HasCli)" `
     -o $Msi
 }
@@ -154,7 +154,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Ms
 & (Join-Path $PSScriptRoot 'sign.ps1') $Msi
 
 # ---- portable zip ------------------------------------------------------------------------------
-$Portable = Join-Path $TargetDir "windows-package\figcraft-$Version-windows-$Arch-portable"
+$Portable = Join-Path $TargetDir "windows-package\lizard-$Version-windows-$Arch-portable"
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
@@ -170,17 +170,17 @@ if ($env:CRAFT_FONTS_DIR) {
     if (Test-Path $lic) { Copy-Item $lic (Join-Path $Portable "OFL-$($_.Name).txt") }
   }
 }
-# files go to FigCraftData\ next to the exe instead of %APPDATA% (#228; see app_dirs.rs).
-$Zip = Join-Path $Dist "figcraft-$Version-windows-$Arch-portable.zip"
+# files go to LizardData\ next to the exe instead of %APPDATA% (#228; see app_dirs.rs).
+$Zip = Join-Path $Dist "lizard-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
 # Smoke-test the CLI when this machine can run it. An ARM64 build made on an x64 runner can't run
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
 $HostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-$Smoke = if ($HasCli) { 'figcraft-cli.exe' } else { 'figcraft.exe' }
+$Smoke = if ($HasCli) { 'lizard-cli.exe' } else { 'lizard.exe' }
 if ($Arch -ne 'arm64' -or $HostArch -eq 'arm64') {
-  # figcraft.exe is a GUI-subsystem exe: pipe it so PowerShell waits and shows its --version output.
+  # lizard.exe is a GUI-subsystem exe: pipe it so PowerShell waits and shows its --version output.
   Invoke-Native "$Smoke --version" { & (Join-Path $Stage $Smoke) --version | Out-Host }
 } else {
   Write-Output "skipping $Smoke --version: an $Arch build doesn't run on this $HostArch machine"

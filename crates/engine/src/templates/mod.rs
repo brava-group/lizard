@@ -18,8 +18,8 @@ mod slides;
 mod social;
 mod wireframe;
 
-use figcraft_color::Color;
-use figcraft_doc::Document;
+use lizard_color::Color;
+use lizard_doc::Document;
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;

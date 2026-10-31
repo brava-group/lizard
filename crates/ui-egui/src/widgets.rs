@@ -1172,7 +1172,7 @@ pub fn checker(painter: &egui::Painter, rect: Rect, cell: f32) {
 }
 
 /// A paint swatch (with checkerboard under transparent colours).
-pub fn swatch(ui: &mut Ui, paint: &figcraft_color::Paint, size: f32) -> Response {
+pub fn swatch(ui: &mut Ui, paint: &lizard_color::Paint, size: f32) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     // The value is only spelled out while a screen reader reads the tree.
     let value = if a11y::active(&resp.ctx) { paint_name(paint) } else { String::new() };
@@ -1182,8 +1182,8 @@ pub fn swatch(ui: &mut Ui, paint: &figcraft_color::Paint, size: f32) -> Response
 }
 
 /// A paint as a screen reader says it: "#FF0000", "#FF0000 50%", "Gradient", "Image", "Pattern".
-pub fn paint_name(paint: &figcraft_color::Paint) -> String {
-    use figcraft_color::PaintKind;
+pub fn paint_name(paint: &lizard_color::Paint) -> String {
+    use lizard_color::PaintKind;
     match &paint.kind {
         PaintKind::Solid { color } => {
             let hex = color.to_hex();
@@ -1197,9 +1197,9 @@ pub fn paint_name(paint: &figcraft_color::Paint) -> String {
     }
 }
 
-pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &figcraft_color::Paint) {
+pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &lizard_color::Paint) {
     let t = Tokens::get(painter.ctx());
-    use figcraft_color::PaintKind;
+    use lizard_color::PaintKind;
     // A rectangular painter clip leaves the checkerboard and colour visible outside the
     // rounded outline. Clip each painted region to the same rounded silhouette instead.
     let rounded = swatch_outline(rect.shrink(0.5), 2.5);

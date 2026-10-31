@@ -2,11 +2,11 @@
 //!
 //! A plugin is a `cdylib` built for `wasm32-unknown-unknown`. It gets the command the user picked
 //! with its parameters and the selection, and acts on the document by calling Lizard commands
-//! (the ids `figcraft-cli commands` lists) with JSON parameters. Everything one run does is one
+//! (the ids `lizard-cli commands` lists) with JSON parameters. Everything one run does is one
 //! undo step; when the run returns an error (or panics), the document is put back.
 //!
 //! ```ignore
-//! use figcraft_plugin_sdk::{Input, Result, Value, call, entry, json};
+//! use lizard_plugin_sdk::{Input, Result, Value, call, entry, json};
 //!
 //! fn run(input: Input) -> Result<Value> {
 //!     for id in &input.selection {
@@ -245,7 +245,7 @@ pub fn delete_setting(key: &str) {
     host::setting_delete(key.as_bytes());
 }
 
-/// The body of `figcraft_run` (use [`entry!`]): read the input, run `f`, hand back its output.
+/// The body of `lizard_run` (use [`entry!`]): read the input, run `f`, hand back its output.
 pub fn run_plugin(input_len: i32, f: fn(Input) -> Result<Value>) -> i32 {
     let input = host::reply();
     let input = input.get(..usize::try_from(input_len).unwrap_or(0)).unwrap_or(&input);
@@ -267,13 +267,13 @@ pub fn run_plugin(input_len: i32, f: fn(Input) -> Result<Value>) -> i32 {
 macro_rules! entry {
     ($f:path) => {
         #[unsafe(no_mangle)]
-        pub extern "C" fn figcraft_run(input_len: i32) -> i32 {
+        pub extern "C" fn lizard_run(input_len: i32) -> i32 {
             $crate::run_plugin(input_len, $f)
         }
     };
 }
 
-/// The host functions Lizard provides (module `figcraft`).
+/// The host functions Lizard provides (module `lizard`).
 #[cfg(target_arch = "wasm32")]
 #[allow(unsafe_code)]
 mod host {
@@ -281,7 +281,7 @@ mod host {
     use alloc::vec::Vec;
 
     mod sys {
-        #[link(wasm_import_module = "figcraft")]
+        #[link(wasm_import_module = "lizard")]
         unsafe extern "C" {
             pub fn call(cmd: *const u8, cmd_len: usize, params: *const u8, params_len: usize) -> i32;
             pub fn selection() -> i32;

@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use egui::{Event, Pos2, RawInput, Rect, ViewportId, vec2};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use crate::present_tests::id;
-use crate::{ControlRequest, FigApp, NoServices};
+use crate::{ControlRequest, LizardApp, NoServices};
 
 /// The shortest repaint delay that counts as idle (a blinking caret wakes twice a second; nothing
 /// here edits text).
@@ -20,7 +20,7 @@ const IDLE: Duration = Duration::from_secs(1);
 
 pub(crate) struct Harness {
     ctx: egui::Context,
-    pub(crate) app: FigApp,
+    pub(crate) app: LizardApp,
     time: f64,
 }
 
@@ -29,8 +29,8 @@ impl Harness {
         // The one system font scan bumps the layout generation, which makes the canvas render
         // again: scanned here, before the first frame, rather than by whichever test happens to
         // run first while this one waits for idle (#333).
-        figcraft_text::scan_system_fonts();
-        Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0 }
+        lizard_text::scan_system_fonts();
+        Self { ctx: egui::Context::default(), app: LizardApp::new(s, Box::new(NoServices)), time: 0.0 }
     }
 
     /// One frame with `events`, 1/60 s after the last; returns the repaint delay it asked for.
@@ -78,7 +78,7 @@ impl Harness {
 
 /// Waits (without drawing frames, however slow the machine) until the render thread is done with
 /// every job and has woken the UI for it; returns whether one was in flight.
-pub(crate) fn wait_for_render(app: &FigApp) -> bool {
+pub(crate) fn wait_for_render(app: &LizardApp) -> bool {
     let start = Instant::now();
     let mut waited = false;
     while app.worker.as_ref().is_some_and(crate::render_worker::Worker::in_flight) {
@@ -228,7 +228,7 @@ fn a_finished_background_render_wakes_the_ui() {
     worker.submit(crate::render_worker::Job {
         doc: ds.doc.clone(),
         page: ds.page,
-        view: figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 },
+        view: lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 },
         outline: false,
         outline_extras: Default::default(),
         outlined: vec![],
@@ -269,7 +269,7 @@ fn control_requests_and_screenshots_wake_an_idle_ui() {
     assert!(rx.try_recv().unwrap().result.is_ok());
     h.assert_idle("after a control request");
     // A screenshot keeps frames coming until the window delivers it, then the UI rests again.
-    let path = std::env::temp_dir().join(format!("figcraft-idle-shot-{}.png", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lizard-idle-shot-{}.png", std::process::id()));
     let params = json!({"path": path.to_string_lossy()});
     h.app.control_queue.push(ControlRequest {
         id: json!(2),
@@ -352,9 +352,9 @@ fn a_hidden_window_answers_at_once() {
     // #269, #720: minimised or covered, the window draws no frames, but the app's logic still runs:
     // it answers edits, inspection, saves and the interface's state; what needs a frame (a capture
     // of the window) is an error at once instead of waiting for the window to show.
-    let dir = std::env::temp_dir().join(format!("figcraft-hidden-save-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lizard-hidden-save-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("hidden.figcraft");
+    let path = dir.join("hidden.lizard");
     let (mut h, _) = document();
     h.settle();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -388,9 +388,9 @@ fn a_hidden_window_answers_at_once() {
 
 #[test]
 fn auto_save_writes_a_changed_file_then_rests() {
-    let dir = std::env::temp_dir().join(format!("figcraft-auto-save-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lizard-auto-save-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("auto.figcraft").to_string_lossy().to_string();
+    let path = dir.join("auto.lizard").to_string_lossy().to_string();
     let (mut h, _) = document();
     h.run("file.save", json!({"path": path}));
     h.run("pref.autoSave", json!({"on": true}));

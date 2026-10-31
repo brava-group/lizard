@@ -4,8 +4,8 @@
 
 use std::path::PathBuf;
 
-use figcraft_engine::Session;
-use figcraft_ui_egui::{DialogFuture, FigApp, Services, menus};
+use lizard_engine::Session;
+use lizard_ui_egui::{DialogFuture, LizardApp, Services, menus};
 use serde_json::json;
 
 /// Services whose save dialog always returns the given path.
@@ -17,7 +17,7 @@ impl Services for SaveTo {
 }
 
 /// The menu item, then a frame: the save dialog answers asynchronously and the frame takes its answer.
-fn invoke(app: &mut FigApp, id: &str) {
+fn invoke(app: &mut LizardApp, id: &str) {
     menus::invoke(app, id);
     let ctx = egui::Context::default();
     for _ in 0..2 {
@@ -28,12 +28,12 @@ fn invoke(app: &mut FigApp, id: &str) {
 }
 
 fn out_path(name: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("figcraft-{}-{name}.pdf", std::process::id()));
+    let p = std::env::temp_dir().join(format!("lizard-{}-{name}.pdf", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p
 }
 
-fn frame(app: &mut FigApp, x: i32, y: i32) -> serde_json::Value {
+fn frame(app: &mut LizardApp, x: i32, y: i32) -> serde_json::Value {
     app.session.execute("node.create", &json!({"type": "frame", "x": x, "y": y, "width": 100, "height": 80})).unwrap()
 }
 
@@ -46,7 +46,7 @@ fn page_count(pdf: &[u8]) -> usize {
 #[test]
 fn frames_pdf_menu_saves_the_pdf() {
     let path = out_path("one");
-    let mut app = FigApp::new(Session::new(), Box::new(SaveTo(path.clone())));
+    let mut app = LizardApp::new(Session::new(), Box::new(SaveTo(path.clone())));
     frame(&mut app, 0, 0);
     invoke(&mut app, "file.exportFramesPdf");
     assert!(app.ui.last_error.is_none(), "{:?}", app.ui.last_error);
@@ -65,7 +65,7 @@ fn frames_pdf_menu_saves_the_pdf() {
 #[test]
 fn frames_pdf_menu_one_page_per_visible_frame() {
     let path = out_path("two");
-    let mut app = FigApp::new(Session::new(), Box::new(SaveTo(path.clone())));
+    let mut app = LizardApp::new(Session::new(), Box::new(SaveTo(path.clone())));
     frame(&mut app, 0, 0);
     frame(&mut app, 300, 0);
     let hidden = frame(&mut app, 600, 0);

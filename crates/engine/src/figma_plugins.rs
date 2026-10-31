@@ -13,18 +13,18 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_color::PaintKind;
+use lizard_color::PaintKind;
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_doc::{NodeId, NodeKind, StyleKind};
+use lizard_doc::{NodeId, NodeKind, StyleKind};
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_figma_plugin::UiFiles;
+use lizard_figma_plugin::UiFiles;
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_figma_plugin::bridge::Edit;
+use lizard_figma_plugin::bridge::Edit;
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_figma_plugin::worker::{self, Request, Response, SelectedNode};
+use lizard_figma_plugin::worker::{self, Request, Response, SelectedNode};
 #[cfg(not(target_arch = "wasm32"))]
-use figcraft_figma_plugin::worker_ui::{self, UiRequest, UiResponse};
-use figcraft_figma_plugin::{MANIFEST_FILE, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, ParsedManifest};
+use lizard_figma_plugin::worker_ui::{self, UiRequest, UiResponse};
+use lizard_figma_plugin::{MANIFEST_FILE, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, ParsedManifest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -36,7 +36,7 @@ use crate::{Result, Session, bad, file_access, spec};
 const COMMAND: &str = "plugin.figma.inspect";
 
 #[cfg(not(target_arch = "wasm32"))]
-fn snapshot_node(doc: &figcraft_doc::Document, id: NodeId, count: &mut usize, depth: usize) -> Option<SelectedNode> {
+fn snapshot_node(doc: &lizard_doc::Document, id: NodeId, count: &mut usize, depth: usize) -> Option<SelectedNode> {
     if *count >= 4096 || depth >= 32 {
         return None;
     }
@@ -51,10 +51,10 @@ fn snapshot_node(doc: &figcraft_doc::Document, id: NodeId, count: &mut usize, de
                 "color":{"r":color.r,"g":color.g,"b":color.b}})),
             PaintKind::Image(image) => {
                 let mode = match image.scale_mode {
-                    figcraft_color::ImageScaleMode::Fill => "FILL",
-                    figcraft_color::ImageScaleMode::Fit => "FIT",
-                    figcraft_color::ImageScaleMode::Crop => "CROP",
-                    figcraft_color::ImageScaleMode::Tile => "TILE",
+                    lizard_color::ImageScaleMode::Fill => "FILL",
+                    lizard_color::ImageScaleMode::Fit => "FIT",
+                    lizard_color::ImageScaleMode::Crop => "CROP",
+                    lizard_color::ImageScaleMode::Tile => "TILE",
                 };
                 Some(json!({"type":"IMAGE","visible":paint.visible,"blendMode":"NORMAL","opacity":paint.opacity,
                     "imageHash":image.image,"scaleMode":mode}))
@@ -188,12 +188,12 @@ fn paint_value(value: &Value, image_hashes: &std::collections::BTreeMap<String, 
             let temp_hash = paint["imageHash"].as_str().ok_or_else(|| bad("plugin.figma.run", "image paint has no hash"))?;
             let hash = image_hashes.get(temp_hash).ok_or_else(|| bad("plugin.figma.run", "image hash is unavailable"))?;
             let mode = match paint["scaleMode"].as_str().unwrap_or("FILL") {
-                "FIT" => figcraft_color::ImageScaleMode::Fit,
-                "CROP" => figcraft_color::ImageScaleMode::Crop,
-                "TILE" => figcraft_color::ImageScaleMode::Tile,
-                _ => figcraft_color::ImageScaleMode::Fill,
+                "FIT" => lizard_color::ImageScaleMode::Fit,
+                "CROP" => lizard_color::ImageScaleMode::Crop,
+                "TILE" => lizard_color::ImageScaleMode::Tile,
+                _ => lizard_color::ImageScaleMode::Fill,
             };
-            let mut converted = serde_json::to_value(figcraft_color::Paint::image(hash, mode)).map_err(|e| bad("plugin.figma.run", e.to_string()))?;
+            let mut converted = serde_json::to_value(lizard_color::Paint::image(hash, mode)).map_err(|e| bad("plugin.figma.run", e.to_string()))?;
             converted["opacity"] = json!(paint.get("opacity").and_then(Value::as_f64).unwrap_or(1.0));
             converted["visible"] = json!(paint.get("visible").and_then(Value::as_bool).unwrap_or(true));
             out.push(converted);
@@ -284,7 +284,7 @@ fn apply_edits(
                 }
                 let bytes =
                     base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| bad(command, format!("invalid plugin image data: {e}")))?;
-                let (hash, _, _) = figcraft_format::add_image(s.doc_mut()?, bytes).map_err(|e| bad(command, e.to_string()))?;
+                let (hash, _, _) = lizard_format::add_image(s.doc_mut()?, bytes).map_err(|e| bad(command, e.to_string()))?;
                 image_hashes.insert(id.clone(), hash);
             }
             Edit::SetNode { id, key, value } => {
@@ -526,7 +526,7 @@ fn remove(s: &mut Session, params: &Value) -> Result<Value> {
 pub(crate) struct UiProcess {
     pub id: String,
     doc_uid: u64,
-    allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+    allowed: std::collections::BTreeMap<String, lizard_doc::NodeId>,
     allowed_domains: Vec<String>,
     image_hashes: std::collections::BTreeMap<String, String>,
     child: Child,
@@ -547,7 +547,7 @@ impl UiProcess {
     fn spawn(
         id: String,
         doc_uid: u64,
-        allowed: std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+        allowed: std::collections::BTreeMap<String, lizard_doc::NodeId>,
         allowed_domains: Vec<String>,
         image_hashes: std::collections::BTreeMap<String, String>,
     ) -> std::result::Result<Self, String> {
@@ -756,7 +756,7 @@ fn apply_ui_response(s: &mut Session, process: &mut UiProcess, reply: UiResponse
 fn apply_ui_operations(
     s: &mut Session,
     id: &str,
-    allowed: &std::collections::BTreeMap<String, figcraft_doc::NodeId>,
+    allowed: &std::collections::BTreeMap<String, lizard_doc::NodeId>,
     image_hashes: &mut std::collections::BTreeMap<String, String>,
     reply: UiResponse,
     command_id: &str,
@@ -1019,7 +1019,7 @@ mod tests {
 
     #[test]
     fn synthetic_package_inspects_without_running_build() {
-        let dir = std::env::temp_dir().join(format!("figcraft-figma-plugin-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lizard-figma-plugin-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("dist")).unwrap();
         std::fs::write(dir.join("dist/code.js"), "figma.closePlugin()").unwrap();
         std::fs::write(dir.join("manifest.json"), r#"{"id":"test.local","name":"Test","api":"1.0.0","editorType":["figma"],"main":"dist/code.js","documentAccess":"dynamic-page","build":"touch should-not-exist"}"#).unwrap();
@@ -1048,7 +1048,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn symlink_in_package_is_refused() {
-        let dir = std::env::temp_dir().join(format!("figcraft-figma-link-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lizard-figma-link-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::os::unix::fs::symlink("/etc/hosts", dir.join("code.js")).unwrap();
         std::fs::write(dir.join("manifest.json"), r#"{"id":"test.link","name":"Test","api":"1.0.0","editorType":["figma"],"main":"code.js"}"#)
@@ -1087,14 +1087,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn plugin_write_is_one_undo_step_and_failed_script_keeps_document() {
-        let dir = std::env::temp_dir().join(format!("figcraft-figma-run-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lizard-figma-run-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = r#"{"id":"test.run","name":"Opacity","api":"1.0.0","editorType":["figma"],"main":"code.js","documentAccess":"dynamic-page"}"#;
         std::fs::write(dir.join("manifest.json"), manifest).unwrap();
         std::fs::write(dir.join("code.js"), "figma.currentPage.selection[0].opacity = 0.4; figma.closePlugin()").unwrap();
         let mut session = Session::default();
         let created = session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
-        let node_id = figcraft_doc::NodeId(created["id"].as_u64().unwrap());
+        let node_id = lizard_doc::NodeId(created["id"].as_u64().unwrap());
         session.set_selection(vec![node_id]);
         import(&mut session, &json!({"path": dir, "mode": "development"})).unwrap();
         let before = session.undo_depth().0;
@@ -1119,7 +1119,7 @@ mod tests {
     fn ui_message_applies_one_undo_step_and_rejects_foreign_nodes() {
         let mut session = Session::default();
         let created = session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
-        let node_id = figcraft_doc::NodeId(created["id"].as_u64().unwrap());
+        let node_id = lizard_doc::NodeId(created["id"].as_u64().unwrap());
         let allowed = std::collections::BTreeMap::from([(node_id.to_string(), node_id)]);
         let before = session.undo_depth().0;
         let reply = UiResponse {

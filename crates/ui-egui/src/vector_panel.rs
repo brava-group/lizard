@@ -4,11 +4,11 @@
 //! dimensions).
 
 use egui::{Color32, CornerRadius, Id, Rect, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::{Document, HandleMirroring};
-use figcraft_engine::vectoredit::{self, VectorEdit};
+use lizard_doc::{Document, HandleMirroring};
+use lizard_engine::vectoredit::{self, VectorEdit};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::icons::{AppearanceIcon, PositionIcon, VectorPointIcon};
@@ -17,7 +17,7 @@ use crate::right::{menu_popup, row, row_rect};
 use crate::widgets::{self, Edit, FieldEdit, Lead, PAD};
 
 /// Run a point command from a field: typed values are one step, scrubs one step when released.
-fn point_field(app: &mut FigApp, cmd: &str, edit: Option<FieldEdit>, params: impl Fn(f64) -> Value) {
+fn point_field(app: &mut LizardApp, cmd: &str, edit: Option<FieldEdit>, params: impl Fn(f64) -> Value) {
     match edit {
         Some(FieldEdit::Set(v)) => {
             app.run(cmd, params(v));
@@ -34,7 +34,7 @@ fn point_field(app: &mut FigApp, cmd: &str, edit: Option<FieldEdit>, params: imp
 }
 
 /// The Variable width tool's selected width point: where it is along the path and its width.
-fn width_point(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
+fn width_point(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
     widgets::section_header(ui, tr("Width point"), &[], false);
     let stroke = doc.node(ve.id).map(|n| &n.stroke);
     let sel = ve.width_point.and_then(|i| Some((i, *stroke?.profile()?.points.get(i)?)));
@@ -73,7 +73,7 @@ fn width_point(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
     ui.add_space(8.0);
 }
 
-pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
+pub fn points(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
     if ve.tool == vectoredit::VTool::Width {
         width_point(app, ui, doc, ve);
         return;
@@ -161,7 +161,7 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
 }
 
 /// Arrange actions from the point panel's rightmost button.
-fn point_options(app: &mut FigApp, selected_count: usize, more: &egui::Response) {
+fn point_options(app: &mut LizardApp, selected_count: usize, more: &egui::Response) {
     menu_popup(more).width(320.0).show(|ui| {
         crate::primitives::MenuItem::new(tr("Tidy up"))
             .shortcut(crate::shortcuts::shortcut("arrange.tidy").unwrap_or(""))

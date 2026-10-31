@@ -8,29 +8,29 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::Session;
+use lizard_doc::{Document, NodeId};
+use lizard_engine::Session;
 use serde_json::json;
 
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 const SCREEN: (f32, f32) = (1920.0, 1080.0);
 
 struct Bench {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
 }
 
 impl Bench {
     fn new(layers: usize) -> Self {
-        let (doc, _) = figcraft_engine::synthetic::large_document(layers).unwrap();
+        let (doc, _) = lizard_engine::synthetic::large_document(layers).unwrap();
         Self::with_document(doc)
     }
 
     fn with_document(doc: Document) -> Self {
-        figcraft_text::scan_system_fonts();
-        let mut b = Self { ctx: egui::Context::default(), app: FigApp::new(Session::with_document(doc), Box::new(NoServices)), time: 0.0 };
+        lizard_text::scan_system_fonts();
+        let mut b = Self { ctx: egui::Context::default(), app: LizardApp::new(Session::with_document(doc), Box::new(NoServices)), time: 0.0 };
         // Fonts install on the first frame; the next ones lay out and settle.
         for _ in 0..4 {
             b.frame(vec![]);
@@ -174,9 +174,9 @@ fn a_layer_revealed_at_the_bottom_of_10k_layers_gets_the_keyboard_on_its_row() {
 
 /// The synthetic design system with `icons` icon components (plus its component sets) and
 /// `instances` instances using it.
-fn design_system(icons: usize, instances: usize) -> (Document, figcraft_engine::synthetic_ds::DesignSystem, Vec<NodeId>) {
-    let spec = figcraft_engine::synthetic_ds::DsSpec { icons, ..figcraft_engine::synthetic_ds::DsSpec::FULL };
-    figcraft_engine::synthetic_ds::design_system_with_instances(&spec, instances).unwrap()
+fn design_system(icons: usize, instances: usize) -> (Document, lizard_engine::synthetic_ds::DesignSystem, Vec<NodeId>) {
+    let spec = lizard_engine::synthetic_ds::DsSpec { icons, ..lizard_engine::synthetic_ds::DsSpec::FULL };
+    lizard_engine::synthetic_ds::design_system_with_instances(&spec, instances).unwrap()
 }
 
 fn wheel(d: f32) -> Event {
@@ -207,7 +207,7 @@ fn report_components(icons: usize, instances: usize) {
     b.app.ui.left_tab = crate::LeftTab::File;
     let nav = inst.iter().copied().find(|i| {
         b.app.session.doc().ok().and_then(|d| match &d.node(*i)?.kind {
-            figcraft_doc::NodeKind::Instance { component, .. } => figcraft_engine::components::variant_set(d, *component),
+            lizard_doc::NodeKind::Instance { component, .. } => lizard_engine::components::variant_set(d, *component),
             _ => None,
         }) == Some(ds.nav)
     });
@@ -229,7 +229,7 @@ fn report_components(icons: usize, instances: usize) {
 #[test]
 #[ignore = "benchmark: cargo xtask bench"]
 fn perf_ui_frames() {
-    let sizes: Vec<usize> = std::env::var("FIGCRAFT_BENCH_LAYERS")
+    let sizes: Vec<usize> = std::env::var("LIZARD_BENCH_LAYERS")
         .ok()
         .map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![1000, 10_000]);

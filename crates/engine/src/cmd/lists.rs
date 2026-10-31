@@ -6,7 +6,7 @@
 //! Every list is stored bottom first: index 0 paints (or applies) first, the last one is on top;
 //! the Design panel shows them in reverse, the topmost row first.
 
-use figcraft_doc::*;
+use lizard_doc::*;
 use serde_json::Value;
 
 use super::{CommandSpec, ok};
@@ -113,8 +113,8 @@ pub fn stop_binding(field: &str) -> Option<usize> {
 /// the paint changed from `old`: one stop removed shifts the later ones down (the removed one's
 /// binding goes); a paint that is no longer a gradient drops them. Other edits keep stop indices.
 /// Returns the removed stop's index.
-pub(crate) fn remap_stop_bindings(n: &mut Node, fills: bool, index: usize, old: &figcraft_color::Paint) -> Option<usize> {
-    use figcraft_color::PaintKind;
+pub(crate) fn remap_stop_bindings(n: &mut Node, fills: bool, index: usize, old: &lizard_color::Paint) -> Option<usize> {
+    use lizard_color::PaintKind;
     let list = if fills { BoundList::Fills } else { BoundList::Strokes };
     let new = if fills { n.fills.get(index) } else { n.strokes.get(index) };
     // Some(k): stop k was removed; None: the paint has no stops any more.
@@ -158,10 +158,10 @@ pub(crate) fn remap_stop_bindings(n: &mut Node, fills: bool, index: usize, old: 
 /// bindings follow a removed stop, then each binding whose value the edit changed (the colour, the
 /// opacity, a stop's colour) lets go, so the edit stays instead of being put back from the
 /// variable. Bindings whose value the edit kept stay; a paint that is gone takes its bindings.
-pub(crate) fn rebind_edited_paint(n: &mut Node, fills: bool, index: usize, old: &figcraft_color::Paint) {
+pub(crate) fn rebind_edited_paint(n: &mut Node, fills: bool, index: usize, old: &lizard_color::Paint) {
     let removed = remap_stop_bindings(n, fills, index, old);
     let mut old = old.clone();
-    if let (Some(k), figcraft_color::PaintKind::Gradient(g)) = (removed, &mut old.kind)
+    if let (Some(k), lizard_color::PaintKind::Gradient(g)) = (removed, &mut old.kind)
         && k < g.stops.len()
     {
         g.stops.remove(k);
@@ -176,8 +176,8 @@ pub(crate) fn rebind_edited_paint(n: &mut Node, fills: bool, index: usize, old: 
 
 /// Whether a paint's bound `field` (`color`, `opacity`, `stops/<j>/color`, …) has the same value in
 /// `new` as in `old`.
-fn paint_field_kept(old: &figcraft_color::Paint, new: &figcraft_color::Paint, field: &str) -> bool {
-    use figcraft_color::PaintKind;
+fn paint_field_kept(old: &lizard_color::Paint, new: &lizard_color::Paint, field: &str) -> bool {
+    use lizard_color::PaintKind;
     match field {
         "color" => matches!((&old.kind, &new.kind), (PaintKind::Solid { color: a }, PaintKind::Solid { color: b }) if a == b),
         "opacity" => old.opacity == new.opacity,

@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::{Color32, Event, PointerButton, Pos2, RawInput, Rect, Shape, ViewportId, pos2, vec2};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
-use figcraft_engine::live::{Event as LiveEvent, HostOptions, LiveLink, Peer, Presence, Role, SessionInfo, Status};
+use lizard_doc::NodeId;
+use lizard_engine::Session;
+use lizard_engine::live::{Event as LiveEvent, HostOptions, LiveLink, Peer, Presence, Role, SessionInfo, Status};
 use serde_json::json;
 
 use crate::present_tests::id;
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 pub(crate) const HANA: Color32 = Color32::from_rgb(0x97, 0x47, 0xFF);
 
@@ -28,13 +28,13 @@ impl LiveLink for Mock {
         self.1 = session;
         Ok(())
     }
-    fn publish(&mut self, session: u64, _: figcraft_engine::live::PublishOptions) -> Result<(), String> {
+    fn publish(&mut self, session: u64, _: lizard_engine::live::PublishOptions) -> Result<(), String> {
         self.1 = session;
         Ok(())
     }
     fn leave(&mut self, _: u64) {}
     fn presence(&mut self, _: u64, _: &Presence) {}
-    fn send(&mut self, _: u64, _: figcraft_engine::figcraft_collab::message::ClientMsg) {}
+    fn send(&mut self, _: u64, _: lizard_engine::lizard_collab::message::ClientMsg) {}
     fn poll(&mut self) -> Vec<(u64, LiveEvent)> {
         std::mem::take(&mut *self.0.lock().unwrap()).into_iter().map(|e| (self.1, e)).collect()
     }
@@ -42,7 +42,7 @@ impl LiveLink for Mock {
 
 pub(crate) struct Harness {
     pub(crate) ctx: egui::Context,
-    pub(crate) app: FigApp,
+    pub(crate) app: LizardApp,
     time: f64,
     events: Arc<Mutex<Vec<LiveEvent>>>,
 }
@@ -69,7 +69,7 @@ impl Harness {
         s.execute("select.set", &json!({"ids": []})).unwrap();
         let events = Arc::new(Mutex::new(Vec::new()));
         s.live.install(Box::new(Mock(events.clone(), 0)));
-        let h = Harness { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0, events };
+        let h = Harness { ctx: egui::Context::default(), app: LizardApp::new(s, Box::new(NoServices)), time: 0.0, events };
         (h, rect)
     }
 
@@ -113,7 +113,7 @@ impl Harness {
 
     /// Joined as Ada, with Hana (the host) already here.
     pub(crate) fn joined(&mut self) {
-        self.app.session.execute("collab.join", &json!({"link": "figcraft://join?host=127.0.0.1:47900&file=f&token=t"})).unwrap();
+        self.app.session.execute("collab.join", &json!({"link": "lizard://join?host=127.0.0.1:47900&file=f&token=t"})).unwrap();
         let info = SessionInfo {
             role: Role::Guest,
             me: 2,
@@ -125,7 +125,7 @@ impl Harness {
             url: String::new(),
             address: "127.0.0.1:47900".into(),
             network: false,
-            access: figcraft_engine::live::Access::Edit,
+            access: lizard_engine::live::Access::Edit,
         };
         self.send(vec![LiveEvent::Welcome { info, peers: vec![Peer { client_id: 1, name: "Hana".into(), color: "#9747FF".into() }] }]);
     }
@@ -133,8 +133,8 @@ impl Harness {
     /// The host's welcome with the document (a session server seeded with this document): it opens
     /// as a new tab, which is then the synced document.
     pub(crate) fn sync(&mut self) {
-        use figcraft_engine::figcraft_collab::message::{ClientMsg, ServerMsg};
-        use figcraft_engine::figcraft_collab::{Client, Limits, Outgoing, Server};
+        use lizard_engine::lizard_collab::message::{ClientMsg, ServerMsg};
+        use lizard_engine::lizard_collab::{Client, Limits, Outgoing, Server};
         let mut server = Server::new(self.app.session.doc().unwrap().clone(), "", Limits::default());
         let ClientMsg::Hello(host) = Client::hello("f", "", "Hana", "") else { panic!("no hello") };
         server.join(host).unwrap();

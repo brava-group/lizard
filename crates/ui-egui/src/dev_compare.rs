@@ -6,11 +6,11 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::devcompare::{self, ChangeKind, Comparison, LayerChange};
+use lizard_doc::{Document, NodeId};
+use lizard_engine::devcompare::{self, ChangeKind, Comparison, LayerChange};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::Icon;
 use crate::theme::{ACCENT, DEV_CHANGED, Tokens, regular, semibold};
@@ -60,14 +60,14 @@ struct Cached {
 /// One version rendered: its texture, the page area it shows and where each listed layer is.
 pub(crate) struct Shot {
     tex: egui::TextureHandle,
-    area: figcraft_geom::Rect,
-    boxes: Vec<(NodeId, ChangeKind, figcraft_geom::Rect)>,
+    area: lizard_geom::Rect,
+    boxes: Vec<(NodeId, ChangeKind, lizard_geom::Rect)>,
 }
 
 impl Shot {
     /// Layer `id` of `doc` rendered, the layers `marks` outlined.
     pub(crate) fn new(ctx: &egui::Context, doc: &Document, id: NodeId, marks: impl Iterator<Item = (NodeId, ChangeKind)>) -> Option<Self> {
-        let area = figcraft_render::export_bounds(doc, id)?;
+        let area = lizard_render::export_bounds(doc, id)?;
         let tex = crate::assets_panel::thumbnail(ctx, doc, id, TEXTURE_SIDE)?;
         let boxes = marks.filter_map(|(c, kind)| doc.world_bounds(c).map(|b| (c, kind, b))).collect();
         Some(Self { tex, area, boxes })
@@ -118,14 +118,14 @@ pub(crate) fn kind_color(t: &Tokens, k: ChangeKind) -> Color32 {
 }
 
 /// Escape closes the view (before the canvas's shortcuts see it).
-pub fn keys(app: &mut FigApp, ctx: &egui::Context) {
+pub fn keys(app: &mut LizardApp, ctx: &egui::Context) {
     if app.ui.dev.compare.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.ui.dev.compare = None;
     }
 }
 
 /// The compare view window, while open.
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut view) = app.ui.dev.compare.take() else { return };
     let Ok(ds) = app.session.ds() else { return };
     let doc = ds.doc.clone();

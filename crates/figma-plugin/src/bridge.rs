@@ -49,7 +49,7 @@ pub fn setup(
 pub fn run_timers(context: &mut Context) -> Result<(), String> {
     let started = Instant::now();
     for _ in 0..32 {
-        let value = context.eval(Source::from_bytes("__figcraftNextTimerDelay()")).map_err(|e| format!("plugin timer: {e}"))?;
+        let value = context.eval(Source::from_bytes("__lizardNextTimerDelay()")).map_err(|e| format!("plugin timer: {e}"))?;
         let delay = value.to_number(context).map_err(|e| format!("plugin timer: {e}"))?;
         if delay < 0.0 {
             return Ok(());
@@ -65,7 +65,7 @@ pub fn run_timers(context: &mut Context) -> Result<(), String> {
         if !wait.is_zero() {
             std::thread::sleep(wait);
         }
-        context.eval(Source::from_bytes("__figcraftFireTimer()")).map_err(|e| format!("plugin timer: {e}"))?;
+        context.eval(Source::from_bytes("__lizardFireTimer()")).map_err(|e| format!("plugin timer: {e}"))?;
         context.run_jobs().map_err(|e| format!("plugin timer task: {e}"))?;
     }
     Ok(())
@@ -300,7 +300,7 @@ const API: &str = r#"
         if (depth > 24) throw Error('plugin UI message is too deeply nested');
         if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
             const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-            return { __figcraftBytes: encodeImageBytes(bytes).encoded };
+            return { __lizardBytes: encodeImageBytes(bytes).encoded };
         }
         if (Array.isArray(value)) return value.map(item => encodeWire(item, depth + 1));
         if (value && typeof value === 'object') {
@@ -312,8 +312,8 @@ const API: &str = r#"
     }
     function decodeWire(value, depth = 0) {
         if (depth > 24) throw Error('plugin UI message is too deeply nested');
-        if (value && typeof value === 'object' && typeof value.__figcraftBytes === 'string'
-            && Object.keys(value).length === 1) return decodeBase64(value.__figcraftBytes);
+        if (value && typeof value === 'object' && typeof value.__lizardBytes === 'string'
+            && Object.keys(value).length === 1) return decodeBase64(value.__lizardBytes);
         if (Array.isArray(value)) return value.map(item => decodeWire(item, depth + 1));
         if (value && typeof value === 'object') {
             const result = {};
@@ -465,11 +465,11 @@ const API: &str = r#"
     Object.defineProperty(globalThis, 'console', { value: Object.freeze({
         log() {}, info() {}, warn() {}, error() {}, clear() {}
     }), writable: false });
-    if (typeof __figcraftFetch === 'function') {
+    if (typeof __lizardFetch === 'function') {
         Object.defineProperty(globalThis, 'fetch', { value: (url, options = {}) => Promise.resolve().then(() => {
             const headers = options.headers && typeof options.headers.forEach === 'function'
                 ? Object.fromEntries(Array.from(options.headers.entries())) : (options.headers ?? {});
-            const reply = JSON.parse(__figcraftFetch(String(url), JSON.stringify({method: options.method ?? 'GET', headers, body: options.body ?? ''})));
+            const reply = JSON.parse(__lizardFetch(String(url), JSON.stringify({method: options.method ?? 'GET', headers, body: options.body ?? ''})));
             if (reply.error) throw Error(reply.error);
             return {
                 ok: reply.ok, status: reply.status, statusText: String(reply.status), url: String(url),
@@ -494,9 +494,9 @@ const API: &str = r#"
     Object.defineProperty(globalThis, 'clearTimeout', { value: clearTimer, writable: false });
     Object.defineProperty(globalThis, 'setInterval', { value: (callback, delay) => scheduleTimer(callback, delay, true), writable: false });
     Object.defineProperty(globalThis, 'clearInterval', { value: clearTimer, writable: false });
-    Object.defineProperty(globalThis, '__figcraftNextTimerDelay', { value: () =>
+    Object.defineProperty(globalThis, '__lizardNextTimerDelay', { value: () =>
         timers.length ? Math.max(0, timers[0].at - Date.now()) : -1 });
-    Object.defineProperty(globalThis, '__figcraftFireTimer', { value: () => {
+    Object.defineProperty(globalThis, '__lizardFireTimer', { value: () => {
         const timer = timers.shift();
         if (timer) {
             timer.callback();
@@ -507,7 +507,7 @@ const API: &str = r#"
             }
         }
     } });
-    Object.defineProperty(globalThis, '__figcraftRun', { value: () => {
+    Object.defineProperty(globalThis, '__lizardRun', { value: () => {
         if (__fcExtra?.parameterInput && typeof events.parametersInput === 'function') {
             const input = __fcExtra.parameterInput;
             eventResult = { suggestions: [], error: null };
@@ -524,11 +524,11 @@ const API: &str = r#"
         else if (typeof events.run === 'function')
             events.run({ command: __fcCommand ?? '', parameters: __fcExtra?.parameters ?? null });
     } });
-    Object.defineProperty(globalThis, '__figcraftReceive', { value: payload => {
+    Object.defineProperty(globalThis, '__lizardReceive', { value: payload => {
         if (closed) throw Error('plugin is closed');
         if (typeof ui.onmessage === 'function') ui.onmessage(decodeWire(payload));
     } });
-    Object.defineProperty(globalThis, '__figcraftTake', { value: () => {
+    Object.defineProperty(globalThis, '__lizardTake', { value: () => {
         const result = JSON.stringify({ operations: opacityOps, edits, show: shown,
             messages, closed, message: closeMessage, eventResult,
             storage: Object.fromEntries(storageChanges) });

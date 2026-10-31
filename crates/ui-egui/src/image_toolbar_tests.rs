@@ -2,7 +2,7 @@
 
 use base64::Engine as _;
 use egui::{Event, PointerButton, Rect, Shape, pos2, vec2};
-use figcraft_color::{ImageScaleMode, PaintKind};
+use lizard_color::{ImageScaleMode, PaintKind};
 use serde_json::json;
 
 #[test]
@@ -37,7 +37,7 @@ fn selected_image_shows_a_second_toolbar_and_crop_opens_the_existing_editor() {
     let click = |pressed| Event::PointerButton { pos: crop, button: PointerButton::Primary, pressed, modifiers: Default::default() };
     harness.frame(vec![Event::PointerMoved(crop), click(true)]);
     harness.frame(vec![click(false)]);
-    let fill = &harness.app.session.doc().unwrap().node(figcraft_doc::NodeId(id)).unwrap().fills[0];
+    let fill = &harness.app.session.doc().unwrap().node(lizard_doc::NodeId(id)).unwrap().fills[0];
     assert!(matches!(&fill.kind, PaintKind::Image(image) if image.scale_mode == ImageScaleMode::Crop));
     assert!(matches!(&harness.app.ui.picker, Some(crate::colorpicker::PickerTarget::Paint { fills: true, index: 0, .. })));
 }

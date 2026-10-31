@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use figcraft_doc::{LetterSpacing, TextData};
+use lizard_doc::{LetterSpacing, TextData};
 
 use crate::{clear_layout_cache, layout_cached, layout_generation};
 

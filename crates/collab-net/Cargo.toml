@@ -1,17 +1,17 @@
 [package]
-name = "figcraft-collab-net"
+name = "lizard-collab-net"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Lizard live sessions over the network: the WebSocket transport, the session host the app embeds, invite links and presence relay (carries figcraft-collab's messages)"
+description = "Lizard live sessions over the network: the WebSocket transport, the session host the app embeds, invite links and presence relay (carries lizard-collab's messages)"
 
 [lints]
 workspace = true
 
 [dependencies]
-figcraft-engine = { workspace = true }
-figcraft-collab = { workspace = true }
-figcraft-doc = { workspace = true }
+lizard-engine = { workspace = true }
+lizard-collab = { workspace = true }
+lizard-doc = { workspace = true }
 log = { workspace = true }
 # `std::time::Instant` natively, the browser's clock in the web build.
 web-time = "1"

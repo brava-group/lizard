@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use canvas_strategies_bench::gpu_live_residual::GpuLiveResidual;
 use canvas_strategies_bench::gpu_scene::{GpuCanvas, make_scene_with_images};
-use figcraft_doc::NodeKind;
-use figcraft_render::{Options, Pixmap, View, render_view};
+use lizard_doc::NodeKind;
+use lizard_render::{Options, Pixmap, View, render_view};
 
 const WIDTH: u32 = 5120;
 const HEIGHT: u32 = 2160;
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if std::env::var_os("LIZARD_GPU_NO_EFFECTS").is_none() {
         return Err("set LIZARD_GPU_NO_EFFECTS=1 to benchmark geometry plus residual".into());
     }
-    let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard"))?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

@@ -3,9 +3,9 @@
 //! across every group.
 
 use egui::{Align2, Context, CornerRadius, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_engine::keymap::{GESTURES, Group, KEYS, Platform};
+use lizard_engine::keymap::{GESTURES, Group, KEYS, Platform};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{self, tr};
 use crate::theme::{Tokens, regular};
 
@@ -42,7 +42,7 @@ fn rows(group: Option<Group>, query: &str, platform: Platform) -> Vec<Row> {
             // Alternatives that read the same (⌘+ and ⇧⌘+) show once.
             let mut keys: Vec<String> = Vec::with_capacity(MAX_KEYS);
             for k in b.keys(platform) {
-                let shown = figcraft_engine::keymap::display(k, platform);
+                let shown = lizard_engine::keymap::display(k, platform);
                 if keys.len() < MAX_KEYS && !keys.contains(&shown) {
                     keys.push(shown);
                 }
@@ -94,7 +94,7 @@ fn row(ui: &mut Ui, t: &Tokens, row: &Row, width: f32) {
     ui.painter().text(pos2(r.min.x + 6.0, cy), Align2::LEFT_CENTER, label, regular(12.0), t.text);
 }
 
-pub fn show(app: &mut FigApp, ctx: &Context) {
+pub fn show(app: &mut LizardApp, ctx: &Context) {
     if !app.ui.shortcuts_panel {
         return;
     }

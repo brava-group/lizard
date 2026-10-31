@@ -7,9 +7,9 @@
 // The tables read best as tuples.
 #![allow(clippy::type_complexity)]
 
-use figcraft_doc::{HandleMirroring, NodeId, NodeKind, VectorNetwork};
-use figcraft_geom::kurbo::ParamCurve;
-use figcraft_geom::{Point, Shape};
+use lizard_doc::{HandleMirroring, NodeId, NodeKind, VectorNetwork};
+use lizard_geom::kurbo::ParamCurve;
+use lizard_geom::{Point, Shape};
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -126,12 +126,12 @@ fn entering_and_leaving_vector_edit_mode() {
     let id = square(&mut s, false);
     ex(&mut s, "node.set", json!({"ids": [id], "props": {"cornerRadius": 20, "fill": "#336699", "stroke": "#000000"}}));
     let before = s.doc().unwrap().node(id).unwrap().clone();
-    let outline = figcraft_doc::geometry::shape_path(&before).unwrap();
+    let outline = lizard_doc::geometry::shape_path(&before).unwrap();
     ex(&mut s, "vector.edit.begin", json!({"id": id}));
     let after = s.doc().unwrap().node(id).unwrap().clone();
     assert!(matches!(after.kind, NodeKind::Vector { .. }), "the shape is a vector now");
     assert_eq!((after.fills.clone(), after.strokes.clone()), (before.fills, before.strokes), "fills and strokes are kept");
-    let (path, _) = figcraft_render::node_outline(s.doc().unwrap(), &after).unwrap();
+    let (path, _) = lizard_render::node_outline(s.doc().unwrap(), &after).unwrap();
     assert!((path.area().abs() - outline.area().abs()).abs() < 0.5, "the outline is kept, rounded corners included");
     s.undo().unwrap();
     assert!(matches!(s.doc().unwrap().node(id).unwrap().kind, NodeKind::Rectangle), "converting is one undo step");

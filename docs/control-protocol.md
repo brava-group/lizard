@@ -1,10 +1,10 @@
 # Lizard control protocol
 
-The desktop app can be driven by other programs (tests, scripts, `figcraft-cli mcp --attach`,
+The desktop app can be driven by other programs (tests, scripts, `lizard-cli mcp --attach`,
 sibling Crafting Apps) through a loopback socket:
 
 ```sh
-cargo run -p figcraft -- --control 7979 [file.figcraft|file.svg|image]
+cargo run -p lizard -- --control 7979 [file.lizard|file.svg|image]
 ```
 
 The app listens on `127.0.0.1:<port>` only. Each connection carries **newline-delimited JSON**:
@@ -20,7 +20,7 @@ Requests are queued and run on the UI thread at the start of the next frame, so 
 real UI state. A request that the UI doesn't answer within 60 s gets a timeout error. A line that is
 not JSON gets `{"id": null, "ok": false, "error": "bad JSON: …"}` and ends the connection (so an
 HTTP request a web page makes the browser send here never runs). The implementation is in
-`crates/ui-egui/src/control.rs` (methods) and `apps/figcraft/src/control_server.rs` (socket).
+`crates/ui-egui/src/control.rs` (methods) and `apps/lizard/src/control_server.rs` (socket).
 
 A request line is limited to **32 MiB before the newline**, including whitespace. The reader stops
 at the first excess byte, replies `{"id": null, "ok": false, "error": "message too large"}`, then
@@ -64,7 +64,7 @@ lizard --control 7979 --automation-read-root /work/project --automation-write-ro
 ```
 
 `--automation-read-root <dir>` and `--automation-write-root <dir>` (each repeatable, `--flag=<dir>`
-works too; the same flags as `figcraft-cli mcp`) confine the files the app reads and writes for
+works too; the same flags as `lizard-cli mcp`) confine the files the app reads and writes for
 whoever asks: every control request (`engine.execute`, `ui.render`, `ui.screenshot`, `window.new`,
 `ui.key`, `ui.menu.invoke`…) and every frame of every window, so input injected with `ui.input`
 and what a person does in the window are held to the same folders. Files are read only inside a
@@ -78,7 +78,7 @@ them and confine nothing.
 
 Not confined: opening the files given on the command line when the app starts and the documents
 the system hands over (Finder, Open With; saving them later is confined like any write), and the
-app's own folders (preferences, recovery copies, plugins installed from a plugin directory). Run `figcraft-cli mcp --attach PORT` without the flags against
+app's own folders (preferences, recovery copies, plugins installed from a plugin directory). Run `lizard-cli mcp --attach PORT` without the flags against
 such an app (it refuses them: the app does the confining). `ui.screenshot` and `ui.render` without a
 `path` return the PNG as data, which is how the attached MCP server takes them, so it writes no
 temporary files.
@@ -200,7 +200,7 @@ document can't be edited now (`readOnly`: the "View only" or "Publishing" reason
 session itself is `engine.execute {command: "collab.peers"}` (sharing with a join code, hosting,
 joining and publishing are `collab.share`, `collab.host`, `collab.join` and `collab.publish`, opening invite links `collab.registerLinks`,
 see [mcp.md](mcp.md#live-sessions)). The app also joins the invite link it
-was started with (`figcraft "figcraft://join?…"`). `online` is the home screen's Online section:
+was started with (`lizard "lizard://join?…"`). `online` is the home screen's Online section:
 whether it shows (`open`), your online files as its rows read (`files: [{file, name, detail,
 shared, state, hasOwnerToken}]`; never a token or a link of yours), whether the servers are being
 asked (`checking`), how many couldn't say (`problems`), and the file whose removal is being
@@ -360,9 +360,9 @@ lizard --control $port &
 exec 3<>/dev/tcp/127.0.0.1/$port
 echo '{"id":1,"method":"engine.execute","params":{"command":"frame.create","params":{"preset":"iPhone 16","x":0,"y":0}}}' >&3
 read -r reply <&3; echo "$reply"
-echo '{"id":2,"method":"ui.screenshot","params":{"path":"/tmp/figcraft.png"}}' >&3
+echo '{"id":2,"method":"ui.screenshot","params":{"path":"/tmp/lizard.png"}}' >&3
 read -r reply <&3; echo "$reply"
 ```
 
-For agents, prefer the MCP server (`figcraft-cli mcp --attach 7979`, see `docs/mcp.md`): it wraps
+For agents, prefer the MCP server (`lizard-cli mcp --attach 7979`, see `docs/mcp.md`): it wraps
 these methods in documented tools and returns images inline.

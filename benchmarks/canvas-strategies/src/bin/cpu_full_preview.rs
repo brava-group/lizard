@@ -4,10 +4,10 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
-use figcraft_render::{Options, View, render_view};
+use lizard_render::{Options, View, render_view};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard"))?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

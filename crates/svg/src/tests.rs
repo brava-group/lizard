@@ -1,6 +1,6 @@
 use super::*;
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, NodeKind, Region, Segment, Vertex, WindingRule};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, Effect, NodeKind, Region, Segment, Vertex, WindingRule};
 
 #[test]
 fn export_basic_shapes() {
@@ -25,7 +25,7 @@ fn export_basic_shapes() {
 
 #[test]
 fn svg_exports_vector_region_colors_separately() -> Result<(), &'static str> {
-    let mut network = figcraft_doc::VectorNetwork::default();
+    let mut network = lizard_doc::VectorNetwork::default();
     for x in [0.0, 40.0] {
         let start = network.vertices.len();
         for (vx, vy) in [(x, 0.0), (x + 30.0, 0.0), (x + 30.0, 30.0), (x, 30.0)] {
@@ -50,12 +50,12 @@ fn svg_exports_vector_region_colors_separately() -> Result<(), &'static str> {
 
 #[test]
 fn svg_unions_a_painted_face_with_unassigned_edges() -> Result<(), &'static str> {
-    let mut network = figcraft_doc::VectorNetwork::default();
+    let mut network = lizard_doc::VectorNetwork::default();
     let points = [(260.0, 100.0), (260.0, 180.0), (0.0, 180.0), (0.0, 0.0), (100.0, 100.0), (180.0, 180.0), (0.0, 100.0)];
     let edges = [(0, 1), (1, 5), (2, 6), (3, 4), (4, 0), (4, 5), (5, 2), (6, 4), (6, 3)];
     network.vertices = points.into_iter().map(|(x, y)| Vertex::new(x, y)).collect();
     network.segments = edges.into_iter().map(|(a, b)| Segment::line(a, b)).collect();
-    assert_eq!(network.paint(figcraft_geom::Point::new(40.0, 150.0)), Some(true));
+    assert_eq!(network.paint(lizard_geom::Point::new(40.0, 150.0)), Some(true));
     let mut doc = Document::new("Face and open edges");
     let page = doc.first_page().ok_or("missing page")?;
     let id = doc.create(page, NodeKind::Vector { network }, "Vector", 0.0, 0.0, 260.0, 180.0).map_err(|_| "missing vector")?;
@@ -87,7 +87,7 @@ fn open_svg_path_keeps_its_stroke_open_and_exports_its_fill() -> Result<(), &'st
         .ok_or("missing imported vector")?;
     let Some(NodeKind::Vector { network }) = doc.node(vector_id).map(|node| &node.kind) else { return Err("missing vector network") };
     assert!(network.regions.is_empty());
-    assert!(!matches!(network.stroke_path().elements().last(), Some(figcraft_geom::kurbo::PathEl::ClosePath)));
+    assert!(!matches!(network.stroke_path().elements().last(), Some(lizard_geom::kurbo::PathEl::ClosePath)));
     let exported = export_svg(&doc, &[vector_id], &SvgOptions::default()).ok_or("export failed")?;
     assert!(exported.contains("#F63434"), "{exported}");
     Ok(())
@@ -147,9 +147,9 @@ fn nested_frame_paint_is_clipped_in_page_space() {
 }
 
 /// "ab" in black with a green second character, as outlines and as live text.
-fn two_colour_text() -> (Document, figcraft_doc::NodeId) {
-    use figcraft_doc::{StyleRun, TextData};
-    figcraft_text::scan_system_fonts();
+fn two_colour_text() -> (Document, lizard_doc::NodeId) {
+    use lizard_doc::{StyleRun, TextData};
+    lizard_text::scan_system_fonts();
     let mut d = Document::new("t");
     let page = d.first_page().unwrap();
     let mut text = TextData::new("ab");
@@ -181,8 +181,8 @@ fn text_run_fill_survives_live_text_export() {
 
 #[test]
 fn title_case_does_not_restart_words_across_fill_runs_in_live_text() {
-    use figcraft_doc::{StyleRun, TextCase, TextData};
-    figcraft_text::scan_system_fonts();
+    use lizard_doc::{StyleRun, TextCase, TextData};
+    lizard_text::scan_system_fonts();
     let mut d = Document::new("t");
     let page = d.first_page().unwrap();
     let mut text = TextData::new("hello");
@@ -200,8 +200,8 @@ fn title_case_does_not_restart_words_across_fill_runs_in_live_text() {
 
 #[test]
 fn point_joins_equal_to_the_layer_join_keep_a_plain_stroke() {
-    use figcraft_doc::{StrokeJoin, VectorNetwork};
-    use figcraft_geom::kurbo::Point;
+    use lizard_doc::{StrokeJoin, VectorNetwork};
+    use lizard_geom::kurbo::Point;
     let svg_with = |join: StrokeJoin| {
         let mut network = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(50.0, 50.0), Point::new(100.0, 0.0)], false);
         for v in &mut network.vertices {

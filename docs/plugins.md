@@ -2,7 +2,7 @@
 
 A Lizard plugin is a WebAssembly module with a small JSON manifest. It acts on the document only
 through Lizard's commands, the same ones the menus, the CLI, the control channel and the MCP
-server run (`figcraft-cli commands` lists them), so a plugin can do what a script can do, within the
+server run (`lizard-cli commands` lists them), so a plugin can do what a script can do, within the
 permissions its manifest asks for, and nothing more.
 
 - **Sandboxed.** Plugins run in [wasmi](https://github.com/wasmi-labs/wasmi), a pure-Rust
@@ -25,7 +25,7 @@ permissions its manifest asks for, and nothing more.
   and shadows too, and panels get sliders, pictures, progress bars, dividers and sections.
 - **Permissions.** The manifest says whether the plugin only reads the document or may edit it, and
   can narrow the commands it may call. Lizard enforces both.
-- **Distribution.** A team's own `figcraft-server` can keep a plugin directory: plugins are
+- **Distribution.** A team's own `lizard-server` can keep a plugin directory: plugins are
   published to it with the server's key, browsed and installed from Plugins ▸ Manage plugins, and
   updated when a newer version is published (see [Plugin directories](#plugin-directories)). No
   third-party service is involved.
@@ -53,7 +53,7 @@ large data instead of logging it in full.
 
 ## Using plugins
 
-- **Plugins ▸ Development ▸ Import plugin from manifest…** picks a `figcraft-plugin.json`. The
+- **Plugins ▸ Development ▸ Import plugin from manifest…** picks a `lizard-plugin.json`. The
   plugin is kept in the preferences and its module is read again on every run, so a rebuilt
   development plugin runs its new code without importing it again.
 - The desktop app saves the preferences the moment a plugin is imported, installed, updated or
@@ -217,20 +217,20 @@ From scripts, the CLI and MCP the same commands apply, panels included:
 ```jsonl
 {"command": "plugin.import", "params": {"path": "plugins/tidy-names"}}
 {"command": "select.all", "params": {}}
-{"command": "plugin.run", "params": {"id": "org.figcraft.examples.tidy-names", "command": "tidy", "params": {"case": "Title Case"}}}
+{"command": "plugin.run", "params": {"id": "com.brava.lizard.examples.tidy-names", "command": "tidy", "params": {"case": "Title Case"}}}
 {"command": "plugin.import", "params": {"path": "target/plugins/dist/swatch-grid"}}
-{"command": "plugin.run", "params": {"id": "org.figcraft.examples.swatch-grid", "command": "panel"}}
-{"command": "plugin.event", "params": {"id": "org.figcraft.examples.swatch-grid", "control": "palette", "value": "Ocean"}}
-{"command": "plugin.event", "params": {"id": "org.figcraft.examples.swatch-grid", "control": "generate"}}
-{"command": "plugin.close", "params": {"id": "org.figcraft.examples.swatch-grid"}}
+{"command": "plugin.run", "params": {"id": "com.brava.lizard.examples.swatch-grid", "command": "panel"}}
+{"command": "plugin.event", "params": {"id": "com.brava.lizard.examples.swatch-grid", "control": "palette", "value": "Ocean"}}
+{"command": "plugin.event", "params": {"id": "com.brava.lizard.examples.swatch-grid", "control": "generate"}}
+{"command": "plugin.close", "params": {"id": "com.brava.lizard.examples.swatch-grid"}}
 {"command": "plugin.import", "params": {"path": "target/plugins/dist/counter"}}
-{"command": "widget.insert", "params": {"plugin": "org.figcraft.examples.counter", "x": 0, "y": 0}}
+{"command": "widget.insert", "params": {"plugin": "com.brava.lizard.examples.counter", "x": 0, "y": 0}}
 {"command": "widget.list", "params": {}}
 {"command": "widget.click", "params": {"id": 12, "target": "increment"}}
 {"command": "widget.menu", "params": {"id": 12}}
 {"command": "widget.menuAction", "params": {"id": 12, "item": "step", "value": "5"}}
 {"command": "plugin.import", "params": {"path": "target/plugins/dist/focus-list"}}
-{"command": "widget.insert", "params": {"plugin": "org.figcraft.examples.focus-list", "x": 0, "y": 200}}
+{"command": "widget.insert", "params": {"plugin": "com.brava.lizard.examples.focus-list", "x": 0, "y": 200}}
 {"command": "widget.setText", "params": {"input": "title", "text": "Release day"}}
 {"command": "widget.click", "params": {"target": "focus"}}
 {"command": "widget.fireTimer", "params": {}}
@@ -239,14 +239,14 @@ From scripts, the CLI and MCP the same commands apply, panels included:
 A widget command without an `id` acts on the selected widget (`widget.insert` selects the one it
 makes).
 
-`figcraft-cli run script.jsonl --in design.figcraft --out tidy.figcraft` runs that headless; over
+`lizard-cli run script.jsonl --in design.lizard --out tidy.lizard` runs that headless; over
 MCP, `run_command` takes the same ids. A session started by the CLI or the MCP server starts with no
 plugins: import them in the script.
 
 | Command | Params | Does |
 |---|---|---|
 | `plugin.list` | `{}` | `{plugins: [{id, name, version, description, main, api, permissions, commands, path, loaded}], last: {id, command}}` |
-| `plugin.import` | `{path}` or `{manifest, wasm}` | `path` is a `figcraft-plugin.json` or its folder. Without files (the browser, tests), pass the manifest (an object or JSON text) and the module as base64 `wasm`; such a plugin lasts for the session only. A plugin with the same id is replaced. The module is checked first. |
+| `plugin.import` | `{path}` or `{manifest, wasm}` | `path` is a `lizard-plugin.json` or its folder. Without files (the browser, tests), pass the manifest (an object or JSON text) and the module as base64 `wasm`; such a plugin lasts for the session only. A plugin with the same id is replaced. The module is checked first. |
 | `plugin.remove` | `{id}` | Uninstalls it. |
 | `plugin.run` | `{id, command?, params?, fuel?}` | Runs a command (default: the first) with its parameters checked against the manifest and the missing ones filled with their defaults; `fuel` lowers the instruction budget (for the panel's callbacks too). Returns `{plugin, command, output, logs, calls, fuel, panel}`; `output` is the plugin's result, parsed as JSON when it is JSON; `panel` is the plugin's open panel (as `plugin.ui` returns it) or null. |
 | `plugin.ui` | `{id?}` | Plugin `id`'s open panel: `{plugin, command, title, controls, values}` (`values`: every field's current value by name), or null. Without `id`, the panel opened last. |
@@ -263,12 +263,12 @@ plugins: import them in the script.
 | `widget.list` | `{}` | `{widgets: [{id, plugin, name, page, state, targets, inputs, menu, timer}]}`: every widget in the file. |
 | `plugin.directory.list` | `{server?, query?}` | The plugin directory at `server` (`ws://host:port/`; default: the one browsed last): `{server, plugins: [{id, name, version, description, author, api, access, commands, widget, bytes, sha256, published, versions, installed, update}]}`, the latest version of each plugin whose id, name, description or author contains `query`. `installed` is the installed version (or null), `update` whether the listed one is newer. |
 | `plugin.directory.install` | `{id, version?, confirm, server?, sha256?}` | Downloads version `version` (default: the latest) and installs it, or updates the installed one. `confirm` must be `true` (installing runs the plugin's code: show its permissions first); without it nothing is downloaded. The download must match the SHA-256 the directory lists (and `sha256`, the one shown, when given). Returns `{installed, name, version, permissions, sha256, path, source, replaced}`. |
-| `plugin.directory.publish` | `{path \| plugin, server}` | Publishes a plugin folder (or its `figcraft-plugin.json`), or an installed plugin, as a new version. `server` carries the server's key: `ws://host:port/?key=…`. Returns `{published, server}`. |
+| `plugin.directory.publish` | `{path \| plugin, server}` | Publishes a plugin folder (or its `lizard-plugin.json`), or an installed plugin, as a new version. `server` carries the server's key: `ws://host:port/?key=…`. Returns `{published, server}`. |
 | `plugin.directory.unpublish` | `{id, version?, server}` | Removes one version (default: every version) from the directory; needs the key. Returns `{id, removed}`. |
 
 ## Plugin directories
 
-A `figcraft-server` ([`server.md`](server.md#plugin-directory)) can keep a directory of plugins for a
+A `lizard-server` ([`server.md`](server.md#plugin-directory)) can keep a directory of plugins for a
 team. Anyone who can reach the server may browse it and install from it; only whoever has the
 server's key may publish to it or unpublish from it. There are no accounts: the server's operator
 decides who gets the key and moderates what's there.
@@ -297,29 +297,29 @@ module and its assets. The CLI and the MCP server install for the session only.
 offers **Update**, with the same confirmation (the permissions may have changed). Browsing again is
 the update check; nothing checks in the background. **Remove** uninstalls it and deletes its folder.
 
-**Publishing.** A plugin folder holds `figcraft-plugin.json`, the module its `main` names and, if
+**Publishing.** A plugin folder holds `lizard-plugin.json`, the module its `main` names and, if
 you like, an `assets/` folder of up to 32 plain files (an icon, a licence) that are installed with
 it. Publish it with the server's key:
 
 ```sh
-FIGCRAFT_SERVER_KEY=<key> figcraft-cli plugin publish target/plugins/dist/counter --server ws://host:47900/
+LIZARD_SERVER_KEY=<key> lizard-cli plugin publish target/plugins/dist/counter --server ws://host:47900/
 ```
 
 (the key may also be in the address, `?key=…`, but the environment keeps it out of your shell
 history), or `plugin.directory.publish {path, server}` from a script or MCP. The server checks the
 whole bundle before keeping it, refuses a version that isn't newer than the one it has, and lists
-the new version at once. `plugin.directory.unpublish` (or the operator's `figcraft-server plugins
+the new version at once. `plugin.directory.unpublish` (or the operator's `lizard-server plugins
 remove`) takes a version, or the whole plugin, down; installed copies keep working.
 
 **In the browser** the directory isn't available yet: the browser build's network link has no
 plugin directory requests (`plugin.directory.*` says so). Import plugins with `plugin.import
 {manifest, wasm}` there.
 
-## The manifest: `figcraft-plugin.json`
+## The manifest: `lizard-plugin.json`
 
 ```json
 {
-  "id": "org.figcraft.examples.swatch-grid",
+  "id": "com.brava.lizard.examples.swatch-grid",
   "name": "Swatch grid",
   "version": "1.0.0",
   "description": "Makes a grid of colour swatches from a palette of hex colours.",
@@ -372,7 +372,7 @@ it can handle):
   `version.list`);
 - the undo history and nesting: `edit.undo`, `edit.redo`, `edit.repeat`, `command.batch` (a run is
   already one undo step), `plugin.*` / `plugins.*` (no plugin runs another) and `widget.*`;
-- writing layer data whose key starts with `figcraft.widget` (a widget's own data: no plugin can
+- writing layer data whose key starts with `lizard.widget` (a widget's own data: no plugin can
   forge a widget or change another one's state);
 - commands that open a dialog or panel (for example `object.rename` without a `name`, which would
   start renaming in the layers panel): the call is undone and refused;
@@ -405,21 +405,21 @@ host function (`widget_timer`), more events for widgets and more in the panel sp
 description; a version 1, 2 or 3 module runs unchanged and gets the input it always got. Strings are UTF-8 `(ptr, len)` pairs in the plugin's linear memory; all values
 are `i32`.
 
-The module **exports** `memory` and `figcraft_run(input_len) -> status`. When `figcraft_run` starts,
+The module **exports** `memory` and `lizard_run(input_len) -> status`. When `lizard_run` starts,
 the reply buffer holds the input JSON, `input_len` bytes:
 
 ```json
 {"api": 1, "command": "grid", "params": {"palette": "#FF5A5F", "columns": 3, "labels": true}, "selection": [12, 15]}
 ```
 
-`api` is the manifest's. When the plugin's panel calls it back, `figcraft_run` runs again in the
+`api` is the manifest's. When the plugin's panel calls it back, `lizard_run` runs again in the
 same instance (its memory as the last call left it) with the event and every field's value added:
 
 ```json
 {"api": 2, "command": "panel", "params": {}, "selection": [], "event": {"control": "generate", "value": null}, "values": {"palette": "Ocean", "columns": 3, "labels": true}}
 ```
 
-When its widget is inserted or clicked, `figcraft_run` runs in a fresh instance (nothing is kept
+When its widget is inserted or clicked, `lizard_run` runs in a fresh instance (nothing is kept
 from one call to the next: a widget's state is all it remembers, so the same state and click
 always give the same widget) with `widget` added: the widget's layer id, its state (an empty object
 for a new widget) and what was clicked (`event` is null when it's inserted):
@@ -441,7 +441,7 @@ timer that is due:
 It returns `0` for success; anything else fails the run (and rolls it back), with the text passed
 to `set_output` as the error message.
 
-The module may **import** these functions from the module `figcraft` (anything else, WASI
+The module may **import** these functions from the module `lizard` (anything else, WASI
 included, is refused when the plugin is imported):
 
 | Import | Signature | Does |
@@ -462,7 +462,7 @@ included, is refused when the plugin is imported):
 | `widget_timer` | `(ms) -> status` | API 4. Asks for the widget being called back to be called again in `ms` milliseconds (100 to 3,600,000), replacing its pending timer; `0` stops it. `1`: refused (out of range, or the manifest's `api` is below 4), the reply says why. The timer starts when the callback succeeds. |
 
 A pointer or length outside the plugin's memory traps, which fails the run. Host functions can only
-be called while `figcraft_run` runs (not from a start function). Settings are forgotten when the
+be called while `lizard_run` runs (not from a start function). Settings are forgotten when the
 plugin is removed.
 
 ### Panel spec
@@ -565,7 +565,7 @@ API 4 adds:
   {"type": "dropdown", "name": "length", "label": "Countdown", "options": ["30 seconds", "1 minute"], "value": "30 seconds"},
   {"type": "color", "name": "paper", "label": "Paper", "options": ["#FFF3B0", "#D9F2E3"], "value": "#FFF3B0"},
   {"type": "separator"},
-  {"type": "link", "name": "help", "label": "About Lizard", "url": "https://getartcraft.com/apps/figcraft"}],
+  {"type": "link", "name": "help", "label": "About Lizard", "url": "https://getartcraft.com/apps/lizard"}],
  "root": {"type": "frame", "layout": "vertical", "width": 272, "gap": 10, "padding": [16, 16, 20, 16], "radius": [2, 2, 14, 2],
   "gradient": {"type": "linear", "angle": 90, "stops": [{"at": 0, "color": "#FFF7C7"}, {"at": 1, "color": "#FFF3B0"}]},
   "shadow": {"x": 0, "y": 4, "blur": 12, "color": "#00000030"}, "children": [
@@ -613,7 +613,7 @@ were, and the new kinds and the four-number forms are refused as they always wer
 ## Writing a plugin in Rust
 
 `plugins/` in the repository is a workspace of its own: `plugins/sdk` (the crate
-`figcraft-plugin-sdk`, `no_std` with `alloc`) wraps the ABI with serde_json, and
+`lizard-plugin-sdk`, `no_std` with `alloc`) wraps the ABI with serde_json, and
 `plugins/examples` has five plugins:
 
 - **Tidy names** (`tidy-names`): cleans up the selected layers' names (extra spaces, the "copy" left
@@ -659,7 +659,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-figcraft-plugin-sdk = { path = "../figcraft/plugins/sdk" }
+lizard-plugin-sdk = { path = "../lizard/plugins/sdk" }
 
 [profile.release]
 opt-level = "z"
@@ -670,7 +670,7 @@ strip = true
 
 ```rust
 // src/lib.rs
-use figcraft_plugin_sdk::{Input, Result, Value, call, entry, json, notify};
+use lizard_plugin_sdk::{Input, Result, Value, call, entry, json, notify};
 
 fn run(input: Input) -> Result<Value> {
     if input.selection.is_empty() {
@@ -689,7 +689,7 @@ entry!(run);
 ```
 
 Build it with `cargo build --release --target wasm32-unknown-unknown`, put
-`target/wasm32-unknown-unknown/release/my_plugin.wasm` next to a `figcraft-plugin.json` whose `main`
+`target/wasm32-unknown-unknown/release/my_plugin.wasm` next to a `lizard-plugin.json` whose `main`
 names it, and import the manifest. The SDK gives `call`, `selection`, `log`, `notify` and the
 `Input` (`command`, `params` with `str`/`f64`/`bool` helpers, `selection`, and `event` when the
 panel calls back: `control`, `value` and every field's `values`); returning `Err` fails the run and
@@ -702,8 +702,8 @@ inserted or clicked, and `render_widget(&json!({"state": ..., "root": ...}))` to
 manage the widget's timer, and the `ui` module builds descriptions without spelling the JSON out:
 
 ```rust
-use figcraft_plugin_sdk::ui::{Node, menu_action, menu_toggle, render};
-use figcraft_plugin_sdk::{Input, Result, Value, WidgetEvent, entry, json, set_timer};
+use lizard_plugin_sdk::ui::{Node, menu_action, menu_toggle, render};
+use lizard_plugin_sdk::{Input, Result, Value, WidgetEvent, entry, json, set_timer};
 
 fn run(input: Input) -> Result<Value> {
     let w = input.widget.ok_or("Insert me from Plugins ▸ Widgets")?;
@@ -737,12 +737,12 @@ them), `ui::progress`, `ui::divider`, `ui::section`, `ui::disabled` and `ui::inv
 controls API 4 added. Outside WebAssembly every host call fails, so the plugin's own logic can be
 unit-tested with `cargo test`.
 
-Any language that compiles to WebAssembly works the same way: export `memory` and `figcraft_run`,
-import what you need from `figcraft`.
+Any language that compiles to WebAssembly works the same way: export `memory` and `lizard_run`,
+import what you need from `lizard`.
 
 ## Not yet
 
-- Distribution: directories live on your own `figcraft-server`; there is no public catalogue,
+- Distribution: directories live on your own `lizard-server`; there is no public catalogue,
   no publisher accounts or signatures (the server's key is the publisher), no ratings, reviews or
   install counts, and updates are found when you browse, not in the background. The browser build
   can't use a directory yet.

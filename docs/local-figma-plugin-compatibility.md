@@ -29,11 +29,11 @@ UI host implemented so far.
 
 The native Figma to Code check used a synthetic frame, rectangle and text. Its preview and code
 were visible in the plugin window; the HTML kept the children's positions and the rectangle's
-colour. Local screenshots are `/tmp/figcraft-plugin-test-native.png`,
-`/tmp/figcraft-icons8-remover-ready.png`, `/tmp/figcraft-iconify-native.png`,
-`/tmp/figcraft-unsplash-native.png`, and `/tmp/figcraft-removebg-key-native.png`; they are not repo
+colour. Local screenshots are `/tmp/lizard-plugin-test-native.png`,
+`/tmp/lizard-icons8-remover-ready.png`, `/tmp/lizard-iconify-native.png`,
+`/tmp/lizard-unsplash-native.png`, and `/tmp/lizard-removebg-key-native.png`; they are not repo
 assets.
 
 To try a package: open **Plugins ▸ Manage plugins ▸ Figma local**, import its
-`figcraft-import/manifest.json`, then run it from the plugin's row. If its manifest has menu
+`lizard-import/manifest.json`, then run it from the plugin's row. If its manifest has menu
 commands, choose the command shown there. The folder and the user's credentials remain local.

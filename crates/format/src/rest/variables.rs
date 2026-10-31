@@ -5,10 +5,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use figcraft_doc::color::PaintKind;
-use figcraft_doc::{
-    ALL_SCOPES, CODE_PLATFORMS, Collection, Mode, Node, NodeKind, Variable, VariableType, VariableValue, Variables, normalize_scopes,
-};
+use lizard_doc::color::PaintKind;
+use lizard_doc::{ALL_SCOPES, CODE_PLATFORMS, Collection, Mode, Node, NodeKind, Variable, VariableType, VariableValue, Variables, normalize_scopes};
 use serde_json::{Map, Value, json};
 
 use super::Ctx;

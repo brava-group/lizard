@@ -2,8 +2,8 @@
 //! The scene compositor keeps ownership of geometry, clipping and blend modes.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use figcraft_color::Color;
-use figcraft_doc::{ShaderDefinition, ShaderFeatures, ShaderFloatParameter, ShaderKind, ShaderParameterControl, ShaderSelectOption};
+use lizard_color::Color;
+use lizard_doc::{ShaderDefinition, ShaderFeatures, ShaderFloatParameter, ShaderKind, ShaderParameterControl, ShaderSelectOption};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod runtime;

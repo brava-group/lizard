@@ -4,13 +4,13 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
-use figcraft_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
-use figcraft_doc::NodeKind;
-use figcraft_render::{Options, View, render_view};
+use lizard_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
+use lizard_doc::NodeKind;
+use lizard_render::{Options, View, render_view};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let path = Path::new("/Users/matheuspires/Documents/Lizard-new-icon.figcraft");
-    let (doc, warnings) = figcraft_format::load_file(path)?;
+    let path = Path::new("/Users/matheuspires/Documents/Lizard-new-icon.lizard");
+    let (doc, warnings) = lizard_format::load_file(path)?;
     if !warnings.is_empty() {
         return Err(format!("document warnings: {warnings:?}").into());
     }

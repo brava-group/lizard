@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-svg"
+name = "lizard-svg"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,12 @@ description = "Lizard SVG export (shapes, gradients, images, strokes, effects as
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-color = { workspace = true }
-figcraft-doc = { workspace = true }
-figcraft-render = { workspace = true }
-figcraft-text = { workspace = true }
-figcraft-pathops = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-color = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-render = { workspace = true }
+lizard-text = { workspace = true }
+lizard-pathops = { workspace = true }
 usvg = { workspace = true }
 base64 = { workspace = true }
 flate2 = { workspace = true }

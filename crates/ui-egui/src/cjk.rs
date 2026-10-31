@@ -2,12 +2,12 @@
 //! for them, so the UI adds a face per script it needs: the UI language's, the scripts in the open file's names
 //! and comments, the language picker's and typed text. Desktop finds them among the installed
 //! fonts (the system font scan), only once one is needed, so English users load none; the web
-//! build has only the CJK faces built in from craft-fonts (`FIGCRAFT_EMBED_CJK`), else none (no
+//! build has only the CJK faces built in from craft-fonts (`LIZARD_EMBED_CJK`), else none (no
 //! Bengali face is built in, so the web leaves Bengali out).
 
 use std::sync::Arc;
 
-use figcraft_text::Face;
+use lizard_text::Face;
 
 pub const KANA: u8 = 1;
 pub const HANGUL: u8 = 2;
@@ -91,10 +91,10 @@ fn shows(code: &str, web: bool) -> bool {
         return true;
     }
     if code.split('-').next() == Some("ka") {
-        return figcraft_text::face_with_char('ა', &["Noto Sans Georgian"]).is_some();
+        return lizard_text::face_with_char('ა', &["Noto Sans Georgian"]).is_some();
     }
     let need = language(code);
-    need == 0 || samples(need, 0).iter().all(|(c, _)| figcraft_text::face_with_char(*c, &["BIZ UDPGothic", "Noto Sans CJK SC"]).is_some())
+    need == 0 || samples(need, 0).iter().all(|(c, _)| lizard_text::face_with_char(*c, &["BIZ UDPGothic", "Noto Sans CJK SC"]).is_some())
 }
 
 /// A character standing for each script in `need`, with the families to look for it in, the UI
@@ -132,7 +132,7 @@ pub fn faces(need: u8, lang: &str, have: &dyn Fn(char) -> bool) -> Vec<Arc<Face>
         if have(c) || out.iter().any(|f| f.has_char(c)) {
             continue;
         }
-        if let Some(face) = figcraft_text::face_with_char(c, &families) {
+        if let Some(face) = lizard_text::face_with_char(c, &families) {
             out.push(face);
         }
     }
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn the_web_offers_georgian_only_with_its_face() {
         assert!(shows("ka", false), "desktop always lists Georgian");
-        let face = figcraft_text::face_with_char('ა', &["Noto Sans Georgian"]).is_some();
+        let face = lizard_text::face_with_char('ა', &["Noto Sans Georgian"]).is_some();
         assert_eq!(shows("ka", true), face);
         assert_eq!(shows("ka-GE", true), face);
         assert!(shows("en", true) && shows("tr", true));

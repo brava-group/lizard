@@ -6,13 +6,13 @@
 //! (links for developers) and the plugins that only read the document.
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::{Annotation, AnnotationCategory, CodeLink, DevStatus, Document, NodeId};
-use figcraft_engine::annotations::{self, PINNABLE, Pinnable};
-use figcraft_engine::code_connect;
-use figcraft_engine::codegen::{CodeLang, code_for};
-use figcraft_engine::devinspect::{self, DevItem, Prop};
-use figcraft_engine::plugins::Access;
-use figcraft_engine::{components, dev_resources};
+use lizard_doc::{Annotation, AnnotationCategory, CodeLink, DevStatus, Document, NodeId};
+use lizard_engine::annotations::{self, PINNABLE, Pinnable};
+use lizard_engine::code_connect;
+use lizard_engine::codegen::{CodeLang, code_for};
+use lizard_engine::devinspect::{self, DevItem, Prop};
+use lizard_engine::plugins::Access;
+use lizard_engine::{components, dev_resources};
 use serde_json::json;
 
 use crate::a11y::Tip;
@@ -22,7 +22,7 @@ use crate::primitives::SelectLead;
 use crate::right::{menu_check, menu_item_with, menu_popup, prop_row, row};
 use crate::theme::{ACCENT, Tokens, doc_c32, regular, semibold};
 use crate::widgets::{self, PAD};
-use crate::{FigApp, RightTab};
+use crate::{LizardApp, RightTab};
 
 /// Width of an annotation callout on the canvas.
 const CALLOUT_W: f32 = 220.0;
@@ -118,14 +118,14 @@ struct Played {
 }
 
 /// Whether Dev Mode extras show: the Inspect tab is open and nothing is presented.
-fn active(app: &FigApp) -> bool {
+fn active(app: &LizardApp) -> bool {
     app.ui.right_tab == RightTab::Inspect && app.ui.present.is_none()
 }
 
 // ------------------------------------------------------------------ canvas
 
 /// The annotations on the current page as callouts beside their layers (Inspect tab only).
-pub fn draw(app: &mut FigApp, painter: &egui::Painter) {
+pub fn draw(app: &mut LizardApp, painter: &egui::Painter) {
     if !active(app) {
         return;
     }
@@ -236,8 +236,8 @@ impl Callout {
             let mid = y + 9.0;
             painter.text(pos2(x, mid), Align2::LEFT_CENTER, tr(p.label), regular(10.0), t.text_secondary);
             let mut vx = x + 84.0;
-            if let Some(c) = v.as_ref().and_then(|v| v.color.as_deref()).and_then(figcraft_color::Color::from_hex) {
-                widgets::paint_swatch(painter, Rect::from_center_size(pos2(vx + 5.0, mid), vec2(10.0, 10.0)), &figcraft_color::Paint::solid(c));
+            if let Some(c) = v.as_ref().and_then(|v| v.color.as_deref()).and_then(lizard_color::Color::from_hex) {
+                widgets::paint_swatch(painter, Rect::from_center_size(pos2(vx + 5.0, mid), vec2(10.0, 10.0)), &lizard_color::Paint::solid(c));
                 vx += 15.0;
             }
             // The style or variable reads better than its value.
@@ -259,7 +259,7 @@ fn template_id(owner: NodeId, lang: CodeLang) -> Id {
 /// Layer `id`'s code in `lang`, generated again only when the document or the choice change (a
 /// component set's code compares every variant). While a connected template is being edited, its
 /// draft's snippet (the live preview).
-pub fn code(app: &mut FigApp, ui: &Ui, id: NodeId, lang: CodeLang) -> String {
+pub fn code(app: &mut LizardApp, ui: &Ui, id: NodeId, lang: CodeLang) -> String {
     let Ok(ds) = app.session.ds() else { return String::new() };
     // The draft lives on after the field loses focus to another layer: only a focused one counts.
     if let Some(owner) = code_connect::owner(&ds.doc, id)
@@ -285,8 +285,8 @@ pub fn code(app: &mut FigApp, ui: &Ui, id: NodeId, lang: CodeLang) -> String {
 /// component and a control for each variant, boolean and text property. The values tried here
 /// change the preview and the code only (returned when any is set: the Code section shows it),
 /// never the document.
-pub fn playground_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, lang: CodeLang) -> Option<String> {
-    figcraft_engine::playground::component_of(doc, id)?;
+pub fn playground_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId, lang: CodeLang) -> Option<String> {
+    lizard_engine::playground::component_of(doc, id)?;
     let t = Tokens::get(ui.ctx());
     let Ok((uid, revision)) = app.session.ds().map(|d| (d.uid, d.revision)) else { return None };
     let play = &mut app.ui.dev.playground;
@@ -296,13 +296,13 @@ pub fn playground_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: Nod
     let key: PlayKey = (uid, revision, id, serde_json::Value::Object(play.values.clone()).to_string(), lang);
     if play.shown.as_ref().is_none_or(|(k, _)| *k != key) {
         // Values the component no longer takes (a property renamed or removed) are dropped.
-        let built = figcraft_engine::playground::build(doc, id, &play.values).or_else(|_| {
+        let built = lizard_engine::playground::build(doc, id, &play.values).or_else(|_| {
             play.values.clear();
-            figcraft_engine::playground::build(doc, id, &play.values)
+            lizard_engine::playground::build(doc, id, &play.values)
         });
         let played = built.ok().map(|(copy, inst)| Played {
             preview: crate::assets_panel::thumbnail(ui.ctx(), &copy, inst, 416.0),
-            properties: figcraft_engine::playground::properties(&copy, inst)["properties"].as_array().cloned().unwrap_or_default(),
+            properties: lizard_engine::playground::properties(&copy, inst)["properties"].as_array().cloned().unwrap_or_default(),
             code: code_for(&copy, inst, lang),
         });
         let key = (uid, revision, id, serde_json::Value::Object(play.values.clone()).to_string(), lang);
@@ -377,7 +377,7 @@ pub fn playground_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: Nod
 /// Connect to code for the selected component, set or instance (its main), in the Code section's
 /// language: a button to connect, then a Connected badge, the import path, name and template (the
 /// code above shows the snippet, live while the template is edited).
-pub fn connect_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, lang: CodeLang) {
+pub fn connect_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId, lang: CodeLang) {
     let Some(owner) = code_connect::owner(doc, id) else { return };
     let t = Tokens::get(ui.ctx());
     let link = code_connect::link(doc, id, lang).cloned();
@@ -449,7 +449,7 @@ pub fn connect_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId
 }
 
 /// Dev Mode plugins: the installed plugins that only read the document, run from the Inspect tab.
-pub fn plugins_section(app: &mut FigApp, ui: &mut Ui) {
+pub fn plugins_section(app: &mut LizardApp, ui: &mut Ui) {
     let runnable: Vec<(String, String, String)> = app
         .session
         .prefs
@@ -491,7 +491,7 @@ pub fn plugins_section(app: &mut FigApp, ui: &mut Ui) {
 }
 
 /// The handoff status of the selected frames or sections (nothing for other layers).
-pub fn status(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if sel.is_empty() || !sel.iter().all(|i| crate::section_panel::has_status(doc, *i)) {
         return;
     }
@@ -501,7 +501,7 @@ pub fn status(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     row(ui, 32.0, |ui| crate::section_panel::status_dropdown(app, ui, doc, sel, w));
     if let [id] = sel {
         let changed = doc.node(*id).is_some_and(|n| n.dev_status == DevStatus::ReadyForDev && n.dev_changed);
-        let focused = app.session.ds().ok().and_then(figcraft_engine::DocState::focused) == Some(*id);
+        let focused = app.session.ds().ok().and_then(lizard_engine::DocState::focused) == Some(*id);
         row(ui, 32.0, |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             if !focused && widgets::button(ui, tr("Focus view"), false, true).on_hover_text(tr("Show only this on the canvas")).clicked() {
@@ -521,7 +521,7 @@ pub fn status(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
 
 /// The selected layer's annotations: each note editable in place with its pinned properties (click
 /// to copy), a menu to pin more, and a field to add one.
-pub fn annotations_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
+pub fn annotations_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId) {
     let t = Tokens::get(ui.ctx());
     let Some(n) = doc.node(id) else { return };
     let sections = devinspect::properties(doc, id);
@@ -583,7 +583,7 @@ pub fn annotations_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: No
 /// The selected layer's dev resources: links for developers, opened in the browser when clicked.
 /// Its own can be renamed, changed and removed; a main component's (and its set's) show on its
 /// instances, read-only, with where they come from.
-pub fn dev_resources_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
+pub fn dev_resources_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId) {
     let t = Tokens::get(ui.ctx());
     let Some(n) = doc.node(id).filter(|n| !n.is_page()) else { return };
     let list = dev_resources::list(doc, id);
@@ -638,7 +638,7 @@ pub fn dev_resources_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: 
         crate::a11y::link(&resp, name);
         // Opened only on a click, never fetched, and a dev resource's URL comes from the
         // document, so only a web link opens.
-        if resp.on_hover_text(url.as_str()).clicked() && figcraft_engine::doc_urls::openable(url) {
+        if resp.on_hover_text(url.as_str()).clicked() && lizard_engine::doc_urls::openable(url) {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
         if let Some(i) = item.index {
@@ -713,7 +713,7 @@ fn category_item(ui: &mut Ui, c: &AnnotationCategory, on: bool) -> bool {
 
 /// With nothing selected: which annotations the canvas shows, and the file's categories (rename,
 /// recolour, delete, add).
-pub fn categories_section(app: &mut FigApp, ui: &mut Ui) {
+pub fn categories_section(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(doc) = app.session.doc().cloned() else { return };
     widgets::separator(ui);
@@ -817,7 +817,7 @@ fn pin_menu(ui: &mut Ui, id: Id, sections: &[devinspect::Section], pinned: &[Str
 
 /// The frames and sections with a handoff status, filtered by status, across every page: click one
 /// to go to it.
-pub fn ready_list(app: &mut FigApp, ui: &mut Ui) {
+pub fn ready_list(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(ds) = app.session.ds() else { return };
     let filter = app.ui.dev.filter.min(FILTERS.len() - 1);
@@ -898,7 +898,7 @@ enum FocusAction {
 
 /// The focus view's bar at the top of the canvas: the frame's name and status, Compare changes,
 /// previous / next ready-for-dev frame and exit.
-pub fn focus_bar(app: &mut FigApp, ctx: &egui::Context, canvas: Rect) {
+pub fn focus_bar(app: &mut LizardApp, ctx: &egui::Context, canvas: Rect) {
     let Ok(ds) = app.session.ds() else { return };
     // A version preview has the top of the canvas.
     let (Some(id), None) = (ds.focused(), ds.preview.as_ref()) else { return };

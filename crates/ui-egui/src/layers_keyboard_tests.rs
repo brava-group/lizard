@@ -4,8 +4,8 @@
 //! keyboard, and F8 draws a selection box the arrows move and size and Enter selects with.
 
 use egui::{Event, Key, Modifiers};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::a11y::{Region, focused_name};
@@ -190,7 +190,7 @@ fn f8_draws_a_selection_box_the_arrows_move_and_size() {
     assert!(u.app.ui.key_box.is_none());
 }
 
-impl crate::FigApp {
+impl crate::LizardApp {
     fn doc_x(&self, id: NodeId) -> f64 {
         self.session.doc().unwrap().node(id).unwrap().transform.translation().x
     }

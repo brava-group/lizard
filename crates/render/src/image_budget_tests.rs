@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use figcraft_color::ColorProfile;
+use lizard_color::ColorProfile;
 use tiny_skia::Pixmap;
 
 use super::*;

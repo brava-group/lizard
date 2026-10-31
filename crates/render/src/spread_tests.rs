@@ -2,8 +2,8 @@
 //! stay sharp and reach out along their tips, inner shadows shrink the outline the same way. The
 //! renderer and the PDF export share the shadow code (`shadow`), so they agree.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
 
 use super::*;
 

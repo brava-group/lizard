@@ -1946,410 +1946,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4beca3cb2444e3304ac30843cc091f44ed58932353cd492ce740067bfce6b12"
 
 [[package]]
-name = "figcraft"
-version = "0.9.0"
-dependencies = [
- "arboard",
- "craft-window",
- "dispatch2",
- "eframe",
- "egui",
- "env_logger",
- "figcraft-canvas-gpu",
- "figcraft-collab-net",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-figma-plugin",
- "figcraft-format",
- "figcraft-geom",
- "figcraft-mcp",
- "figcraft-render",
- "figcraft-text",
- "figcraft-ui-egui",
- "fmv-macos-events",
- "image 0.25.10",
- "log",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "rfd",
- "serde_json",
- "wat",
- "webbrowser",
- "windows",
- "winit",
- "winresource",
- "wry",
-]
-
-[[package]]
-name = "figcraft-canvas-gpu"
-version = "0.9.0"
-dependencies = [
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-render",
- "figcraft-shader",
- "figcraft-text",
- "image 0.25.10",
- "pollster 0.4.0",
- "rayon",
- "vello_common 0.3.0",
- "vello_gpu",
- "web-time",
- "wgpu",
-]
-
-[[package]]
-name = "figcraft-cli"
-version = "0.9.0"
-dependencies = [
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-figma-plugin",
- "figcraft-format",
- "figcraft-mcp",
- "figcraft-render",
- "figcraft-svg",
- "figcraft-text",
- "serde_json",
-]
-
-[[package]]
-name = "figcraft-collab"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "imbl",
- "postcard",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "figcraft-collab-net"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "figcraft-collab",
- "figcraft-doc",
- "figcraft-engine",
- "getrandom 0.4.3",
- "js-sys",
- "log",
- "proptest",
- "rustls",
- "rustls-pki-types",
- "serde_json",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
- "web-time",
- "webpki-roots",
- "windows-registry",
-]
-
-[[package]]
-name = "figcraft-color"
-version = "0.9.0"
-dependencies = [
- "kurbo",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "figcraft-doc"
-version = "0.9.0"
-dependencies = [
- "figcraft-color",
- "figcraft-geom",
- "imbl",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "figcraft-engine"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "craft-docpath",
- "figcraft-canvas-gpu",
- "figcraft-collab",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-figma-plugin",
- "figcraft-format",
- "figcraft-geom",
- "figcraft-layout",
- "figcraft-pathops",
- "figcraft-pdf",
- "figcraft-plugin",
- "figcraft-render",
- "figcraft-shader",
- "figcraft-svg",
- "figcraft-text",
- "flate2",
- "image 0.25.10",
- "log",
- "regex",
- "serde",
- "serde_json",
- "sha1 0.10.7",
- "sha2",
- "thiserror 2.0.21",
- "wat",
- "web-time",
- "zip",
-]
-
-[[package]]
-name = "figcraft-figma-plugin"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "boa_engine",
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "figcraft-format"
-version = "0.9.0"
-dependencies = [
- "figcraft-doc",
- "figcraft-pathops",
- "flate2",
- "image 0.25.10",
- "ruzstd",
- "serde",
- "serde_json",
- "sha2",
- "zip",
-]
-
-[[package]]
-name = "figcraft-geom"
-version = "0.9.0"
-dependencies = [
- "kurbo",
- "serde",
-]
-
-[[package]]
-name = "figcraft-layout"
-version = "0.9.0"
-dependencies = [
- "figcraft-doc",
- "figcraft-geom",
-]
-
-[[package]]
-name = "figcraft-mcp"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "figcraft-collab-net",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-geom",
- "figcraft-render",
- "image 0.25.10",
- "log",
- "proptest",
- "serde_json",
-]
-
-[[package]]
-name = "figcraft-pathops"
-version = "0.9.0"
-dependencies = [
- "figcraft-doc",
- "figcraft-geom",
- "linesweeper",
-]
-
-[[package]]
-name = "figcraft-pdf"
-version = "0.9.0"
-dependencies = [
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-render",
- "figcraft-text",
- "flate2",
- "krilla",
- "log",
- "thiserror 2.0.21",
- "tiny-skia 0.12.0",
-]
-
-[[package]]
-name = "figcraft-plugin"
-version = "0.9.0"
-dependencies = [
- "figcraft-color",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
- "wasmi",
- "wat",
-]
-
-[[package]]
-name = "figcraft-render"
-version = "0.9.0"
-dependencies = [
- "crc32fast",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-shader",
- "figcraft-text",
- "image 0.25.10",
- "log",
- "moxcms",
- "png 0.18.1",
- "rayon",
- "tiny-skia 0.12.0",
-]
-
-[[package]]
-name = "figcraft-server"
-version = "0.9.0"
-dependencies = [
- "crc32fast",
- "ctrlc",
- "env_logger",
- "figcraft-collab",
- "figcraft-collab-net",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-format",
- "figcraft-plugin",
- "log",
- "rustix 1.1.5",
- "serde",
- "serde_json",
- "sha2",
- "toml",
- "tungstenite",
- "wat",
- "zip",
-]
-
-[[package]]
-name = "figcraft-shader"
-version = "0.9.0"
-dependencies = [
- "figcraft-color",
- "figcraft-doc",
- "log",
- "naga",
- "pollster 0.4.0",
- "wgpu",
-]
-
-[[package]]
-name = "figcraft-svg"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-render",
- "figcraft-text",
- "flate2",
- "thiserror 2.0.21",
- "usvg",
-]
-
-[[package]]
-name = "figcraft-text"
-version = "0.9.0"
-dependencies = [
- "figcraft-doc",
- "figcraft-geom",
- "harfrust 0.13.3",
- "log",
- "png 0.18.1",
- "skrifa 0.47.0",
- "unicode-bidi",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "figcraft-ui-egui"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "egui",
- "egui_extras",
- "ehttp",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-figma-plugin",
- "figcraft-format",
- "figcraft-geom",
- "figcraft-layout",
- "figcraft-pathops",
- "figcraft-render",
- "figcraft-shader",
- "figcraft-text",
- "image 0.25.10",
- "log",
- "lyon_tessellation",
- "pulldown-cmark",
- "rayon",
- "serde",
- "serde_json",
- "time",
- "tiny-skia 0.12.0",
- "toml",
- "usvg",
- "vtracer",
- "wat",
- "web-time",
-]
-
-[[package]]
-name = "figcraft-web"
-version = "0.9.0"
-dependencies = [
- "eframe",
- "egui",
- "figcraft-canvas-gpu",
- "figcraft-collab-net",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-geom",
- "figcraft-render",
- "figcraft-ui-egui",
- "js-sys",
- "log",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3558,18 +3154,408 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 
 [[package]]
-name = "lizard-ui-catalog"
+name = "lizard"
+version = "0.9.0"
+dependencies = [
+ "arboard",
+ "craft-window",
+ "dispatch2",
+ "eframe",
+ "egui",
+ "env_logger",
+ "fmv-macos-events",
+ "image 0.25.10",
+ "lizard-canvas-gpu",
+ "lizard-collab-net",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-figma-plugin",
+ "lizard-format",
+ "lizard-geom",
+ "lizard-mcp",
+ "lizard-render",
+ "lizard-text",
+ "lizard-ui-egui",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "rfd",
+ "serde_json",
+ "wat",
+ "webbrowser",
+ "windows",
+ "winit",
+ "winresource",
+ "wry",
+]
+
+[[package]]
+name = "lizard-canvas-gpu"
+version = "0.9.0"
+dependencies = [
+ "image 0.25.10",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-render",
+ "lizard-shader",
+ "lizard-text",
+ "pollster 0.4.0",
+ "rayon",
+ "vello_common 0.3.0",
+ "vello_gpu",
+ "web-time",
+ "wgpu",
+]
+
+[[package]]
+name = "lizard-cli"
+version = "0.9.0"
+dependencies = [
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-figma-plugin",
+ "lizard-format",
+ "lizard-mcp",
+ "lizard-render",
+ "lizard-svg",
+ "lizard-text",
+ "serde_json",
+]
+
+[[package]]
+name = "lizard-collab"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "imbl",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "postcard",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lizard-collab-net"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.4.3",
+ "js-sys",
+ "lizard-collab",
+ "lizard-doc",
+ "lizard-engine",
+ "log",
+ "proptest",
+ "rustls",
+ "rustls-pki-types",
+ "serde_json",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+ "web-time",
+ "webpki-roots",
+ "windows-registry",
+]
+
+[[package]]
+name = "lizard-color"
+version = "0.9.0"
+dependencies = [
+ "kurbo",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lizard-doc"
+version = "0.9.0"
+dependencies = [
+ "imbl",
+ "lizard-color",
+ "lizard-geom",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lizard-engine"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "craft-docpath",
+ "flate2",
+ "image 0.25.10",
+ "lizard-canvas-gpu",
+ "lizard-collab",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-figma-plugin",
+ "lizard-format",
+ "lizard-geom",
+ "lizard-layout",
+ "lizard-pathops",
+ "lizard-pdf",
+ "lizard-plugin",
+ "lizard-render",
+ "lizard-shader",
+ "lizard-svg",
+ "lizard-text",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2",
+ "thiserror 2.0.21",
+ "wat",
+ "web-time",
+ "zip",
+]
+
+[[package]]
+name = "lizard-figma-plugin"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "boa_engine",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "lizard-format"
+version = "0.9.0"
+dependencies = [
+ "flate2",
+ "image 0.25.10",
+ "lizard-doc",
+ "lizard-pathops",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "sha2",
+ "zip",
+]
+
+[[package]]
+name = "lizard-geom"
+version = "0.9.0"
+dependencies = [
+ "kurbo",
+ "serde",
+]
+
+[[package]]
+name = "lizard-layout"
+version = "0.9.0"
+dependencies = [
+ "lizard-doc",
+ "lizard-geom",
+]
+
+[[package]]
+name = "lizard-mcp"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "image 0.25.10",
+ "lizard-collab-net",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-geom",
+ "lizard-render",
+ "log",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "lizard-pathops"
+version = "0.9.0"
+dependencies = [
+ "linesweeper",
+ "lizard-doc",
+ "lizard-geom",
+]
+
+[[package]]
+name = "lizard-pdf"
+version = "0.9.0"
+dependencies = [
+ "flate2",
+ "krilla",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-render",
+ "lizard-text",
+ "log",
+ "thiserror 2.0.21",
+ "tiny-skia 0.12.0",
+]
+
+[[package]]
+name = "lizard-plugin"
+version = "0.9.0"
+dependencies = [
+ "lizard-color",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "wasmi",
+ "wat",
+]
+
+[[package]]
+name = "lizard-render"
+version = "0.9.0"
+dependencies = [
+ "crc32fast",
+ "image 0.25.10",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-shader",
+ "lizard-text",
+ "log",
+ "moxcms",
+ "png 0.18.1",
+ "rayon",
+ "tiny-skia 0.12.0",
+]
+
+[[package]]
+name = "lizard-server"
+version = "0.9.0"
+dependencies = [
+ "crc32fast",
+ "ctrlc",
+ "env_logger",
+ "lizard-collab",
+ "lizard-collab-net",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-format",
+ "lizard-plugin",
+ "log",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "tungstenite",
+ "wat",
+ "zip",
+]
+
+[[package]]
+name = "lizard-shader"
+version = "0.9.0"
+dependencies = [
+ "lizard-color",
+ "lizard-doc",
+ "log",
+ "naga",
+ "pollster 0.4.0",
+ "wgpu",
+]
+
+[[package]]
+name = "lizard-svg"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-render",
+ "lizard-text",
+ "thiserror 2.0.21",
+ "usvg",
+]
+
+[[package]]
+name = "lizard-text"
+version = "0.9.0"
+dependencies = [
+ "harfrust 0.13.3",
+ "lizard-doc",
+ "lizard-geom",
+ "log",
+ "png 0.18.1",
+ "skrifa 0.47.0",
+ "unicode-bidi",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "lizard-ui-egui"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "egui",
+ "egui_extras",
+ "ehttp",
+ "image 0.25.10",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-figma-plugin",
+ "lizard-format",
+ "lizard-geom",
+ "lizard-layout",
+ "lizard-pathops",
+ "lizard-render",
+ "lizard-shader",
+ "lizard-text",
+ "log",
+ "lyon_tessellation",
+ "pulldown-cmark",
+ "rayon",
+ "serde",
+ "serde_json",
+ "time",
+ "tiny-skia 0.12.0",
+ "toml",
+ "usvg",
+ "vtracer",
+ "wat",
+ "web-time",
+ "workbench-ui",
+]
+
+[[package]]
+name = "lizard-web"
 version = "0.9.0"
 dependencies = [
  "eframe",
  "egui",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-text",
- "figcraft-ui-egui",
- "image 0.25.10",
- "serde_json",
+ "js-sys",
+ "lizard-canvas-gpu",
+ "lizard-collab-net",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-geom",
+ "lizard-render",
+ "lizard-ui-egui",
+ "log",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -7520,6 +7506,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "workbench-ui"
+version = "0.9.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
+name = "workbench-ui-catalog"
+version = "0.9.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "image 0.25.10",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-text",
+ "lizard-ui-egui",
+ "serde_json",
+ "workbench-ui",
+]
+
+[[package]]
 name = "write-fonts"
 version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7660,11 +7669,11 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 name = "xtask"
 version = "0.9.0"
 dependencies = [
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-format",
- "figcraft-render",
  "image 0.25.10",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-format",
+ "lizard-render",
  "serde_json",
 ]
 

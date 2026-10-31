@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-geom"
+name = "lizard-geom"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

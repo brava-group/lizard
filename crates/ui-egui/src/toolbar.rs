@@ -1,13 +1,13 @@
 //! The floating bottom toolbar (UI3): tool groups with flyouts, comments, actions.
 
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::{ImageScaleMode, Paint, PaintKind};
-use figcraft_doc::NodeId;
-use figcraft_engine::ToolId;
-use figcraft_engine::vectoredit::VTool;
+use lizard_color::{ImageScaleMode, Paint, PaintKind};
+use lizard_doc::NodeId;
+use lizard_engine::ToolId;
+use lizard_engine::vectoredit::VTool;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::{self, Nav, Region, Tip};
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
@@ -86,7 +86,7 @@ fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
     ui.data(|d| d.get_temp::<u8>(egui::Id::new(("tb_last", key)))).and_then(|i| ToolId::ALL.get(i as usize).copied()).unwrap_or(default)
 }
 
-pub fn show(app: &mut FigApp, ui: &mut Ui) {
+pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
     app.ui.actions_rect = None;
@@ -125,7 +125,7 @@ pub(crate) fn main_width() -> f32 {
 
 /// The main toolbar pill: the tool groups with their flyouts, Comment and Actions, then the
 /// Draw · Design · Prototype · Inspect mode switcher.
-fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
+fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let cell = 32.0;
     let width = main_width();
     let rect = pill(ui, &mut app.ui.nav, canvas, width, t);
@@ -289,13 +289,13 @@ fn main_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
 
 /// The pill shown for a file you can't edit now: Move and Hand, and a badge saying why ("View
 /// only", or "Publishing…" until the file is on the server).
-fn view_only_toolbar(app: &mut FigApp, ui: &mut Ui, why: &'static str) {
+fn view_only_toolbar(app: &mut LizardApp, ui: &mut Ui, why: &'static str) {
     let t = Tokens::get(ui.ctx());
     // The editing tools are off: the tool falls back to moving around.
     if !matches!(app.session.tool.tool, ToolId::Move | ToolId::Hand) {
         app.run("tool.set", json!({"tool": "move"}));
     }
-    let label = if why == figcraft_engine::live::PUBLISHING { tr("Publishing…") } else { tr("View only") };
+    let label = if why == lizard_engine::live::PUBLISHING { tr("Publishing…") } else { tr("View only") };
     let cell = 32.0;
     let text = ui.painter().layout_no_wrap(label.to_string(), crate::theme::semibold(11.5), t.text);
     let badge_w = 12.0 + 14.0 + 6.0 + text.size().x + 12.0;
@@ -346,7 +346,7 @@ fn vector_edit_separator(ui: &mut Ui, t: &Tokens) {
 }
 
 /// A second toolbar above the main toolbar while a vector is being edited.
-fn edit_toolbar(app: &mut FigApp, ui: &mut Ui, current: VTool) {
+fn edit_toolbar(app: &mut LizardApp, ui: &mut Ui, current: VTool) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
     let width = vector_edit_toolbar_width();
@@ -431,7 +431,7 @@ pub(crate) fn image_toolbar_width() -> f32 {
     16.0 + IMAGE_BUTTONS.iter().map(|(_, _, _, width)| width).sum::<f32>() + 17.0 + 62.0
 }
 
-fn selected_image_fill(app: &FigApp) -> Option<(NodeId, usize, Paint)> {
+fn selected_image_fill(app: &LizardApp) -> Option<(NodeId, usize, Paint)> {
     let selection = app.session.selection();
     let [id] = selection.as_slice() else { return None };
     app.session
@@ -445,7 +445,7 @@ fn selected_image_fill(app: &FigApp) -> Option<(NodeId, usize, Paint)> {
         .map(|(index, fill)| (*id, index, fill.clone()))
 }
 
-fn image_action(app: &mut FigApp, ui: &Ui, id: NodeId, index: usize, mut paint: Paint, action: ImageAction) {
+fn image_action(app: &mut LizardApp, ui: &Ui, id: NodeId, index: usize, mut paint: Paint, action: ImageAction) {
     if let ImageAction::Crop = action {
         if let PaintKind::Image(image) = &mut paint.kind
             && image.scale_mode != ImageScaleMode::Crop
@@ -488,7 +488,7 @@ fn image_action(app: &mut FigApp, ui: &Ui, id: NodeId, index: usize, mut paint: 
 }
 
 /// Contextual image actions above the normal toolbar while one image fill is selected.
-fn image_toolbar(app: &mut FigApp, ui: &mut Ui, id: NodeId, index: usize, paint: Paint) {
+fn image_toolbar(app: &mut LizardApp, ui: &mut Ui, id: NodeId, index: usize, paint: Paint) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
     let width = image_toolbar_width();
@@ -528,11 +528,11 @@ fn image_toolbar(app: &mut FigApp, ui: &mut Ui, id: NodeId, index: usize, paint:
 }
 
 /// The pill shown while the shape builder is active: Merge and Remove modes, a hint and Done.
-fn builder_toolbar(app: &mut FigApp, ui: &mut Ui) {
+fn builder_toolbar(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let cell = 32.0;
     let remove = app.session.tool.builder_remove;
-    let has_regions = figcraft_engine::shapebuilder::current(&app.session).is_some_and(|a| !a.regions.is_empty());
+    let has_regions = lizard_engine::shapebuilder::current(&app.session).is_some_and(|a| !a.regions.is_empty());
     let alt = pretty_shortcut("Alt");
     let hint = if !has_regions {
         tr("Select overlapping shapes").to_string()
@@ -634,7 +634,7 @@ fn done_button(ui: &mut Ui, t: &Tokens, x: f32, cy: f32, tip: &str) -> bool {
     resp.clicked()
 }
 
-fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, anchor: &egui::Response, bottom_left: egui::Pos2) {
+fn flyout(app: &mut LizardApp, ui: &mut Ui, g: &Group, anchor: &egui::Response, bottom_left: egui::Pos2) {
     let w = match g.key {
         "move" => 202.0,
         "frame" => 143.0,
@@ -685,5 +685,5 @@ fn flyout_id(key: &str) -> egui::Id {
 
 /// "Shift+Cmd+K" → "⇧⌘K" on macOS, "Ctrl+Shift+K" elsewhere.
 pub fn pretty_shortcut(s: &str) -> String {
-    figcraft_engine::keymap::display(s, crate::shortcuts::platform())
+    lizard_engine::keymap::display(s, crate::shortcuts::platform())
 }

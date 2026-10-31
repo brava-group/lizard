@@ -114,7 +114,7 @@ fn model_entry(ui: &mut Ui, origin: Pos2, model: usize, color: Color) -> Option<
                     [f64::from(r), f64::from(g), f64::from(b)]
                 }
                 2 => {
-                    let hsl = figcraft_color::Hsl::from_color(color);
+                    let hsl = lizard_color::Hsl::from_color(color);
                     [f64::from(hsl.h), f64::from(hsl.s * 100.0), f64::from(hsl.l * 100.0)]
                 }
                 _ => {
@@ -146,7 +146,7 @@ fn model_entry(ui: &mut Ui, origin: Pos2, model: usize, color: Color) -> Option<
                     (updated[2] / 255.0).clamp(0.0, 1.0) as f32,
                     color.a,
                 ),
-                2 => figcraft_color::Hsl {
+                2 => lizard_color::Hsl {
                     h: updated[0].rem_euclid(360.0) as f32,
                     s: (updated[1] / 100.0).clamp(0.0, 1.0) as f32,
                     l: (updated[2] / 100.0).clamp(0.0, 1.0) as f32,
@@ -169,7 +169,7 @@ fn model_entry(ui: &mut Ui, origin: Pos2, model: usize, color: Color) -> Option<
     }
 }
 
-pub(super) fn pick_kind(app: &mut FigApp, target: &PickerTarget, paint: &mut Paint, index: usize) {
+pub(super) fn pick_kind(app: &mut LizardApp, target: &PickerTarget, paint: &mut Paint, index: usize) {
     let base = paint.preview_color();
     match index {
         0 => paint.kind = PaintKind::Solid { color: base.with_alpha(1.0) },
@@ -189,15 +189,15 @@ pub(super) fn pick_kind(app: &mut FigApp, target: &PickerTarget, paint: &mut Pai
     write(app, target, paint, false);
 }
 
-pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint) {
+pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint) {
     show_inner(app, ctx, target, paint, None);
 }
 
-pub(super) fn show_stop(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint, index: usize, parent_pos: Pos2) {
+pub(super) fn show_stop(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint, index: usize, parent_pos: Pos2) {
     show_inner(app, ctx, target, paint, Some((index, parent_pos)));
 }
 
-fn show_inner(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
+fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
     let pos =
         stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)));
     let height = if stop.is_some() { HEIGHT - 40.0 } else { HEIGHT };

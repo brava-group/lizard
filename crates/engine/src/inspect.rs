@@ -1,6 +1,6 @@
 //! Document inspection as JSON, so agents can verify their work without screenshots.
 
-use figcraft_doc::*;
+use lizard_doc::*;
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -20,7 +20,7 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
         o.insert("y".into(), json!(round(c[5])));
         o.insert("width".into(), json!(round(n.width)));
         o.insert("height".into(), json!(round(n.height)));
-        let rot = figcraft_geom::rotation_degrees(n.transform);
+        let rot = lizard_geom::rotation_degrees(n.transform);
         if rot.abs() > 1e-6 {
             o.insert("rotation".into(), json!(round(rot)));
         }
@@ -36,7 +36,7 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
         if n.opacity < 1.0 {
             o.insert("opacity".into(), json!(n.opacity));
         }
-        if !matches!(n.blend, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough) {
+        if !matches!(n.blend, lizard_color::BlendMode::Normal | lizard_color::BlendMode::PassThrough) {
             o.insert("blend".into(), json!(n.blend));
         }
         if !n.fills.is_empty() {
@@ -97,7 +97,7 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
             }
         }
         if let Some(cell) = parent_al
-            .then(|| n.parent.and_then(|p| figcraft_layout::grid_geometry(doc, p)))
+            .then(|| n.parent.and_then(|p| lizard_layout::grid_geometry(doc, p)))
             .flatten()
             .and_then(|g| g.cells.into_iter().find(|c| c.id == n.id))
         {
@@ -197,7 +197,7 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
             }
             // Lists: one style for the layer, or each paragraph's type, nesting level and start.
             if t.paragraphs.is_empty() {
-                if t.list != figcraft_doc::ListStyle::None {
+                if t.list != lizard_doc::ListStyle::None {
                     o.insert("listStyle".into(), json!(t.list));
                 }
             } else {
@@ -215,7 +215,7 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
                     o.insert(k.into(), json!(true));
                 }
             }
-            if t.leading_trim != figcraft_doc::LeadingTrim::None {
+            if t.leading_trim != lizard_doc::LeadingTrim::None {
                 o.insert("leadingTrim".into(), json!(t.leading_trim));
             }
             if !t.runs.is_empty() {
@@ -279,19 +279,19 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
 }
 
 fn round(v: f64) -> f64 {
-    figcraft_geom::round_to(v, 2)
+    lizard_geom::round_to(v, 2)
 }
 
-fn paints(p: &[figcraft_color::Paint]) -> Value {
+fn paints(p: &[lizard_color::Paint]) -> Value {
     Value::Array(
         p.iter()
             .map(|x| match &x.kind {
-                figcraft_color::PaintKind::Solid { color } => {
+                lizard_color::PaintKind::Solid { color } => {
                     let mut v = json!({"type": "solid", "color": color.to_css_hex()});
                     if x.opacity < 1.0 {
                         v["opacity"] = json!(x.opacity);
                     }
-                    if x.blend != figcraft_color::BlendMode::Normal {
+                    if x.blend != lizard_color::BlendMode::Normal {
                         v["blend"] = json!(x.blend);
                     }
                     if !x.visible {

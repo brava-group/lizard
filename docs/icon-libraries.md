@@ -3,7 +3,7 @@
 Lizard ships an offline, versioned SVG catalog for six icon families: Lucide, Feather,
 Phosphor, and Material Symbols Outlined, Rounded and Sharp. The catalog is compiled from pinned
 redistributable packages by `scripts/build-icon-catalog.py`. Package versions, archive hashes
-and licences live in `assets/icon-packs/` and `ATTRIBUTION.md`. Rendering never depends on a
+and licences live in `assets/icon-packs/` and `NOTICE`. Rendering never depends on a
 network request or on the agent provider.
 
 ## Agent workflow
@@ -37,7 +37,7 @@ must be an exact catalog pair.
 ## Updating the catalog
 
 Update the pinned package versions in `scripts/build-icon-catalog.py`, run the script from the
-repository root, inspect the resulting counts and licences, and update `ATTRIBUTION.md`. The
+repository root, inspect the resulting counts and licences, and update `NOTICE`. The
 generator accepts locally cached archives named `/tmp/lizard-icons-<source>.tgz` or downloads
 the pinned archives. Run the engine icon catalog tests and the MCP icon creation test; visually
 inspect an exported icon before shipping.

@@ -1542,7 +1542,7 @@ mod tests {
     /// The Design panel's Rotation field shows an icon of its own, not Corner radius's (#256).
     #[test]
     fn rotation_and_corner_radius_fields_show_different_icons() {
-        let mut s = figcraft_engine::Session::new();
+        let mut s = lizard_engine::Session::new();
         let r = s.execute("shape.rectangle", &serde_json::json!({"x": 0, "y": 0, "width": 100, "height": 80})).unwrap()["id"].clone();
         s.execute("select.set", &serde_json::json!({"ids": [r]})).unwrap();
         let mut u = crate::layers_drag_tests::Ui::new(s);

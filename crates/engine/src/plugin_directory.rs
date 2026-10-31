@@ -12,11 +12,11 @@
 
 use std::cmp::Ordering;
 
-pub use figcraft_collab::message::PluginEntry;
-use figcraft_collab::message::{PluginReply, PluginReq};
-pub use figcraft_plugin::bundle;
-pub use figcraft_plugin::bundle::newer as newer_version;
-use figcraft_plugin::bundle::{Asset, Bundle, MAX_ASSETS, check_asset_name, compare_versions, newer, sha256_hex};
+pub use lizard_collab::message::PluginEntry;
+use lizard_collab::message::{PluginReply, PluginReq};
+pub use lizard_plugin::bundle;
+pub use lizard_plugin::bundle::newer as newer_version;
+use lizard_plugin::bundle::{Asset, Bundle, MAX_ASSETS, check_asset_name, compare_versions, newer, sha256_hex};
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;
@@ -26,7 +26,7 @@ use crate::plugins::{InstalledPlugin, MANIFEST_FILE, Manifest, installed, regist
 use crate::{EngineError, Result, Session, bad, spec};
 
 /// Why there's no plugin directory here (the browser build, sessions without the network).
-pub const NO_DIRECTORY: &str = "plugin directories on a server need the desktop app, figcraft-cli or the MCP server";
+pub const NO_DIRECTORY: &str = "plugin directories on a server need the desktop app, lizard-cli or the MCP server";
 /// Largest bundle downloaded or published (a server's own cap is at most this).
 pub const MAX_BUNDLE: usize = 32 << 20;
 /// The module's file name in an installed plugin's folder, and the folder its assets go in.
@@ -216,7 +216,7 @@ fn bundle_from_disk(cmd: &str, path: &str) -> Result<Bundle> {
         file.push(MANIFEST_FILE);
     }
     let text =
-        String::from_utf8(read_file(&file, figcraft_plugin::manifest::MAX_MANIFEST_BYTES)?).map_err(|_| bad(cmd, "the manifest isn't UTF-8 text"))?;
+        String::from_utf8(read_file(&file, lizard_plugin::manifest::MAX_MANIFEST_BYTES)?).map_err(|_| bad(cmd, "the manifest isn't UTF-8 text"))?;
     let m = Manifest::parse(&text).map_err(|e| bad(cmd, e))?;
     let wasm = module_file(&file, &m)?;
     let mut assets = Vec::new();
@@ -261,7 +261,7 @@ fn publish(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        (None, None) => return Err(bad(cmd, "pass `path` (a plugin folder or its figcraft-plugin.json) or `plugin` (an installed plugin's id)")),
+        (None, None) => return Err(bad(cmd, "pass `path` (a plugin folder or its lizard-plugin.json) or `plugin` (an installed plugin's id)")),
     };
     // Checked here too, for a clear message before anything is sent.
     bundle.check().map_err(|e| bad(cmd, e))?;
@@ -302,7 +302,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "plugin.directory.publish",
             "Publish plugin to directory",
-            "{path (a plugin folder or its figcraft-plugin.json) | plugin (an installed plugin's id), server (ws://host:port/?key=…)} → {published: entry, server}",
+            "{path (a plugin folder or its lizard-plugin.json) | plugin (an installed plugin's id), server (ws://host:port/?key=…)} → {published: entry, server}",
             false,
             publish
         ),

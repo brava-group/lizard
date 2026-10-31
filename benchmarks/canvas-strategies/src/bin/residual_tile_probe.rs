@@ -5,8 +5,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use canvas_strategies_bench::residual::Residual;
-use figcraft_doc::EffectKind;
-use figcraft_render::{Options, Pixmap, View, render_view};
+use lizard_doc::EffectKind;
+use lizard_render::{Options, Pixmap, View, render_view};
 use rayon::prelude::*;
 
 const WIDTH: u32 = 5120;
@@ -29,7 +29,7 @@ fn compare(actual: &Pixmap, reference: &Pixmap) -> (f64, f64) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard"))?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

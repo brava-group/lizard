@@ -3,15 +3,15 @@
 //! `node.set`.
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::Paint;
-use figcraft_doc::proto::{
+use lizard_color::Paint;
+use lizard_doc::proto::{
     Action, ConditionalBlock, Direction, Easing, GAMEPAD_BUTTONS, Interaction, KeyMods, Overflow, OverlayPosition, ScrollPosition, Transition,
     Trigger, is_gamepad_button,
 };
-use figcraft_doc::*;
+use lizard_doc::*;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
@@ -42,7 +42,7 @@ pub fn editor(ctx: &egui::Context) -> Option<(NodeId, usize)> {
 
 /// Delete the selected interaction (when one is active in the Prototype tab).
 /// Returns true if an interaction was deleted.
-pub fn delete_selected_interaction(app: &mut FigApp, ctx: &egui::Context) -> bool {
+pub fn delete_selected_interaction(app: &mut LizardApp, ctx: &egui::Context) -> bool {
     if app.ui.right_tab != crate::RightTab::Prototype {
         return false;
     }
@@ -161,7 +161,7 @@ fn transition_of(label: &str, cur: Transition) -> Transition {
 
 /// Destinations a "Change to" can pick: the variants next to the layer's component.
 fn variants_for(doc: &Document, id: NodeId) -> Vec<NodeId> {
-    let comp = figcraft_engine::components::owning_component(doc, id).or_else(|| match doc.node(id).map(|n| &n.kind) {
+    let comp = lizard_engine::components::owning_component(doc, id).or_else(|| match doc.node(id).map(|n| &n.kind) {
         Some(NodeKind::Instance { component, .. }) => Some(*component),
         _ => None,
     });
@@ -242,7 +242,7 @@ pub(crate) fn action_of(label: &str, doc: &Document, page: NodeId, node: NodeId,
         "Navigate to" => Action::Navigate { dest: frame_dest?, preserve_scroll: matches!(cur, Some(Action::Navigate { preserve_scroll: true, .. })) },
         "Change to" => {
             let vs = variants_for(doc, node);
-            let mine = figcraft_engine::components::owning_component(doc, node);
+            let mine = lizard_engine::components::owning_component(doc, node);
             Action::ChangeTo { dest: vs.iter().copied().find(|v| Some(*v) != mine).or(vs.first().copied())? }
         }
         "Back" => Action::Back,
@@ -259,7 +259,7 @@ pub(crate) fn action_of(label: &str, doc: &Document, page: NodeId, node: NodeId,
         "Close overlay" => Action::CloseOverlay,
         "Set variable" => {
             let v = doc.variables.variables.first()?;
-            let value = value_json(&figcraft_engine::cmd::proto_actions::start_value(&doc.variables, v));
+            let value = value_json(&lizard_engine::cmd::proto_actions::start_value(&doc.variables, v));
             Action::SetVariable { variable: v.id.clone(), value, expr: None }
         }
         "Set variable mode" => {
@@ -269,10 +269,7 @@ pub(crate) fn action_of(label: &str, doc: &Document, page: NodeId, node: NodeId,
             Action::SetVariableMode { collection: c.id.clone(), mode: m.id.clone() }
         }
         "Conditional" => Action::Conditional {
-            blocks: vec![ConditionalBlock {
-                condition: Some(figcraft_engine::cmd::proto_actions::default_condition(&doc.variables)),
-                actions: vec![],
-            }],
+            blocks: vec![ConditionalBlock { condition: Some(lizard_engine::cmd::proto_actions::default_condition(&doc.variables)), actions: vec![] }],
         },
         _ => return None,
     })
@@ -280,7 +277,7 @@ pub(crate) fn action_of(label: &str, doc: &Document, page: NodeId, node: NodeId,
 
 /// The layers an edit of `node`'s interactions applies to: the whole selection when it includes
 /// `node` and every selected layer has the same interactions, else just `node`.
-pub(crate) fn targets_for(app: &FigApp, node: NodeId) -> Vec<NodeId> {
+pub(crate) fn targets_for(app: &LizardApp, node: NodeId) -> Vec<NodeId> {
     let Ok(ds) = app.session.ds() else { return vec![node] };
     let sel = &ds.selection;
     let first = ds.doc.node(node).map(|n| &n.interactions);
@@ -288,7 +285,7 @@ pub(crate) fn targets_for(app: &FigApp, node: NodeId) -> Vec<NodeId> {
     if same { sel.clone() } else { vec![node] }
 }
 
-fn patch(app: &mut FigApp, node: NodeId, index: usize, fields: Value) {
+fn patch(app: &mut LizardApp, node: NodeId, index: usize, fields: Value) {
     let mut p = json!({"ids": targets_for(app, node), "index": index});
     if let (Some(o), Value::Object(f)) = (p.as_object_mut(), fields) {
         o.extend(f);
@@ -296,7 +293,7 @@ fn patch(app: &mut FigApp, node: NodeId, index: usize, fields: Value) {
     app.run("proto.interaction.set", p);
 }
 
-pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
+pub fn prototype(app: &mut LizardApp, ui: &mut Ui) {
     let Ok(ds) = app.session.ds() else { return };
     let doc = ds.doc.clone();
     let sel = ds.selection.clone();
@@ -335,7 +332,7 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
 
 /// Several layers with different interactions: "+" replaces them all with one click interaction
 /// (one undo step); "Remove all" clears them.
-fn mixed_interactions(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, sel: &[NodeId]) {
+fn mixed_interactions(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId, sel: &[NodeId]) {
     let t = Tokens::get(ui.ctx());
     if widgets::section_header(ui, tr("Interactions"), &[(Icon::Plus, tr("Replace with a new interaction"))], false).is_some() {
         let first = sel.first().copied().unwrap_or(NodeId(0));
@@ -376,7 +373,7 @@ fn icon_button(ui: &mut Ui, id: Id, rect: Rect, icon: Icon, tip: &str) -> bool {
 }
 
 /// One flow row: play, editable name, preview, remove.
-fn flow_row(app: &mut FigApp, ui: &mut Ui, f: &proto::Flow) {
+fn flow_row(app: &mut LizardApp, ui: &mut Ui, f: &proto::Flow) {
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
     let button = |dx: f32| Rect::from_center_size(pos2(dx, r.center().y), vec2(24.0, 24.0));
@@ -396,7 +393,7 @@ fn flow_row(app: &mut FigApp, ui: &mut Ui, f: &proto::Flow) {
     }
 }
 
-fn flows_overview(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
+fn flows_overview(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     let t = Tokens::get(ui.ctx());
     let flows = flows_of(doc, page);
     if widgets::section_header(ui, tr("Flow starting points"), &[(Icon::Plus, tr("Add starting point"))], flows.is_empty()).is_some() {
@@ -429,7 +426,7 @@ fn flows_overview(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     }
 }
 
-fn settings(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
+fn settings(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     if widgets::section_header(ui, tr("Prototype settings"), &[(Icon::Preview, tr("Open prototype preview"))], false).is_some() {
         app.run("proto.preview", json!({}));
     }
@@ -492,7 +489,7 @@ fn settings(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
         widgets::swatch(ui, &Paint::solid(bg), 16.0);
         let width = ui.available_width();
         if let Some(h) = widgets::text_field(ui, Id::new("proto_bg"), &bg.to_hex(), width, "")
-            && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+            && let Some(c) = lizard_color::Color::from_hex_or_name(&h)
         {
             app.run("proto.settings", json!({"background": c.to_css_hex()}));
         }
@@ -506,11 +503,11 @@ const RESPONSIVE_TIP: &str =
 /// A device colour as a swatch paint.
 fn color_paint(c: proto::DeviceColor) -> Paint {
     let [r, g, b] = c.rgb;
-    Paint::solid(figcraft_color::Color::from_rgb8_const(r, g, b))
+    Paint::solid(lizard_color::Color::from_rgb8_const(r, g, b))
 }
 
 /// The colours the device comes in: its swatch and a picker (each colour with its swatch).
-fn device_colors(app: &mut FigApp, ui: &mut Ui, colors: &[proto::DeviceColor], current: Option<proto::DeviceColor>) {
+fn device_colors(app: &mut LizardApp, ui: &mut Ui, colors: &[proto::DeviceColor], current: Option<proto::DeviceColor>) {
     widgets::sublabels(ui, tr("Color"), None);
     row(ui, 32.0, |ui| {
         if let Some(c) = current {
@@ -536,7 +533,7 @@ fn device_colors(app: &mut FigApp, ui: &mut Ui, colors: &[proto::DeviceColor], c
 }
 
 /// The custom size's screen: width and height fields and a button that swaps them.
-fn custom_size(app: &mut FigApp, ui: &mut Ui, model: Option<proto::Device>) {
+fn custom_size(app: &mut LizardApp, ui: &mut Ui, model: Option<proto::Device>) {
     let Some(d) = model else { return };
     let col = widgets::col_width(ui.available_width());
     widgets::sublabels(ui, tr("Size"), None);
@@ -556,7 +553,7 @@ fn custom_size(app: &mut FigApp, ui: &mut Ui, model: Option<proto::Device>) {
     });
 }
 
-fn flow_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, frame: NodeId) {
+fn flow_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId, frame: NodeId) {
     let flows = flows_of(doc, page);
     let mine = flows.iter().find(|f| f.start == frame).cloned();
     // A flow's row has its own preview button.
@@ -583,7 +580,7 @@ fn flow_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, fra
     }
 }
 
-fn interactions(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, node: &Node) {
+fn interactions(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId, node: &Node) {
     let t = Tokens::get(ui.ctx());
     let id = node.id;
     let list = node.interactions.clone();
@@ -642,7 +639,7 @@ fn interactions(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, nod
 
 /// The interaction editor, floating left of the panel (`at` is its top-right corner).
 #[allow(clippy::too_many_arguments)]
-fn editor_popover(app: &mut FigApp, ctx: &egui::Context, doc: &Document, page: NodeId, node: NodeId, k: usize, it: &Interaction, at: Pos2) {
+fn editor_popover(app: &mut LizardApp, ctx: &egui::Context, doc: &Document, page: NodeId, node: NodeId, k: usize, it: &Interaction, at: Pos2) {
     let t = Tokens::get(ctx);
     let width = 280.0;
     let screen = ctx.content_rect();
@@ -671,7 +668,7 @@ fn editor_popover(app: &mut FigApp, ctx: &egui::Context, doc: &Document, page: N
                 widgets::sublabels(ui, if it.actions.len() > 1 { tr("Actions") } else { tr("Action") }, None);
                 let cx = Cx { doc, page, node, k };
                 crate::proto_editor::action_list(app, ui, &cx, &it.actions, &[]);
-                if figcraft_doc::proto::walk(&it.actions).any(animates) {
+                if lizard_doc::proto::walk(&it.actions).any(animates) {
                     widgets::separator(ui);
                     animation_rows(app, ui, node, k, it);
                 }
@@ -699,7 +696,7 @@ fn capturing(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(capture_id())).unwrap_or(false)
 }
 
-fn trigger_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &Interaction) {
+fn trigger_rows(app: &mut LizardApp, ui: &mut Ui, node: NodeId, k: usize, it: &Interaction) {
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Trigger"), None);
     row(ui, 32.0, |ui| {
@@ -816,7 +813,7 @@ const PAD_MENU_W: f32 = 92.0;
 /// A destination picker for the action at `slot`: `make` builds the action for the destination.
 #[allow(clippy::too_many_arguments)]
 fn dest_dropdown(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     doc: &Document,
     options: &[NodeId],
@@ -846,7 +843,7 @@ fn dest_dropdown(
 
 /// The settings of the action at `slot` (set variable and conditional actions have their own
 /// editors in `proto_editor`).
-pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId, slot: &Slot, action: &Action) {
+pub(crate) fn action_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId, slot: &Slot, action: &Action) {
     let node = slot.node;
     let frames = frames_for(doc, page);
     match action {
@@ -956,7 +953,7 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
             });
             row(ui, 28.0, |ui| {
                 if widgets::checkbox(ui, background.is_some(), tr("Add background behind overlay")) {
-                    let bg = if background.is_some() { None } else { Some(figcraft_color::Color::new(0.0, 0.0, 0.0, 0.25)) };
+                    let bg = if background.is_some() { None } else { Some(lizard_color::Color::new(0.0, 0.0, 0.0, 0.25)) };
                     set_action(app, slot, Action::OpenOverlay { dest, position, close_on_outside, background: bg, offset });
                 }
             });
@@ -965,7 +962,7 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
                     widgets::swatch(ui, &Paint::solid(bg), 16.0);
                     let hex_width = (ui.available_width() - 72.0).max(40.0);
                     if let Some(h) = widgets::text_field(ui, slot.id("proto_ovbg"), &bg.to_hex(), hex_width, "")
-                        && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+                        && let Some(c) = lizard_color::Color::from_hex_or_name(&h)
                     {
                         set_action(app, slot, Action::OpenOverlay { dest, position, close_on_outside, background: Some(c), offset });
                     }
@@ -1018,7 +1015,7 @@ pub(crate) fn action_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, page:
     }
 }
 
-fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &Interaction) {
+fn animation_rows(app: &mut LizardApp, ui: &mut Ui, node: NodeId, k: usize, it: &Interaction) {
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Animation"), None);
     row(ui, 32.0, |ui| {
@@ -1121,7 +1118,7 @@ fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &In
 }
 
 /// Fields for a custom bezier (x1, y1, x2, y2) or spring (mass, stiffness, damping).
-fn custom_easing_fields(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, e: Easing) {
+fn custom_easing_fields(app: &mut LizardApp, ui: &mut Ui, node: NodeId, k: usize, e: Easing) {
     let (names, vals, steps): ([&str; 4], [f64; 4], [f64; 4]) = match e {
         Easing::CustomBezier { x1, y1, x2, y2 } => (["X1", "Y1", "X2", "Y2"], [x1, y1, x2, y2], [0.01; 4]),
         Easing::CustomSpring { mass, stiffness, damping } => {
@@ -1207,7 +1204,7 @@ pub fn curve(p: &egui::Painter, r: Rect, e: Easing, col: Color32, dot: Option<f6
     }
 }
 
-fn scroll_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], node: &Node) {
+fn scroll_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], node: &Node) {
     let t = Tokens::get(ui.ctx());
     let in_frame = node.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.kind.is_frame_like());
     let is_frame = node.kind.is_frame_like();

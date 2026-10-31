@@ -12,8 +12,8 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use figcraft_doc::{Document, EffectKind, Node, NodeKind, SPREAD_MITER_LIMIT, Shadow};
-use figcraft_geom::{Affine, BezPath};
+use lizard_doc::{Document, EffectKind, Node, NodeKind, SPREAD_MITER_LIMIT, Shadow};
+use lizard_geom::{Affine, BezPath};
 use tiny_skia::{FillRule, Pixmap, PixmapPaint, Transform};
 
 use crate::draw::{hash_path, node_outline, stroke_area, stroke_rule, ts_path, ts_transform};
@@ -39,7 +39,7 @@ pub fn cover(doc: &Document, n: &Node) -> Option<Vec<Outline>> {
     outlines(doc, n, |f| f.visible)
 }
 
-fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) -> bool) -> Option<Vec<Outline>> {
+fn outlines(doc: &Document, n: &Node, fill_counts: fn(&lizard_color::Paint) -> bool) -> Option<Vec<Outline>> {
     let has_fill = n.fills.iter().any(fill_counts);
     let is_bool = matches!(n.kind, NodeKind::BooleanOp { .. });
     let is_text = matches!(n.kind, NodeKind::Text(_));
@@ -50,11 +50,11 @@ fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) ->
     {
         return None;
     }
-    let closed = is_bool || is_text || figcraft_doc::geometry::is_closed(n);
+    let closed = is_bool || is_text || lizard_doc::geometry::is_closed(n);
     let outline = node_outline(doc, n);
     let mut out = Vec::new();
     if has_fill
-        && figcraft_doc::geometry::has_fill_geometry(n)
+        && lizard_doc::geometry::has_fill_geometry(n)
         && let Some(o) = outline.clone()
     {
         out.push(o);
@@ -85,7 +85,7 @@ fn band(path: &BezPath, rule: FillRule, half: f64, shrink: bool, res: f32) -> Op
     if let Some(b) = band_cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key) {
         return b.clone();
     }
-    let simplified = (shrink && rule == FillRule::Winding).then(|| figcraft_pathops::simplify(path).ok()).flatten();
+    let simplified = (shrink && rule == FillRule::Winding).then(|| lizard_pathops::simplify(path).ok()).flatten();
     let stroke = tiny_skia::Stroke {
         width: (half * 2.0) as f32,
         line_join: tiny_skia::LineJoin::Miter,
@@ -140,7 +140,7 @@ pub(crate) fn whole_px(v: f64) -> i32 {
     if v.is_finite() { v.round().clamp(-100_000.0, 100_000.0) as i32 } else { 0 }
 }
 
-fn color4(c: figcraft_color::Color) -> [f32; 4] {
+fn color4(c: lizard_color::Color) -> [f32; 4] {
     let c = c.sanitized();
     [c.r, c.g, c.b, c.a]
 }

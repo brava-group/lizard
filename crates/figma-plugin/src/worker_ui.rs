@@ -19,7 +19,7 @@ use serde_json::Value;
 use crate::bridge::Edit;
 use crate::worker::{MAX_OPERATIONS, SelectedNode, SetOpacity};
 
-pub const WORKER_UI_ARG: &str = "--figcraft-figma-plugin-ui-worker";
+pub const WORKER_UI_ARG: &str = "--lizard-figma-plugin-ui-worker";
 pub const MAX_UI_HTML_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_UI_SOURCE_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_UI_REQUEST_BYTES: usize = 16 * 1024 * 1024;
@@ -226,7 +226,7 @@ impl UiRuntime {
             .map_err(|e| format!("plugin setup: {e}"))?;
         ALLOWED_DOMAINS.with(|domains| *domains.borrow_mut() = allowed_domains);
         context
-            .register_global_builtin_callable(boa_engine::js_string!("__figcraftFetch"), 2, NativeFunction::from_fn_ptr(fetch_native))
+            .register_global_builtin_callable(boa_engine::js_string!("__lizardFetch"), 2, NativeFunction::from_fn_ptr(fetch_native))
             .map_err(|e| format!("plugin network setup: {e}"))?;
         context.runtime_limits_mut().set_loop_iteration_limit(100_000);
         context.runtime_limits_mut().set_recursion_limit(128);
@@ -244,7 +244,7 @@ impl UiRuntime {
         context.eval(Source::from_bytes(&setup)).map_err(|e| format!("plugin setup: {e}"))?;
         context.eval(Source::from_bytes(&source)).map_err(|e| format!("plugin JavaScript: {e}"))?;
         context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
-        context.eval(Source::from_bytes("__figcraftRun()")).map_err(|e| format!("plugin event: {e}"))?;
+        context.eval(Source::from_bytes("__lizardRun()")).map_err(|e| format!("plugin event: {e}"))?;
         let mut runtime = Self { context, hooks, callbacks: 0, closed: false };
         let response = runtime.finish_callback()?;
         if response.show.is_none() && !response.closed {
@@ -266,14 +266,14 @@ impl UiRuntime {
         }
         self.callbacks += 1;
         self.context.runtime_limits_mut().set_loop_iteration_limit(100_000);
-        self.context.eval(Source::from_bytes(&format!("__figcraftReceive({encoded})"))).map_err(|e| format!("plugin UI callback: {e}"))?;
+        self.context.eval(Source::from_bytes(&format!("__lizardReceive({encoded})"))).map_err(|e| format!("plugin UI callback: {e}"))?;
         self.finish_callback()
     }
 
     fn finish_callback(&mut self) -> Result<UiResponse, String> {
         self.context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
         crate::bridge::run_timers(&mut self.context)?;
-        let value = self.context.eval(Source::from_bytes("__figcraftTake()")).map_err(|e| format!("plugin UI result: {e}"))?;
+        let value = self.context.eval(Source::from_bytes("__lizardTake()")).map_err(|e| format!("plugin UI result: {e}"))?;
         let output = value.to_string(&mut self.context).map_err(|e| format!("plugin UI result: {e}"))?.to_std_string_escaped();
         if output.len() > MAX_UI_RESPONSE_BYTES {
             return Err("plugin UI response is too large".into());
@@ -464,8 +464,8 @@ mod tests {
     fn typed_image_bytes_survive_ui_message_roundtrip() {
         let source = "figma.showUI(__html__); figma.ui.onmessage = message => figma.ui.postMessage({first: message.bytes[0], bytes: new Uint8Array([1,2,3])});";
         let (mut runtime, _) = UiRuntime::start(start(source)).expect("UI start");
-        let reply = runtime.receive(&json!({"bytes":{"__figcraftBytes":"BAUG"}})).expect("binary UI message");
-        assert_eq!(reply.messages, [json!({"first":4,"bytes":{"__figcraftBytes":"AQID"}})]);
+        let reply = runtime.receive(&json!({"bytes":{"__lizardBytes":"BAUG"}})).expect("binary UI message");
+        assert_eq!(reply.messages, [json!({"first":4,"bytes":{"__lizardBytes":"AQID"}})]);
     }
 
     #[test]

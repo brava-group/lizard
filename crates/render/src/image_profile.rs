@@ -6,8 +6,8 @@
 
 use std::io::Cursor;
 
-use figcraft_color::ColorProfile;
 use image::{DynamicImage, ImageDecoder, ImageFormat, RgbaImage};
+use lizard_color::ColorProfile;
 use moxcms::{Chromaticity, ColorPrimaries, DataColorSpace, Layout, ParsingOptions, ProfileText, ToneReprCurve, TransformOptions, XyY};
 
 /// The most bytes an embedded profile may have; bigger ones are ignored.

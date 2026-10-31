@@ -1,5 +1,5 @@
 //! The browser client (step 4 of `docs/collab-protocol.md`): the web build joins a session a
-//! desktop app hosts, or a file on a `figcraft-server` (also over `wss://` behind a TLS reverse
+//! desktop app hosts, or a file on a `lizard-server` (also over `wss://` behind a TLS reverse
 //! proxy), through the browser's WebSocket API (`web-sys`), with the same messages as the native
 //! guest. The connection logic is the [`Driver`]'s; this file feeds it the socket's
 //! events and wakes it with a timer. Hosting needs the desktop app (a page can't listen on a
@@ -17,8 +17,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use figcraft_collab::message::{ClientMsg, Presence};
-use figcraft_engine::live::{Event, HostOptions, LiveLink, SessionId, SessionInfo};
+use lizard_collab::message::{ClientMsg, Presence};
+use lizard_engine::live::{Event, HostOptions, LiveLink, SessionId, SessionInfo};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
 use web_sys::{BinaryType, CloseEvent, MessageEvent, WebSocket};

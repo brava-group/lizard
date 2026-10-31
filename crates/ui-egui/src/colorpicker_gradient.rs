@@ -214,7 +214,7 @@ fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut 
     }
 }
 
-pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
+pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
     let PaintKind::Gradient(mut gradient) = paint.kind.clone() else { return };
     let pos = super::initial_position(app, ctx, target);
     let visible_stops = gradient.stops.len().min(MAX_STOPS);

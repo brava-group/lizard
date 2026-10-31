@@ -3,8 +3,8 @@
 //! settings, and the schema written into the file numbers its definitions, fields and enum values
 //! the way the format does.
 
-use figcraft_doc::color::{Color, Paint};
-use figcraft_doc::*;
+use lizard_doc::color::{Color, Paint};
+use lizard_doc::*;
 
 use super::kiwi::{Kind, Kv, Schema, Type};
 use super::*;
@@ -139,7 +139,7 @@ fn hidden_page_background_round_trips_without_discarding_its_color() {
 #[test]
 fn the_document_colour_profile_and_page_opacity_follow_the_document() {
     let mut doc = sample();
-    doc.color_profile = figcraft_doc::color::ColorProfile::DisplayP3;
+    doc.color_profile = lizard_doc::color::ColorProfile::DisplayP3;
     let page = doc.first_page().unwrap();
     if let Some(NodeKind::Page { background, .. }) = doc.node_mut(page).map(|n| &mut n.kind) {
         *background = Color::new(0.5, 0.5, 0.5, 0.25);
@@ -475,7 +475,7 @@ fn schema_text_takes_numbers_and_refuses_bad_ones() {
     }
 }
 
-/// Local only (`FIGCRAFT_FIG_SAMPLES`): every definition, field and enum value the export writes
+/// Local only (`LIZARD_FIG_SAMPLES`): every definition, field and enum value the export writes
 /// has the kind, type and number it has in each sample's own schema.
 #[test]
 fn local_samples_agree_with_the_written_schema() {

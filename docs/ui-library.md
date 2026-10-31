@@ -1,6 +1,6 @@
 # Standalone UI component catalog
 
-Run `cargo run -p lizard-ui-catalog` from the repository root. This starts **Lizard · UI Components** as its own native desktop process and window. The Lizard editor does not start. To open a specific page, use `cargo run -p lizard-ui-catalog -- --page Glass`; `--audit` renders all pages headlessly. The catalog is a separate workspace package under `apps/lizard-ui-catalog/`; it is not a dependency or binary of `apps/figcraft` and is not part of the production app bundle.
+Run `cargo run -p workbench-ui-catalog` from the repository root. This starts **Workbench UI** as its own native desktop process and window. The Lizard editor does not start. To open a specific page, use `cargo run -p workbench-ui-catalog -- --page Glass`; `--audit` renders all pages headlessly. The reusable foundation is the independent `workbench-ui` crate under `crates/workbench-ui/`. Lizard adapts those controls to its theme in `crates/ui-egui`; the catalog is a separate workspace package under `apps/workbench-ui-catalog/` and is not part of the production app bundle.
 
 The left sidebar switches pages and filters by component name or group. The Light mode button switches between the production light and dark tokens. Hover, menu, text, sizing, and slider states are interactive. The catalog builds a synthetic document in memory so the real workspace panels can show their selected, mixed, and empty states without opening a user file.
 

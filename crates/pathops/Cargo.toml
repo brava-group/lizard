@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-pathops"
+name = "lizard-pathops"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,6 @@ description = "Lizard path operations: booleans (union, subtract, intersect, exc
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-doc = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-doc = { workspace = true }
 linesweeper = { workspace = true }

@@ -9,8 +9,8 @@ use crate::components::tests::{ex, idv, node};
 use crate::plugins_tests::{install, layer_count, lit, rect, undo_len};
 use crate::tools::{Cursor, PointerEvent, PointerKind};
 use crate::{EngineError, Session};
-use figcraft_doc::NodeId;
-use figcraft_geom::Point;
+use lizard_doc::NodeId;
+use lizard_geom::Point;
 
 const INPUT: usize = 100_000;
 const REPLY: usize = 200_000;
@@ -60,10 +60,10 @@ impl W {
     pub(crate) fn build(self, body: &str) -> Vec<u8> {
         let wat = format!(
             r#"(module
-              (import "figcraft" "call" (func $call (param i32 i32 i32 i32) (result i32)))
-              (import "figcraft" "reply_read" (func $reply_read (param i32 i32) (result i32)))
-              (import "figcraft" "set_output" (func $set_output (param i32 i32)))
-              (import "figcraft" "widget_render" (func $render (param i32 i32) (result i32)))
+              (import "lizard" "call" (func $call (param i32 i32 i32 i32) (result i32)))
+              (import "lizard" "reply_read" (func $reply_read (param i32 i32) (result i32)))
+              (import "lizard" "set_output" (func $set_output (param i32 i32)))
+              (import "lizard" "widget_render" (func $render (param i32 i32) (result i32)))
               {}
               (memory (export "memory") 4)
               {}
@@ -80,7 +80,7 @@ impl W {
                   (local.set $i (i32.add (local.get $i) (i32.const 1)))
                   (br $outer)))
                 (i32.const 0))
-              (func (export "figcraft_run") (param $n i32) (result i32)
+              (func (export "lizard_run") (param $n i32) (result i32)
                 (drop (call $reply_read (i32.const {INPUT}) (local.get $n)))
                 (call $set_output (i32.const {INPUT}) (local.get $n))
                 {body}
@@ -194,8 +194,8 @@ fn widgets_survive_save_reload_duplicating_and_export() {
     let mut s = session();
     let (w, _) = insert(&mut s);
     click(&mut s, w, "inc");
-    let bytes = figcraft_format::save_bytes(s.doc().unwrap(), None).unwrap();
-    let (back, _) = figcraft_format::load_bytes(&bytes).unwrap();
+    let bytes = lizard_format::save_bytes(s.doc().unwrap(), None).unwrap();
+    let (back, _) = lizard_format::load_bytes(&bytes).unwrap();
     let mut t = session();
     t.ds_mut().unwrap().doc = std::sync::Arc::new(back);
     assert_eq!(state(&mut t, w), json!({"n": 2}), "the state is saved with the file");
@@ -210,7 +210,7 @@ fn widgets_survive_save_reload_duplicating_and_export() {
     assert_eq!((state(&mut s, copy), state(&mut s, w)), (json!({"n": 0}), json!({"n": 2})));
     assert_eq!(ex(&mut s, "widget.list", json!({}))["widgets"].as_array().unwrap().len(), 2);
     // Exports draw the layers it's made of.
-    let svg = crate::cmd::file::export_bytes(s.doc().unwrap(), &[w], figcraft_doc::ExportFormat::Svg, 1.0).unwrap();
+    let svg = crate::cmd::file::export_bytes(s.doc().unwrap(), &[w], lizard_doc::ExportFormat::Svg, 1.0).unwrap();
     let svg = String::from_utf8(svg).unwrap().to_ascii_lowercase();
     assert!(svg.contains("<svg") && svg.contains("0d99ff"), "{svg}");
 }
@@ -304,9 +304,9 @@ fn plugins_cant_forge_widgets_or_call_widget_commands() {
     let r = rect(&mut s, 0.0);
     let (w, _) = insert(&mut s);
     for (i, (cmd, params)) in [
-        ("node.set", json!({"ids": [r], "props": {"pluginData": {"figcraft.widget": "org.test.tally"}}})),
-        ("node.set", json!({"ids": [w], "props": {"pluginData": {"figcraft.widget.state": "{\"n\": 99}"}}})),
-        ("shape.rectangle", json!({"x": 0, "y": 0, "width": 5, "height": 5, "props": {"pluginData": {"figcraft.widget.target": "inc"}}})),
+        ("node.set", json!({"ids": [r], "props": {"pluginData": {"lizard.widget": "org.test.tally"}}})),
+        ("node.set", json!({"ids": [w], "props": {"pluginData": {"lizard.widget.state": "{\"n\": 99}"}}})),
+        ("shape.rectangle", json!({"x": 0, "y": 0, "width": 5, "height": 5, "props": {"pluginData": {"lizard.widget.target": "inc"}}})),
         ("widget.click", json!({"id": w, "target": "inc"})),
         ("widget.list", json!({})),
     ]
@@ -321,10 +321,10 @@ fn plugins_cant_forge_widgets_or_call_widget_commands() {
         let out = out.as_str().unwrap_or_default().to_string();
         assert!(out.contains("can't write") || out.contains("isn't available to plugins"), "{cmd}: {out}");
     }
-    assert!(!node(&s, r).plugin_data.contains_key("figcraft.widget"));
+    assert!(!node(&s, r).plugin_data.contains_key("lizard.widget"));
     // Text that merely mentions the keys is fine.
     let mut b = W::default();
-    let body = b.call("text.create", &json!({"text": "figcraft.widget", "props": {"pluginData": {"note": "figcraft.widget"}}}));
+    let body = b.call("text.create", &json!({"text": "lizard.widget", "props": {"pluginData": {"note": "lizard.widget"}}}));
     install(&mut s, json!({"id": "org.test.text", "name": "Text", "main": "t.wasm", "permissions": {"access": "write"}}), &b.build(&body));
     let layers = layer_count(&s);
     ex(&mut s, "plugin.run", json!({"id": "org.test.text"}));
@@ -359,6 +359,6 @@ fn widget_state_syncs_in_a_live_session() {
     push(&script, back);
     s.live_poll();
     let theirs = server.document().node(w).unwrap();
-    assert_eq!(theirs.plugin_data.get("figcraft.widget.state").map(String::as_str), Some(r#"{"n":2}"#));
+    assert_eq!(theirs.plugin_data.get("lizard.widget.state").map(String::as_str), Some(r#"{"n":2}"#));
     assert_eq!(theirs.children.len(), 3, "the redrawn layers reached the server");
 }

@@ -9,14 +9,14 @@
 //! it. Colour slots also list colour variables to bind (this file's, then each enabled library's).
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_color::{Paint, PaintKind};
-use figcraft_doc::{
+use lizard_color::{Paint, PaintKind};
+use lizard_doc::{
     Document, Effect, GridKind, LayoutGrid, Node, NodeId, NodeKind, PublishedLibrary, Style, StyleKind, TextStyle, VariableType, trim_num,
 };
-use figcraft_engine::library;
+use lizard_engine::library;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::{tr, trf};
@@ -175,7 +175,7 @@ impl Picker {
 }
 
 /// Open the picker for `slot` of `ids`, level with the pointer.
-pub fn open(app: &mut FigApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
+pub fn open(app: &mut LizardApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y - 12.0);
     ui.data_mut(|d| d.insert_temp(Id::new("style_picker_just_opened"), true));
     app.ui.style_picker = Some(Picker {
@@ -191,7 +191,7 @@ pub fn open(app: &mut FigApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
 }
 
 /// Open the picker for `slot` of the selection (the control channel), optionally editing `style`.
-pub fn open_for_selection(app: &mut FigApp, slot: StyleSlot, style: Option<&str>) {
+pub fn open_for_selection(app: &mut LizardApp, slot: StyleSlot, style: Option<&str>) {
     let ids = app.session.selection();
     let edit = style.and_then(|s| app.session.doc().ok()?.style(s).map(editing));
     app.ui.style_picker =
@@ -204,11 +204,11 @@ fn editing(s: &Style) -> Editing {
 
 /// The style `slot` of `ids` links to: `Some(Some(id))` one style, `Some(None)` none, None when
 /// they differ. Text goes by chars: the selected chars of the text being edited, else every char.
-fn link_of(app: &FigApp, doc: &Document, ids: &[NodeId], slot: StyleSlot) -> Option<Option<String>> {
+fn link_of(app: &LizardApp, doc: &Document, ids: &[NodeId], slot: StyleSlot) -> Option<Option<String>> {
     if slot != StyleSlot::Text {
         return crate::right::common(doc, ids, |n| slot.linked(n));
     }
-    let range = figcraft_engine::textedit::selected_range(&app.session);
+    let range = lizard_engine::textedit::selected_range(&app.session);
     let styles = crate::typography::target_styles(doc, ids, range);
     let mut links = styles.iter().map(|s| s.style_id.clone());
     let Some(first) = links.next() else { return Some(None) };
@@ -216,13 +216,13 @@ fn link_of(app: &FigApp, doc: &Document, ids: &[NodeId], slot: StyleSlot) -> Opt
 }
 
 /// The text style the targeted chars of `ids` link to (see [`link_of`]).
-pub fn text_link(app: &FigApp, doc: &Document, ids: &[NodeId]) -> Option<Option<String>> {
+pub fn text_link(app: &LizardApp, doc: &Document, ids: &[NodeId]) -> Option<Option<String>> {
     link_of(app, doc, ids, StyleSlot::Text)
 }
 
 /// The applied style's name (click opens the picker) with a detach button; for text, "Mixed"
 /// when the chars link to different styles (or some to none).
-pub fn chip(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[NodeId], slot: StyleSlot) {
+pub fn chip(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ids: &[NodeId], slot: StyleSlot) {
     let t = Tokens::get(ui.ctx());
     let (name, mixed) = match link_of(app, doc, ids, slot) {
         Some(Some(id)) => (doc.style(&id).map_or_else(|| tr("Missing style").to_string(), |st| st.name.clone()), false),
@@ -402,7 +402,7 @@ fn preview(ui: &Ui, r: Rect, s: &Style, slot: StyleSlot) {
     let t = Tokens::get(ui.ctx());
     match &s.kind {
         StyleKind::Paint { paints } => {
-            let p = paints.last().cloned().unwrap_or_else(|| Paint::solid(figcraft_color::Color::TRANSPARENT));
+            let p = paints.last().cloned().unwrap_or_else(|| Paint::solid(lizard_color::Color::TRANSPARENT));
             widgets::paint_swatch(ui.painter(), r, &p);
         }
         _ => icons::paint(ui.painter(), r, slot.icon(), t.menu_text),
@@ -558,7 +558,7 @@ fn offered<'a>(doc: &'a Document, lib: Option<&'a PublishedLibrary>, slot: Style
 
 /// The style list: header, search, this file's and the libraries' styles by folder, and (colour
 /// slots) colour variables.
-fn listing(app: &FigApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame, header: Rect) {
+fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame, header: Rect) {
     let t = Tokens::get(ui.ctx());
     let slot = p.slot;
     let color = slot.paints();
@@ -812,7 +812,7 @@ fn property_row(ui: &mut Ui, label: &str, paint: Option<&Paint>, slot: StyleSlot
 /// The variable on `field` of the style a [`property_row`] just drew: its name at the row's end
 /// (a click unbinds it), or, with the pointer over the row, the button that opens the variable
 /// picker for it. True when the pointer is on it (the row's own click isn't meant then).
-fn binding_cell(ui: &mut Ui, doc: &Document, style: &Style, field: &str, kind: figcraft_doc::VariableType, out: &mut Frame) -> bool {
+fn binding_cell(ui: &mut Ui, doc: &Document, style: &Style, field: &str, kind: lizard_doc::VariableType, out: &mut Frame) -> bool {
     let t = Tokens::get(ui.ctx());
     let row = ui.min_rect();
     let row = Rect::from_min_max(pos2(row.min.x, row.max.y - ROW_H), row.max);
@@ -841,8 +841,8 @@ fn binding_cell(ui: &mut Ui, doc: &Document, style: &Style, field: &str, kind: f
 
 /// The field of effect `fx` (item `i` of an effect style) a variable binds from its row, and its
 /// type: a shadow's colour, a blur's radius.
-fn effect_binding(fx: &figcraft_doc::Effect, i: usize) -> Option<(String, figcraft_doc::VariableType)> {
-    use figcraft_doc::{EffectKind as K, VariableType as V};
+fn effect_binding(fx: &lizard_doc::Effect, i: usize) -> Option<(String, lizard_doc::VariableType)> {
+    use lizard_doc::{EffectKind as K, VariableType as V};
     match fx.kind {
         K::DropShadow(_) | K::InnerShadow(_) => Some((format!("effects/{i}/color"), V::Color)),
         K::LayerBlur(_) | K::BackgroundBlur(_) => Some((format!("effects/{i}/radius"), V::Number)),
@@ -851,7 +851,7 @@ fn effect_binding(fx: &figcraft_doc::Effect, i: usize) -> Option<(String, figcra
 }
 
 /// A layout grid's summary ("Columns 12", "Grid 8").
-fn grid_label(g: &figcraft_doc::LayoutGrid) -> String {
+fn grid_label(g: &lizard_doc::LayoutGrid) -> String {
     match g.kind {
         GridKind::Grid => trf("Grid {size}", &[("size", &g.size)]),
         GridKind::Columns => trf("Columns {count}", &[("count", &g.count)]),
@@ -910,7 +910,7 @@ fn text_properties(ui: &mut Ui, id: &str, def: &TextStyle, out: &mut Frame) {
         if let Some(f) = crate::typography::font_picker(ui, Some(&def.font_family), family_resp.clicked()).picked {
             set(out, &|d| {
                 d.font_family = f.clone();
-                let styles = figcraft_text::family_styles(&f);
+                let styles = lizard_text::family_styles(&f);
                 if !styles.is_empty() && !styles.contains(&d.font_style) {
                     d.set_font_style(styles.iter().find(|s| s.eq_ignore_ascii_case("Regular")).or(styles.first()).cloned().unwrap_or_default());
                 }
@@ -921,7 +921,7 @@ fn text_properties(ui: &mut Ui, id: &str, def: &TextStyle, out: &mut Frame) {
     if let Some(sr) = style_resp {
         crate::right::menu_popup(&sr).width(200.0).show(|ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                for s in figcraft_text::family_styles(&def.font_family) {
+                for s in lizard_text::family_styles(&def.font_family) {
                     let mark = if def.font_style == s { "✓ " } else { "   " };
                     if crate::right::menu_item(ui, &format!("{mark}{s}"), "") {
                         set(out, &|d| d.set_font_style(s.clone()));
@@ -1078,7 +1078,7 @@ fn text_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fram
             if let Some(family) = picked.picked {
                 set(out, &|d| {
                     d.font_family = family.clone();
-                    let styles = figcraft_text::family_styles(&family);
+                    let styles = lizard_text::family_styles(&family);
                     if !styles.is_empty() && !styles.contains(&d.font_style) {
                         d.set_font_style(styles.iter().find(|s| s.eq_ignore_ascii_case("Regular")).or(styles.first()).cloned().unwrap_or_default());
                     }
@@ -1105,7 +1105,7 @@ fn text_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fram
                 return;
             }
             let initial = pos2(header.left() - 248.0, header.top());
-            let variable = figcraft_text::find_face(&def.font_family, &def.font_style).is_some_and(|face| face.is_variable());
+            let variable = lizard_text::find_face(&def.font_family, &def.font_style).is_some_and(|face| face.is_variable());
             let close = crate::typography::type_settings_panel(&ctx, panel_id, Id::new("text_style_settings_tab"), initial, variable, |ui, tab| {
                 if let Some((updated, scrub)) = crate::typography::text_style_settings(ui, def, tab, &mut out.budget) {
                     out.act = Some(Act::SetText(style.id.clone(), updated, scrub));
@@ -1120,7 +1120,7 @@ fn text_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fram
     if let Some(response) = style_response {
         crate::right::menu_popup(&response).width(200.0).show(|ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                for font_style in figcraft_text::family_styles(&def.font_family) {
+                for font_style in lizard_text::family_styles(&def.font_family) {
                     let mark = if def.font_style == font_style { "✓ " } else { "   " };
                     if crate::right::menu_item(ui, &format!("{mark}{font_style}"), "") {
                         set(out, &|d| d.set_font_style(font_style.clone()));
@@ -1204,7 +1204,7 @@ fn color_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fra
             &style.id,
             paints,
             |updated| {
-                updated.push(Paint::solid(figcraft_color::Color::from_rgb8_const(0xD9, 0xD9, 0xD9)));
+                updated.push(Paint::solid(lizard_color::Color::from_rgb8_const(0xD9, 0xD9, 0xD9)));
             },
             None,
         );
@@ -1237,7 +1237,7 @@ fn color_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fra
                 out.act = Some(Act::Unbind(style.id.clone(), format!("fills/{index}/color")));
             }
             if let Some(hex) = change.edited_hex
-                && let Some(color) = figcraft_color::Color::from_hex_or_name(&hex)
+                && let Some(color) = lizard_color::Color::from_hex_or_name(&hex)
             {
                 update_style_paints(
                     out,
@@ -1327,15 +1327,15 @@ fn update_style_effects(out: &mut Frame, id: &str, effects: &[Effect], change: i
 }
 
 /// Render the sample through the same renderer used by the canvas, including stacked effects.
-fn effect_style_sample(effects: &[Effect]) -> Option<figcraft_render::Pixmap> {
+fn effect_style_sample(effects: &[Effect]) -> Option<lizard_render::Pixmap> {
     let mut sample = Document::new("Effect preview");
     let page = sample.current_page?;
     let image =
         sample.create(page, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Preview", 96.0, 20.0, 112.0, 112.0).ok()?;
     let node = sample.node_mut(image)?;
-    node.fills = vec![Paint::solid(figcraft_color::Color::WHITE)];
+    node.fills = vec![Paint::solid(lizard_color::Color::WHITE)];
     node.effects = effects.to_vec();
-    figcraft_engine::cmd::file::render_export_area(&sample, &[image], figcraft_geom::Rect::new(0.0, 0.0, 304.0, 152.0), 2.0)
+    lizard_engine::cmd::file::render_export_area(&sample, &[image], lizard_geom::Rect::new(0.0, 0.0, 304.0, 152.0), 2.0)
 }
 
 fn effect_style_preview(ui: &mut Ui, rect: Rect, effects: &[Effect]) {
@@ -1346,7 +1346,7 @@ fn effect_style_preview(ui: &mut Ui, rect: Rect, effects: &[Effect]) {
         Some(texture)
     } else {
         effect_style_sample(effects).map(|pixmap| {
-            let image = crate::render_worker::screen_image(&pixmap, figcraft_color::ColorProfile::Srgb);
+            let image = crate::render_worker::screen_image(&pixmap, lizard_color::ColorProfile::Srgb);
             let texture = ui.ctx().load_texture("effect-style-preview", image, egui::TextureOptions::LINEAR);
             ui.ctx().data_mut(|data| data.insert_temp(cache_id, (effects.to_vec(), texture.clone())));
             texture
@@ -1434,7 +1434,7 @@ fn effect_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fr
                     },
                     None,
                 );
-                open = open.and_then(|current| figcraft_engine::cmd::lists::removed_index(current, index));
+                open = open.and_then(|current| lizard_engine::cmd::lists::removed_index(current, index));
             }
             drag.row(ui, index, row.rect, row.rect, || tr(effect.label()).to_string());
         }
@@ -1451,7 +1451,7 @@ fn effect_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fr
                 },
                 None,
             );
-            open = open.map(|index| figcraft_engine::cmd::lists::moved_index(index, from, to));
+            open = open.map(|index| lizard_engine::cmd::lists::moved_index(index, from, to));
         }
     });
     ui.add_space(8.0);
@@ -1605,7 +1605,7 @@ fn grid_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fram
                     },
                     None,
                 );
-                open = open.and_then(|current| figcraft_engine::cmd::lists::removed_index(current, index));
+                open = open.and_then(|current| lizard_engine::cmd::lists::removed_index(current, index));
             }
             drag.row(ui, index, row.rect, row.rect, || crate::right::grid_label(grid));
         }
@@ -1622,7 +1622,7 @@ fn grid_style_editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Fram
                 },
                 None,
             );
-            open = open.map(|index| figcraft_engine::cmd::lists::moved_index(index, from, to));
+            open = open.map(|index| lizard_engine::cmd::lists::moved_index(index, from, to));
         }
     });
     ui.add_space(8.0);
@@ -1679,7 +1679,7 @@ fn editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame) {
                     let clicked = property_row(ui, &label, Some(paint), slot);
                     // A solid paint's colour takes a variable.
                     let on_binding = matches!(paint.kind, PaintKind::Solid { .. })
-                        && binding_cell(ui, doc, &style, &format!("fills/{i}/color"), figcraft_doc::VariableType::Color, out);
+                        && binding_cell(ui, doc, &style, &format!("fills/{i}/color"), lizard_doc::VariableType::Color, out);
                     if clicked && !on_binding {
                         out.act = Some(Act::EditPaint(style.id.clone(), i));
                     }
@@ -1696,7 +1696,7 @@ fn editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame) {
             StyleKind::Grid { grids } => {
                 for (i, g) in grids.iter().enumerate() {
                     property_row(ui, &grid_label(g), None, slot);
-                    binding_cell(ui, doc, &style, &format!("layoutGrids/{i}/size"), figcraft_doc::VariableType::Number, out);
+                    binding_cell(ui, doc, &style, &format!("layoutGrids/{i}/size"), lizard_doc::VariableType::Number, out);
                 }
             }
             StyleKind::Text { style: def } => text_properties(ui, &style.id, def, out),
@@ -1715,7 +1715,7 @@ fn editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame) {
 }
 
 /// Write the typed name and description of the style being edited, when they changed.
-fn commit_edit(app: &mut FigApp, doc: &Document, e: &Editing) {
+fn commit_edit(app: &mut LizardApp, doc: &Document, e: &Editing) {
     let Some(s) = doc.style(&e.id) else { return };
     let name = e.name.trim();
     let mut q = json!({"style": e.id});
@@ -1731,7 +1731,7 @@ fn commit_edit(app: &mut FigApp, doc: &Document, e: &Editing) {
 }
 
 /// The picker popover (call once per frame).
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut p) = app.ui.style_picker.take() else { return };
     let Ok(doc) = app.session.ds().map(|d| d.text_preview.clone().unwrap_or_else(|| d.doc.clone())) else { return };
     // A new selection closes the picker (it acts on the layers it was opened for).
@@ -2010,7 +2010,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// Open the style editor on this file's style `id` (from the Local styles list).
-fn edit_local(app: &mut FigApp, ui: &Ui, slot: StyleSlot, id: &str) {
+fn edit_local(app: &mut LizardApp, ui: &Ui, slot: StyleSlot, id: &str) {
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y - 12.0);
     let edit = app.session.doc().ok().and_then(|d| d.style(id).map(editing));
     ui.data_mut(|d| d.insert_temp(Id::new("style_picker_just_opened"), true));
@@ -2046,13 +2046,13 @@ fn folder_rename_id() -> Id {
     Id::new("local_style_folder_rename")
 }
 
-fn create_local_style(app: &mut FigApp, ui: &Ui, doc: &Document, slot: StyleSlot) {
+fn create_local_style(app: &mut LizardApp, ui: &Ui, doc: &Document, slot: StyleSlot) {
     let name = next_name(doc, slot.default_name());
     let value = match slot {
         StyleSlot::Text => json!({"fontSize": 14}),
         StyleSlot::Fill | StyleSlot::Stroke => json!("#000000"),
-        StyleSlot::Effect => json!([figcraft_doc::Effect::drop_shadow()]),
-        StyleSlot::Grid => json!([figcraft_doc::LayoutGrid::default()]),
+        StyleSlot::Effect => json!([lizard_doc::Effect::drop_shadow()]),
+        StyleSlot::Grid => json!([lizard_doc::LayoutGrid::default()]),
     };
     if let Some(id) = app
         .run("style.create", json!({"type": slot.create_type(), "name": name, "value": value}))
@@ -2071,7 +2071,7 @@ fn create_local_style(app: &mut FigApp, ui: &Ui, doc: &Document, slot: StyleSlot
 /// is no selected layer. A click edits a style; right-click offers edit,
 /// duplicate and delete; a row dragged by its grip moves (into the folder it lands in, renamed to
 /// match); right-click on a folder renames it (and the styles in it).
-pub fn local_styles(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
+pub fn local_styles(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
     let t = Tokens::get(ui.ctx());
     let (header, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
     ui.painter().text(pos2(header.min.x + widgets::PAD, header.center().y), Align2::LEFT_CENTER, tr("Styles"), semibold(11.0), t.text);
@@ -2163,7 +2163,7 @@ pub fn local_styles(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
                 let icon_r = Rect::from_center_size(pos2(x + 8.0, r.center().y), vec2(16.0, 16.0));
                 match &s.kind {
                     StyleKind::Paint { paints } => {
-                        let p = paints.last().cloned().unwrap_or_else(|| Paint::solid(figcraft_color::Color::TRANSPARENT));
+                        let p = paints.last().cloned().unwrap_or_else(|| Paint::solid(lizard_color::Color::TRANSPARENT));
                         widgets::paint_swatch(ui.painter(), icon_r, &p);
                     }
                     StyleKind::Text { .. } => {

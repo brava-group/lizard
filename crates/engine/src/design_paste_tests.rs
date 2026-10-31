@@ -70,15 +70,15 @@ fn signed_image_bytes_replace_placeholder_without_changing_fill_settings() {
     let photo = id(&source.execute("image.place", &json!({"data": B64.encode(&original), "width": 30, "height": 20})).unwrap());
     let doc = source.doc_mut().unwrap();
     let old_key = match &doc.node(photo).unwrap().fills[0].kind {
-        figcraft_color::PaintKind::Image(img) => img.image.clone(),
+        lizard_color::PaintKind::Image(img) => img.image.clone(),
         _ => panic!("expected an image fill"),
     };
     let mut placeholder = doc.images.remove(&old_key).unwrap();
     placeholder.bytes = std::sync::Arc::new(vec![0]);
     doc.images.insert(hash.clone(), placeholder);
-    let figcraft_color::PaintKind::Image(img) = &mut doc.node_mut(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
+    let lizard_color::PaintKind::Image(img) = &mut doc.node_mut(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
     img.image = hash.clone();
-    img.scale_mode = figcraft_color::ImageScaleMode::Fit;
+    img.scale_mode = lizard_color::ImageScaleMode::Fit;
     img.scale = 0.42;
 
     let mut wrong = serde_json::Map::new();
@@ -89,8 +89,8 @@ fn signed_image_bytes_replace_placeholder_without_changing_fill_settings() {
     let mut images = serde_json::Map::new();
     images.insert(hash.clone(), json!(B64.encode(&original)));
     restore_copied_images(doc, &images);
-    let figcraft_color::PaintKind::Image(img) = &doc.node(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
-    assert_eq!(img.scale_mode, figcraft_color::ImageScaleMode::Fit);
+    let lizard_color::PaintKind::Image(img) = &doc.node(photo).unwrap().fills[0].kind else { panic!("expected an image fill") };
+    assert_eq!(img.scale_mode, lizard_color::ImageScaleMode::Fit);
     assert_eq!(img.scale, 0.42);
     assert_eq!(doc.images[&img.image].bytes.as_ref(), &original);
     assert!(!doc.images.contains_key(&hash));
@@ -126,11 +126,11 @@ fn clipboard_preview_recovers_missing_image_in_its_layer() {
     let photo = doc.node(doc.node(card).unwrap().children[0]).unwrap();
     assert_eq!(photo.name, "Photo");
     assert_eq!((photo.width, photo.height), (40.0, 20.0));
-    let figcraft_color::PaintKind::Image(img) = &photo.fills[0].kind else { panic!("photo fill") };
+    let lizard_color::PaintKind::Image(img) = &photo.fills[0].kind else { panic!("photo fill") };
     let recovered = image::load_from_memory(&doc.images[&img.image].bytes).unwrap().to_rgba8();
     assert_eq!(recovered.dimensions(), (80, 40));
     assert_eq!(recovered.get_pixel(40, 20).0, [255, 0, 0, 255]);
-    let rendered = figcraft_render::render_node(doc, card, 1.0).unwrap();
+    let rendered = lizard_render::render_node(doc, card, 1.0).unwrap();
     let pixel = |x: u32, y: u32| {
         let at = ((y * rendered.width() + x) * 4) as usize;
         &rendered.data()[at..at + 4]
@@ -148,7 +148,7 @@ fn clipboard_preview_recovers_missing_image_in_its_layer() {
     let doc = with_bytes.doc().unwrap();
     let card = params::id_of(&result["ids"][0]).unwrap();
     let photo = doc.node(doc.node(card).unwrap().children[0]).unwrap();
-    let figcraft_color::PaintKind::Image(img) = &photo.fills[0].kind else { panic!("photo fill") };
+    let lizard_color::PaintKind::Image(img) = &photo.fills[0].kind else { panic!("photo fill") };
     let imported = image::load_from_memory(&doc.images[&img.image].bytes).unwrap().to_rgba8();
     assert_eq!(imported.get_pixel(0, 0).0, [0, 0, 255, 255]);
 }

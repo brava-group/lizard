@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-shader"
+name = "lizard-shader"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,8 @@ description = "Lizard WGSL validation and bounded GPU rendering for shader fills
 workspace = true
 
 [dependencies]
-figcraft-doc = { workspace = true }
-figcraft-color = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-color = { workspace = true }
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 log = { workspace = true }
 

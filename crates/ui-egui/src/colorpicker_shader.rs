@@ -2,8 +2,8 @@
 
 use super::custom::{self, BORDER, FIELD, MUTED, PANEL, WIDTH, at, label_tab, paint_kind_button, vector_button};
 use super::*;
-use figcraft_color::ShaderFill;
-use figcraft_doc::{ShaderDefinition, ShaderFloatParameter, ShaderParameterControl};
+use lizard_color::ShaderFill;
+use lizard_doc::{ShaderDefinition, ShaderFloatParameter, ShaderParameterControl};
 
 const BROWSER_STATE: &str = "color_picker_shader_browser";
 const CODE_STATE: &str = "color_picker_shader_code";
@@ -38,8 +38,8 @@ pub(super) fn supports(target: &PickerTarget) -> bool {
     )
 }
 
-fn definitions(app: &FigApp) -> Vec<ShaderDefinition> {
-    let mut items = figcraft_shader::presets();
+fn definitions(app: &LizardApp) -> Vec<ShaderDefinition> {
+    let mut items = lizard_shader::presets();
     if let Ok(doc) = app.session.doc() {
         for definition in doc.shaders.values() {
             if let Some(existing) = items.iter_mut().find(|item| item.id == definition.id) {
@@ -88,7 +88,7 @@ fn thumbnail(ctx: &egui::Context, definition: &ShaderDefinition) -> Option<egui:
                 let ctx = ctx.clone();
                 std::thread::spawn(move || {
                     let values = definition.parameters.iter().flat_map(ShaderFloatParameter::default_entries).collect();
-                    let rendered = figcraft_shader::render_rgba(&definition, &values, THUMB_SIZE as u32, THUMB_SIZE as u32);
+                    let rendered = lizard_shader::render_rgba(&definition, &values, THUMB_SIZE as u32, THUMB_SIZE as u32);
                     if let Ok(mut guard) = cache.lock() {
                         guard.insert(
                             key,
@@ -118,11 +118,11 @@ fn thumbnail(_ctx: &egui::Context, _definition: &ShaderDefinition) -> Option<egu
     None
 }
 
-fn apply(app: &mut FigApp, target: &PickerTarget, current: &Paint, definition: &ShaderDefinition) {
+fn apply(app: &mut LizardApp, target: &PickerTarget, current: &Paint, definition: &ShaderDefinition) {
     if !supports(target) {
         return;
     }
-    if let Err(error) = figcraft_shader::validate(definition) {
+    if let Err(error) = lizard_shader::validate(definition) {
         app.toast(error);
         return;
     }
@@ -146,7 +146,7 @@ fn apply(app: &mut FigApp, target: &PickerTarget, current: &Paint, definition: &
     let _ = app.session.commit_interaction();
 }
 
-pub(super) fn show_browser(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, current: Paint) {
+pub(super) fn show_browser(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, current: Paint) {
     if !supports(target) {
         deactivate(ctx);
         return;
@@ -229,7 +229,7 @@ pub(super) fn show_browser(app: &mut FigApp, ctx: &egui::Context, target: &Picke
         deactivate(ctx);
     }
     if create {
-        let mut definition = figcraft_shader::demo();
+        let mut definition = lizard_shader::demo();
         let mut number = 1_u32;
         if let Ok(doc) = app.session.doc() {
             while doc.shaders.contains_key(&format!("lizard.custom.{number}")) {
@@ -259,7 +259,7 @@ pub(super) fn show_browser(app: &mut FigApp, ctx: &egui::Context, target: &Picke
     }
 }
 
-pub(super) fn show_editor(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
+pub(super) fn show_editor(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
     let PaintKind::Shader(fill) = &paint.kind else { return };
     let shader_id = fill.shader_id.clone();
     let definition = app.session.doc().ok().and_then(|doc| doc.shaders.get(&shader_id)).cloned();
@@ -449,7 +449,7 @@ pub(super) fn show_editor(app: &mut FigApp, ctx: &egui::Context, target: &Picker
     }
 }
 
-fn show_color_parameter(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, paint: &mut Paint, parameter: &ShaderFloatParameter) {
+fn show_color_parameter(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, paint: &mut Paint, parameter: &ShaderFloatParameter) {
     let PaintKind::Shader(fill) = &paint.kind else { return };
     let color = parameter.color_value(&fill.values);
     let picker_pos = crate::primitives::FloatingPanel::position(ctx, Id::new("color_picker"), super::initial_position(app, ctx, target));
@@ -508,7 +508,7 @@ fn show_color_parameter(app: &mut FigApp, ctx: &egui::Context, target: &PickerTa
     }
 }
 
-fn show_code(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, _paint: &Paint, definition: Option<ShaderDefinition>) {
+fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _paint: &Paint, definition: Option<ShaderDefinition>) {
     let Some(mut state) = ctx.data(|data| data.get_temp::<CodeState>(Id::new(CODE_STATE))) else { return };
     let Some(definition) = definition.filter(|definition| definition.id == state.shader_id) else {
         ctx.data_mut(|data| data.remove::<CodeState>(Id::new(CODE_STATE)));
@@ -578,7 +578,7 @@ fn show_code(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, _pain
             });
             if state.checked_draft != state.draft && ctx.input(|input| input.time) - state.changed_at >= 0.3 {
                 candidate.source = state.draft.clone();
-                state.diagnostic = figcraft_shader::validate(&candidate).err();
+                state.diagnostic = lizard_shader::validate(&candidate).err();
                 state.checked_draft = state.draft.clone();
             }
             let diagnostic = state.diagnostic.as_deref().unwrap_or("WGSL valid");
@@ -602,7 +602,7 @@ fn show_code(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, _pain
     if apply {
         let mut updated = definition;
         updated.source = state.draft.clone();
-        match figcraft_shader::validate(&updated) {
+        match lizard_shader::validate(&updated) {
             Ok(()) => {
                 app.run("shader.register", json!({"definition": updated}));
                 close_now = true;

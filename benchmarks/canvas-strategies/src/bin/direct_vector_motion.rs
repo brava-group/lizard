@@ -8,9 +8,9 @@ use std::time::Instant;
 use canvas_strategies_bench::gpu_scene::{
     GpuCanvas, has_unhandled_effects_in_view, has_unhandled_effects_with_cached_noise_in_view, make_scene_with_images,
 };
-use figcraft_doc::{EffectKind, NodeKind};
-use figcraft_geom::Affine;
-use figcraft_render::{Options, View, render_view};
+use lizard_doc::{EffectKind, NodeKind};
+use lizard_geom::Affine;
+use lizard_render::{Options, View, render_view};
 
 fn write_png(path: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), Box<dyn Error>> {
     let mut encoder = png::Encoder::new(File::create(path)?, width, height);
@@ -31,9 +31,9 @@ fn percentile(values: &[f64], p: f64) -> f64 {
 }
 
 fn compare_pan_and_drag(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    frame: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    frame: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -111,9 +111,9 @@ fn compare_pan_and_drag(
 }
 
 fn compare_rotate(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    frame: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    frame: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -131,7 +131,7 @@ fn compare_rotate(
     let mut frame_ms = Vec::new();
     let mut effects_ms = Vec::new();
     let mut reused = 0;
-    let pivot = figcraft_geom::Point::new(center.0, center.1);
+    let pivot = lizard_geom::Point::new(center.0, center.1);
     for index in 0..60 {
         let angle = (index as f64 * 0.24).sin() * 0.7;
         let start = Instant::now();
@@ -178,9 +178,9 @@ fn compare_rotate(
 }
 
 fn compare_scale(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    frame: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    frame: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -202,7 +202,7 @@ fn compare_scale(
         let k = 1.0 + 0.35 * (index as f64 * 0.24).sin();
         let start = Instant::now();
         let mut scaled = doc.clone();
-        figcraft_engine::cmd::arrange::scale_node(&mut scaled, frame, k)?;
+        lizard_engine::cmd::arrange::scale_node(&mut scaled, frame, k)?;
         let [a, b, c, d, x, y] = doc.world_transform(frame).as_coeffs();
         scaled.set_world_transform(frame, Affine::new([a, b, c, d, center.0 + (x - center.0) * k, center.1 + (y - center.1) * k]))?;
         let effects_start = Instant::now();
@@ -244,9 +244,9 @@ fn compare_scale(
 }
 
 fn compare_resize(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    frame: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    frame: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -271,7 +271,7 @@ fn compare_resize(
         let (w, h) = (w0 * (1.0 + 0.25 * phase.sin()), h0 * (1.0 + 0.18 * phase.sin()));
         let start = Instant::now();
         let mut resized = doc.clone();
-        figcraft_engine::cmd::props::resize_node(&mut resized, frame, w, h)?;
+        lizard_engine::cmd::props::resize_node(&mut resized, frame, w, h)?;
         let effects_start = Instant::now();
         if reuse_effects && gpu.reuse_resized_effects(&previous, &resized) {
             reused += 1;
@@ -309,9 +309,9 @@ fn compare_resize(
 }
 
 fn compare_duplicate(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    source: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    source: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -338,7 +338,7 @@ fn compare_duplicate(
         let mut duplicated = doc.clone();
         let copy = duplicated.duplicate_into(source, parent, doc.index_in_parent(source).map(|index| index + 1))?;
         duplicated.set_world_transform(copy, Affine::translate((100.0 + 80.0 * phase.sin(), 40.0 + 50.0 * phase.cos())) * original_world)?;
-        figcraft_engine::normalize(&mut duplicated, doc);
+        lizard_engine::normalize(&mut duplicated, doc);
         document_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         let effects_start = Instant::now();
         if reuse_effects && (gpu.reuse_translated_effects(&previous, &duplicated) || gpu.reuse_duplicated_effects(&previous, &duplicated)) {
@@ -379,9 +379,9 @@ fn compare_duplicate(
 }
 
 fn compare_create(
-    doc: &figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
-    parent: figcraft_doc::NodeId,
+    doc: &lizard_doc::Document,
+    page: lizard_doc::NodeId,
+    parent: lizard_doc::NodeId,
     clear: [f32; 3],
     center: (f64, f64),
     width: u32,
@@ -412,7 +412,7 @@ fn compare_create(
         let start = Instant::now();
         let mut drawn = doc.clone();
         drawn.create(parent, shape_kind.clone(), "New Shape", 60.0, 80.0, 120.0 + 60.0 * phase.sin(), 90.0 + 40.0 * phase.cos())?;
-        figcraft_engine::normalize(&mut drawn, doc);
+        lizard_engine::normalize(&mut drawn, doc);
         document_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         let effects_start = Instant::now();
         if reuse_effects && gpu.reuse_unaffected_effects(&previous, &drawn) {
@@ -454,10 +454,10 @@ fn compare_create(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().collect();
-    let file = args.iter().find_map(|arg| arg.strip_prefix("--file=")).ok_or("pass --file=<saved .figcraft file>")?;
+    let file = args.iter().find_map(|arg| arg.strip_prefix("--file=")).ok_or("pass --file=<saved .lizard file>")?;
     let width = args.iter().find_map(|arg| arg.strip_prefix("--width=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(1266);
     let height = args.iter().find_map(|arg| arg.strip_prefix("--height=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(1720);
-    let (mut doc, warnings) = figcraft_format::load_file(Path::new(file))?;
+    let (mut doc, warnings) = lizard_format::load_file(Path::new(file))?;
     if !warnings.is_empty() {
         return Err(format!("document warnings: {warnings:?}").into());
     }
@@ -481,7 +481,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let duplicated_inner = if args.iter().any(|arg| arg == "--duplicate-inner") {
         let page = doc.current_page.ok_or("document page missing")?;
-        Some(doc.duplicate_into(figcraft_doc::NodeId(26), page, None)?)
+        Some(doc.duplicate_into(lizard_doc::NodeId(26), page, None)?)
     } else {
         None
     };
@@ -490,7 +490,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let resize_frame = args
         .iter()
         .find_map(|arg| arg.strip_prefix("--node-id=").and_then(|value| value.parse::<u64>().ok()))
-        .map(figcraft_doc::NodeId)
+        .map(lizard_doc::NodeId)
         .or(duplicated_inner)
         .unwrap_or(frame);
     let bounds = doc.world_render_bounds(frame).ok_or("frame bounds missing")?;

@@ -10,8 +10,8 @@ use canvas_strategies_bench::geometry_atlas::{self, GeometryAtlas};
 use canvas_strategies_bench::gpu_live_residual::GpuLiveResidual;
 use canvas_strategies_bench::gpu_residual::GpuResidual;
 use canvas_strategies_bench::gpu_scene::{GpuCanvas, make_scene_with_images};
-use figcraft_doc::{EffectKind, NodeKind};
-use figcraft_render::{Options, Pixmap, View, render_view};
+use lizard_doc::{EffectKind, NodeKind};
+use lizard_render::{Options, Pixmap, View, render_view};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -129,8 +129,8 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    doc: figcraft_doc::Document,
-    page: figcraft_doc::NodeId,
+    doc: lizard_doc::Document,
+    page: lizard_doc::NodeId,
     clear: [f32; 3],
     gpu: GpuCanvas,
     residual: GpuLiveResidual,
@@ -222,7 +222,7 @@ impl State {
             config.present_mode, config.desired_maximum_frame_latency, capabilities.present_modes
         );
         let (doc, warnings) =
-            figcraft_format::load_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.figcraft"))?;
+            lizard_format::load_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ultrawide-workbook.lizard"))?;
         if !warnings.is_empty() {
             return Err(format!("fixture warnings: {warnings:?}").into());
         }

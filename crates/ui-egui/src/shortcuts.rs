@@ -1,14 +1,14 @@
-//! Keyboard handling: the shortcuts of [`figcraft_engine::keymap`], tool keys, nudging, opacity
+//! Keyboard handling: the shortcuts of [`lizard_engine::keymap`], tool keys, nudging, opacity
 //! digits and text editing keys.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use egui::{Context, Event, Key, Modifiers};
-use figcraft_engine::keymap::{self, Platform};
+use lizard_engine::keymap::{self, Platform};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 
 /// Two opacity digits typed within this long make one exact percentage ("4" then "5": 45%).
 pub const OPACITY_CHAIN_SECS: f64 = 0.6;
@@ -95,7 +95,7 @@ fn cached_tip(label: &'static str, key: Option<&'static str>) -> &'static str {
 /// Run the shortcuts this frame's keys press. `typing`: a field had the keyboard when the frame
 /// began.
 /// `swallowed`: what this frame's Cmd/Ctrl+V chords the shell swallowed ask for ([`swallowed_paste`]).
-pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool, swallowed: Swallowed) {
+pub fn handle(app: &mut LizardApp, ctx: &Context, typing: bool, swallowed: Swallowed) {
     note_platform(ctx);
     // Text fields in panels own the keyboard (also the key that ends their editing).
     if typing || crate::a11y::field_focused(ctx) || app.ui.palette.is_some() {
@@ -160,7 +160,7 @@ pub struct Swallowed {
 /// (an image, or nothing). The browser sends the press as well, which runs the command itself.
 /// Call at the start of every frame: it reads the raw events, which keys consumed by panels or the
 /// presenter still carry.
-pub fn swallowed_paste(app: &mut FigApp, ctx: &Context) -> Swallowed {
+pub fn swallowed_paste(app: &mut LizardApp, ctx: &Context) -> Swallowed {
     let ui = &mut app.ui;
     let mut out = Swallowed::default();
     ctx.input(|i| {
@@ -209,7 +209,7 @@ pub fn swallowed_paste(app: &mut FigApp, ctx: &Context) -> Swallowed {
 
 /// Run the command a shortcut is bound to, with the keyboard's own twists (Escape steps out
 /// before it deselects, Delete ends a pen path, Enter edits the selected text or vector).
-pub fn run_binding(app: &mut FigApp, id: &str) {
+pub fn run_binding(app: &mut LizardApp, id: &str) {
     match id {
         "select.none" => {
             if let Some(ctx) = &app.ui_context
@@ -234,7 +234,7 @@ pub fn run_binding(app: &mut FigApp, id: &str) {
     }
 }
 
-fn key_event(app: &mut FigApp, key: Key, physical: Option<Key>, m: Modifiers, repeat: bool, now: f64, ctx: &Context) -> bool {
+fn key_event(app: &mut LizardApp, key: Key, physical: Option<Key>, m: Modifiers, repeat: bool, now: f64, ctx: &Context) -> bool {
     if key == Key::Escape && crate::proto_panel::close_editor(ctx) {
         return true;
     }
@@ -314,7 +314,7 @@ fn key_event(app: &mut FigApp, key: Key, physical: Option<Key>, m: Modifiers, re
 /// F8): the arrows move it, Cmd/Ctrl+arrows or Shift+arrows move its far corner, sizing it (Shift
 /// with Cmd/Ctrl: five times as far), by 10 screen pixels; Enter selects what it covers like a
 /// marquee (Shift toggles, Cmd/Ctrl takes nested layers), Escape drops it.
-fn key_box(app: &mut FigApp, key: Key, m: Modifiers) -> bool {
+fn key_box(app: &mut LizardApp, key: Key, m: Modifiers) -> bool {
     let Some(mut b) = app.ui.key_box else { return false };
     let size = m.shift || m.command;
     let step = if m.shift && m.command { 50.0 } else { 10.0 } / app.session.ds().map_or(1.0, |d| d.view.zoom.max(1e-6));
@@ -350,7 +350,7 @@ fn key_box(app: &mut FigApp, key: Key, m: Modifiers) -> bool {
     }
 }
 
-impl FigApp {
+impl LizardApp {
     /// Show a selection box for the keyboard: around the selection, else in the middle of the view.
     pub(crate) fn start_key_box(&mut self) {
         let Ok(ds) = self.session.ds() else { return };
@@ -360,7 +360,7 @@ impl FigApp {
             Some(r) => r.inflate(8.0 / zoom, 8.0 / zoom),
             None => {
                 let c = self.to_page(self.canvas.rect.center());
-                figcraft_geom::Rect::new(c.x - 100.0 / zoom, c.y - 75.0 / zoom, c.x + 100.0 / zoom, c.y + 75.0 / zoom)
+                lizard_geom::Rect::new(c.x - 100.0 / zoom, c.y - 75.0 / zoom, c.x + 100.0 / zoom, c.y + 75.0 / zoom)
             }
         };
         self.ui.key_box = Some([r.x0, r.y0, r.x1, r.y1]);
@@ -382,7 +382,7 @@ fn digit(key: Key) -> Option<u32> {
 
 /// Number keys set the selection's opacity: one digit is tens of percent (0: 100%), a second digit
 /// typed soon after makes the exact percentage.
-pub fn opacity_digit(app: &mut FigApp, key: Key, now: f64) -> bool {
+pub fn opacity_digit(app: &mut LizardApp, key: Key, now: f64) -> bool {
     let Some(d) = digit(key) else { return false };
     if !app.session.prefs.number_keys_opacity || app.session.selection().is_empty() {
         return false;
@@ -400,10 +400,10 @@ pub fn opacity_digit(app: &mut FigApp, key: Key, now: f64) -> bool {
 }
 
 /// Enter on a single selected text layer starts editing it; on shapes, edits them as vectors.
-fn enter_text(app: &mut FigApp) -> bool {
+fn enter_text(app: &mut LizardApp) -> bool {
     let sel = app.session.selection();
     if sel.len() > 1 {
-        let ids = app.session.doc().ok().and_then(|d| figcraft_engine::vectoredit::enter_targets(d, &sel));
+        let ids = app.session.doc().ok().and_then(|d| lizard_engine::vectoredit::enter_targets(d, &sel));
         return ids.is_some_and(|ids| {
             app.run("vector.edit.begin", json!({"ids": ids}));
             true
@@ -413,10 +413,10 @@ fn enter_text(app: &mut FigApp) -> bool {
         return false;
     }
     let Some(id) = sel.first().copied() else { return false };
-    let kind = app.session.doc().ok().and_then(|d| d.node(id)).map(|n| (matches!(n.kind, figcraft_doc::NodeKind::Text(_)), n.kind.is_shape()));
+    let kind = app.session.doc().ok().and_then(|d| d.node(id)).map(|n| (matches!(n.kind, lizard_doc::NodeKind::Text(_)), n.kind.is_shape()));
     match kind {
         Some((true, _)) => {
-            let _ = figcraft_engine::textedit::begin(&mut app.session, id, None, false);
+            let _ = lizard_engine::textedit::begin(&mut app.session, id, None, false);
             true
         }
         Some((_, true)) => {
@@ -427,7 +427,7 @@ fn enter_text(app: &mut FigApp) -> bool {
     }
 }
 
-fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
+fn text_keys(app: &mut LizardApp, ctx: &Context, events: &[Event]) {
     // A key that ran a shortcut swallows the text it also produced (Alt+. types "≥" on macOS).
     let mut skip_text = false;
     for ev in events {
@@ -437,28 +437,28 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
                     skip_text = false;
                     continue;
                 }
-                if let Err(e) = figcraft_engine::textedit::insert(&mut app.session, t) {
+                if let Err(e) = lizard_engine::textedit::insert(&mut app.session, t) {
                     app.toast(e.to_string());
                 }
             }
             // The composition shows inline at the caret; the document gets it on Commit.
             Event::Ime(egui::ImeEvent::Preedit { text, active_range_chars }) => {
                 let cursor = active_range_chars.as_ref().map(|r| r.start);
-                if let Err(e) = figcraft_engine::textedit::preedit(&mut app.session, text, cursor) {
+                if let Err(e) = lizard_engine::textedit::preedit(&mut app.session, text, cursor) {
                     app.toast(e.to_string());
                 }
             }
             Event::Paste(t) => {
                 // Plain text only: the engine normalises line endings and drops control chars.
-                if let Err(e) = figcraft_engine::textedit::insert(&mut app.session, t) {
+                if let Err(e) = lizard_engine::textedit::insert(&mut app.session, t) {
                     app.toast(e.to_string());
                 }
             }
             Event::Copy | Event::Cut => {
-                if let Some(text) = figcraft_engine::textedit::selected_text(&app.session).filter(|t| !t.is_empty()) {
+                if let Some(text) = lizard_engine::textedit::selected_text(&app.session).filter(|t| !t.is_empty()) {
                     app.services.clipboard_set_text(&text);
                     if matches!(ev, Event::Cut) {
-                        let _ = figcraft_engine::textedit::key(&mut app.session, "Delete", false, false, false);
+                        let _ = lizard_engine::textedit::key(&mut app.session, "Delete", false, false, false);
                     }
                 }
             }
@@ -485,18 +485,18 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
                     Key::Tab => "Tab",
                     Key::A if m.command => "SelectAll",
                     Key::Z if m.command => {
-                        let _ = figcraft_engine::textedit::end(&mut app.session);
+                        let _ = lizard_engine::textedit::end(&mut app.session);
                         app.run(if m.shift { "edit.redo" } else { "edit.undo" }, json!({}));
                         continue;
                     }
                     _ => continue,
                 };
                 if name == "Enter" && m.command {
-                    let _ = figcraft_engine::textedit::end(&mut app.session);
+                    let _ = lizard_engine::textedit::end(&mut app.session);
                     continue;
                 }
                 let (word, line) = keymap::text_motion(platform(), name, mods(*m));
-                if let Err(e) = figcraft_engine::textedit::key(&mut app.session, name, m.shift, word, line) {
+                if let Err(e) = lizard_engine::textedit::key(&mut app.session, name, m.shift, word, line) {
                     app.toast(e.to_string());
                 }
             }
@@ -520,7 +520,7 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
 }
 
 /// Shortcuts live while editing text (Bold, lists, alignment, size/weight/spacing steps, Save…).
-fn text_shortcut(app: &mut FigApp, key: Key, physical: Option<Key>, m: Modifiers) -> bool {
+fn text_shortcut(app: &mut LizardApp, key: Key, physical: Option<Key>, m: Modifiers) -> bool {
     match lookup(keymap::Context::Text, key, physical, m) {
         Some(b) => {
             crate::menus::invoke(app, b.id);
@@ -532,17 +532,17 @@ fn text_shortcut(app: &mut FigApp, key: Key, physical: Option<Key>, m: Modifiers
 
 /// Tell the platform where the caret is (inside the composition while composing) so IME
 /// candidate windows open next to it.
-fn ime_output(app: &FigApp, ctx: &Context) {
+fn ime_output(app: &LizardApp, ctx: &Context) {
     let Some(te) = app.session.ds().ok().and_then(|d| d.text_edit.clone()) else { return };
     let preedit = app.preedit_view();
     let Some(doc) = preedit.map(|p| &*p.doc).or_else(|| app.session.doc().ok()) else { return };
     let Some(node) = doc.node(te.id) else { return };
-    let Some((layout, dy)) = figcraft_text::layout_node(node) else { return };
+    let Some((layout, dy)) = lizard_text::layout_node(node) else { return };
     let w = doc.world_transform(te.id);
     let (cx, li) = layout.caret(preedit.map(|p| p.cursor).unwrap_or(te.caret));
     let (top, h) = layout.lines.get(li).map(|l| (l.top, l.height)).unwrap_or((0.0, 14.0));
-    let p0 = w * figcraft_geom::Point::new(cx, top + dy);
-    let p1 = w * figcraft_geom::Point::new(cx, top + h + dy);
+    let p0 = w * lizard_geom::Point::new(cx, top + dy);
+    let p1 = w * lizard_geom::Point::new(cx, top + h + dy);
     let (a, b) = (app.to_screen(p0.x, p0.y), app.to_screen(p1.x, p1.y));
     if !(a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite()) {
         return;

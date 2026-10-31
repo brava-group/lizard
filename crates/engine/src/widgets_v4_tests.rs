@@ -9,10 +9,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use figcraft_collab::message::{ClientMsg, ServerMsg};
-use figcraft_collab::{Client, Outgoing, Server};
-use figcraft_color::{ImageScaleMode, PaintKind};
-use figcraft_doc::{EffectKind, NodeId, NodeKind};
+use lizard_collab::message::{ClientMsg, ServerMsg};
+use lizard_collab::{Client, Outgoing, Server};
+use lizard_color::{ImageScaleMode, PaintKind};
+use lizard_doc::{EffectKind, NodeId, NodeKind};
 use serde_json::{Value, json};
 
 use crate::components::tests::{ex, idv, node};
@@ -25,7 +25,7 @@ use crate::widgets_tests::{W, err, state, widget_manifest};
 use crate::{EngineError, Session};
 
 const CARD: &str = "org.test.card";
-const TIMER: &str = r#"(import "figcraft" "widget_timer" (func $timer (param i32) (result i32)))"#;
+const TIMER: &str = r#"(import "lizard" "widget_timer" (func $timer (param i32) (result i32)))"#;
 /// A 1×1 PNG.
 const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
@@ -292,7 +292,7 @@ fn hover_styles_and_tooltips_show_without_the_plugin_or_an_undo_step() {
     // Saving while a part is hovered saves the document itself.
     point(&mut s, PointerKind::Move, w, "Start");
     assert!(s.ds().unwrap().text_preview.is_some());
-    let fill = |d: &figcraft_doc::Document| d.node(part(&s, w, "Start")).unwrap().fills[0].solid_color().unwrap().to_css_hex();
+    let fill = |d: &lizard_doc::Document| d.node(part(&s, w, "Start")).unwrap().fills[0].solid_color().unwrap().to_css_hex();
     assert_eq!(fill(s.ds().unwrap().document_itself()), "#0D99FF");
 }
 
@@ -442,8 +442,8 @@ fn what_api_4_added_survives_save_reload_duplicating_and_export() {
     let (w, _) = insert(&mut s);
     ex(&mut s, "widget.click", json!({"id": w, "target": "start"}));
     ex(&mut s, "widget.menuAction", json!({"id": w, "item": "size", "value": "S"}));
-    let bytes = figcraft_format::save_bytes(s.doc().unwrap(), None).unwrap();
-    let (back, _) = figcraft_format::load_bytes(&bytes).unwrap();
+    let bytes = lizard_format::save_bytes(s.doc().unwrap(), None).unwrap();
+    let (back, _) = lizard_format::load_bytes(&bytes).unwrap();
     let mut t = session();
     t.ds_mut().unwrap().doc = Arc::new(back);
     let l = listed(&mut t, w);
@@ -469,7 +469,7 @@ fn what_api_4_added_survives_save_reload_duplicating_and_export() {
     );
     assert_eq!(ex(&mut s, "widget.setText", json!({"id": pasted, "input": "title", "text": "pasted"}))["state"], json!({"n": 4}));
     assert_eq!(state(&mut s, w), json!({"n": 2}), "the original keeps its own state");
-    let svg = crate::cmd::file::export_bytes(s.doc().unwrap(), &[w], figcraft_doc::ExportFormat::Svg, 1.0).unwrap();
+    let svg = crate::cmd::file::export_bytes(s.doc().unwrap(), &[w], lizard_doc::ExportFormat::Svg, 1.0).unwrap();
     let svg = String::from_utf8(svg).unwrap().to_ascii_lowercase();
     assert!(svg.contains("lineargradient") && svg.contains("dddddd"), "{svg}");
 }
@@ -553,13 +553,12 @@ fn junk_layer_data_and_parameters_never_panic() {
     for j in &junk {
         let (title, start) = (part(&s, w, "Title"), part(&s, w, "Start"));
         let doc = s.ds_mut().unwrap().doc_mut();
-        for (id, key) in
-            [(title, "figcraft.widget.input"), (start, "figcraft.widget.hover"), (start, "figcraft.widget.tooltip"), (w, "figcraft.widget.menu")]
+        for (id, key) in [(title, "lizard.widget.input"), (start, "lizard.widget.hover"), (start, "lizard.widget.tooltip"), (w, "lizard.widget.menu")]
         {
             doc.get_mut(id).unwrap().plugin_data.insert(key.into(), j.clone());
         }
-        doc.get_mut(w).unwrap().plugin_data.insert("figcraft.widget.timer".into(), j.clone());
-        doc.get_mut(w).unwrap().plugin_data.insert("figcraft.widget.state".into(), j.clone());
+        doc.get_mut(w).unwrap().plugin_data.insert("lizard.widget.timer".into(), j.clone());
+        doc.get_mut(w).unwrap().plugin_data.insert("lizard.widget.state".into(), j.clone());
         let l = listed(&mut s, w);
         assert_eq!((l["menu"].clone(), l["timer"].clone()), (json!([]), Value::Null), "{}", &j[..j.len().min(60)]);
         assert!(l["inputs"].as_array().unwrap().iter().all(|i| i["maxLength"].as_u64().is_some_and(|m| (1..=1000).contains(&m))));
@@ -602,7 +601,7 @@ type Peer = (Session, Arc<Mutex<Script>>, u32);
 fn join(server: &mut Server, access: Access) -> Peer {
     let (mut s, script) = crate::live_tests::session();
     install(&mut s, manifest(4), &card(|_| String::new()));
-    s.execute("collab.join", &json!({"link": "figcraft://join?host=a:1&file=f&token=t"})).unwrap();
+    s.execute("collab.join", &json!({"link": "lizard://join?host=a:1&file=f&token=t"})).unwrap();
     let ClientMsg::Hello(h) = Client::hello("f", "", "Me", "") else { panic!("no hello") };
     let (id, outs) = server.join_as(h, access).unwrap();
     let welcome = outs.into_iter().find_map(|o| if let Outgoing::To(_, m @ ServerMsg::Welcome { .. }) = o { Some(m) } else { None }).unwrap();
@@ -646,7 +645,7 @@ fn pump(server: &mut Server, peers: &mut [Peer]) {
 
 #[test]
 fn in_a_live_session_updates_sync_and_a_timer_runs_for_whoever_started_it_last() {
-    let mut server = Server::new(Session::new().doc().unwrap().clone(), "", figcraft_collab::Limits::default());
+    let mut server = Server::new(Session::new().doc().unwrap().clone(), "", lizard_collab::Limits::default());
     let mut peers = [join(&mut server, Access::Edit), join(&mut server, Access::Edit), join(&mut server, Access::View)];
     let (a, b, viewer) = (0, 1, 2);
     let (w, _) = insert(&mut peers[a].0);
@@ -674,7 +673,7 @@ fn in_a_live_session_updates_sync_and_a_timer_runs_for_whoever_started_it_last()
     assert_eq!(state(&mut peers[b].0, w), json!({"n": 3}));
     pump(&mut server, &mut peers);
     assert_eq!(state(&mut peers[a].0, w), json!({"n": 3}));
-    assert_eq!(server.document().node(w).unwrap().plugin_data.get("figcraft.widget.state").map(String::as_str), Some(r#"{"n":3}"#));
+    assert_eq!(server.document().node(w).unwrap().plugin_data.get("lizard.widget.state").map(String::as_str), Some(r#"{"n":3}"#));
     // The hover look never syncs, and an update arriving under it shows.
     point(&mut peers[a].0, PointerKind::Move, w, "Start");
     assert!(peers[a].0.ds().unwrap().text_preview.is_some());
@@ -711,7 +710,7 @@ fn a_prototypes_copy_takes_text_menu_items_and_timers_too() {
     assert_eq!((out["state"].clone(), out["timer"].is_u64(), out["timerChanged"].clone()), (json!({"n": 3}), true, json!(true)));
     let (copy, out) = run_on(&s, copy, "widget.click", &json!({"id": w, "target": "stop"})).unwrap();
     assert_eq!((out["timerChanged"].clone(), out["timer"].clone()), (json!(true), Value::Null));
-    assert_eq!(copy.node(w).unwrap().plugin_data.get("figcraft.widget.state").map(String::as_str), Some(r#"{"n":3}"#));
+    assert_eq!(copy.node(w).unwrap().plugin_data.get("lizard.widget.state").map(String::as_str), Some(r#"{"n":3}"#));
     // The file, its history and its timers are as they were.
     assert_eq!((state(&mut s, w), undo_len(&s), next_timer(&s)), (json!({"n": 1}), undo, None));
     assert!(run_on(&s, copy.clone(), "node.delete", &json!({"ids": [w]})).is_err(), "only widget events");
@@ -721,7 +720,7 @@ fn a_prototypes_copy_takes_text_menu_items_and_timers_too() {
 /// A plugin that shows panel `spec` on every call.
 fn panel_plugin(spec: &Value) -> Vec<u8> {
     let mut w = W::default();
-    w.imports = r#"(import "figcraft" "ui_show" (func $ui_show (param i32 i32) (result i32)))"#.into();
+    w.imports = r#"(import "lizard" "ui_show" (func $ui_show (param i32 i32) (result i32)))"#.into();
     let (a, l) = w.s(&spec.to_string());
     w.build(&format!(
         "(if (call $ui_show (i32.const {a}) (i32.const {l})) (then (call $set_output (i32.const 200000) (call $reply_read (i32.const 200000) (i32.const 5000))) (return (i32.const 1))))"

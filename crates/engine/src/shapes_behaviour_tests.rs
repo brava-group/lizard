@@ -7,8 +7,8 @@
 // The tables read best as tuples.
 #![allow(clippy::type_complexity)]
 
-use figcraft_doc::{BoolOp, Node, NodeId, NodeKind, StrokeCap, StrokeJoin, StrokeProps};
-use figcraft_geom::{BezPath, Point, Shape};
+use lizard_doc::{BoolOp, Node, NodeId, NodeKind, StrokeCap, StrokeJoin, StrokeProps};
+use lizard_geom::{BezPath, Point, Shape};
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -47,7 +47,7 @@ fn draw(s: &mut Session, tool: ToolId, a: (f64, f64), b: (f64, f64), shift: bool
 
 /// A layer's box on the page: x, y, width, height (rotation ignored).
 fn bx(n: &Node) -> (f64, f64, f64, f64) {
-    let t = figcraft_geom::translation(n.transform);
+    let t = lizard_geom::translation(n.transform);
     (t.x, t.y, n.width, n.height)
 }
 
@@ -121,8 +121,8 @@ fn lines_and_arrows_follow_the_modifier_rules() {
         let mut s = Session::new();
         let id = draw(&mut s, tool, a, b, shift, alt);
         let n = node(&s, id);
-        let p = figcraft_geom::translation(n.transform);
-        let rot = -figcraft_geom::rotation_degrees(n.transform);
+        let p = lizard_geom::translation(n.transform);
+        let rot = -lizard_geom::rotation_degrees(n.transform);
         assert!(near(p.x, start.0) && near(p.y, start.1), "{why}: starts at {p:?}");
         assert!((n.width - length).abs() < 1e-6, "{why}: length {}", n.width);
         assert!((rot.rem_euclid(360.0) - angle.rem_euclid(360.0)).abs() < 1e-6 || (rot - angle).abs() < 1e-6, "{why}: angle {rot}");
@@ -151,12 +151,12 @@ fn new_shapes_have_the_documented_defaults() {
     assert!(matches!(p.kind, NodeKind::Polygon { count: 3 }), "a new polygon is a triangle");
     let NodeKind::Star { count, inner_ratio } = st.kind else { panic!("star") };
     assert_eq!(count, 5, "a new star has five points");
-    assert_eq!(figcraft_geom::star_points(st.width, st.height, count, inner_ratio).len(), 10, "five points make ten sides");
+    assert_eq!(lizard_geom::star_points(st.width, st.height, count, inner_ratio).len(), 10, "five points make ten sides");
     assert!((inner_ratio - 0.38).abs() < 1e-9, "silent: the default ratio is 38% (pinned)");
-    assert_eq!(node(&s, line).stroke.align, figcraft_doc::StrokeAlign::Center, "lines stroke on their centre");
-    assert_eq!(node(&s, rect).stroke.align, figcraft_doc::StrokeAlign::Inside, "most shapes stroke inside");
+    assert_eq!(node(&s, line).stroke.align, lizard_doc::StrokeAlign::Center, "lines stroke on their centre");
+    assert_eq!(node(&s, rect).stroke.align, lizard_doc::StrokeAlign::Inside, "most shapes stroke inside");
     // The polygon's first point is at the top centre.
-    let pts = figcraft_geom::polygon_points(p.width, p.height, 3);
+    let pts = lizard_geom::polygon_points(p.width, p.height, 3);
     assert!(near(pts[0].x, p.width / 2.0) && near(pts[0].y, 0.0), "the polygon points up");
 }
 
@@ -179,7 +179,7 @@ fn corner_radius_follows_the_documented_rules() {
         let mut s = Session::new();
         let id = create(&mut s, "shape.rectangle", json!({"x": 0, "y": 0, "width": w, "height": h}));
         ex(&mut s, "node.set", json!({"ids": [id], "props": {"cornerRadius": radius}}));
-        let path = figcraft_doc::geometry::shape_path(&node(&s, id)).unwrap();
+        let path = lizard_doc::geometry::shape_path(&node(&s, id)).unwrap();
         assert!((top_left_radius(&path) - want).abs() < 1e-6, "{why}: {}", top_left_radius(&path));
     }
     // Which layers take a radius, and which round each corner on its own.
@@ -198,7 +198,7 @@ fn corner_radius_follows_the_documented_rules() {
     let mut s = Session::new();
     let id = create(&mut s, "shape.polygon", json!({"x": 0, "y": 0, "width": 100, "height": 100, "props": {"pointCount": 4}}));
     ex(&mut s, "node.set", json!({"ids": [id], "props": {"cornerRadius": 1000}}));
-    let path = figcraft_doc::geometry::shape_path(&node(&s, id)).unwrap();
+    let path = lizard_doc::geometry::shape_path(&node(&s, id)).unwrap();
     assert!(
         path.winding(Point::new(50.0, 50.0)) != 0 && path.bounding_box().width() > 50.0,
         "silent: a huge radius makes the polygon as round as it gets (pinned)"
@@ -289,7 +289,7 @@ fn point_counts_and_star_ratios() {
         ex(&mut s, "node.set", json!({"ids": [id], "props": {"innerRadius": set}}));
         let NodeKind::Star { count, inner_ratio } = node(&s, id).kind else { panic!("star") };
         assert!((inner_ratio - want).abs() < 1e-9, "{why}");
-        let inner = figcraft_geom::star_points(100.0, 100.0, count, inner_ratio)[1];
+        let inner = lizard_geom::star_points(100.0, 100.0, count, inner_ratio)[1];
         assert!(((inner - Point::new(50.0, 50.0)).hypot() - 50.0 * want).abs() < 1e-9, "{why}: inner points sit at the ratio");
     }
     assert!(s.execute("node.set", &json!({"ids": [id], "props": {"pointCount": "many"}})).is_err(), "junk counts are refused");
@@ -311,7 +311,7 @@ fn arcs_follow_sweep_start_and_ratio() {
         let mut s = Session::new();
         let id = create(&mut s, "shape.ellipse", json!({"x": 0, "y": 0, "width": 100, "height": 100}));
         ex(&mut s, "node.set", json!({"ids": [id], "props": {"arcSweep": sweep * 3.6, "arcInner": ratio}}));
-        let path = figcraft_doc::geometry::shape_path(&node(&s, id)).unwrap();
+        let path = lizard_doc::geometry::shape_path(&node(&s, id)).unwrap();
         assert_eq!(path.winding(Point::new(p.0, p.1)) != 0, inside, "{why}");
     }
 }
@@ -324,12 +324,12 @@ fn v_tip_reach(deg: f64, props: &StrokeProps) -> f64 {
     path.move_to((100.0 * half.sin(), 100.0 * half.cos()));
     path.line_to((0.0, 0.0));
     path.line_to((-100.0 * half.sin(), 100.0 * half.cos()));
-    -figcraft_pathops::stroke_outline(&path, props, false).bounding_box().y0
+    -lizard_pathops::stroke_outline(&path, props, false).bounding_box().y0
 }
 
 #[test]
 fn stroke_joins_miter_angle_and_caps() {
-    let base = StrokeProps { weight: 10.0, join: StrokeJoin::Miter, align: figcraft_doc::StrokeAlign::Center, ..Default::default() };
+    let base = StrokeProps { weight: 10.0, join: StrokeJoin::Miter, align: lizard_doc::StrokeAlign::Center, ..Default::default() };
     assert!((base.miter_angle() - 28.955).abs() < 0.01, "the default miter angle is about 29°");
     // (corner angle, miter angle, join, derivation)
     let rows: Vec<(f64, f64, bool, &str)> = vec![
@@ -364,8 +364,8 @@ fn stroke_joins_miter_angle_and_caps() {
     sq.line_to((100.0, 100.0));
     sq.close_path();
     let arrows = StrokeProps { cap_end: StrokeCap::TriangleArrow, ..base.clone() };
-    let closed = figcraft_pathops::stroke_outline(&sq, &arrows, true).bounding_box();
-    let plain = figcraft_pathops::stroke_outline(&sq, &base, true).bounding_box();
+    let closed = lizard_pathops::stroke_outline(&sq, &arrows, true).bounding_box();
+    let plain = lizard_pathops::stroke_outline(&sq, &base, true).bounding_box();
     assert_eq!(closed, plain, "closed paths have no ends to cap");
 }
 
@@ -386,7 +386,7 @@ fn boolean_results_and_the_look_they_take() {
         let b = create(&mut s, "shape.rectangle", json!({"x": 50, "y": 50, "width": 100, "height": 100, "props": {"fill": "#0000FF"}}));
         let g = create(&mut s, cmd, json!({"ids": [a, b]}));
         let gn = node(&s, g);
-        let (path, _) = figcraft_render::node_outline(s.doc().unwrap(), &gn).unwrap();
+        let (path, _) = lizard_render::node_outline(s.doc().unwrap(), &gn).unwrap();
         let w = s.doc().unwrap().world_transform(g).inverse();
         for (p, want) in pts.iter().zip(inside) {
             assert_eq!(path.winding(w * *p) % 2 != 0, want, "{why}: at {p:?}");
@@ -407,7 +407,7 @@ fn boolean_results_and_the_look_they_take() {
     let a = create(&mut s, "shape.rectangle", json!({"x": 0, "y": 0, "width": 10, "height": 10}));
     let b = create(&mut s, "shape.rectangle", json!({"x": 50, "y": 50, "width": 10, "height": 10}));
     let g = create(&mut s, "bool.intersect", json!({"ids": [a, b]}));
-    let (path, _) = figcraft_render::node_outline(s.doc().unwrap(), &node(&s, g)).unwrap();
+    let (path, _) = lizard_render::node_outline(s.doc().unwrap(), &node(&s, g)).unwrap();
     assert!(path.area().abs() < 1e-6, "no overlap, nothing to show");
 }
 
@@ -455,7 +455,7 @@ fn flatten_bakes_vector_corner_radius_into_editable_curves() {
     let NodeKind::Vector { network } = node(&s, flattened).kind else { panic!("flatten makes a vector") };
     assert_eq!((network.vertices.len(), network.segments.len()), (8, 8), "each rounded corner becomes a curve between two points");
     assert!(network.vertices.iter().all(|v| v.radius == 0.0), "the rounded geometry no longer depends on radius settings");
-    assert!(network.stroke_path().elements().iter().any(|el| matches!(el, figcraft_geom::kurbo::PathEl::CurveTo(..))));
+    assert!(network.stroke_path().elements().iter().any(|el| matches!(el, lizard_geom::kurbo::PathEl::CurveTo(..))));
     let baked_path = network.fill_path();
     for p in [Point::new(2.0, 2.0), Point::new(50.0, 2.0), Point::new(50.0, 50.0), Point::new(98.0, 98.0)] {
         assert_eq!(baked_path.winding(p), visible_path.winding(p), "the fill stays where it was before flattening at {p:?}");
@@ -464,8 +464,8 @@ fn flatten_bakes_vector_corner_radius_into_editable_curves() {
 
 #[test]
 fn flatten_group_preserves_child_face_paints_and_holes() {
-    use figcraft_color::{Color, Paint};
-    use figcraft_doc::WindingRule;
+    use lizard_color::{Color, Paint};
+    use lizard_doc::WindingRule;
 
     for inner_visible in [true, false] {
         let mut s = Session::new();
@@ -494,8 +494,8 @@ fn flatten_group_preserves_child_face_paints_and_holes() {
             network.regions[0].winding = WindingRule::EvenOdd;
         }
         let group = create(&mut s, "object.group", json!({"ids": [inner, ring]}));
-        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
-        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         assert_ne!(before.pixel(10, 40), before.pixel(90, 40), "the white ring is visible");
         if inner_visible {
             assert_ne!(before.pixel(40, 40), before.pixel(90, 40), "the inner face is painted");
@@ -503,7 +503,7 @@ fn flatten_group_preserves_child_face_paints_and_holes() {
             assert_eq!(before.pixel(40, 40), before.pixel(90, 40), "the ring has a real hole");
         }
         let flattened = create(&mut s, "vector.flatten", json!({"ids": [group]}));
-        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let after = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         for (x, y) in [(10, 40), (40, 40), (90, 40)] {
             assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; inner visible: {inner_visible}");
         }
@@ -515,8 +515,8 @@ fn flatten_group_preserves_child_face_paints_and_holes() {
 
 #[test]
 fn flatten_group_and_selected_children_keep_the_same_compound_holes() {
-    use figcraft_color::{Color, Paint};
-    use figcraft_doc::{Region, WindingRule};
+    use lizard_color::{Color, Paint};
+    use lizard_doc::{Region, WindingRule};
 
     let mut results = Vec::new();
     for grouped in [true, false] {
@@ -539,12 +539,12 @@ fn flatten_group_and_selected_children_keep_the_same_compound_holes() {
             network.regions = loops.into_iter().map(|lp| Region { loops: vec![lp], winding: WindingRule::EvenOdd, fills: None }).collect();
         }
         let group = create(&mut s, "object.group", json!({"ids": [white, black]}));
-        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
-        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         assert_ne!(before.pixel(10, 40), before.pixel(40, 40), "the compound black vector leaves its centre white");
         let ids = if grouped { vec![group] } else { vec![white, black] };
         let flattened = create(&mut s, "vector.flatten", json!({"ids": ids}));
-        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let after = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         for (x, y) in [(10, 40), (40, 40), (90, 40)] {
             assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; grouped: {grouped}");
         }
@@ -557,8 +557,8 @@ fn flatten_group_and_selected_children_keep_the_same_compound_holes() {
 
 #[test]
 fn flatten_keeps_filled_open_subpaths_from_each_source_vector() {
-    use figcraft_color::{Color, Paint};
-    use figcraft_doc::WindingRule;
+    use lizard_color::{Color, Paint};
+    use lizard_doc::WindingRule;
 
     for grouped in [true, false] {
         let mut s = Session::new();
@@ -588,12 +588,12 @@ fn flatten_keeps_filled_open_subpaths_from_each_source_vector() {
             network.regions[0].winding = WindingRule::EvenOdd;
         }
         let group = create(&mut s, "object.group", json!({"ids": [white, black]}));
-        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
-        let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
+        let before = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         assert_ne!(before.pixel(30, 30), before.pixel(90, 30), "the open white subpath has a visible fill");
         let ids = if grouped { vec![group] } else { vec![white, black] };
         let flattened = create(&mut s, "vector.flatten", json!({"ids": ids}));
-        let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+        let after = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
         for (x, y) in [(5, 30), (30, 30), (40, 40), (90, 30)] {
             assert_eq!(after.pixel(x, y), before.pixel(x, y), "flatten changed pixel {x},{y}; grouped: {grouped}");
         }
@@ -634,7 +634,7 @@ fn flatten_and_outline_stroke() {
     assert!(n.strokes.is_empty() && n.fills == before.strokes, "the stroke's paints fill the outline");
     assert_eq!(n.styles.fill, before.styles.stroke, "a stroke's colour style becomes the outline's fill style");
     assert_eq!(n.opacity, 0.5, "silent: the outline keeps the layer's opacity (fixed: it was lost)");
-    let (path, _) = figcraft_render::node_outline(s.doc().unwrap(), &n).unwrap();
+    let (path, _) = lizard_render::node_outline(s.doc().unwrap(), &n).unwrap();
     assert!((path.bounding_box().height() - 10.0).abs() < 1e-6, "the outline is as thick as the stroke was");
 }
 
@@ -668,8 +668,8 @@ fn outline_stroke_outlines_every_selected_layer() {
 
 #[test]
 fn outline_stroke_keeps_the_painted_faces_of_a_flattened_vector() {
-    use figcraft_color::{Color, Paint};
-    use figcraft_doc::{StrokeAlign, WindingRule};
+    use lizard_color::{Color, Paint};
+    use lizard_doc::{StrokeAlign, WindingRule};
 
     let mut s = Session::new();
     let white = create(&mut s, "vector.create", json!({"path": "M10 10 L70 10 L70 70 L10 70 Z"}));
@@ -697,8 +697,8 @@ fn outline_stroke_keeps_the_painted_faces_of_a_flattened_vector() {
         flat_node.stroke.weight = 4.0;
         flat_node.stroke.align = StrokeAlign::Outside;
     }
-    let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 90, height: 90 };
-    let before = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+    let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 90, height: 90 };
+    let before = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
     assert_ne!(before.pixel(40, 40), before.pixel(80, 40), "the white centre is visible");
     assert_ne!(before.pixel(15, 40), before.pixel(40, 40), "the black face is visible");
     assert_ne!(before.pixel(8, 40), before.pixel(80, 40), "the outside stroke is visible");
@@ -709,7 +709,7 @@ fn outline_stroke_keeps_the_painted_faces_of_a_flattened_vector() {
     assert!(preserved.strokes.is_empty(), "the editable stroke is removed after outlining");
     let NodeKind::Vector { network } = preserved.kind else { panic!("the painted vector remains") };
     assert!(network.regions.iter().any(|region| region.fills.is_some()), "face paints are preserved");
-    let after = figcraft_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
+    let after = lizard_render::render_view(s.doc().unwrap(), s.page().unwrap(), &view, &Default::default()).unwrap();
     for (x, y) in [(8, 40), (15, 40), (40, 40), (80, 40)] {
         assert_eq!(after.pixel(x, y), before.pixel(x, y), "outlining changed the image at {x},{y}");
     }

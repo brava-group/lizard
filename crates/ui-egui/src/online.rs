@@ -7,11 +7,11 @@
 //! list shows what this computer remembers.
 
 use egui::{Align2, CornerRadius, Rect, Sense, Ui, pos2, vec2};
-use figcraft_engine::live::utc_date;
-use figcraft_engine::online::{FileState, OnlineFile, ServerProblem, server_host};
+use lizard_engine::live::utc_date;
+use lizard_engine::online::{FileState, OnlineFile, ServerProblem, server_host};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::{self, Tip};
 use crate::home::{FileRow, file_row};
 use crate::i18n::{tr, trf};
@@ -55,7 +55,7 @@ pub fn mark(shared: bool) -> Icon {
 }
 
 /// Ask each server once what became of its files (in the background).
-fn refresh(app: &mut FigApp, ctx: &egui::Context) {
+fn refresh(app: &mut LizardApp, ctx: &egui::Context) {
     if !app.session.prefs.online_files.is_empty() && !app.session.waiting_for(FILES) {
         app.run_background(ctx, FILES, json!({"refresh": true}), Box::new(|_, _, _| {}));
     }
@@ -63,7 +63,7 @@ fn refresh(app: &mut FigApp, ctx: &egui::Context) {
 
 /// Run `action` of `collab.manageFile` on recorded file `f` without the window waiting for the
 /// server; `done` gets the result.
-fn manage(app: &mut FigApp, ctx: &egui::Context, f: (&str, &str), action: &str, extra: Value, done: crate::Done) {
+fn manage(app: &mut LizardApp, ctx: &egui::Context, f: (&str, &str), action: &str, extra: Value, done: crate::Done) {
     let mut params = json!({"server": f.0, "file": f.1, "action": action});
     if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         p.extend(e.clone());
@@ -72,7 +72,7 @@ fn manage(app: &mut FigApp, ctx: &egui::Context, f: (&str, &str), action: &str, 
 }
 
 /// Open recorded file `f` as its owner; its tab shows once the file arrives.
-pub(crate) fn open(app: &mut FigApp, f: &OnlineFile) {
+pub(crate) fn open(app: &mut LizardApp, f: &OnlineFile) {
     let Some(r) = app.run("collab.openFile", json!({"server": f.server, "file": f.file})) else { return };
     if r["alreadyOpen"] == true && !r["document"].is_null() {
         app.ui.home = false;
@@ -82,7 +82,7 @@ pub(crate) fn open(app: &mut FigApp, f: &OnlineFile) {
 }
 
 /// The Online section of the home screen, in `main`.
-pub fn section(app: &mut FigApp, ui: &mut Ui, main: Rect, t: &Tokens) {
+pub fn section(app: &mut LizardApp, ui: &mut Ui, main: Rect, t: &Tokens) {
     let ctx = ui.ctx().clone();
     // Shown again after something else was: ask the servers.
     let frame = ctx.cumulative_frame_nr();
@@ -121,7 +121,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, main: Rect, t: &Tokens) {
 }
 
 /// What the servers are being asked, and which couldn't say.
-fn status(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn status(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     if app.session.waiting_for(FILES) {
         return widgets::label(ui, tr("Checking the server…"), t.text_secondary);
     }
@@ -151,7 +151,7 @@ fn status(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// One file: its mark, name and details; a click opens it, the button at its end has its menu.
-fn row(app: &mut FigApp, ui: &mut Ui, t: &Tokens, f: &OnlineFile, busy: bool) {
+fn row(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, f: &OnlineFile, busy: bool) {
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
     let gone = f.state == FileState::Gone;
     let more = Rect::from_center_size(pos2(r.max.x - 18.0, r.center().y), vec2(24.0, 24.0));
@@ -199,7 +199,7 @@ fn row(app: &mut FigApp, ui: &mut Ui, t: &Tokens, f: &OnlineFile, busy: bool) {
         if let Some(code) = shared.and_then(|s| s.edit.code.as_deref())
             && item(ui, tr("Copy code"), true)
         {
-            app.services.clipboard_set_text(&figcraft_engine::figcraft_collab::code::grouped(code));
+            app.services.clipboard_set_text(&lizard_engine::lizard_collab::code::grouped(code));
             app.toast(tr("Join code copied"));
             ui.close();
         }
@@ -231,7 +231,7 @@ fn row(app: &mut FigApp, ui: &mut Ui, t: &Tokens, f: &OnlineFile, busy: bool) {
 }
 
 /// Drop `f` from the list on this computer, and say that the file itself stays.
-fn forget(app: &mut FigApp, f: &OnlineFile) {
+fn forget(app: &mut LizardApp, f: &OnlineFile) {
     if app.run("collab.forgetFile", json!({"server": f.server, "file": f.file})).is_none() {
         return;
     }
@@ -243,7 +243,7 @@ fn forget(app: &mut FigApp, f: &OnlineFile) {
 }
 
 /// Escape closes the section's dialogs; true when it did.
-pub fn dialog_keys(app: &mut FigApp, ctx: &egui::Context) {
+pub fn dialog_keys(app: &mut LizardApp, ctx: &egui::Context) {
     let o = &mut app.ui.online;
     if (o.remove.is_some() || o.rename.is_some()) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         o.remove = None;
@@ -252,7 +252,7 @@ pub fn dialog_keys(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// The confirmation of Remove from server…, and Rename on the server….
-pub fn dialogs(app: &mut FigApp, ctx: &egui::Context) {
+pub fn dialogs(app: &mut LizardApp, ctx: &egui::Context) {
     dialog_keys(app, ctx);
     let t = Tokens::get(ctx);
     if let Some((server, file, name)) = app.ui.online.remove.take() {
@@ -307,7 +307,7 @@ pub fn dialogs(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// The section's state for `ui.inspect`: no token, no link.
-pub fn inspect(app: &FigApp) -> Value {
+pub fn inspect(app: &LizardApp) -> Value {
     let files: Vec<Value> = app
         .session
         .prefs

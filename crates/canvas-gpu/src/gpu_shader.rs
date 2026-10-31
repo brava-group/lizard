@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use figcraft_doc::{ShaderDefinition, ShaderParameterControl};
+use lizard_doc::{ShaderDefinition, ShaderParameterControl};
 use wgpu::util::DeviceExt;
 
 #[derive(Default)]
@@ -20,8 +20,8 @@ impl GpuShader {
         if let Some(pipeline) = self.pipelines.get(&key) {
             return Ok(pipeline.clone());
         }
-        figcraft_shader::validate(def)?;
-        let source = format!("{}\n{}", figcraft_shader::PRELUDE, def.source);
+        lizard_shader::validate(def)?;
+        let source = format!("{}\n{}", lizard_shader::PRELUDE, def.source);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Lizard canvas shader fill"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -81,14 +81,14 @@ impl GpuShader {
     ) -> Result<wgpu::Texture, String> {
         if width == 0
             || height == 0
-            || width > figcraft_shader::MAX_DIMENSION
-            || height > figcraft_shader::MAX_DIMENSION
-            || u64::from(width) * u64::from(height) > figcraft_shader::MAX_PIXELS
+            || width > lizard_shader::MAX_DIMENSION
+            || height > lizard_shader::MAX_DIMENSION
+            || u64::from(width) * u64::from(height) > lizard_shader::MAX_PIXELS
         {
             return Err("shader texture dimensions exceed the GPU limit".into());
         }
         let pipeline = self.pipeline(device, def)?;
-        let mut uniforms = [0u8; 16 + figcraft_shader::MAX_PARAMETERS * 16];
+        let mut uniforms = [0u8; 16 + lizard_shader::MAX_PARAMETERS * 16];
         uniforms[0..4].copy_from_slice(&(width as f32).to_le_bytes());
         uniforms[4..8].copy_from_slice(&(height as f32).to_le_bytes());
         let frame_time = if def.features.animated && time.is_finite() { time.max(0.0) } else { 0.0 };

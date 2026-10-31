@@ -1,4 +1,4 @@
-//! The native `.figcraft` format.
+//! The native `.lizard` format.
 //!
 //! A zip archive holding `document.json` (the [`Document`] as JSON, with a `format`/`version`
 //! header; layer fields at their default values are left out and read back as those defaults),
@@ -28,14 +28,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use figcraft_doc::{Document, ImageData};
+use lizard_doc::{Document, ImageData};
 use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use sha2::Digest;
 
-pub const EXTENSION: &str = "figcraft";
-pub const FORMAT: &str = "figcraft";
+pub const EXTENSION: &str = "lizard";
+pub const FORMAT: &str = "lizard";
 pub const VERSION: u32 = 1;
 /// Largest archive member we read (guards against zip bombs).
 const MAX_MEMBER: u64 = 512 * 1024 * 1024;
@@ -358,17 +358,17 @@ pub(crate) fn json_options() -> zip::write::SimpleFileOptions {
     zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).compression_level(Some(JSON_LEVEL))
 }
 
-/// Write a `.figcraft` archive to bytes.
+/// Write a `.lizard` archive to bytes.
 pub fn save_bytes(doc: &Document, thumbnail_png: Option<&[u8]>) -> Result<Vec<u8>, FormatError> {
     save_bytes_with_versions(doc, thumbnail_png, &[])
 }
 
-/// Write a `.figcraft` archive with a version history (oldest first) to bytes.
+/// Write a `.lizard` archive with a version history (oldest first) to bytes.
 pub fn save_bytes_with_versions(doc: &Document, thumbnail_png: Option<&[u8]>, versions: &[Version]) -> Result<Vec<u8>, FormatError> {
     save_bytes_with_history(doc, thumbnail_png, versions, &[])
 }
 
-/// Write a `.figcraft` archive with a version history (oldest first) and branches to bytes.
+/// Write a `.lizard` archive with a version history (oldest first) and branches to bytes.
 pub fn save_bytes_with_history(
     doc: &Document,
     thumbnail_png: Option<&[u8]>,
@@ -444,7 +444,7 @@ fn put_versions<W: Write + Seek>(z: &mut zip::ZipWriter<W>, dir: &str, versions:
     Ok(())
 }
 
-/// Read a `.figcraft` archive (or bare JSON) from bytes. Returns the document and any repairs made.
+/// Read a `.lizard` archive (or bare JSON) from bytes. Returns the document and any repairs made.
 pub fn load_bytes(bytes: &[u8]) -> Result<(Document, Vec<String>), FormatError> {
     load_bytes_with_versions(bytes).map(|l| (l.doc, l.issues))
 }
@@ -476,7 +476,7 @@ pub(crate) struct ImageBudget {
     pub bytes: u64,
 }
 
-/// Read a `.figcraft` archive (or bare JSON) with its version history.
+/// Read a `.lizard` archive (or bare JSON) with its version history.
 pub fn load_bytes_with_versions(bytes: &[u8]) -> Result<Loaded, FormatError> {
     load_within(bytes, IMAGE_BUDGET)
 }
@@ -717,7 +717,7 @@ pub fn save_file(doc: &Document, path: &std::path::Path, thumbnail_png: Option<&
 
 /// Write `bytes` to `path` through a staging file and one atomic rename, so a reader of `path`
 /// sees either the previous file or the complete new one, never a partial write. The staging file
-/// is a uniquely named sibling (`<path>.tmp-figcraft-<process id>-<counter>`) created exclusively
+/// is a uniquely named sibling (`<path>.tmp-lizard-<process id>-<counter>`) created exclusively
 /// (`create_new`) and written through its own handle: a file or symlink that already exists at a
 /// staging name is never truncated or followed, and separate writers (also of separate processes)
 /// never share a staging file. On failure only the staging file this call created is removed, and
@@ -733,7 +733,7 @@ pub fn write_file_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Resul
     // of a dead process that now shares our process id can collide, and the next counter won't.
     for _ in 0..3 {
         let mut name = path.as_os_str().to_os_string();
-        name.push(format!(".tmp-figcraft-{}-{}", std::process::id(), STAGING.fetch_add(1, Relaxed)));
+        name.push(format!(".tmp-lizard-{}-{}", std::process::id(), STAGING.fetch_add(1, Relaxed)));
         let tmp = std::path::PathBuf::from(name);
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
             Ok(mut file) => {
@@ -781,7 +781,7 @@ mod version_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_doc::NodeKind;
+    use lizard_doc::NodeKind;
 
     fn png() -> Vec<u8> {
         let img = image::RgbaImage::from_pixel(3, 2, image::Rgba([255, 0, 0, 255]));
@@ -806,6 +806,16 @@ mod tests {
         // Bare JSON opens too.
         let json = serde_json::to_vec(&to_json(&d).unwrap()).unwrap();
         assert!(load_bytes(&json).is_ok());
+    }
+
+    #[test]
+    fn earlier_native_format_header_still_opens() {
+        let doc = Document::new("Earlier document");
+        let mut json = to_json(&doc).unwrap();
+        json["format"] = Value::String("earlier-editor".into());
+        let (loaded, issues) = from_json(&json.to_string()).unwrap();
+        assert!(issues.is_empty());
+        assert_eq!(loaded.name, doc.name);
     }
 
     #[test]

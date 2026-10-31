@@ -6,4 +6,4 @@ The standalone [`lizard-server`](server.md) is included in this repository so yo
 
 A server stores the files published to it and can read their contents. A share link or join code grants access according to its edit or view permission. Use `wss://` with a trusted TLS certificate when connecting over the internet. The server's settings determine whether publishing requires a server key, how long unused public files are retained, and which limits apply.
 
-The Lizard project does not receive your files through the built-in online sharing workflow unless you explicitly configure a server operated by the project in the future. The former FigCraft endpoint is not used by default, including when older saved preferences contain its old default address.
+The Lizard project does not receive your files through the built-in online sharing workflow unless you explicitly configure a server operated by the project in the future. The former Lizard endpoint is not used by default, including when older saved preferences contain its old default address.

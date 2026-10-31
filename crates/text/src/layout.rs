@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
-use figcraft_doc::{
+use harfrust::{Direction, Feature, ShapeOptions, ShaperInstance, Tag, UnicodeBuffer, Variation};
+use lizard_doc::{
     DecorationLength, DecorationStyle, LeadingTrim, ListStyle, ParaList, TextAlignH, TextAutoResize, TextCase, TextData, TextDecoration, TextStyle,
     valid_feature_tag,
 };
-use figcraft_geom::{Affine, BezPath, Rect};
-use harfrust::{Direction, Feature, ShapeOptions, ShaperInstance, Tag, UnicodeBuffer, Variation};
+use lizard_geom::{Affine, BezPath, Rect};
 
 use crate::color::{ColorInk, MAX_PX_PER_EM};
 use crate::fontdb::{Coords, Face, db, no_coords};
@@ -105,7 +105,7 @@ const MAX_DECO_STEPS: usize = 20_000;
 impl Decoration {
     /// The line's outline: a bar, a row of dots or a wave, `thickness` thick.
     pub fn path(&self) -> BezPath {
-        use figcraft_geom::kurbo::Shape;
+        use lizard_geom::kurbo::Shape;
         let (r, th) = (self.rect, self.thickness.max(0.01));
         let cy = r.center().y;
         match self.kind {
@@ -117,7 +117,7 @@ impl Decoration {
                     if x > r.x1 - th / 2.0 + 1e-9 && !p.elements().is_empty() {
                         break;
                     }
-                    p.extend(figcraft_geom::kurbo::Circle::new((x, cy), th / 2.0).to_path(0.05));
+                    p.extend(lizard_geom::kurbo::Circle::new((x, cy), th / 2.0).to_path(0.05));
                     x += th * 2.0;
                 }
                 p
@@ -127,7 +127,7 @@ impl Decoration {
                 let n = (((r.width() / period) * 8.0).ceil() as usize).clamp(2, MAX_DECO_STEPS);
                 let at = |i: usize, side: f64| {
                     let x = r.x0 + r.width() * i as f64 / n as f64;
-                    figcraft_geom::Point::new(x, cy + amp * (std::f64::consts::TAU * (x - r.x0) / period).sin() + side * th / 2.0)
+                    lizard_geom::Point::new(x, cy + amp * (std::f64::consts::TAU * (x - r.x0) / period).sin() + side * th / 2.0)
                 };
                 let mut p = BezPath::new();
                 p.move_to(at(0, -1.0));
@@ -818,7 +818,7 @@ pub fn layout(text: &TextData, box_width: Option<f64>, box_height: Option<f64>) 
                 };
                 let style = match look.color {
                     Some(c) => {
-                        let own = TextStyle { fills: Some(vec![figcraft_doc::color::Paint::solid(c)]), ..st.clone() };
+                        let own = TextStyle { fills: Some(vec![lizard_doc::color::Paint::solid(c)]), ..st.clone() };
                         let k = deco_styles.iter().position(|d| *d == own).unwrap_or_else(|| {
                             deco_styles.push(own);
                             deco_styles.len() - 1
@@ -860,7 +860,7 @@ pub fn layout(text: &TextData, box_width: Option<f64>, box_height: Option<f64>) 
 /// from the first item's start number; levels go 1. a. i. and • ◦ ▪, then round again.
 pub(crate) fn list_markers(lists: &[ParaList]) -> Vec<String> {
     const BULLETS: [&str; 3] = ["\u{2022}", "\u{25E6}", "\u{25AA}"];
-    let mut count = [(ListStyle::None, 0usize); figcraft_doc::MAX_LIST_INDENT as usize + 1];
+    let mut count = [(ListStyle::None, 0usize); lizard_doc::MAX_LIST_INDENT as usize + 1];
     lists
         .iter()
         .map(|pl| {
@@ -951,9 +951,9 @@ fn ink_cuts(glyphs: &[Glyph], y0: f64, y1: f64, gap: f64) -> Vec<(f64, f64)> {
     let mut cuts: Vec<(f64, f64)> = Vec::new();
     for g in glyphs {
         let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-        let mut prev: Option<figcraft_geom::Point> = None;
-        figcraft_geom::kurbo::flatten(g.path().iter(), 0.25, |el| {
-            use figcraft_geom::kurbo::PathEl;
+        let mut prev: Option<lizard_geom::Point> = None;
+        lizard_geom::kurbo::flatten(g.path().iter(), 0.25, |el| {
+            use lizard_geom::kurbo::PathEl;
             let p = match el {
                 PathEl::MoveTo(p) => {
                     prev = Some(p);
@@ -1161,7 +1161,7 @@ impl TextLayout {
             gs.iter().map(move |g| {
                 let pad = g.size.abs() * 0.5;
                 let r = Rect::new(g.x.min(g.x + g.advance) - pad, l.top - pad, g.x.max(g.x + g.advance) + pad, l.top + l.height + pad);
-                figcraft_geom::transform_rect_bbox(g.warp, r)
+                lizard_geom::transform_rect_bbox(g.warp, r)
             })
         });
         glyphs.chain(self.decorations.iter().map(|d| d.rect)).filter(|r| r.x0.is_finite() && r.y1.is_finite()).reduce(|a, b| a.union(b))
@@ -1233,8 +1233,8 @@ impl TextLayout {
     }
 
     /// Layout point `(x, y)` where it shows: moved onto the path for text on a path.
-    pub fn warp_point(&self, x: f64, y: f64) -> figcraft_geom::Point {
-        let p = figcraft_geom::Point::new(x, y);
+    pub fn warp_point(&self, x: f64, y: f64) -> lizard_geom::Point {
+        let p = lizard_geom::Point::new(x, y);
         let Some(on) = &self.on_path else { return p };
         let baseline = self.lines.iter().find(|l| y <= l.top + l.height).or(self.lines.last()).map_or(y, |l| l.baseline);
         on.frame(x, baseline).map_or(p, |f| f * p)
@@ -1242,11 +1242,11 @@ impl TextLayout {
 
     /// Text on a path: the char nearest to where `(x, y)` shows, by the glyph it falls nearest to.
     fn hit_on_path(&self, x: f64, y: f64) -> usize {
-        let p = figcraft_geom::Point::new(x, y);
+        let p = lizard_geom::Point::new(x, y);
         let near = self.glyphs.iter().filter(|g| g.char_end > g.char_start && g.warp.determinant().abs() > 1e-12).map(|g| {
             let q = g.warp.inverse() * p;
             let mid = g.x + g.advance / 2.0;
-            ((q - figcraft_geom::Point::new(mid, g.y - g.size / 3.0)).hypot(), if q.x < mid { g.char_start } else { g.char_end })
+            ((q - lizard_geom::Point::new(mid, g.y - g.size / 3.0)).hypot(), if q.x < mid { g.char_start } else { g.char_end })
         });
         near.min_by(|a, b| a.0.total_cmp(&b.0)).map_or(0, |(_, i)| i)
     }

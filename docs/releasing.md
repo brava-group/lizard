@@ -1,7 +1,7 @@
 # Releasing Lizard
 
 **Release automation is disabled while the inherited packaging is migrated to Lizard.** The
-instructions below describe the previous FigCraft release process and are retained for reference;
+instructions below describe the previous Lizard release process and are retained for reference;
 do not publish artifacts from these scripts under the Lizard name yet.
 
 The former workflow built
@@ -10,7 +10,7 @@ server for Linux, then created or updated a draft GitHub Release.
 
 This is Lizard's copy of the shared [release playbook](release-playbook.md) (PhotoCraft is the
 reference implementation). User-facing names say **Lizard**. Files, binaries and ids stay
-lowercase (`figcraft-<version>-<platform>-<arch>.<ext>`, `ai.storyteller.figcraft`). The
+lowercase (`lizard-<version>-<platform>-<arch>.<ext>`, `com.brava.lizard`). The
 operational runbook (secrets, the `release` ruleset, runner group, promoting the draft) is
 craftrules `release/cut-a-release.md`.
 
@@ -19,9 +19,9 @@ craftrules `release/cut-a-release.md`.
 | Thing | Value |
 |---|---|
 | Display name | Lizard |
-| Packages / binaries | `figcraft` (app), `figcraft-cli` (headless CLI), `figcraft-web` (browser) |
-| Bundle / app id | `ai.storyteller.figcraft` (CLI signing identifier `ai.storyteller.figcraft-cli`) |
-| Native document | `.figcraft`, MIME `application/x-figcraft`, UTI `ai.storyteller.figcraft.document` |
+| Packages / binaries | `lizard` (app), `lizard-cli` (headless CLI), `lizard-web` (browser) |
+| Bundle / app id | `com.brava.lizard` (CLI signing identifier `com.brava.lizard-cli`) |
+| Native document | `.lizard`, MIME `application/x-lizard`, UTI `com.brava.lizard.document` |
 | Also opens | `.svg`, `.png`, `.jpg`/`.jpeg` ("Open with", never the default app) |
 | WiX UpgradeCode | `7F8B9827-D065-41B7-A514-2A454B21F484` (fixed forever; never reuse it in another app) |
 | Linux categories | `Graphics;2DGraphics;VectorGraphics;X-Design;` (`Design` isn't a registered freedesktop category, so `desktop-file-validate` rejects it) |
@@ -62,7 +62,7 @@ online sharing stays off until the user enters one (local network sharing still 
 distribution can embed its own server address at build time with `LIZARD_DEFAULT_SERVER`:
 
 ```sh
-LIZARD_DEFAULT_SERVER=wss://design.example.org/ cargo build --release -p figcraft
+LIZARD_DEFAULT_SERVER=wss://design.example.org/ cargo build --release -p lizard
 ```
 
 The release workflow leaves it unset. See [online sharing and privacy](online-sharing-terms.md).
@@ -71,28 +71,28 @@ The release workflow leaves it unset. See [online sharing and privacy](online-sh
 
 | Platform | Artifacts | Built on |
 |---|---|---|
-| macOS 11+ (universal) | `figcraft-<v>-macos-universal.dmg`, `figcraft-cli-<v>-macos-universal.zip` | `macos-15-xlarge` |
-| Windows 10+ x64 / x86 / arm64 | `figcraft-<v>-windows-<arch>.msi`, `figcraft-<v>-windows-<arch>-portable.zip` | `windows-latest` (arm64 cross-compiled) |
-| Linux x86_64 / aarch64 | `figcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04` / `ubuntu-22.04-arm` (Flatpak: 24.04) |
-| Linux riscv64 | `figcraft-<v>-linux-riscv64.tar.gz` (CLI smoke-tested under QEMU; needs glibc ≥ 2.39) | cross-compiled on `ubuntu-24.04` against ports.ubuntu.com riscv64 libraries |
-| FreeBSD 14 x86_64 | `figcraft-<v>-freebsd-x86_64.tar.gz` | FreeBSD 14.3 VM on `ubuntu-latest` |
-| Web | `figcraft-web-<v>.zip` (static site; [`packaging/web/README.md`](../packaging/web/README.md)) | `ubuntu-latest` |
+| macOS 11+ (universal) | `lizard-<v>-macos-universal.dmg`, `lizard-cli-<v>-macos-universal.zip` | `macos-15-xlarge` |
+| Windows 10+ x64 / x86 / arm64 | `lizard-<v>-windows-<arch>.msi`, `lizard-<v>-windows-<arch>-portable.zip` | `windows-latest` (arm64 cross-compiled) |
+| Linux x86_64 / aarch64 | `lizard-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04` / `ubuntu-22.04-arm` (Flatpak: 24.04) |
+| Linux riscv64 | `lizard-<v>-linux-riscv64.tar.gz` (CLI smoke-tested under QEMU; needs glibc ≥ 2.39) | cross-compiled on `ubuntu-24.04` against ports.ubuntu.com riscv64 libraries |
+| FreeBSD 14 x86_64 | `lizard-<v>-freebsd-x86_64.tar.gz` | FreeBSD 14.3 VM on `ubuntu-latest` |
+| Web | `lizard-web-<v>.zip` (static site; [`packaging/web/README.md`](../packaging/web/README.md)) | `ubuntu-latest` |
 | Server, Linux x86_64 / aarch64 | `lizard-server-<v>-linux-<arch>.tar.gz` (the collaboration server; [`server.md`](server.md)) | `ubuntu-22.04` / `ubuntu-22.04-arm` |
 
-`figcraft-cli` ships in every desktop package (and its own macOS zip) when `apps/figcraft-cli`
+`lizard-cli` ships in every desktop package (and its own macOS zip) when `apps/lizard-cli`
 is in the workspace: `packaging/env.sh` sets `BINS`/`HAS_CLI` from that, and `package.ps1`,
-`figcraft.wxs` (`HasCli`), `nfpm.yaml` (`#cli` lines) and the Flatpak bundle follow it.
+`lizard.wxs` (`HasCli`), `nfpm.yaml` (`#cli` lines) and the Flatpak bundle follow it.
 
-`figcraft --version` prints the version and, in CI builds, the commit (`FIGCRAFT_BUILD_SHA`,
-read by `apps/figcraft/build.rs`).
+`lizard --version` prints the version and, in CI builds, the commit (`LIZARD_BUILD_SHA`,
+read by `apps/lizard/build.rs`).
 
-**The collaboration server** (`apps/figcraft-server`, binary `lizard-server`, see
+**The collaboration server** (`apps/lizard-server`, binary `lizard-server`, see
 [`server.md`](server.md)) is built by the `server` job with `packaging/server/package.sh`: a
 headless binary, so not part of `BINS` (which every desktop package installs) and no installer,
 desktop file or fonts. Its archive holds the binary, the licences, `server.md` and the deployment
 examples from `packaging/server/` (systemd unit, Caddyfile, nginx; the Dockerfile builds from
 the sources). Linux only for now; elsewhere operators build it with
-`cargo build --release -p figcraft-server`.
+`cargo build --release -p lizard-server`.
 
 **Fonts.** Every build job, the web one included (`web-craft-fonts`), checks out
 [craft-fonts](https://github.com/storytold/craft-fonts) at `craft-fonts-ref` (in `release.yml`) and
@@ -113,7 +113,7 @@ Noto Sans Georgian and the Archivo SemiBold wordmark, when the pin has them. Pac
 `MACOSX_DEPLOYMENT_TARGET=11.0`, joins them with `lipo` and assembles `Lizard.app`
 (`Contents/MacOS/Lizard`, `Contents/Resources/Lizard.icns`, `Info.plist` from
 `Info.plist.in`). The `.icns` is generated at packaging time with `iconutil` from the committed
-`assets/app-icon/figcraft-<size>.png` (made by `cargo xtask icon`); it is never committed.
+`assets/app-icon/lizard-<size>.png` (made by `cargo xtask icon`); it is never committed.
 Signing goes inside-out with the hardened runtime and a timestamp (empty entitlements), then the
 app is notarized and stapled, put on a DMG with an `Applications` link (`hdiutil makehybrid` +
 `convert`), and the DMG is signed, notarized and stapled. The CLI is signed with the same
@@ -125,18 +125,18 @@ Locally (no certificates: ad-hoc signature, no notarization):
 ```sh
 packaging/macos/package.sh --arch aarch64     # quick, host-only; omit --arch for universal
 packaging/macos/verify.sh --arch aarch64
-hdiutil attach -nobrowse -readonly dist/release/figcraft-*-macos-aarch64.dmg   # inspect, then detach
+hdiutil attach -nobrowse -readonly dist/release/lizard-*-macos-aarch64.dmg   # inspect, then detach
 ```
 
 ### Windows
 
 `packaging/windows/package.ps1 -Arch x64|x86|arm64` builds with `+crt-static` (no VC++
 redistributable), checks each exe's PE machine and subsystem (app GUI, CLI console), signs the
-exes, builds the MSI with WiX v5 (`figcraft.wxs`: per-machine, Start Menu shortcut, owner of
-`.figcraft`, "Open with" for SVG/PNG/JPEG, App Paths, setup wizard with art drawn from the app
+exes, builds the MSI with WiX v5 (`lizard.wxs`: per-machine, Start Menu shortcut, owner of
+`.lizard`, "Open with" for SVG/PNG/JPEG, App Paths, setup wizard with art drawn from the app
 icon), validates ICE50, signs the MSI and zips a portable build. `sign.ps1` uses a `.pfx`
 (`WINDOWS_CERTIFICATE*`) or Azure Trusted Signing (`AZURE_*`), else warns and leaves files
-unsigned. `apps/figcraft/build.rs` embeds the icon and version info with `winresource`.
+unsigned. `apps/lizard/build.rs` embeds the icon and version info with `winresource`.
 `.github/workflows/windows-arm64.yml` installs the arm64 MSI on real ARM64 hardware nightly.
 
 Locally on Windows: `dotnet tool install -g wix --version 5.0.2`,
@@ -146,15 +146,15 @@ Locally on Windows: `dotnet tool install -g wix --version 5.0.2`,
 ### Linux
 
 `packaging/linux/package.sh [--formats "appimage deb rpm tar"]` stages one FHS tree (binaries,
-`ai.storyteller.figcraft.desktop`, hicolor icons 16–512 px, AppStream metainfo, a
-shared-mime-info file for `.figcraft`) and builds every format from it: `.tar.gz`; `.deb` and
+`com.brava.lizard.desktop`, hicolor icons 16–512 px, AppStream metainfo, a
+shared-mime-info file for `.lizard`) and builds every format from it: `.tar.gz`; `.deb` and
 `.rpm` with [nfpm](https://nfpm.goreleaser.com/) (`nfpm.yaml` lists the dlopen'd runtime
 libraries as dependencies); and an `.AppImage` with update information and a `.zsync`, whose
 `AppRun` registers the desktop entry and icons on launch so Wayland docks show the right icon
-(`FIGCRAFT_NO_DESKTOP_INTEGRATION=1` opts out; covered by `apprun-test.sh`) and runs the bundled
-`figcraft-cli` for `Lizard.AppImage cli <args>`.
+(`LIZARD_NO_DESKTOP_INTEGRATION=1` opts out; covered by `apprun-test.sh`) and runs the bundled
+`lizard-cli` for `Lizard.AppImage cli <args>`.
 `flatpak-bundle.sh` repackages the tarball into a `.flatpak` with
-`flatpak/ai.storyteller.figcraft.bundle.yml` (freedesktop 26.08). `flatpak/ai.storyteller.figcraft.yml`
+`flatpak/com.brava.lizard.bundle.yml` (freedesktop 26.08). `flatpak/com.brava.lizard.yml`
 is the from-source manifest for a Flathub submission (not built in CI; vendor crates with
 `flatpak-cargo-generator.py` first). Both manifests keep the same runtime and `finish-args`
 (packaging-lint checks). Binaries are built on Ubuntu 22.04 and need glibc ≥ 2.35.
@@ -169,18 +169,18 @@ The `freebsd` job runs `packaging/freebsd/package.sh` in a FreeBSD 14.3 VM
 (packaging-lint runs it). `.github/workflows/freebsd.yml` builds, tests and packages nightly.
 
 ```sh
-tar -xzf figcraft-<v>-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local
+tar -xzf lizard-<v>-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local
 ```
 
 ### Web
 
-`packaging/web/package.sh` runs `trunk build --release` in `apps/figcraft-web` (`Trunk.toml`:
+`packaging/web/package.sh` runs `trunk build --release` in `apps/lizard-web` (`Trunk.toml`:
 `public_url = "./"`, output `dist/web`), fails if a `.wasm` exceeds 24 MiB, and zips the site
 with sample `_headers`/`.htaccess` and the hosting guide. The app uses WebGPU with a WebGL2
 fallback; `?webgl` forces WebGL2. 0.1.0: wasm 17.7 MiB raw, 6.7 MiB gzip, 4.4 MiB Brotli.
 
 The wasm is built with the size-optimised `web-release` Cargo profile (`opt-level = "s"`, fat
-LTO, one codegen unit; `data-cargo-profile` in `apps/figcraft-web/index.html`) and then
+LTO, one codegen unit; `data-cargo-profile` in `apps/lizard-web/index.html`) and then
 `wasm-opt -Oz`, which needs the wasm features rustc emits by default passed explicitly
 (`data-wasm-opt-params`). Sizes: 0.2.0 21.1 MiB and 0.3.0 25.8 MiB (failed the gate; the plugin
 interpreter and collaboration code landed) with the desktop `release` profile; 0.3.1 17.2 MiB

@@ -36,11 +36,11 @@ fn vector_edit_options_appear_above_the_normal_toolbar_and_can_end_editing() {
     let pen = pos2(main.min.x + 8.0 + 3.0 * (32.0 + 1.0 + 16.0 + 8.0) + 16.0, main.center().y);
     h.frame(vec![Event::PointerMoved(pen), click(pen)]);
     h.frame(vec![release(pen)]);
-    assert_eq!(h.app.session.ds().unwrap().vector_edit.as_ref().map(|edit| edit.tool), Some(figcraft_engine::vectoredit::VTool::Pen));
-    assert_eq!(h.app.session.tool.tool, figcraft_engine::ToolId::Move, "the main Pen button keeps vector edit mode active");
+    assert_eq!(h.app.session.ds().unwrap().vector_edit.as_ref().map(|edit| edit.tool), Some(lizard_engine::vectoredit::VTool::Pen));
+    assert_eq!(h.app.session.tool.tool, lizard_engine::ToolId::Move, "the main Pen button keeps vector edit mode active");
     h.frame(vec![Event::PointerMoved(bend), click(bend)]);
     h.frame(vec![release(bend)]);
-    assert_eq!(h.app.session.ds().unwrap().vector_edit.as_ref().map(|edit| edit.tool), Some(figcraft_engine::vectoredit::VTool::Bend));
+    assert_eq!(h.app.session.ds().unwrap().vector_edit.as_ref().map(|edit| edit.tool), Some(lizard_engine::vectoredit::VTool::Bend));
 
     let close = pos2(top.max.x - 8.0 - 12.0, top.center().y);
     h.frame(vec![Event::PointerMoved(close), click(close)]);

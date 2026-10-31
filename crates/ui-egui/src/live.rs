@@ -17,10 +17,10 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
-use figcraft_engine::live::{Access, PEOPLE, Role, SessionId, Share, Signal, Status, TOO_LARGE_TO_JOIN, Via, initials, parse_color, presence_page};
+use lizard_engine::live::{Access, PEOPLE, Role, SessionId, Share, Signal, Status, TOO_LARGE_TO_JOIN, Via, initials, parse_color, presence_page};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::{self, Tip};
 use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::{self, HeaderIcon};
@@ -222,7 +222,7 @@ fn chat_bubble(painter: &egui::Painter, tip: Pos2, name: Option<&str>, text: &st
 }
 
 /// Hand the pointer's page position to the session when it moved (or the view under it did).
-pub fn track_pointer(app: &mut FigApp, ctx: &egui::Context) {
+pub fn track_pointer(app: &mut LizardApp, ctx: &egui::Context) {
     let (id, live) = (app.session.live().id, app.session.live().status == Status::Live);
     let ui = &mut app.ui.live;
     // Another tab came to the front, or this file's session started or ended.
@@ -247,7 +247,7 @@ pub fn track_pointer(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// Others' selections and cursors on the canvas, and the frame around it while following.
-pub fn draw(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Context) {
+pub fn draw(app: &mut LizardApp, painter: &egui::Painter, ctx: &egui::Context) {
     let live = app.session.live();
     if live.peers.is_empty() {
         app.ui.live.shown.clear();
@@ -327,7 +327,7 @@ pub fn draw(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Context) {
 }
 
 /// Open your cursor chat (`/`, `collab.cursorChat` without text), with your current message.
-pub fn open_chat(app: &mut FigApp) {
+pub fn open_chat(app: &mut LizardApp) {
     if app.ui.live.chat.as_ref().is_none_or(|c| !c.editing) {
         app.ui.live.chat = Some(ChatBox { text: app.session.live().chat.clone(), typed: None, editing: true });
     }
@@ -336,7 +336,7 @@ pub fn open_chat(app: &mut FigApp) {
 /// Your cursor chat at your pointer: a bubble to type in. What you type shows to everyone as you
 /// type; Enter (or clicking away) sends it and closes the box, and the message fades; Escape takes
 /// it back at once. The box closes by itself when you haven't typed for a while.
-pub fn chat_box(app: &mut FigApp, ctx: &egui::Context) {
+pub fn chat_box(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut chat) = app.ui.live.chat.take() else { return };
     if app.session.live().status != Status::Live {
         return;
@@ -415,7 +415,7 @@ pub fn chat_box(app: &mut FigApp, ctx: &egui::Context) {
 
 /// While you spotlight, or someone does and you stopped following them: a banner on the canvas to
 /// stop, or to follow again.
-pub fn spotlight_banner(app: &mut FigApp, ctx: &egui::Context, canvas: Rect) {
+pub fn spotlight_banner(app: &mut LizardApp, ctx: &egui::Context, canvas: Rect) {
     let live = app.session.live();
     let (text, button, cmd, params) = if live.spotlighting {
         (tr("You're spotlighting: everyone follows your view").to_string(), tr("Stop"), "collab.spotlight", json!({"on": false}))
@@ -447,7 +447,7 @@ fn follow_frame(painter: &egui::Painter, canvas: Rect, name: &str, fill: Color32
 /// You and the others at the top of the right panel, within `area`: click someone to follow
 /// them (again to stop); right-click them to remove them from the session (when you host it or
 /// own the file); the chevron lists everyone.
-pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
+pub fn people_bar(app: &mut LizardApp, ui: &mut Ui, area: Rect) {
     let t = Tokens::get(ui.ctx());
     const R: f32 = 12.0;
     const STEP: f32 = 20.0;
@@ -461,7 +461,7 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
     let peers: Vec<(u32, String, Color32)> = live.peers.values().map(|p| (p.client_id, p.name.clone(), color(&p.color))).collect();
     let follow = live.follow;
     let (in_session, spotlighting) = (live.status == Status::Live, live.spotlighting);
-    let can_remove = figcraft_engine::live::can_remove_people(&app.session);
+    let can_remove = lizard_engine::live::can_remove_people(&app.session);
     let mut remove = None;
     // Room for the avatars after yours and the chevron.
     let fit = (((area.width() - 2.0 * R - 18.0) / STEP).floor() as usize).max(1);
@@ -570,7 +570,7 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
 }
 
 /// The Share button's popover: the live session (start, invite link, stop or leave) and export.
-pub fn share_popover(app: &mut FigApp, anchor: &egui::Response) {
+pub fn share_popover(app: &mut LizardApp, anchor: &egui::Response) {
     const WIDTH: f32 = 340.0;
     menu_popup(anchor).width(WIDTH).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
@@ -658,7 +658,7 @@ fn hosting_lines(ui: &mut Ui, t: &Tokens, info: &Value) {
 }
 
 /// Sharing online: where the file goes, and on request what that server says about its hosting.
-fn online_note(app: &mut FigApp, ui: &mut Ui, t: &Tokens, server: &str) {
+fn online_note(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, server: &str) {
     widgets::label(
         ui,
         &trf("People join from anywhere with a code. The file is kept on {server} while you share it.", &[("server", &server_host(server))]),
@@ -679,7 +679,7 @@ fn online_note(app: &mut FigApp, ui: &mut Ui, t: &Tokens, server: &str) {
 
 /// The join field with its Join button, on one row: what is typed stays while the popover or the
 /// home screen is closed. The session of the join that started, if one did.
-pub fn join_row(app: &mut FigApp, ui: &mut Ui, width: f32) -> Option<SessionId> {
+pub fn join_row(app: &mut LizardApp, ui: &mut Ui, width: f32) -> Option<SessionId> {
     let mut typed = std::mem::take(&mut app.ui.live.code);
     let joined = ui.horizontal(|ui| join_field(app, ui, &mut typed, egui::Id::new("live_join_code"), width, false)).inner;
     app.ui.live.code = typed;
@@ -689,7 +689,7 @@ pub fn join_row(app: &mut FigApp, ui: &mut Ui, width: f32) -> Option<SessionId> 
 /// The one way to join: a field for a join code or an invite link (pasted or typed; spaces,
 /// dashes and case don't matter in a code) and a Join button; Enter joins too. The session of the
 /// join that started (the field is cleared); what can't be joined says why and stays to be fixed.
-pub fn join_field(app: &mut FigApp, ui: &mut Ui, typed: &mut String, id: egui::Id, width: f32, focus: bool) -> Option<SessionId> {
+pub fn join_field(app: &mut LizardApp, ui: &mut Ui, typed: &mut String, id: egui::Id, width: f32, focus: bool) -> Option<SessionId> {
     let resp = widgets::text_input(ui, id, typed, width, tr("Code or invite link"));
     // It may hold a link with its secret: it isn't read out.
     a11y::text(&resp, tr("Join code or invite link"), "");
@@ -709,7 +709,7 @@ pub fn join_field(app: &mut FigApp, ui: &mut Ui, typed: &mut String, id: egui::I
 
 /// What join `session` is doing, under the field it was started from (the home screen): on its
 /// way, or why it failed.
-pub fn join_status(app: &FigApp, ui: &mut Ui, t: &Tokens, session: SessionId) {
+pub fn join_status(app: &LizardApp, ui: &mut Ui, t: &Tokens, session: SessionId) {
     match app.session.live.get(session).map(|l| &l.status) {
         Some(Status::Connecting) => widgets::label(ui, tr("Joining…"), t.text_secondary),
         Some(Status::Failed { reason }) => widgets::label(ui, &failure_text(reason), t.danger),
@@ -726,7 +726,7 @@ pub(crate) fn failure_text(reason: &str) -> Cow<'_, str> {
 
 /// Not in a session: your name, how to share (online or on the local network), start; or join
 /// one with a code. Everything else is under Advanced.
-fn start_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn start_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     ui.horizontal(|ui| {
         widgets::label(ui, tr("Your name"), t.text);
         let name = app.session.prefs.user_name.clone();
@@ -791,7 +791,7 @@ fn start_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 
 /// Under what starts a share: the join field, then the Advanced part (`advanced` draws it while
 /// it is open).
-fn join_and_advanced(app: &mut FigApp, ui: &mut Ui, t: &Tokens, advanced: impl FnOnce(&mut FigApp, &mut Ui, &Tokens)) {
+fn join_and_advanced(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, advanced: impl FnOnce(&mut LizardApp, &mut Ui, &Tokens)) {
     ui.separator();
     widgets::label(ui, tr("Join with a code"), t.text);
     let field_width = (ui.available_width() - 52.0).max(120.0);
@@ -807,7 +807,7 @@ fn join_and_advanced(app: &mut FigApp, ui: &mut Ui, t: &Tokens, advanced: impl F
 /// The file is on a server and not shared now: it is its owner's alone. Start sharing gives
 /// others new links and codes for this same file; taking it off the server is a separate,
 /// confirmed step under Advanced.
-fn private_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens, share: &Share) {
+fn private_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
     let host = server_host(share.server.split('?').next().unwrap_or_default()).to_string();
     widgets::label(
         ui,
@@ -827,7 +827,7 @@ fn private_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens, share: &Share) {
     // recorded with their online files): they can remove it.
     let removable = app.session.live().published.clone().map(|p| (share.server.clone(), p.file)).filter(|(server, file)| {
         app.session.live().published.as_ref().is_some_and(|p| p.owner.is_some())
-            || app.session.prefs.online_files.iter().any(|f| f.file == *file && figcraft_engine::online::same_server(&f.server, server))
+            || app.session.prefs.online_files.iter().any(|f| f.file == *file && lizard_engine::online::same_server(&f.server, server))
     });
     join_and_advanced(app, ui, t, |app, ui, t| {
         if widgets::button(ui, tr("Leave session"), false, true).on_hover_text(tr("Your copy stays open; the file stays on the server")).clicked() {
@@ -871,10 +871,10 @@ const NO_CODE_NOTE: &str =
 
 /// Sharing with a join code: the code, large; copying it or the link; what it lets people do;
 /// who is here; and stop.
-fn share_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens, share: &Share) {
+fn share_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
     let live = app.session.live();
     let online = share.via == Via::Online;
-    let stop = |app: &mut FigApp, ui: &mut Ui| {
+    let stop = |app: &mut LizardApp, ui: &mut Ui| {
         let hint = if online {
             tr("Others lose access and keep their copy; the file stays on the server for you")
         } else {
@@ -939,7 +939,7 @@ fn share_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens, share: &Share) {
 }
 
 /// Hosting: the invite link and URL to copy, and stop.
-fn host_ui(app: &mut FigApp, ui: &mut Ui) {
+fn host_ui(app: &mut LizardApp, ui: &mut Ui) {
     let Some(info) = app.session.live().info.clone() else { return };
     link_rows(app, ui, &[(tr("Invite link"), &info.link, tr("Invite link copied")), (tr("WebSocket URL"), &info.url, tr("WebSocket URL copied"))]);
     let t = Tokens::get(ui.ctx());
@@ -952,7 +952,7 @@ fn host_ui(app: &mut FigApp, ui: &mut Ui) {
 
 /// Joined, or publishing: where the file is and what you may do there, a published file's links,
 /// and leave (the file stays open as your copy).
-fn guest_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn guest_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     let live = app.session.live();
     let view = live.info.as_ref().is_some_and(|i| i.access == Access::View);
     if let Some(i) = live.info.as_ref() {
@@ -1003,13 +1003,13 @@ fn host_line(ui: &mut Ui, t: &Tokens, operator: &str, terms: &str) {
 /// When the server deletes the file unless someone opens it.
 fn expiry_line(ui: &mut Ui, t: &Tokens, expires: Option<u64>) {
     if let Some(e) = expires {
-        let date = figcraft_engine::live::utc_date(e);
+        let date = lizard_engine::live::utc_date(e);
         widgets::label(ui, &trf("The server deletes this file if nobody opens it before {date}.", &[("date", &date)]), t.text_secondary);
     }
 }
 
 /// Report the file you're in to the server's operator: a button, then a reason to send.
-fn report_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn report_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     let Some(mut reason) = app.ui.live.report.take() else {
         if widgets::button(ui, tr("Report this file…"), false, true).on_hover_text(tr("Tell the server's operator what is wrong with it")).clicked()
         {
@@ -1022,7 +1022,7 @@ fn report_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     let resp = ui.add(
         egui::TextEdit::singleline(&mut reason)
             .hint_text(tr("Spam, stolen work, abuse…"))
-            .char_limit(figcraft_engine::live::MAX_REPORT)
+            .char_limit(lizard_engine::live::MAX_REPORT)
             .desired_width(ui.available_width())
             .id(egui::Id::new("live_report_reason")),
     );
@@ -1048,7 +1048,7 @@ fn report_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// Links to copy: a label, the link (elided, monospace) and a Copy button each.
-fn link_rows(app: &mut FigApp, ui: &mut Ui, rows: &[(&str, &String, &str)]) {
+fn link_rows(app: &mut LizardApp, ui: &mut Ui, rows: &[(&str, &String, &str)]) {
     for (label, value, what) in rows {
         ui.horizontal(|ui| {
             let t = Tokens::get(ui.ctx());
@@ -1067,24 +1067,24 @@ fn link_rows(app: &mut FigApp, ui: &mut Ui, rows: &[(&str, &String, &str)]) {
 }
 
 /// Open the Join dialog, with `link` in its field (focused).
-pub fn open_join(app: &mut FigApp, link: &str) {
+pub fn open_join(app: &mut LizardApp, link: &str) {
     app.ui.live.join = Some(link.to_string());
     app.ui.live.focus_join = true;
 }
 
-/// An invite link the app was opened with (`figcraft figcraft://join?…`): the Join dialog opens
+/// An invite link the app was opened with (`lizard lizard://join?…`): the Join dialog opens
 /// with the link filled in, so joining is the person's own choice.
 ///
-/// The system hands the app any `figcraft://` link that is followed, which may be a page, a
+/// The system hands the app any `lizard://` link that is followed, which may be a page, a
 /// message or a document rather than something the person meant to act on, so the link is shown
 /// and confirmed rather than acted on.
-pub fn open_invite(app: &mut FigApp, link: &str) {
+pub fn open_invite(app: &mut LizardApp, link: &str) {
     open_join(app, link.trim());
 }
 
 /// Escape closes the Join or Publish dialog (before the canvas's shortcuts see it: it doesn't
 /// deselect).
-pub fn dialog_keys(app: &mut FigApp, ctx: &egui::Context) {
+pub fn dialog_keys(app: &mut LizardApp, ctx: &egui::Context) {
     let live = &mut app.ui.live;
     if (live.join.is_some() || live.publish.is_some()) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         live.join = None;
@@ -1093,7 +1093,7 @@ pub fn dialog_keys(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// File ▸ Join live session: type a join code or paste an invite link.
-pub fn join_dialog(app: &mut FigApp, ctx: &egui::Context) {
+pub fn join_dialog(app: &mut LizardApp, ctx: &egui::Context) {
     // The editor takes Escape before its shortcuts; the home screen has none.
     dialog_keys(app, ctx);
     let Some(mut link) = app.ui.live.join.take() else { return };
@@ -1124,7 +1124,7 @@ pub fn join_dialog(app: &mut FigApp, ctx: &egui::Context) {
 
 /// Open the Publish to server dialog for the open file, with the last address used this run in
 /// it (the server in Preferences is what Share ▸ Online uses: this dialog is for another one).
-pub fn open_publish(app: &mut FigApp) {
+pub fn open_publish(app: &mut LizardApp) {
     if !app.session.live.can_host() {
         app.toast(tr("Publishing to a server needs the desktop app; in the browser you can join a server's files"));
         return;
@@ -1141,7 +1141,7 @@ fn has_key(server: &str) -> bool {
 
 /// Ask the server at `server` about its hosting in the background; the answer goes into the
 /// Publish dialog while it still shows that address, and is kept for the Share popover.
-fn ask_server(app: &mut FigApp, ctx: &egui::Context, server: String) {
+fn ask_server(app: &mut LizardApp, ctx: &egui::Context, server: String) {
     app.run_background(
         ctx,
         SERVER_INFO,
@@ -1159,7 +1159,7 @@ const SERVER_INFO: &str = "collab.serverInfo";
 
 /// Share ▸ Publish to server…: the server's address (with its key, unless the server is open to
 /// the public: it is asked first) and the file's name.
-pub fn publish_dialog(app: &mut FigApp, ctx: &egui::Context) {
+pub fn publish_dialog(app: &mut LizardApp, ctx: &egui::Context) {
     published_dialog(app, ctx);
     let Some(mut form) = app.ui.live.publish.take() else { return };
     let t = Tokens::get(ctx);
@@ -1248,7 +1248,7 @@ pub fn publish_dialog(app: &mut FigApp, ctx: &egui::Context) {
 
 /// The file just published from the dialog without the key: its links and its owner token, shown
 /// this once, with where it is hosted and when it expires.
-fn published_dialog(app: &mut FigApp, ctx: &egui::Context) {
+fn published_dialog(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(live) = app.ui.live.owner.and_then(|id| app.session.live.get(id)) else {
         // Nothing published without a key, or it didn't get there (the message says why).
         app.ui.live.owner = None;
@@ -1287,7 +1287,7 @@ fn published_dialog(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// Live session state for `ui.inspect`.
-pub fn inspect(app: &FigApp) -> serde_json::Value {
+pub fn inspect(app: &LizardApp) -> serde_json::Value {
     let l = app.session.live();
     json!({
         "session": (l.id != 0).then_some(l.id),
@@ -1319,6 +1319,6 @@ pub fn inspect(app: &FigApp) -> serde_json::Value {
 
 /// Peer ids drawn on the canvas, by what they point at (tests).
 #[cfg(test)]
-pub(crate) fn shown_at(app: &FigApp) -> Vec<(u32, (f64, f64))> {
+pub(crate) fn shown_at(app: &LizardApp) -> Vec<(u32, (f64, f64))> {
     app.ui.live.shown.iter().map(|(k, v)| (*k, *v)).collect()
 }

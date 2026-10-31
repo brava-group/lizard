@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use egui::{Color32, CornerRadius, Id, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
-use figcraft_doc::{Document, NodeId};
+use lizard_doc::{Document, NodeId};
 use serde_json::{Value, json};
 
-use crate::{FigApp, RightTab};
+use crate::{LizardApp, RightTab};
 
 const HANDLE_R: f32 = 7.0;
 
@@ -31,12 +31,12 @@ struct Noodle {
     pts: [Pos2; 4],
 }
 
-fn active(app: &FigApp) -> bool {
+fn active(app: &LizardApp) -> bool {
     app.ui.right_tab == RightTab::Prototype && app.ui.present.is_none()
 }
 
 /// Screen rect of a node's axis-aligned page bounds.
-fn screen_rect(app: &FigApp, doc: &Document, id: NodeId) -> Option<Rect> {
+fn screen_rect(app: &LizardApp, doc: &Document, id: NodeId) -> Option<Rect> {
     let b = doc.world_bounds(id)?;
     Some(Rect::from_min_max(app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1)))
 }
@@ -70,13 +70,13 @@ pub(crate) fn sources(ctx: &egui::Context, doc: &Arc<Document>, page: NodeId) ->
     })
 }
 
-fn noodles(app: &FigApp, ctx: &egui::Context, doc: &Arc<Document>, page: NodeId) -> Vec<Noodle> {
+fn noodles(app: &LizardApp, ctx: &egui::Context, doc: &Arc<Document>, page: NodeId) -> Vec<Noodle> {
     let mut out = Vec::new();
     for &id in sources(ctx, doc, page).iter() {
         let Some(n) = doc.node(id) else { continue };
         let Some(from) = screen_rect(app, doc, id) else { continue };
         for (k, it) in n.interactions.iter().enumerate() {
-            let Some(dest) = figcraft_doc::proto::walk(&it.actions).find_map(|a| a.dest()) else { continue };
+            let Some(dest) = lizard_doc::proto::walk(&it.actions).find_map(|a| a.dest()) else { continue };
             // Change-to targets are variants; draw to them as they are.
             let Some(to) = screen_rect(app, doc, dest) else { continue };
             if doc.page_of(dest) != Some(page) {
@@ -114,7 +114,7 @@ fn segment_distance(a: Pos2, b: Pos2, q: Pos2) -> f32 {
 }
 
 /// Handle centres of the selected layers (right edge, vertically centred).
-fn handles(app: &FigApp, doc: &Document, sel: &[NodeId]) -> Vec<(NodeId, Pos2)> {
+fn handles(app: &LizardApp, doc: &Document, sel: &[NodeId]) -> Vec<(NodeId, Pos2)> {
     sel.iter()
         .take(32)
         .filter(|i| doc.node(**i).is_some_and(|n| !n.is_page()))
@@ -124,7 +124,7 @@ fn handles(app: &FigApp, doc: &Document, sel: &[NodeId]) -> Vec<(NodeId, Pos2)> 
 
 /// The top-level frame under a screen point (top-most first), else the innermost section there
 /// (a connection to a section opens the frame of it shown last).
-fn frame_at(app: &FigApp, doc: &Document, page: NodeId, p: Pos2) -> Option<NodeId> {
+fn frame_at(app: &LizardApp, doc: &Document, page: NodeId, p: Pos2) -> Option<NodeId> {
     let pt = app.to_page(p);
     let under = |i: &NodeId| doc.world_bounds(*i).is_some_and(|b| b.contains(pt));
     doc.top_frames(page).into_iter().rev().find(under).or_else(|| doc.sections_in(page).into_iter().rev().find(under))
@@ -146,7 +146,7 @@ fn plus_handle(painter: &egui::Painter, c: Pos2, hot: bool) {
 }
 
 /// Draw connections, handles and a connection being dragged.
-pub fn draw(app: &FigApp, painter: &egui::Painter) {
+pub fn draw(app: &LizardApp, painter: &egui::Painter) {
     if !active(app) {
         return;
     }
@@ -177,7 +177,7 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
             && let Some(dest) = doc
                 .node(nd.source)
                 .and_then(|n| n.interactions.get(nd.index))
-                .and_then(|it| figcraft_doc::proto::walk(&it.actions).find_map(|a| a.dest()))
+                .and_then(|it| lizard_doc::proto::walk(&it.actions).find_map(|a| a.dest()))
             && let Some(r) = screen_rect(app, doc, dest)
         {
             painter.rect_stroke(
@@ -223,7 +223,7 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 
 /// Canvas input while the Prototype tab is open. Returns true when it consumed the gesture
 /// (dragging from a connection handle, or clicking a noodle).
-pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
+pub fn input(app: &mut LizardApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
     let ctx = ui.ctx().clone();
     let drag: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if !active(app) {
@@ -299,7 +299,7 @@ mod tests {
     /// else on the canvas does, so a later Delete can't take the page (#859).
     #[test]
     fn a_press_on_a_connection_handle_ends_the_pages_list_focus() {
-        let mut s = figcraft_engine::Session::new();
+        let mut s = lizard_engine::Session::new();
         let a = s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 200, "height": 150})).unwrap();
         let a = crate::present_tests::id(&a);
         s.execute("select.set", &json!({"ids": [a]})).unwrap();

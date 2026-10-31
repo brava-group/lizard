@@ -1,4 +1,4 @@
-# CI for pull requests and main: format, clippy, tests, dependency layering, asset attribution and
+# CI for pull requests and main: format, clippy, tests, dependency layering, asset licences and
 # the wasm32 check (the same gates as `cargo xtask ci`). Platform release workflows will be added
 # after Lizard's packaging identities and signing are configured.
 name: CI
@@ -65,7 +65,7 @@ jobs:
       - name: Dependency layering
         run: cargo run --locked -q -p xtask -- layers
 
-      - name: Asset attribution
+      - name: Asset licences
         run: cargo run --locked -q -p xtask -- assets
 
   wasm:
@@ -82,6 +82,6 @@ jobs:
           key: wasm32
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
-      # The engine, the UI crate and apps/figcraft-web must keep compiling for the browser.
+      # The engine, the UI crate and apps/lizard-web must keep compiling for the browser.
       - name: Check wasm-safe crates
         run: cargo run --locked -q -p xtask -- wasm

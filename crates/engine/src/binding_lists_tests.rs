@@ -2,8 +2,8 @@
 //! effect bindings follow their effects when the list is reordered or shrinks, and removing the
 //! first fill takes its binding with it.
 
-use figcraft_color::{Color, PaintKind};
-use figcraft_doc::{EffectKind, NodeId};
+use lizard_color::{Color, PaintKind};
+use lizard_doc::{EffectKind, NodeId};
 use serde_json::json;
 
 use crate::Session;

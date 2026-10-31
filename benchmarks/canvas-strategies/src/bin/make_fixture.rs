@@ -5,15 +5,15 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
-use figcraft_color::{ImageScaleMode, Paint};
-use figcraft_doc::proto::{Action, Easing, Flow, Interaction, Transition, Trigger};
-use figcraft_doc::{Document, ImageData, Node, NodeId, NodeKind};
-use figcraft_geom::Affine;
+use lizard_color::{ImageScaleMode, Paint};
+use lizard_doc::proto::{Action, Easing, Flow, Interaction, Transition, Trigger};
+use lizard_doc::{Document, ImageData, Node, NodeId, NodeKind};
+use lizard_geom::Affine;
 
-const OUTPUT: &str = "benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft";
+const OUTPUT: &str = "benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard";
 
 fn add_source(dest: &mut Document, page: NodeId, path: &str, offset: (f64, f64)) -> Result<Vec<NodeId>, Box<dyn Error>> {
-    let (source, warnings) = figcraft_format::load_file(Path::new(path))?;
+    let (source, warnings) = lizard_format::load_file(Path::new(path))?;
     if !warnings.is_empty() {
         return Err(format!("{path}: {warnings:?}").into());
     }
@@ -43,7 +43,7 @@ fn add_source(dest: &mut Document, page: NodeId, path: &str, offset: (f64, f64))
 }
 
 fn image_cards(doc: &mut Document, page: NodeId) -> Result<(), Box<dyn Error>> {
-    let bytes = std::fs::read("assets/app-icon/figcraft-512.png")?;
+    let bytes = std::fs::read("assets/app-icon/lizard-512.png")?;
     let key = "benchmark-local-app-icon".to_string();
     doc.images.insert(key.clone(), ImageData { bytes: Arc::new(bytes), width: 512, height: 512 });
     for row in 0..3 {
@@ -105,12 +105,12 @@ fn connect_screens(doc: &mut Document, page: NodeId, roots: &[NodeId], name: &st
 fn main() -> Result<(), Box<dyn Error>> {
     let mut doc = Document::new("Lizard ultrawide design workbook");
     let page = doc.current_page.ok_or("new document has no page")?;
-    let app = add_source(&mut doc, page, "examples/ridgeline-app.figcraft", (150.0, 160.0))?;
-    let onboarding = add_source(&mut doc, page, "examples/ridgeline-onboarding.figcraft", (150.0, 1350.0))?;
-    let dashboard = add_source(&mut doc, page, "examples/ridgeline-studio-dashboard.figcraft", (1500.0, 160.0))?;
-    let glass = add_source(&mut doc, page, "examples/glass-and-vectors.figcraft", (2600.0, 1420.0))?;
-    let system = add_source(&mut doc, page, "examples/ridgeline-design-system.figcraft", (5000.0, 160.0))?;
-    let icon = add_source(&mut doc, page, "assets/app-icon/Lizard-new-icon.figcraft", (1900.0, 2700.0))?;
+    let app = add_source(&mut doc, page, "examples/ridgeline-app.lizard", (150.0, 160.0))?;
+    let onboarding = add_source(&mut doc, page, "examples/ridgeline-onboarding.lizard", (150.0, 1350.0))?;
+    let dashboard = add_source(&mut doc, page, "examples/ridgeline-studio-dashboard.lizard", (1500.0, 160.0))?;
+    let glass = add_source(&mut doc, page, "examples/glass-and-vectors.lizard", (2600.0, 1420.0))?;
+    let system = add_source(&mut doc, page, "examples/ridgeline-design-system.lizard", (5000.0, 160.0))?;
+    let icon = add_source(&mut doc, page, "assets/app-icon/Lizard-new-icon.lizard", (1900.0, 2700.0))?;
     connect_screens(&mut doc, page, &app, "Trail app");
     connect_screens(&mut doc, page, &onboarding, "Trail onboarding");
     for row in 1..4 {
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             _ => None,
         })
         .unwrap_or(0);
-    figcraft_format::save_file(&doc, Path::new(OUTPUT), None)?;
+    lizard_format::save_file(&doc, Path::new(OUTPUT), None)?;
     println!(
         "fixture={OUTPUT} nodes={nodes} top_frames={frames} effects={effects} auto_layout={auto_layout} images={} interactions={interactions} flows={flows}",
         doc.images.len()

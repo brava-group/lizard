@@ -3,10 +3,10 @@
 use std::error::Error;
 use std::time::Instant;
 
-use figcraft_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeKind};
-use figcraft_render::{Options, View, render_view};
+use lizard_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_with_cached_noise_in_view};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeKind};
+use lizard_render::{Options, View, render_view};
 
 fn difference(actual: &[u8], reference: &[u8]) -> (f64, f64, u8) {
     let mut total = 0u64;

@@ -2,10 +2,10 @@
 
 use base64::Engine as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_doc::NodeId;
+use lizard_doc::NodeId;
 use serde::{Deserialize, Serialize};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y;
 use crate::icons::{self, AgentIcon, LayerIcon};
 use crate::primitives::{Menu, MenuItem, ShimmerDirection, ShimmerText};
@@ -292,11 +292,11 @@ pub struct AgentUi {
     pub models_loading_until: Option<web_time::Instant>,
 }
 
-fn document_key(app: &FigApp) -> String {
+fn document_key(app: &LizardApp) -> String {
     app.session.ds().ok().map_or_else(|| "sem-documento".to_string(), |ds| ds.path.clone().unwrap_or_else(|| format!("untitled:{}", ds.uid)))
 }
 
-fn save_history(app: &mut FigApp) {
+fn save_history(app: &mut LizardApp) {
     if let Ok(value) = serde_json::to_value(&app.ui.agent.conversations) {
         app.services.agent_history_save(&value);
     }
@@ -306,7 +306,7 @@ fn agent_message(chat: &mut Conversation, index: usize) -> Option<&mut ChatMessa
     chat.messages.iter_mut().rev().find(|message| message.role == "assistant" && message.agent_index == index)
 }
 
-pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
+pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
     if !app.ui.agent.history_loaded {
         app.ui.agent.history_loaded = true;
         if let Ok(mut chats) = serde_json::from_value::<Vec<Conversation>>(app.services.agent_history_load()) {
@@ -540,7 +540,7 @@ pub fn sync(app: &mut FigApp, ctx: &egui::Context) {
     }
 }
 
-fn selected_context(app: &FigApp) -> Vec<ChatNodeRef> {
+fn selected_context(app: &LizardApp) -> Vec<ChatNodeRef> {
     let Ok(ds) = app.session.ds() else { return Vec::new() };
     ds.selection
         .iter()
@@ -552,7 +552,7 @@ fn selected_context(app: &FigApp) -> Vec<ChatNodeRef> {
 
 const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 
-fn attach_image(app: &mut FigApp, name: String, bytes: Vec<u8>) -> Result<(), String> {
+fn attach_image(app: &mut LizardApp, name: String, bytes: Vec<u8>) -> Result<(), String> {
     if app.ui.agent.images.len() >= 4
         || bytes.is_empty()
         || bytes.len().saturating_add(app.ui.agent.images.iter().map(|image| image.bytes.len()).sum::<usize>()) > MAX_IMAGE_BYTES
@@ -577,7 +577,7 @@ fn attach_image(app: &mut FigApp, name: String, bytes: Vec<u8>) -> Result<(), St
     Ok(())
 }
 
-fn attach_rgba_image(app: &mut FigApp, width: u32, height: u32, rgba: Vec<u8>) {
+fn attach_rgba_image(app: &mut LizardApp, width: u32, height: u32, rgba: Vec<u8>) {
     let Some(expected) = usize::try_from(width).ok().and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)?.checked_mul(4))) else {
         app.toast("A imagem da área de transferência é grande demais.");
         return;
@@ -601,7 +601,7 @@ fn attach_rgba_image(app: &mut FigApp, width: u32, height: u32, rgba: Vec<u8>) {
     }
 }
 
-fn attach_clipboard_image(app: &mut FigApp) {
+fn attach_clipboard_image(app: &mut LizardApp) {
     let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
         app.toast("Não há uma imagem na área de transferência.");
         return;
@@ -609,7 +609,7 @@ fn attach_clipboard_image(app: &mut FigApp) {
     attach_rgba_image(app, width, height, rgba);
 }
 
-fn paste_image_into_composer(app: &mut FigApp, ui: &Ui) {
+fn paste_image_into_composer(app: &mut LizardApp, ui: &Ui) {
     if !ui.memory(|memory| memory.has_focus(Id::new("agent_prompt"))) {
         return;
     }
@@ -624,7 +624,7 @@ fn paste_image_into_composer(app: &mut FigApp, ui: &Ui) {
     }
     // A copied design may include a PNG preview. Keep that paste on the design path; ordinary
     // HTML or text alongside a real image does not turn the image into text in the composer.
-    if app.services.clipboard_get_html().is_some_and(|html| figcraft_engine::cmd::edit::design_clipboard_buffer(&html).is_some()) {
+    if app.services.clipboard_get_html().is_some_and(|html| lizard_engine::cmd::edit::design_clipboard_buffer(&html).is_some()) {
         return;
     }
     let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
@@ -641,7 +641,7 @@ fn paste_image_into_composer(app: &mut FigApp, ui: &Ui) {
     attach_rgba_image(app, width, height, rgba);
 }
 
-fn send_prompt(app: &mut FigApp) {
+fn send_prompt(app: &mut LizardApp) {
     let prompt = app.ui.agent.draft.trim().to_string();
     let selected_nodes = selected_context(app);
     if (prompt.is_empty() && selected_nodes.is_empty() && app.ui.agent.images.is_empty()) || app.ui.agent.busy {
@@ -786,7 +786,7 @@ fn send_prompt(app: &mut FigApp) {
     }
 }
 
-fn begin_next_variant(app: &mut FigApp) {
+fn begin_next_variant(app: &mut LizardApp) {
     let Some(conversation) = app.ui.agent.runtime_conversation else { return };
     let Ok(ds) = app.session.ds() else {
         app.ui.agent.busy = false;
@@ -900,7 +900,7 @@ impl AgentUi {
     }
 }
 
-fn stop_chat(app: &mut FigApp) {
+fn stop_chat(app: &mut LizardApp) {
     app.ui.agent.presence = AgentPresence::default();
     app.services.agent_stop();
     app.services.agent_reset();
@@ -933,7 +933,7 @@ fn stop_chat(app: &mut FigApp) {
     app.ui.agent.runtime_conversation = None;
 }
 
-fn reset_chat(app: &mut FigApp) {
+fn reset_chat(app: &mut LizardApp) {
     stop_chat(app);
     app.ui.agent.new_chat();
 }
@@ -1157,7 +1157,7 @@ fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -
     (locate.clicked(), exclude.clicked())
 }
 
-pub fn show(app: &mut FigApp, ui: &mut Ui) {
+pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     if app.ui.agent.connection.as_ref().is_none_or(|(kind, _)| *kind != app.ui.agent.agent) {
         let kind = app.ui.agent.agent;
         app.ui.agent.connection = Some((kind, app.services.agent_connection(kind)));
@@ -1851,7 +1851,7 @@ mod tests {
     use super::*;
     use crate::{NoServices, Services};
     use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
-    use figcraft_engine::Session;
+    use lizard_engine::Session;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
@@ -1884,7 +1884,7 @@ mod tests {
     }
 
     fn paste_into_agent(events: Vec<Event>) {
-        let mut app = FigApp::new(Session::new(), Box::new(ImagePasteClipboard));
+        let mut app = LizardApp::new(Session::new(), Box::new(ImagePasteClipboard));
         app.ui.left_tab = crate::LeftTab::Agent;
         let ctx = egui::Context::default();
         for (time, events) in [(0.0, Vec::new()), (1.0 / 60.0, Vec::new()), (2.0 / 60.0, events)] {
@@ -1917,7 +1917,7 @@ mod tests {
     fn sending_a_prompt_streams_an_answer_into_local_chat() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
         app.ui.agent.history_loaded = true;
         app.ui.agent.draft = "Crie um frame".into();
         send_prompt(&mut app);
@@ -1945,7 +1945,7 @@ mod tests {
     fn parallel_agents_complete_independently_before_the_next_variant() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
         app.ui.agent.history_loaded = true;
         app.ui.agent.agent_count = 2;
         app.ui.agent.variant_count = 2;
@@ -1992,7 +1992,7 @@ mod tests {
     fn attached_agent_activity_targets_the_current_document_and_adds_preview() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
         app.ui.agent.history_loaded = true;
         app.ui.agent.draft = "Confira o frame".into();
         send_prompt(&mut app);
@@ -2037,7 +2037,7 @@ mod tests {
     fn agent_frame_edit_starts_a_transient_shimmer() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
         let frame =
             app.session.execute("node.create", &json!({"type":"frame", "x":140, "y":90, "width":320, "height":240})).unwrap()["id"].as_u64().unwrap();
         app.ui.agent.history_loaded = true;
@@ -2060,7 +2060,7 @@ mod tests {
     fn parallel_agent_preview_attaches_to_its_own_response() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
         app.ui.agent.history_loaded = true;
         app.ui.agent.agent_count = 2;
         app.ui.agent.draft = "Confira o frame".into();
@@ -2081,7 +2081,7 @@ mod tests {
     fn selected_nodes_are_context_refs_and_excluding_one_keeps_canvas_selection() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events }));
         app.ui.agent.history_loaded = true;
         let first = app.session.execute("node.create", &json!({"type":"rectangle", "name":"First"})).unwrap()["id"].as_u64().unwrap();
         let second = app.session.execute("node.create", &json!({"type":"rectangle", "name":"Second"})).unwrap()["id"].as_u64().unwrap();
@@ -2101,7 +2101,7 @@ mod tests {
     fn png_attachment_is_sent_as_a_separate_acp_image_and_can_be_retried() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut app = FigApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
         app.ui.agent.history_loaded = true;
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgba8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
@@ -2117,7 +2117,7 @@ mod tests {
 
     #[test]
     fn mcp_edits_are_tied_to_the_document_and_undo_entries_are_identified() {
-        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
         let uid = app.session.ds().unwrap().uid;
         let ctx = egui::Context::default();
         let edit = json!({"__agent_document":uid,"command":"node.create","params":{"type":"frame","width":200,"height":100}});
@@ -2135,7 +2135,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
         let uid = app.session.ds().unwrap().uid;
         let guard = Arc::new(AtomicBool::new(true));
         let (reply, received) = std::sync::mpsc::channel();

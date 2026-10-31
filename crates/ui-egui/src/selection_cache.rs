@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
-use figcraft_doc::{Document, Node, NodeId};
+use lizard_doc::{Document, Node, NodeId};
 
 struct Shown {
     doc: Weak<Document>,

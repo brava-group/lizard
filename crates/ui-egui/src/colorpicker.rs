@@ -2,13 +2,13 @@
 //! hex and RGB fields, gradient stops, image and pattern fills and document colours.
 
 use egui::{Align2, Color32, CornerRadius, Id, Mesh, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::{
+use lizard_color::{
     Color, ColorStop, Gradient, GradientKind, Hsb, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternAlign, PatternPaint, PatternTile,
 };
-use figcraft_doc::{NodeId, NodeKind};
+use lizard_doc::{NodeId, NodeKind};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
@@ -34,7 +34,7 @@ pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
     library_tab::create_variable(ctx, color);
 }
 
-pub(crate) fn show_standalone_creation(app: &mut FigApp, ctx: &egui::Context) {
+pub(crate) fn show_standalone_creation(app: &mut LizardApp, ctx: &egui::Context) {
     library_tab::show_standalone(app, ctx);
 }
 #[path = "colorpicker_gradient.rs"]
@@ -50,7 +50,7 @@ mod shader_tab;
 pub enum PickerTarget {
     PageBackground,
     SelectionColor {
-        targets: Vec<figcraft_engine::selection_colors::PaintTarget>,
+        targets: Vec<lizard_engine::selection_colors::PaintTarget>,
         selection: Vec<NodeId>,
         document: u64,
     },
@@ -109,21 +109,21 @@ pub enum PickerTarget {
 }
 
 /// The paints of colour style `id`.
-fn style_paints(doc: &figcraft_doc::Document, id: &str) -> Option<Vec<Paint>> {
+fn style_paints(doc: &lizard_doc::Document, id: &str) -> Option<Vec<Paint>> {
     match &doc.style(id)?.kind {
-        figcraft_doc::StyleKind::Paint { paints } => Some(paints.clone()),
+        lizard_doc::StyleKind::Paint { paints } => Some(paints.clone()),
         _ => None,
     }
 }
 
 /// The fills a text range paints with (its own, else the layer's).
-pub fn range_fills(doc: &figcraft_doc::Document, id: NodeId, start: usize) -> Option<Vec<Paint>> {
+pub fn range_fills(doc: &lizard_doc::Document, id: NodeId, start: usize) -> Option<Vec<Paint>> {
     let n = doc.node(id)?;
     let t = n.kind.text()?;
     Some(t.style_at(start).fills.clone().unwrap_or_else(|| n.fills.clone()))
 }
 
-fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
+fn current_paint(app: &LizardApp, target: &PickerTarget) -> Option<Paint> {
     let doc = app.session.doc().ok()?;
     match target {
         PickerTarget::SelectionColor { targets, selection, document } => {
@@ -150,7 +150,7 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
         PickerTarget::Effect { ids, index, secondary } => doc.node(*ids.first()?)?.effects.get(*index)?.color(*secondary).map(Paint::solid),
         PickerTarget::TextRange { id, start, .. } => range_fills(doc, *id, *start)?.into_iter().next(),
         PickerTarget::Variable { id, mode } => match doc.variables.get(id)?.values.get(mode)? {
-            figcraft_doc::VariableValue::Color(c) => {
+            lizard_doc::VariableValue::Color(c) => {
                 let mut p = Paint::solid(c.with_alpha(1.0));
                 p.opacity = c.a;
                 Some(p)
@@ -161,7 +161,7 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
         PickerTarget::DraftStyle { index } => app.ui_context.as_ref().and_then(|ctx| library_tab::draft_paint(ctx, *index)),
         PickerTarget::DraftVariable => app.ui_context.as_ref().and_then(library_tab::draft_variable_paint),
         PickerTarget::StyleEffect { id, index, secondary } => match &doc.style(id)?.kind {
-            figcraft_doc::StyleKind::Effect { effects } => effects.get(*index)?.color(*secondary).map(Paint::solid),
+            lizard_doc::StyleKind::Effect { effects } => effects.get(*index)?.color(*secondary).map(Paint::solid),
             _ => None,
         },
         PickerTarget::PluginField { plugin, control, pending } => {
@@ -178,7 +178,7 @@ fn current_paint(app: &FigApp, target: &PickerTarget) -> Option<Paint> {
 }
 
 /// Write `paint` to the target. `live` edits are part of an ongoing drag.
-fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
+fn write(app: &mut LizardApp, target: &PickerTarget, paint: &Paint, live: bool) {
     if let PickerTarget::DraftStyle { index } = target {
         if let Some(ctx) = &app.ui_context {
             library_tab::set_draft_paint(ctx, *index, paint.clone());
@@ -246,7 +246,7 @@ fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
         PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable => return,
         PickerTarget::StyleEffect { id, index, secondary } => {
             let Some(mut effects) = app.session.doc().ok().and_then(|doc| match &doc.style(id)?.kind {
-                figcraft_doc::StyleKind::Effect { effects } => Some(effects.clone()),
+                lizard_doc::StyleKind::Effect { effects } => Some(effects.clone()),
                 _ => None,
             }) else {
                 return;
@@ -267,7 +267,7 @@ fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
     }
 }
 
-fn remember_recent(app: &mut FigApp, c: Color) {
+fn remember_recent(app: &mut LizardApp, c: Color) {
     // By 8-bit value: a document stores colours rounded to 8 bits, so the colour picked and the one read
     // back differ by a fraction and would show as two identical swatches.
     app.session.recent_colors.retain(|x| x.to_rgba8() != c.to_rgba8());
@@ -275,7 +275,7 @@ fn remember_recent(app: &mut FigApp, c: Color) {
     app.session.recent_colors.truncate(16);
 }
 
-fn finish(app: &mut FigApp) {
+fn finish(app: &mut LizardApp) {
     if let Some(PickerTarget::PluginField { plugin, control, pending: Some(hex) }) = app.ui.picker.clone() {
         crate::plugins_ui::set_field(app, &plugin, &control, &hex);
         app.ui.picker = Some(PickerTarget::PluginField { plugin, control, pending: None });
@@ -297,7 +297,7 @@ pub fn stop_id() -> Id {
 }
 
 /// Apply a swatch colour: a solid paint's colour, or the selected gradient stop's.
-fn set_color(app: &mut FigApp, target: &PickerTarget, paint: &mut Paint, c: Color, stop: Id, ui: &Ui) {
+fn set_color(app: &mut LizardApp, target: &PickerTarget, paint: &mut Paint, c: Color, stop: Id, ui: &Ui) {
     match &mut paint.kind {
         PaintKind::Solid { color } => {
             *color = c.with_alpha(1.0);
@@ -315,16 +315,16 @@ fn set_color(app: &mut FigApp, target: &PickerTarget, paint: &mut Paint, c: Colo
 }
 
 /// The page's most used solid colours, recomputed only when the document snapshot changes.
-fn page_colors(app: &FigApp, ui: &Ui) -> Vec<Color> {
+fn page_colors(app: &LizardApp, ui: &Ui) -> Vec<Color> {
     let Ok(ds) = app.session.ds() else { return vec![] };
     let key = (std::sync::Arc::as_ptr(&ds.doc) as usize, ds.page);
     let cache_id = Id::new("cp_doc_colors");
-    if let Some((k, colors)) = ui.data(|d| d.get_temp::<((usize, figcraft_doc::NodeId), Vec<Color>)>(cache_id))
+    if let Some((k, colors)) = ui.data(|d| d.get_temp::<((usize, lizard_doc::NodeId), Vec<Color>)>(cache_id))
         && k == key
     {
         return colors;
     }
-    let colors: Vec<Color> = figcraft_engine::cmd::styles::document_colors(&ds.doc, ds.page).into_iter().take(21).map(|(c, _)| c).collect();
+    let colors: Vec<Color> = lizard_engine::cmd::styles::document_colors(&ds.doc, ds.page).into_iter().take(21).map(|(c, _)| c).collect();
     ui.data_mut(|d| d.insert_temp(cache_id, (key, colors.clone())));
     colors
 }
@@ -532,7 +532,7 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
 }
 
 /// Keep a style's colour picker beside its editor. Other targets retain their usual position.
-fn initial_position(app: &FigApp, ctx: &egui::Context, target: &PickerTarget) -> Pos2 {
+fn initial_position(app: &LizardApp, ctx: &egui::Context, target: &PickerTarget) -> Pos2 {
     let beside = match target {
         PickerTarget::Style { .. } => {
             ctx.memory(|memory| memory.area_rect(Id::new("color_style_editor_area"))).map(|rect| pos2(rect.left() - 248.0, rect.top()))
@@ -553,7 +553,7 @@ fn initial_position(app: &FigApp, ctx: &egui::Context, target: &PickerTarget) ->
     beside.unwrap_or_else(|| pos2(ctx.content_rect().right() - app.ui.right_width - 260.0, 140.0))
 }
 
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(target) = app.ui.picker.clone() else {
         if library_tab::active(ctx) {
             library_tab::deactivate(ctx);
@@ -775,7 +775,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                     let stop = g.stops.get(sel).map(|s| s.color);
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
-                        crate::variable_ui::bindable(app, ui, ids, &field, figcraft_doc::VariableType::Color, 208.0, |_, ui| {
+                        crate::variable_ui::bindable(app, ui, ids, &field, lizard_doc::VariableType::Color, 208.0, |_, ui| {
                             let (r, _) = ui.allocate_exact_size(vec2(208.0, widgets::FIELD_H), Sense::hover());
                             ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
                             let sw = Rect::from_center_size(pos2(r.min.x + 13.0, r.center().y), vec2(14.0, 14.0));
@@ -815,7 +815,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                     }
                 });
                 // The image's own colour profile (decoding converts it into the file's).
-                let source = app.session.doc().ok().and_then(|d| figcraft_render::images::profile_name(&img.image, d.images.get(&img.image)));
+                let source = app.session.doc().ok().and_then(|d| lizard_render::images::profile_name(&img.image, d.images.get(&img.image)));
                 let source = match source.as_deref() {
                     None => tr("Unknown — treated as sRGB"),
                     Some("") => tr("Embedded profile"),
@@ -922,7 +922,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 }
                 ui.data_mut(|d| d.insert_temp(Id::new("cp_hsb"), (hsb.h, hsb.s, hsb.b, nc.to_rgba8())));
                 // A Display P3 colour sRGB can't show: the canvas (sRGB) shows the nearest one.
-                if app.session.doc().is_ok_and(|d| d.color_profile.conversion_to(figcraft_color::ColorProfile::Srgb).clips(nc)) {
+                if app.session.doc().is_ok_and(|d| d.color_profile.conversion_to(lizard_color::ColorProfile::Srgb).clips(nc)) {
                     gamut_warning(ui, &t);
                 }
                 if changed {
@@ -1005,7 +1005,7 @@ fn gamut_warning(ui: &mut Ui, t: &Tokens) {
 
 /// Layers a pattern can tile: the file's components and the current page's top-level layers, but
 /// the painted layers, what they contain and what contains them (at most 64).
-fn pattern_sources(app: &FigApp, target: &PickerTarget) -> Vec<(NodeId, String)> {
+fn pattern_sources(app: &LizardApp, target: &PickerTarget) -> Vec<(NodeId, String)> {
     let Ok(doc) = app.session.doc() else { return Vec::new() };
     let painted = match target {
         PickerTarget::Paint { ids, .. } => ids.clone(),
@@ -1033,7 +1033,7 @@ fn pattern_sources(app: &FigApp, target: &PickerTarget) -> Vec<(NodeId, String)>
 }
 
 /// The pattern tab: source, tile type, alignment, scale and spacing.
-fn pattern_controls(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &mut Paint, mut pt: PatternPaint) {
+fn pattern_controls(app: &mut LizardApp, ui: &mut Ui, target: &PickerTarget, paint: &mut Paint, mut pt: PatternPaint) {
     use widgets::{FieldEdit, Lead};
     // Some(live): changed, as part of a drag when live.
     let mut changed: Option<bool> = None;
@@ -1154,7 +1154,7 @@ fn saved_preset_row(ui: &mut Ui, name: &str) -> Option<PresetAction> {
 
 /// The image paint's adjustment presets: a menu of the built-in presets and the file's saved ones
 /// (named after the one in effect), "Save as preset…" and Reset.
-fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &mut Paint, filters: ImageFilters) {
+fn image_presets(app: &mut LizardApp, ui: &mut Ui, target: &PickerTarget, paint: &mut Paint, filters: ImageFilters) {
     let saved: Vec<(String, ImageFilters)> =
         app.session.doc().map(|d| d.image_presets.iter().map(|p| (p.name.clone(), p.filters)).collect()).unwrap_or_default();
     let built_in = ImageFilters::PRESETS.iter().filter(|(id, ..)| *id != "reset");
@@ -1231,7 +1231,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
                 app.run("image.adjust", json!({"ids": ids, "target": if *fills { "fill" } else { "stroke" }, "index": index, "preset": name}));
             }
             _ => {
-                let preset = app.session.doc().ok().and_then(|d| figcraft_engine::cmd::image::find_preset(d, &name));
+                let preset = app.session.doc().ok().and_then(|d| lizard_engine::cmd::image::find_preset(d, &name));
                 if let (Some(f), PaintKind::Image(img)) = (preset, &mut paint.kind) {
                     img.filters = f;
                     write(app, target, paint, false);
@@ -1242,7 +1242,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
     }
 }
 
-fn figcraft_format_add(doc: &mut figcraft_doc::Document, bytes: Vec<u8>) -> Option<String> {
+fn lizard_format_add(doc: &mut lizard_doc::Document, bytes: Vec<u8>) -> Option<String> {
     // Images are keyed by content hash; the engine's image.place uses the same scheme.
     let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
     let hash = {
@@ -1251,7 +1251,7 @@ fn figcraft_format_add(doc: &mut figcraft_doc::Document, bytes: Vec<u8>) -> Opti
         bytes.hash(&mut s);
         format!("img{:016x}{:08x}", s.finish(), bytes.len())
     };
-    doc.images.insert(hash.clone(), figcraft_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: w, height: h });
+    doc.images.insert(hash.clone(), lizard_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: w, height: h });
     Some(hash)
 }
 
@@ -1259,14 +1259,14 @@ fn figcraft_format_add(doc: &mut figcraft_doc::Document, bytes: Vec<u8>) -> Opti
 mod selection_color_tests {
     use super::*;
     use crate::NoServices;
-    use figcraft_engine::{Session, selection_colors::collect};
+    use lizard_engine::{Session, selection_colors::collect};
 
-    fn setup() -> (FigApp, NodeId, NodeId) {
+    fn setup() -> (LizardApp, NodeId, NodeId) {
         let mut s = Session::new();
         let a = NodeId(s.execute("shape.rectangle", &json!({"width":40,"height":40,"props":{"fill":"#ff0000"}})).unwrap()["id"].as_u64().unwrap());
         let b = NodeId(s.execute("shape.rectangle", &json!({"width":40,"height":40,"props":{"fill":"#0000ff"}})).unwrap()["id"].as_u64().unwrap());
         s.execute("select.set", &json!({"ids":[a,b]})).unwrap();
-        let mut app = FigApp::new(s, Box::new(NoServices));
+        let mut app = LizardApp::new(s, Box::new(NoServices));
         let targets = collect(app.session.doc().unwrap(), &[a, b])[0].targets.clone();
         crate::selection_colors::open_picker(&mut app, targets);
         (app, a, b)
@@ -1308,7 +1308,7 @@ mod selection_color_tests {
 
     #[test]
     fn draft_style_picker_updates_the_unsaved_paint_without_document_commands() {
-        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
         let ctx = egui::Context::default();
         app.ui_context = Some(ctx.clone());
         library_tab::create(&ctx, Paint::solid(Color::BLACK));
@@ -1327,7 +1327,7 @@ mod selection_color_tests {
 
     #[test]
     fn draft_variable_picker_preserves_color_and_opacity_without_document_commands() {
-        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
         let ctx = egui::Context::default();
         app.ui_context = Some(ctx.clone());
         library_tab::create_variable(&ctx, Color::from_hex("#1E1E1E").unwrap());
@@ -1363,7 +1363,7 @@ mod selection_color_tests {
 mod tests {
     use super::*;
     use crate::layers_drag_tests::Ui;
-    use figcraft_engine::Session;
+    use lizard_engine::Session;
 
     #[test]
     fn dragging_records_only_the_final_colour_in_recent_colors() {

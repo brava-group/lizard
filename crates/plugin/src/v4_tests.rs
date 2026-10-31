@@ -301,11 +301,11 @@ fn mutated_and_random_descriptions_never_panic() {
 fn timer_module(ms: i64) -> Vec<u8> {
     let wat = format!(
         r#"(module
-          (import "figcraft" "widget_timer" (func $timer (param i32) (result i32)))
-          (import "figcraft" "reply_read" (func $reply_read (param i32 i32) (result i32)))
-          (import "figcraft" "set_output" (func $set_output (param i32 i32)))
+          (import "lizard" "widget_timer" (func $timer (param i32) (result i32)))
+          (import "lizard" "reply_read" (func $reply_read (param i32 i32) (result i32)))
+          (import "lizard" "set_output" (func $set_output (param i32 i32)))
           (memory (export "memory") 1)
-          (func (export "figcraft_run") (param $n i32) (result i32)
+          (func (export "lizard_run") (param $n i32) (result i32)
             (i32.store8 (i32.const 0) (i32.add (i32.const 48) (call $timer (i32.const {ms}))))
             (call $set_output (i32.const 0) (i32.add (i32.const 1) (call $reply_read (i32.const 1) (i32.const 200))))
             (i32.const 0)))"#
@@ -336,8 +336,8 @@ fn widget_timer_is_bounded_charged_and_needs_api_4() {
     let poor = Limits { fuel: 5_000, ..Limits::default() };
     assert!(Instance::new(&timer_module(1000), &poor).unwrap().call("{}", &mut Quiet).is_err());
     // A wrong signature is refused when the module is checked.
-    let wrong = r#"(module (import "figcraft" "widget_timer" (func (param i32 i32) (result i32))) (memory (export "memory") 1)
-        (func (export "figcraft_run") (param i32) (result i32) (i32.const 0)))"#;
+    let wrong = r#"(module (import "lizard" "widget_timer" (func (param i32 i32) (result i32))) (memory (export "memory") 1)
+        (func (export "lizard_run") (param i32) (result i32) (i32.const 0)))"#;
     assert!(crate::check_module(&wat::parse_str(wrong).unwrap(), &Limits::default()).is_err());
 }
 

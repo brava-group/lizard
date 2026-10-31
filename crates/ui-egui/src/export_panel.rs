@@ -6,11 +6,11 @@
 use std::collections::BTreeSet;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_doc::*;
-use figcraft_engine::cmd::file::export_jobs;
+use lizard_doc::*;
+use lizard_engine::cmd::file::export_jobs;
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, Icon};
 use crate::right::{common, menu_item, menu_popup, row};
@@ -23,7 +23,7 @@ const PREVIEW_REFRESH: f64 = 0.3;
 const PREVIEW_H: f32 = 160.0;
 
 /// The Export section for the selected layers.
-pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let t = Tokens::get(ui.ctx());
     let ids = sel.to_vec();
     let shared = common(doc, sel, |n| n.exports.clone());
@@ -64,7 +64,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
 
 /// One export setting: size (typed or picked; images only, SVG and PDF are vector), suffix,
 /// format, advanced options and remove; a PDF's print settings under it.
-fn setting_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, e: &ExportSetting) {
+fn setting_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], i: usize, e: &ExportSetting) {
     row(ui, 32.0, |ui| {
         // Tighter spacing so the advanced options and remove buttons fit beside the fields.
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -132,7 +132,7 @@ fn advanced_options(ui: &mut Ui, e: &ExportSetting) -> Option<Value> {
 }
 
 /// A PDF setting's print settings: a summary row that opens them.
-fn print_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &PrintSettings) {
+fn print_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &PrintSettings) {
     let t = Tokens::get(ui.ctx());
     row(ui, 26.0, |ui| {
         let open_id = Id::new(("export_print", i));
@@ -253,7 +253,7 @@ struct PreviewTex {
 }
 
 /// A "Preview" disclosure row; open, it shows the layer as it exports.
-fn preview(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
+fn preview(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId) {
     let t = Tokens::get(ui.ctx());
     let mut open = app.ui.export_thumb;
     row(ui, 28.0, |ui| {
@@ -321,9 +321,9 @@ pub(crate) fn wide_button(ui: &mut Ui, label: &str) -> bool {
 
 /// Export `ids` with their export settings (`assets`: the Inspect tab's assets in and under them):
 /// one file through a save dialog, several into a folder.
-pub(crate) fn export_layers(app: &mut FigApp, ids: &[NodeId], assets: bool) {
+pub(crate) fn export_layers(app: &mut LizardApp, ids: &[NodeId], assets: bool) {
     let jobs = match app.session.doc() {
-        Ok(doc) if assets => figcraft_engine::devinspect::asset_jobs(doc, ids),
+        Ok(doc) if assets => lizard_engine::devinspect::asset_jobs(doc, ids),
         Ok(doc) => export_jobs(doc, ids),
         Err(_) => return,
     };
@@ -344,7 +344,7 @@ pub(crate) fn export_layers(app: &mut FigApp, ids: &[NodeId], assets: bool) {
 }
 
 /// Export `ids` together as one file with `setting`, through a save dialog suggesting `file`.
-pub(crate) fn save_one(app: &mut FigApp, ids: &[NodeId], setting: &ExportSetting, file: &str) {
+pub(crate) fn save_one(app: &mut LizardApp, ids: &[NodeId], setting: &ExportSetting, file: &str) {
     let ext = setting.format.ext();
     let mut params = setting_params(setting);
     params["ids"] = json!(ids);
@@ -364,7 +364,7 @@ pub(crate) fn suggested_name(doc: &Document, ids: &[NodeId], setting: &ExportSet
 }
 
 /// The page's Export section: the whole page as one PNG.
-pub fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId) {
+pub fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     widgets::section_header(ui, tr("Export"), &[], false);
     if wide_button(ui, tr("Export page as PNG")) {
         let all: Vec<NodeId> = doc.node(page).map(|p| p.children.clone()).unwrap_or_default();

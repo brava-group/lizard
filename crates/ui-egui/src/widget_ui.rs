@@ -4,12 +4,12 @@
 //! at no other time. Everything acts through the engine's `widget.*` commands.
 
 use egui::{Context, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::widgets::{self as engine, MenuItem, MenuKind};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, NodeId};
+use lizard_engine::widgets::{self as engine, MenuItem, MenuKind};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 use crate::right::{menu_item, menu_popup};
 use crate::theme::{ACCENT, Tokens};
@@ -24,7 +24,7 @@ const SWATCH: f32 = 18.0;
 
 /// Fire the widget timers that are due (their plugins are called back) and ask for the frame the
 /// next one is due at. Nothing here draws a frame sooner.
-pub fn tick(app: &mut FigApp, ctx: &Context) {
+pub fn tick(app: &mut LizardApp, ctx: &Context) {
     // While a prototype is presented the file's timers wait: a callback would change the file,
     // and the prototype (which plays its own copy, with its own timers) would start over.
     if app.ui.present.is_some() || engine::next_timer(&app.session).is_none() {
@@ -41,7 +41,7 @@ pub fn tick(app: &mut FigApp, ctx: &Context) {
 }
 
 /// The one selected widget and its property menu, when it has one.
-fn selected(app: &FigApp) -> Option<(NodeId, Vec<MenuItem>)> {
+fn selected(app: &LizardApp) -> Option<(NodeId, Vec<MenuItem>)> {
     let ds = app.session.ds().ok()?;
     let [w] = ds.selection.as_slice() else { return None };
     let menu = engine::menu_of(ds.document_itself(), *w);
@@ -49,7 +49,7 @@ fn selected(app: &FigApp) -> Option<(NodeId, Vec<MenuItem>)> {
 }
 
 /// Choose item `name` of widget `w`'s menu: its plugin is called back; a link opens.
-fn choose(app: &mut FigApp, ctx: &Context, w: NodeId, name: &str, value: Value) {
+fn choose(app: &mut LizardApp, ctx: &Context, w: NodeId, name: &str, value: Value) {
     let Some(out) = app.run("widget.menuAction", json!({"id": w, "item": name, "value": value})) else { return };
     // Opened only on this click, and only what the engine checked is a web address.
     if let Some(url) = out["url"].as_str() {
@@ -122,7 +122,7 @@ fn items(ui: &mut Ui, menu: &[MenuItem], t: &Tokens) -> Option<(String, Value)> 
 /// The selected widget's property menu as a bar on the canvas (`ui` is the canvas's: windows and
 /// popups lie over the bar): centred above the widget, or under it when there is no room above,
 /// and kept inside the canvas. Hidden while the widget is dragged or its text is typed.
-pub fn menu_bar(app: &mut FigApp, ui: &mut Ui, canvas: Rect) {
+pub fn menu_bar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect) {
     let Some((w, menu)) = selected(app) else { return };
     let Ok(ds) = app.session.ds() else { return };
     if ds.interaction.is_some() || ds.text_edit.is_some() || ds.preview.is_some() {
@@ -161,7 +161,7 @@ pub fn menu_bar(app: &mut FigApp, ui: &mut Ui, canvas: Rect) {
 
 /// The selected widget's property menu in the Design panel (the same items as the bar's). Returns
 /// whether it drew anything.
-pub fn design_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+pub fn design_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
     let [w] = sel else { return false };
     let menu = engine::menu_of(doc, *w);
     if menu.is_empty() {
@@ -207,7 +207,7 @@ pub fn design_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[Node
 /// What the pointer over the canvas (its response) means for widgets: the tooltip of the part
 /// under it; and once it has left the canvas (for a panel, a window over it, the menu bar), no
 /// part is under it, so none keeps its hover style.
-pub fn pointer(app: &mut FigApp, canvas: &egui::Response) {
+pub fn pointer(app: &mut LizardApp, canvas: &egui::Response) {
     if canvas.hovered() {
         if let Some(tip) = app.session.tool.overlay.widget_tip.as_deref() {
             canvas.clone().on_hover_text_at_pointer(tip);

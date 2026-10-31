@@ -3,11 +3,11 @@
 use std::error::Error;
 use std::time::Instant;
 
-use figcraft_canvas_gpu::vello_scene::GpuCanvas;
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, EffectKind, NodeKind, Noise, NoiseMode, VectorNetwork};
-use figcraft_geom::{Affine, Point};
-use figcraft_render::{Options, View, render_view};
+use lizard_canvas_gpu::vello_scene::GpuCanvas;
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, Effect, EffectKind, NodeKind, Noise, NoiseMode, VectorNetwork};
+use lizard_geom::{Affine, Point};
+use lizard_render::{Options, View, render_view};
 
 fn run(mode: NoiseMode, scale: f64) -> Result<(), Box<dyn Error>> {
     let large = std::env::var_os("LIZARD_NOISE_LARGE").is_some();

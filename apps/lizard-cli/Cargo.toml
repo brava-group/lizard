@@ -1,0 +1,25 @@
+[package]
+name = "lizard-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Lizard command line: info, export, convert, render, scripted commands, MCP server, perf"
+
+[[bin]]
+name = "lizard-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+lizard-engine = { workspace = true }
+lizard-figma-plugin = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-render = { workspace = true }
+lizard-text = { workspace = true }
+lizard-svg = { workspace = true }
+lizard-format = { workspace = true }
+lizard-mcp = { workspace = true }
+serde_json = { workspace = true }

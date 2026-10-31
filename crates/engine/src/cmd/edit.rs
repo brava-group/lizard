@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use figcraft_doc::*;
-use figcraft_geom::Affine;
+use lizard_doc::*;
+use lizard_geom::Affine;
 use serde_json::{Map, Value, json};
 
 use super::{CommandSpec, ok};
@@ -536,7 +536,7 @@ pub fn copy_to_clipboard(s: &mut Session, cmd: &str, ids: &[NodeId]) -> Result<(
     Ok(())
 }
 
-type Copied = (Vec<(NodeId, Vec<Node>)>, BTreeMap<String, ImageData>, Option<figcraft_geom::Rect>);
+type Copied = (Vec<(NodeId, Vec<Node>)>, BTreeMap<String, ImageData>, Option<lizard_geom::Rect>);
 
 fn copied(doc: &Document, ids: &[NodeId]) -> Copied {
     let ids = z_sorted(doc, &roots(doc, ids));
@@ -551,7 +551,7 @@ fn copied(doc: &Document, ids: &[NodeId]) -> Copied {
         }
         for n in &sub {
             for p in n.fills.iter().chain(n.strokes.iter()) {
-                if let figcraft_color::PaintKind::Image(img) = &p.kind
+                if let lizard_color::PaintKind::Image(img) = &p.kind
                     && let Some(d) = doc.images.get(&img.image)
                 {
                     images.insert(img.image.clone(), d.clone());
@@ -592,7 +592,7 @@ pub fn design_clipboard_buffer(html: &str) -> Option<Vec<u8>> {
     let start = html.find(CLIP_OPEN)? + CLIP_OPEN.len();
     let len = html.get(start..)?.find(CLIP_CLOSE)?;
     let bytes = clip_base64(html.get(start..start + len)?)?;
-    figcraft_format::fig::is_fig(&bytes).then_some(bytes)
+    lizard_format::fig::is_fig(&bytes).then_some(bytes)
 }
 
 /// Temporary image URLs carried by copied Figma layers. The clipboard names each image by the
@@ -647,7 +647,7 @@ fn paste_design_layers(s: &mut Session, p: &Value) -> Result<Value> {
     if !tops.iter().flat_map(|id| doc.subtree(*id)).any(|id| {
         doc.node(id).is_some_and(|n| {
             n.fills.iter().chain(&n.strokes).any(|p| {
-                let figcraft_color::PaintKind::Image(img) = &p.kind else { return false };
+                let lizard_color::PaintKind::Image(img) = &p.kind else { return false };
                 image_is_placeholder(&doc, &img.image)
             })
         })
@@ -678,12 +678,12 @@ pub(crate) fn restore_copied_images(doc: &mut Document, images: &serde_json::Map
         if format!("{:x}", Sha1::digest(&data)) != hash.to_ascii_lowercase() {
             continue;
         }
-        let Ok((key, _, _)) = figcraft_format::add_image(doc, data) else { continue };
+        let Ok((key, _, _)) = lizard_format::add_image(doc, data) else { continue };
         let ids: Vec<_> = doc.nodes().map(|n| n.id).collect();
         for id in ids {
             let Some(node) = doc.node_mut(id) else { continue };
             for paint in node.fills.iter_mut().chain(&mut node.strokes) {
-                if let figcraft_color::PaintKind::Image(img) = &mut paint.kind
+                if let lizard_color::PaintKind::Image(img) = &mut paint.kind
                     && img.image == *hash
                 {
                     img.image.clone_from(&key);
@@ -695,7 +695,7 @@ pub(crate) fn restore_copied_images(doc: &mut Document, images: &serde_json::Map
 }
 
 fn image_is_placeholder(doc: &Document, key: &str) -> bool {
-    doc.images.get(key).is_some_and(|data| figcraft_format::image_hash(&data.bytes) != key)
+    doc.images.get(key).is_some_and(|data| lizard_format::image_hash(&data.bytes) != key)
 }
 
 /// Recover image fills omitted from a bare clipboard canvas using the selection's PNG preview.
@@ -714,7 +714,7 @@ fn restore_preview_images(doc: &mut Document, tops: &[NodeId], png: &[u8]) {
     if !ids.iter().any(|id| {
         doc.node(*id).is_some_and(|n| {
             n.fills.iter().any(|paint| {
-                let figcraft_color::PaintKind::Image(img) = &paint.kind else { return false };
+                let lizard_color::PaintKind::Image(img) = &paint.kind else { return false };
                 image_is_placeholder(doc, &img.image)
             })
         })
@@ -743,7 +743,7 @@ fn restore_preview_images(doc: &mut Document, tops: &[NodeId], png: &[u8]) {
             .fills
             .iter()
             .filter_map(|paint| {
-                let figcraft_color::PaintKind::Image(img) = &paint.kind else { return None };
+                let lizard_color::PaintKind::Image(img) = &paint.kind else { return None };
                 image_is_placeholder(doc, &img.image).then(|| img.image.clone())
             })
             .collect();
@@ -763,16 +763,16 @@ fn restore_preview_images(doc: &mut Document, tops: &[NodeId], png: &[u8]) {
         if cropped.write_to(&mut encoded, image::ImageFormat::Png).is_err() {
             continue;
         }
-        let Ok((key, _, _)) = figcraft_format::add_image(doc, encoded.into_inner()) else { continue };
+        let Ok((key, _, _)) = lizard_format::add_image(doc, encoded.into_inner()) else { continue };
         let Some(node) = doc.node_mut(id) else { continue };
         for paint in &mut node.fills {
-            let figcraft_color::PaintKind::Image(img) = &mut paint.kind else { continue };
+            let lizard_color::PaintKind::Image(img) = &mut paint.kind else { continue };
             if missing.contains(&img.image) {
                 img.image = key.clone();
-                img.scale_mode = figcraft_color::ImageScaleMode::Fill;
+                img.scale_mode = lizard_color::ImageScaleMode::Fill;
                 img.crop = None;
                 img.rotation = 0;
-                img.filters = figcraft_color::ImageFilters::NONE;
+                img.filters = lizard_color::ImageFilters::NONE;
             }
         }
     }
@@ -847,7 +847,7 @@ fn copied_image(s: &Session) -> Option<(String, ImageData)> {
     let [(_, nodes)] = s.clipboard.nodes.as_slice() else { return None };
     let [node] = nodes.as_slice() else { return None };
     let [paint] = node.fills.as_slice() else { return None };
-    let figcraft_color::PaintKind::Image(image) = &paint.kind else { return None };
+    let lizard_color::PaintKind::Image(image) = &paint.kind else { return None };
     s.clipboard.images.get(&image.image).map(|data| (image.image.clone(), data.clone()))
 }
 
@@ -863,7 +863,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let doc = s.doc_mut()?;
         doc.images.entry(hash.clone()).or_insert(data);
         let node = doc.get_mut(*target)?;
-        super::create::replace_with_image_fill(node, hash, figcraft_color::ImageScaleMode::Fill);
+        super::create::replace_with_image_fill(node, hash, lizard_color::ImageScaleMode::Fill);
         return Ok(json!({"ids": [target]}));
     }
     let page = s.page()?;
@@ -886,7 +886,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 (Some(t), Some(b)) => {
                     let tb = doc.world_bounds(t);
                     match tb {
-                        Some(tb) if tb.contains(b.origin()) && tb.contains(figcraft_geom::Point::new(b.x1, b.y1)) => None,
+                        Some(tb) if tb.contains(b.origin()) && tb.contains(lizard_geom::Point::new(b.x1, b.y1)) => None,
                         Some(tb) => Some((tb.center().x - b.width() / 2.0, tb.center().y - b.height() / 2.0)),
                         None => None,
                     }
@@ -895,7 +895,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                     // Off-screen originals paste at the viewport centre.
                     let v = &s.ds()?.view;
                     let (ox, oy) = v.origin();
-                    let vr = figcraft_geom::Rect::new(ox, oy, ox + v.vw / v.zoom.max(1e-9), oy + v.vh / v.zoom.max(1e-9));
+                    let vr = lizard_geom::Rect::new(ox, oy, ox + v.vw / v.zoom.max(1e-9), oy + v.vh / v.zoom.max(1e-9));
                     if vr.intersect(b).is_zero_area() { Some((v.cx - b.width() / 2.0, v.cy - b.height() / 2.0)) } else { None }
                 }
                 _ => None,
@@ -996,7 +996,7 @@ fn layers_at(s: &mut Session, p: &Value) -> Result<Value> {
     let zoom = s.ds()?.view.zoom.max(1e-6);
     let sel = s.selection();
     let result = crate::booleans::result_outline(doc, &sel);
-    let layers: Vec<Value> = figcraft_doc::geometry::layers_at(doc, s.page()?, figcraft_geom::Point::new(x, y), 2.0 / zoom, Some(&result))
+    let layers: Vec<Value> = lizard_doc::geometry::layers_at(doc, s.page()?, lizard_geom::Point::new(x, y), 2.0 / zoom, Some(&result))
         .into_iter()
         .filter_map(|(id, depth)| doc.node(id).map(|n| json!({"id": id, "name": n.name, "type": n.kind.type_name(), "depth": depth})))
         .collect();
@@ -1037,8 +1037,8 @@ fn select_area(s: &mut Session, p: &Value) -> Result<Value> {
     if ![x, y, w, h].iter().all(|v| v.is_finite() && v.abs() < 1e9) {
         return Err(bad(cmd, "the box is out of range"));
     }
-    let start = figcraft_geom::Point::new(x, y);
-    let r = figcraft_geom::Rect::from_points(start, figcraft_geom::Point::new(x + w, y + h));
+    let start = lizard_geom::Point::new(x, y);
+    let r = lizard_geom::Rect::from_points(start, lizard_geom::Point::new(x + w, y + h));
     let add = boolean(p, "add") == Some(true);
     let base = if add { s.selection() } else { Vec::new() };
     let within = s.marquee_within(start)?;
@@ -1365,7 +1365,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let ds = s.ds()?;
     let pivot =
         ds.moved_origin().filter(|_| props.contains_key("rotation") && !props.contains_key("x") && !props.contains_key("y") && ds.selection == ids);
-    let pinned: Vec<(NodeId, figcraft_geom::Point)> = match pivot {
+    let pinned: Vec<(NodeId, lizard_geom::Point)> = match pivot {
         Some(o) => roots(&ds.doc, &ids)
             .into_iter()
             .map(|i| (i, ds.doc.world_transform(i)))
@@ -1430,7 +1430,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 /// face has another weight or slant than the name asks for ("Black" on a family whose heaviest is
 /// Bold), say which face it is. Families that aren't installed, and names that match a style or a
 /// named instance (spelled any way: "SemiBold", "Semi Bold"), say nothing.
-fn font_style_warnings(doc: &figcraft_doc::Document, ids: &[NodeId], props: &serde_json::Map<String, Value>) -> Vec<String> {
+fn font_style_warnings(doc: &lizard_doc::Document, ids: &[NodeId], props: &serde_json::Map<String, Value>) -> Vec<String> {
     let Some(style) = props.get("fontStyle").and_then(Value::as_str) else { return Vec::new() };
     let mut families: Vec<String> = match props.get("fontFamily").and_then(Value::as_str) {
         Some(f) => vec![f.to_string()],
@@ -1444,15 +1444,15 @@ fn font_style_warnings(doc: &figcraft_doc::Document, ids: &[NodeId], props: &ser
     families.sort();
     families.dedup();
     let norm = |s: &str| s.to_lowercase().replace([' ', '-', '_'], "");
-    let (want_w, want_i) = (i32::from(figcraft_doc::style_weight(style)), style.to_lowercase().contains("italic"));
+    let (want_w, want_i) = (i32::from(lizard_doc::style_weight(style)), style.to_lowercase().contains("italic"));
     families
         .into_iter()
         .filter_map(|family| {
-            let styles = figcraft_text::family_styles(&family);
+            let styles = lizard_text::family_styles(&family);
             if styles.is_empty() || styles.iter().any(|x| norm(x) == norm(style)) {
                 return None;
             }
-            let face = figcraft_text::find_face(&family, style).filter(|f| f.family.eq_ignore_ascii_case(&family))?;
+            let face = lizard_text::find_face(&family, style).filter(|f| f.family.eq_ignore_ascii_case(&family))?;
             let w = face.axis("wght").map_or(i32::from(face.weight), |a| a.clamp(f64::from(want_w)).round() as i32);
             if face.instance(style).is_some() || (w == want_w && face.italic == want_i) {
                 return None;
@@ -1485,7 +1485,7 @@ fn stroke_brush(s: &mut Session, p: &Value) -> Result<Value> {
     for i in ids {
         let n = doc.get_mut(i)?;
         if brush.is_some() && n.strokes.is_empty() {
-            n.strokes.push(figcraft_color::Paint::solid(figcraft_color::Color::BLACK));
+            n.strokes.push(lizard_color::Paint::solid(lizard_color::Color::BLACK));
         }
         n.stroke.brush = brush.clone();
     }
@@ -1521,9 +1521,9 @@ fn paint_list(s: &mut Session, p: &Value, fills: bool, add: bool) -> Result<Valu
         if add {
             let paint = match get(p, "paint").or_else(|| get(p, "color")) {
                 Some(v) => paint_of(v).ok_or_else(|| bad(cmd, "invalid paint"))?,
-                None if fills && frameish => figcraft_color::Paint::solid(figcraft_color::Color::WHITE),
-                None if fills => figcraft_color::Paint::solid(figcraft_color::Color::DEFAULT_SHAPE),
-                None => figcraft_color::Paint::solid(figcraft_color::Color::BLACK),
+                None if fills && frameish => lizard_color::Paint::solid(lizard_color::Color::WHITE),
+                None if fills => lizard_color::Paint::solid(lizard_color::Color::DEFAULT_SHAPE),
+                None => lizard_color::Paint::solid(lizard_color::Color::BLACK),
             };
             list.push(paint);
         } else {
@@ -1550,7 +1550,7 @@ fn paint_set(s: &mut Session, p: &Value, fills: bool) -> Result<Value> {
         let list = if fills { &mut n.fills } else { &mut n.strokes };
         let at = idx.unwrap_or(list.len().saturating_sub(1));
         if list.is_empty() {
-            list.push(figcraft_color::Paint::solid(if fills { figcraft_color::Color::DEFAULT_SHAPE } else { figcraft_color::Color::BLACK }));
+            list.push(lizard_color::Paint::solid(if fills { lizard_color::Color::DEFAULT_SHAPE } else { lizard_color::Color::BLACK }));
         }
         let Some(slot) = list.get_mut(at) else { return Err(bad(cmd, format!("no paint at index {at}"))) };
         let old = slot.clone();
@@ -1558,7 +1558,7 @@ fn paint_set(s: &mut Session, p: &Value, fills: bool) -> Result<Value> {
             *slot = np.clone();
         }
         if let Some(c) = col {
-            slot.kind = figcraft_color::PaintKind::Solid { color: c.with_alpha(1.0) };
+            slot.kind = lizard_color::PaintKind::Solid { color: c.with_alpha(1.0) };
             if c.a < 1.0 {
                 slot.opacity = c.a;
             }
@@ -1592,16 +1592,15 @@ fn pattern_fill(s: &mut Session, p: &Value) -> Result<Value> {
     if req_targets(CMD, s, p)?.iter().any(|t| doc.is_ancestor(*t, src)) {
         return Err(bad(CMD, "a layer can't be filled with itself or a layer inside it"));
     }
-    let mut pt = figcraft_color::PatternPaint::new(src.0);
+    let mut pt = lizard_color::PatternPaint::new(src.0);
     pt.tile = parse(CMD, p, "tile")?.unwrap_or_default();
     pt.align = parse(CMD, p, "align")?.unwrap_or_default();
     pt.spacing = parse(CMD, p, "spacing")?.unwrap_or_default();
-    let (lo, hi) = figcraft_color::PatternPaint::SCALE_RANGE;
+    let (lo, hi) = lizard_color::PatternPaint::SCALE_RANGE;
     pt.scale = num(p, "scale").filter(|v| v.is_finite()).unwrap_or(1.0).clamp(lo, hi);
     let mut q = if p.is_object() { p.clone() } else { json!({}) };
-    q["paint"] =
-        serde_json::to_value(figcraft_color::Paint { kind: figcraft_color::PaintKind::Pattern(pt), ..figcraft_color::Paint::pattern(src.0) })
-            .map_err(|e| bad(CMD, e.to_string()))?;
+    q["paint"] = serde_json::to_value(lizard_color::Paint { kind: lizard_color::PaintKind::Pattern(pt), ..lizard_color::Paint::pattern(src.0) })
+        .map_err(|e| bad(CMD, e.to_string()))?;
     paint_set(s, &q, true)
 }
 

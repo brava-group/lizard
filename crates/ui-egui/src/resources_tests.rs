@@ -2,7 +2,7 @@
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 
 use crate::LeftTab;
 use crate::layers_drag_tests::Ui;

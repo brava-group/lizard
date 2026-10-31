@@ -4,7 +4,7 @@
 //! the same render with expensive layers omitted. Applying that difference to a sharp
 //! render preserves geometry while retaining a provisional approximation of effects.
 
-use figcraft_render::{Pixmap, View};
+use lizard_render::{Pixmap, View};
 use rayon::prelude::*;
 
 pub struct Residual {

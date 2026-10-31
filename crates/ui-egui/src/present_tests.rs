@@ -3,21 +3,21 @@
 //! frame scrolls inside the device's screen with the wheel and by dragging.
 
 use egui::{Event, Key, Pos2, RawInput, Rect, pos2, vec2};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 pub(crate) struct Ui {
     pub(crate) ctx: egui::Context,
-    pub(crate) app: FigApp,
+    pub(crate) app: LizardApp,
     pub(crate) time: f64,
 }
 
 impl Ui {
     pub(crate) fn new(s: Session) -> Self {
-        let mut u = Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0 };
+        let mut u = Self { ctx: egui::Context::default(), app: LizardApp::new(s, Box::new(NoServices)), time: 0.0 };
         u.frames(3, Vec::new);
         u
     }

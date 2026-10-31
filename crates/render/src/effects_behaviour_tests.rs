@@ -5,8 +5,8 @@
 //! silent the case says so and pins today's behaviour. Scenes are small and synthetic, drawn on
 //! a white page at 1×.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeId, NodeKind, Shadow, StrokeAlign};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeId, NodeKind, Shadow, StrokeAlign};
 
 use super::paint_behaviour_tests::{Probes, Pt, Px, hex, near, page, px, rect, render, solid_at};
 use super::*;
@@ -56,7 +56,7 @@ fn new_effects_start_from_the_documented_defaults() {
         assert_eq!(e.kind, want, "{ty}");
         assert!(e.visible, "{ty} starts visible");
     }
-    assert!(!shadow.show_behind && shadow.blend == figcraft_color::BlendMode::Normal);
+    assert!(!shadow.show_behind && shadow.blend == lizard_color::BlendMode::Normal);
     assert_eq!(Blur::default().blur_type, BlurType::Uniform);
 }
 
@@ -348,14 +348,14 @@ fn exports_include_what_effects_paint_outside_the_layer() {
         ("a layer blur reaches out", vec![fx(EffectKind::LayerBlur(Blur::uniform(4.0)))], true),
         ("an inner shadow stays inside", vec![fx(EffectKind::InnerShadow(sharp((0.0, 10.0), 0.0)))], false),
         ("a background blur stays inside", vec![fx(EffectKind::BackgroundBlur(Blur::uniform(4.0)))], false),
-        ("noise stays on the layer's pixels", vec![fx(EffectKind::Noise(figcraft_doc::Noise::default()))], false),
-        ("texture roughens past the edge", vec![fx(EffectKind::Texture(figcraft_doc::Texture::default()))], true),
+        ("noise stays on the layer's pixels", vec![fx(EffectKind::Noise(lizard_doc::Noise::default()))], false),
+        ("texture roughens past the edge", vec![fx(EffectKind::Texture(lizard_doc::Texture::default()))], true),
         (
             "texture clipped to the shape stays inside",
-            vec![fx(EffectKind::Texture(figcraft_doc::Texture { clip_to_shape: true, ..Default::default() }))],
+            vec![fx(EffectKind::Texture(lizard_doc::Texture { clip_to_shape: true, ..Default::default() }))],
             false,
         ),
-        ("glass stays inside", vec![fx(EffectKind::Glass(figcraft_doc::Glass::default()))], false),
+        ("glass stays inside", vec![fx(EffectKind::Glass(lizard_doc::Glass::default()))], false),
     ];
     for (why, effects, grows) in rows {
         let (w, h) = size(effects);

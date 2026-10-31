@@ -1,7 +1,7 @@
 //! Pages.
 
-use figcraft_doc::proto::Flow;
-use figcraft_doc::*;
+use lizard_doc::proto::Flow;
+use lizard_doc::*;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};

@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
-use figcraft_engine::live::{Event, Live, Presence, Role, Status};
+use lizard_doc::NodeId;
+use lizard_engine::Session;
+use lizard_engine::live::{Event, Live, Presence, Role, Status};
 use serde_json::{Value, json};
 
 use crate::NetLink;

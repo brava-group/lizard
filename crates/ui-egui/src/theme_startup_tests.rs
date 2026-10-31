@@ -1,12 +1,12 @@
 //! Startup and system-theme changes through the real UI frame, before any settling frames.
 
 use egui::{Context, RawInput, Theme};
-use figcraft_engine::{Prefs, Session};
+use lizard_engine::{Prefs, Session};
 use serde_json::json;
 
-use crate::{FigApp, NoServices, theme::Tokens};
+use crate::{LizardApp, NoServices, theme::Tokens};
 
-fn frame(ctx: &Context, app: &mut FigApp, system: Option<Theme>) {
+fn frame(ctx: &Context, app: &mut LizardApp, system: Option<Theme>) {
     let mut output = ctx.run_ui(RawInput { system_theme: system, ..Default::default() }, |ui| app.ui(ui));
     output.textures_delta.clear();
 }
@@ -14,7 +14,7 @@ fn frame(ctx: &Context, app: &mut FigApp, system: Option<Theme>) {
 #[test]
 fn fresh_app_uses_system_dark_theme_on_its_first_frame() {
     let ctx = Context::default();
-    let mut app = FigApp::new(Session::empty(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
     frame(&ctx, &mut app, Some(Theme::Dark));
     assert!(app.ui.dark, "a first run must use the OS dark theme before drawing");
     assert_eq!(Tokens::get(&ctx), Tokens::dark());
@@ -27,7 +27,7 @@ fn first_run_and_preferences_without_a_theme_follow_system_light() {
         let ctx = Context::default();
         let mut session = Session::empty();
         session.prefs = prefs;
-        let mut app = FigApp::new(session, Box::new(NoServices));
+        let mut app = LizardApp::new(session, Box::new(NoServices));
         frame(&ctx, &mut app, Some(Theme::Light));
         assert_eq!(app.session.prefs.theme, "system");
         assert_eq!(Tokens::get(&ctx), Tokens::light());
@@ -40,7 +40,7 @@ fn saved_manual_themes_survive_startup_and_os_changes() {
         let ctx = Context::default();
         let mut session = Session::empty();
         session.prefs = serde_json::from_value(json!({"theme": saved})).unwrap();
-        let mut app = FigApp::new(session, Box::new(NoServices));
+        let mut app = LizardApp::new(session, Box::new(NoServices));
         for system in [Theme::Dark, Theme::Light, Theme::Dark] {
             frame(&ctx, &mut app, Some(system));
             assert_eq!(Tokens::get(&ctx), expected);
@@ -53,7 +53,7 @@ fn saved_manual_themes_survive_startup_and_os_changes() {
 fn returning_to_system_reads_the_os_not_the_previously_drawn_palette() {
     for (manual, os) in [("view.themeLight", Theme::Dark), ("view.themeDark", Theme::Light)] {
         let ctx = Context::default();
-        let mut app = FigApp::new(Session::empty(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
         app.session.execute(manual, &json!({})).unwrap();
         frame(&ctx, &mut app, Some(os));
         app.session.execute("view.themeSystem", &json!({})).unwrap();
@@ -66,7 +66,7 @@ fn returning_to_system_reads_the_os_not_the_previously_drawn_palette() {
 #[test]
 fn system_theme_changes_apply_in_the_same_frame() {
     let ctx = Context::default();
-    let mut app = FigApp::new(Session::empty(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
     app.session.execute("view.themeSystem", &json!({})).unwrap();
     for os in [Theme::Dark, Theme::Light, Theme::Dark] {
         frame(&ctx, &mut app, Some(os));
@@ -78,7 +78,7 @@ fn system_theme_changes_apply_in_the_same_frame() {
 #[test]
 fn unavailable_system_theme_uses_the_existing_light_fallback() {
     let ctx = Context::default();
-    let mut app = FigApp::new(Session::empty(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::empty(), Box::new(NoServices));
     app.session.execute("view.themeSystem", &json!({})).unwrap();
     frame(&ctx, &mut app, None);
     assert_eq!(Tokens::get(&ctx), Tokens::light());

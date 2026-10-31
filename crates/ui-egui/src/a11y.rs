@@ -20,9 +20,9 @@
 
 use egui::accesskit::{self, Role, Toggled};
 use egui::{Context, CornerRadius, Event, FocusDirection, Id, Key, LayerId, Modifiers, Order, Pos2, Rect, Response, Stroke, StrokeKind, Ui};
-use figcraft_engine::keymap;
+use lizard_engine::keymap;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 use crate::theme::Tokens;
 
@@ -250,7 +250,7 @@ struct Shared {
 }
 
 fn shared<R>(ctx: &Context, f: impl FnOnce(&mut Shared) -> R) -> R {
-    ctx.data_mut(|d| f(d.get_temp_mut_or_default::<Shared>(Id::new("figcraft_a11y"))))
+    ctx.data_mut(|d| f(d.get_temp_mut_or_default::<Shared>(Id::new("lizard_a11y"))))
 }
 
 /// Whether a widget other than the canvas has the keyboard (a field, a focused button): the
@@ -284,7 +284,7 @@ pub fn keyboard(ctx: &Context) -> bool {
 
 /// Before the panels draw: pointer presses, the focused control's region, and the navigation
 /// keys (F6, Tab, arrows, Escape), which are taken out of the input when they move the keyboard.
-pub fn begin(app: &mut FigApp, ctx: &Context) {
+pub fn begin(app: &mut LizardApp, ctx: &Context) {
     app.ui.nav.last = std::mem::take(&mut app.ui.nav.next);
     keys(app, ctx);
     let keyboard = app.ui.nav.keyboard;
@@ -297,7 +297,7 @@ pub fn begin(app: &mut FigApp, ctx: &Context) {
     });
 }
 
-fn keys(app: &mut FigApp, ctx: &Context) {
+fn keys(app: &mut LizardApp, ctx: &Context) {
     // A press hides the ring, and the keyboard goes to the region pressed in.
     let press = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten());
     if let Some(p) = press {
@@ -474,7 +474,7 @@ pub fn refocus_row(nav: &mut Nav) {
 /// its layer row when the layers panel has the keyboard, else on the canvas below the selection
 /// (the middle of the canvas with nothing selected). The menu takes the keyboard (keyboard mode),
 /// and gives it back to the row or the canvas when it closes. Call after the panels drew.
-pub fn context_menu(app: &mut FigApp, ctx: &Context) {
+pub fn context_menu(app: &mut LizardApp, ctx: &Context) {
     let nav = &app.ui.nav;
     let rect_of = |id: Id| ctx.viewport(|v| v.this_pass.widgets.get(id).or_else(|| v.prev_pass.widgets.get(id)).map(|w| w.rect));
     let row = (app.ui.layers_focus || nav.region == Region::Layers)
@@ -505,7 +505,7 @@ pub fn context_menu(app: &mut FigApp, ctx: &Context) {
 }
 
 /// After everything drew: the layer row the arrows moved to takes the keyboard, and the focus ring.
-pub fn end(app: &mut FigApp, ctx: &Context) {
+pub fn end(app: &mut LizardApp, ctx: &Context) {
     // A popup registered before it closed later in the frame (Escape) isn't open any more.
     if !menus_open(app) {
         app.ui.nav.next.popup = None;
@@ -527,7 +527,7 @@ pub fn end(app: &mut FigApp, ctx: &Context) {
 }
 
 /// Dialogs, the palette, the presenter and the home screen have no regions.
-fn blocked(app: &FigApp) -> bool {
+fn blocked(app: &LizardApp) -> bool {
     let u = &app.ui;
     u.palette.is_some()
         || u.about
@@ -542,7 +542,7 @@ fn blocked(app: &FigApp) -> bool {
 }
 
 /// Menus the app draws itself (Escape closes them, and the keyboard stays put).
-fn menus_open(app: &FigApp) -> bool {
+fn menus_open(app: &LizardApp) -> bool {
     app.ui.main_menu || app.ui.tool_flyout.is_some() || app.ui.context_menu.is_some()
 }
 
@@ -569,7 +569,7 @@ fn next_region(nav: &Nav, step: i32) -> Region {
 
 /// Give `region` the keyboard: the canvas, or the region's preferred control, else its first.
 /// Open menus close.
-fn enter(app: &mut FigApp, ctx: &Context, region: Region) {
+fn enter(app: &mut LizardApp, ctx: &Context, region: Region) {
     egui::Popup::close_all(ctx);
     app.ui.main_menu = false;
     app.ui.tool_flyout = None;
@@ -603,7 +603,7 @@ fn drop_focus(ctx: &Context) {
     });
 }
 
-fn focus(app: &mut FigApp, ctx: &Context, id: Id) {
+fn focus(app: &mut LizardApp, ctx: &Context, id: Id) {
     ctx.memory_mut(|m| m.request_focus(id));
     if app.ui.nav.region == Region::Properties {
         app.ui.nav.scroll_to = Some(id);
@@ -613,7 +613,7 @@ fn focus(app: &mut FigApp, ctx: &Context, id: Id) {
 
 /// Tab / Shift+Tab (and the toolbar's arrows): the next or previous control in the region,
 /// wrapping. Going back from a field being edited skips the field it is part of.
-fn step_within(app: &mut FigApp, ctx: &Context, region: Region, step: i32) {
+fn step_within(app: &mut LizardApp, ctx: &Context, region: Region, step: i32) {
     let list = focusables(ctx, &app.ui.nav, region);
     let n = list.len() as i32;
     if n == 0 {
@@ -680,7 +680,7 @@ fn first_in(ctx: &Context, layer: LayerId) -> Option<Id> {
 
 /// A menu opened from the keyboard takes it (its first item); when the keyboard leaves the menu
 /// (Escape, or a pick that closes it), the control that opened it gets it back.
-fn popups(app: &mut FigApp, ctx: &Context, focused: Option<Id>, widget: Option<egui::WidgetRect>) {
+fn popups(app: &mut LizardApp, ctx: &Context, focused: Option<Id>, widget: Option<egui::WidgetRect>) {
     let nav = &mut app.ui.nav;
     if let Some((opener, layer)) = nav.opener {
         let in_menu = widget.is_some_and(|w| w.layer_id == layer);

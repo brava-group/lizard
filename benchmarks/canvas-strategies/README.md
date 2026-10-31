@@ -1,6 +1,6 @@
 # GPU canvas background preparation experiment
 
-This standalone Rust package exercises a retained GPU tile compositor on a saved Lizard document. It is a benchmark prototype, not the editor's shipped renderer. Run it from the repository root on macOS with a Metal GPU. If `benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft` is missing, generate it from Lizard's example documents first:
+This standalone Rust package exercises a retained GPU tile compositor on a saved Lizard document. It is a benchmark prototype, not the editor's shipped renderer. Run it from the repository root on macOS with a Metal GPU. If `benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard` is missing, generate it from Lizard's example documents first:
 
 ```sh
 CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \

@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Ui, pos2, vec2};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::branches::{self, BranchState, Review, Side, SideChanges};
-use figcraft_engine::devcompare::ChangeKind;
+use lizard_doc::{Document, NodeId};
+use lizard_engine::branches::{self, BranchState, Review, Side, SideChanges};
+use lizard_engine::devcompare::ChangeKind;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::dev_compare::{self, BAR_H, LIST_W, Mode, Shot};
 use crate::i18n::{tr, trf, trn};
 use crate::theme::{Tokens, regular, semibold};
@@ -49,14 +49,14 @@ struct Cached {
 }
 
 /// Open the review of branch `id` of the file shown (or of the file a branch tab belongs to).
-pub fn open(app: &mut FigApp, id: Option<&str>) {
+pub fn open(app: &mut LizardApp, id: Option<&str>) {
     let Ok((mi, bi)) = branches::locate(&app.session, "branch.review", id) else { return };
     let found = app.session.docs.get(mi).and_then(|m| Some((m.uid, m.branches.get(bi)?.id.clone())));
     app.ui.branch_review = found.map(|(main, id)| ReviewView::new(main, id));
 }
 
 /// Escape closes the dialog (before the canvas's shortcuts see it).
-pub fn keys(app: &mut FigApp, ctx: &egui::Context) {
+pub fn keys(app: &mut LizardApp, ctx: &egui::Context) {
     if app.ui.branch_review.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.ui.branch_review = None;
     }
@@ -64,7 +64,7 @@ pub fn keys(app: &mut FigApp, ctx: &egui::Context) {
 
 /// On a branch tab: a banner over the canvas naming the branch and its file, with Review and
 /// merge.
-pub fn banner(app: &mut FigApp, ctx: &egui::Context, canvas: Rect) {
+pub fn banner(app: &mut LizardApp, ctx: &egui::Context, canvas: Rect) {
     let Ok(ds) = app.session.ds() else { return };
     let Some((main, id)) = ds.branch_of.clone() else { return };
     // A branch version being viewed shows its own banner in this place.
@@ -118,7 +118,7 @@ fn shot(ctx: &egui::Context, doc: &Document, frame: NodeId, changes: &SideChange
 }
 
 /// The review dialog, while open.
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut view) = app.ui.branch_review.take() else { return };
     let Some(mi) = app.session.docs.iter().position(|d| d.uid == view.main) else { return };
     let Some(bi) = app.session.docs.get(mi).and_then(|m| m.branches.iter().position(|b| b.id == view.id)) else { return };

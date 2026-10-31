@@ -1,5 +1,5 @@
-use figcraft_color::{Color, ColorProfile, Paint};
-use figcraft_doc::Document;
+use lizard_color::{Color, ColorProfile, Paint};
+use lizard_doc::Document;
 
 use super::import_svg_with_notes;
 

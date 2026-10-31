@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::Session;
-use figcraft_engine::params::id_of;
-use figcraft_render::{View, Work};
+use lizard_doc::{Document, NodeId};
+use lizard_engine::Session;
+use lizard_engine::params::id_of;
+use lizard_render::{View, Work};
 use serde_json::json;
 
 use super::{CanvasState, canvas_zoom_delta, canvas_zoom_events, measured_wheel_zoom, shows};

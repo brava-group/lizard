@@ -1,7 +1,7 @@
 //! The swatch, value, and opacity control shared by paint rows and effect settings.
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::{Color, Hsb, Hsl, Paint, PaintKind};
+use lizard_color::{Color, Hsb, Hsl, Paint, PaintKind};
 
 use super::ControlWidth;
 use crate::i18n::tr;
@@ -383,7 +383,7 @@ fn show_bound_variable(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &st
 mod tests {
     use super::*;
     use crate::theme;
-    use figcraft_color::Color;
+    use lizard_color::Color;
 
     #[test]
     fn variants_render_even_when_the_parent_row_is_narrow() {

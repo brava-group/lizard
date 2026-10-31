@@ -2,10 +2,10 @@
 
 use std::error::Error;
 
-use figcraft_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_in_view};
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, NodeKind, Region, Segment, VectorNetwork, Vertex, WindingRule};
-use figcraft_render::{Options, View, render_view};
+use lizard_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_in_view};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, NodeKind, Region, Segment, VectorNetwork, Vertex, WindingRule};
+use lizard_render::{Options, View, render_view};
 
 fn add_square(network: &mut VectorNetwork, x: f64, fill: Option<Vec<Paint>>) {
     let first_vertex = network.vertices.len();

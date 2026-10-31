@@ -1,9 +1,9 @@
 use egui::{Pos2, RawInput, Rect, vec2};
-use figcraft_engine::Session;
-use figcraft_ui_egui::{FigApp, NoServices, control};
+use lizard_engine::Session;
+use lizard_ui_egui::{LizardApp, NoServices, control};
 use serde_json::json;
 
-fn frame(ctx: &egui::Context, app: &mut FigApp, time: f64) {
+fn frame(ctx: &egui::Context, app: &mut LizardApp, time: f64) {
     let mut out = ctx
         .run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(time), ..Default::default() }, |ui| {
             app.ui(ui)
@@ -19,7 +19,7 @@ fn comment_open_other_page() {
     session.execute("page.select", &json!({"id": second})).unwrap();
     let comment = session.execute("comment.add", &json!({"x": 50, "y": 50, "text": "Review this"})).unwrap()["id"].as_u64().unwrap();
     let ctx = egui::Context::default();
-    let mut app = FigApp::new(session, Box::new(NoServices));
+    let mut app = LizardApp::new(session, Box::new(NoServices));
     for i in 1..=3 {
         frame(&ctx, &mut app, i as f64 / 60.0);
     }

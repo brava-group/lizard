@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use figcraft_doc::{Document, NodeKind};
+use lizard_doc::{Document, NodeKind};
 
 use super::*;
 

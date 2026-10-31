@@ -8,9 +8,9 @@
 use std::sync::Arc;
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, pos2, vec2};
-use figcraft_doc::proto::{Action, Direction, Easing, OverlayPosition, Transition};
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_engine::Session;
+use lizard_doc::proto::{Action, Direction, Easing, OverlayPosition, Transition};
+use lizard_doc::{Document, NodeId, NodeKind};
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use super::{Presenter, next_delay, raise_fixed, smart_interpolate};
@@ -388,7 +388,7 @@ fn fixed_layers_stay_above_the_content_that_scrolls() {
     let shown = p.display().unwrap();
     // The header was below the feed in the layer list; fixed, it draws (and takes clicks) on top.
     assert_eq!(shown.node(a).unwrap().children, [feed, header], "fixed layers draw above scrolling ones");
-    assert_eq!(figcraft_engine::proto_run::hotspots(&shown, a).last().map(|h| h.0), Some(header), "the top-most hotspot");
+    assert_eq!(lizard_engine::proto_run::hotspots(&shown, a).last().map(|h| h.0), Some(header), "the top-most hotspot");
     assert_eq!(p.design.as_ref().unwrap().node(a).unwrap().children, [header, feed], "the file's layer order doesn't change");
     // Nothing fixed: nothing moves.
     let mut d = s.doc().unwrap().clone();

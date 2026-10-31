@@ -3,12 +3,12 @@
 //! The model runs in a provider CLI. Lizard owns this context and the document-bound MCP
 //! bridge; no provider-specific prompt or third-party design instructions are embedded here.
 
-use figcraft_engine::DocState;
+use lizard_engine::DocState;
 use serde_json::json;
 
 use crate::agent_panel::ChatNodeRef;
 
-const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in the open document through the figcraft MCP server. The editor's command engine is the source of truth for changes and Undo history.\n\
+const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in the open document through the lizard MCP server. The editor's command engine is the source of truth for changes and Undo history.\n\
 \n\
 Workflow:\n\
 1. Read the provided document snapshot. If you need more detail, call inspect_document or get_node. Use the selected layer IDs as references, not as a request to modify them all.\n\
@@ -34,8 +34,8 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
         }
         icon_scope = node.parent.unwrap_or(ds.page);
     }
-    let preferred_icon_library = figcraft_engine::cmd::icon::dominant_library(&ds.doc, icon_scope, 2_048)
-        .or_else(|| figcraft_engine::cmd::icon::dominant_library(&ds.doc, ds.page, 2_048))
+    let preferred_icon_library = lizard_engine::cmd::icon::dominant_library(&ds.doc, icon_scope, 2_048)
+        .or_else(|| lizard_engine::cmd::icon::dominant_library(&ds.doc, ds.page, 2_048))
         .unwrap_or("lucide");
     let selected = selected
         .iter()
@@ -96,8 +96,8 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_doc::{Document, NodeId};
-    use figcraft_engine::Session;
+    use lizard_doc::{Document, NodeId};
+    use lizard_engine::Session;
 
     #[test]
     fn new_session_gets_rules_and_resumed_turn_gets_fresh_state() {
@@ -106,7 +106,7 @@ mod tests {
         let first = build_turn(&ds, &[], "Create a card", "", true);
         let next = build_turn(&ds, &[], "Change its fill", "", false);
         assert!(first.contains("Lizard agent instructions:"));
-        assert!(first.contains("figcraft MCP server"));
+        assert!(first.contains("lizard MCP server"));
         assert!(first.contains("search_icons"));
         assert!(first.contains("\"preferred_icon_library\":\"lucide\""));
         assert!(!next.contains("Lizard agent instructions:"));
@@ -128,10 +128,10 @@ mod tests {
     }
 
     #[test]
-    fn selected_screen_keeps_its_existing_icon_library() -> figcraft_engine::Result<()> {
+    fn selected_screen_keeps_its_existing_icon_library() -> lizard_engine::Result<()> {
         let mut session = Session::new();
         let frame = session.execute("node.create", &json!({"type":"frame", "name":"Settings screen", "width":400, "height":400}))?;
-        let id = figcraft_engine::params::id(&frame, "id").ok_or_else(|| figcraft_engine::bad("test", "missing frame id"))?;
+        let id = lizard_engine::params::id(&frame, "id").ok_or_else(|| lizard_engine::bad("test", "missing frame id"))?;
         session.execute("icon.create", &json!({"parent":id, "library":"phosphor", "icon":"gear", "select":false}))?;
         let selected = [ChatNodeRef { id, name: "Settings screen".into() }];
         let turn = build_turn(session.ds()?, &selected, "Add a save icon", "", false);

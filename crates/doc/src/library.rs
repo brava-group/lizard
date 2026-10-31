@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use figcraft_color::{Paint, PaintKind};
+use lizard_color::{Paint, PaintKind};
 use serde::{Deserialize, Serialize};
 
 use crate::{CollectionId, Document, Node, NodeId, NodeKind, StyleKind, VariableId};
@@ -261,7 +261,7 @@ impl Document {
         let node = Node::new(
             id,
             NodeKind::Page {
-                background: figcraft_color::Color::DEFAULT_PAGE,
+                background: lizard_color::Color::DEFAULT_PAGE,
                 background_visible: true,
                 flows: Vec::new(),
                 prototype: Default::default(),

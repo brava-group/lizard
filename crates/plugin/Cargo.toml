@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-plugin"
+name = "lizard-plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ description = "Lizard plugins: the plugin manifest and the WebAssembly sandbox p
 workspace = true
 
 [dependencies]
-figcraft-color = { workspace = true }
+lizard-color = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # A bundle's SHA-256 (plugin directories list it; the app checks downloads against it).

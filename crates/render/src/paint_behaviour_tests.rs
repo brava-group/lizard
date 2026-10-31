@@ -5,8 +5,8 @@
 //! it does; where the documentation is silent the case says so and pins today's behaviour.
 //! Scenes are small and synthetic, drawn on a white page at 1×.
 
-use figcraft_color::{BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, Hsb, Hsl, ImageFilters, ImageScaleMode, Paint, PaintKind};
-use figcraft_doc::{Document, ImageData, NodeId, NodeKind, StrokeAlign};
+use lizard_color::{BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, Hsb, Hsl, ImageFilters, ImageScaleMode, Paint, PaintKind};
+use lizard_doc::{Document, ImageData, NodeId, NodeKind, StrokeAlign};
 
 use super::*;
 
@@ -65,8 +65,8 @@ pub(super) fn solid_at(c: &str, opacity: f32) -> Paint {
 fn shader_fill_uses_rectangle_mask_and_live_uniforms() {
     use std::collections::BTreeMap;
 
-    let definition = figcraft_shader::demo();
-    if figcraft_shader::render_rgba(&definition, &BTreeMap::new(), 2, 2).is_err() {
+    let definition = lizard_shader::demo();
+    if lizard_shader::render_rgba(&definition, &BTreeMap::new(), 2, 2).is_err() {
         // Headless test runners may have no WebGPU adapter.
         return;
     }
@@ -77,7 +77,7 @@ fn shader_fill_uses_rectangle_mask_and_live_uniforms() {
         page,
         (20.0, 20.0, 100.0, 60.0),
         vec![Paint {
-            kind: PaintKind::Shader(figcraft_color::ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: BTreeMap::new() }),
+            kind: PaintKind::Shader(lizard_color::ShaderFill { shader_id: lizard_shader::DEMO_ID.into(), values: BTreeMap::new() }),
             opacity: 1.0,
             visible: true,
             blend: BlendMode::Normal,
@@ -463,7 +463,7 @@ fn image_scale_modes_place_the_image() {
     const RED: [u8; 3] = [255, 0, 0];
     const BLUE: [u8; 3] = [0, 0, 255];
     const PAGE: [u8; 3] = [255, 255, 255];
-    let crop = |x0, x1| Some(figcraft_color::ImagePaint::crop_from_rect(x0, 0.0, x1, 1.0));
+    let crop = |x0, x1| Some(lizard_color::ImagePaint::crop_from_rect(x0, 0.0, x1, 1.0));
     // (why, mode, rotation, scale, crop, box, probes). The 20 × 10 image on a box at (0, 0).
     type Row<'a> = (&'a str, ImageScaleMode, i32, f64, Option<[f64; 6]>, Pt, Probes);
     let rows: Vec<Row> = vec![
@@ -669,10 +669,10 @@ fn changing_the_colour_profile_converts_or_keeps_values() {
 fn text_strokes_follow_their_alignment() {
     // #615: as on other shapes (and in SVG export), an inside stroke stays in the glyphs, a centre
     // one reaches half its weight past them and an outside one all of it.
-    figcraft_text::scan_system_fonts();
+    lizard_text::scan_system_fonts();
     let left_edge = |align: StrokeAlign| -> Option<u32> {
         let (mut d, p) = page();
-        let mut td = figcraft_doc::TextData::new("I");
+        let mut td = lizard_doc::TextData::new("I");
         td.style.font_size = 120.0;
         let t = d.create(p, NodeKind::Text(td), "T", 60.0, 30.0, 1.0, 1.0).unwrap();
         let n = d.get_mut(t).unwrap();
@@ -680,7 +680,7 @@ fn text_strokes_follow_their_alignment() {
         n.strokes = vec![Paint::solid(hex("#000000"))];
         n.stroke.weight = 12.0;
         n.stroke.align = align;
-        let (w, h) = figcraft_text::auto_size(n)?;
+        let (w, h) = lizard_text::auto_size(n)?;
         (n.width, n.height) = (w, h);
         let pix = render(&d);
         (0..200).find(|x| (0..200).any(|y| px(&pix, *x, y)[0] < 128))

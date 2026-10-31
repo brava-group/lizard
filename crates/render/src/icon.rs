@@ -33,7 +33,7 @@ pub fn rasterize_icon(d: &str, fill: Option<&str>, stroke: Option<(&str, f64)>, 
     if !(8..=256).contains(&px) || d.trim().is_empty() || d.len() > 16 * 1024 {
         return None;
     }
-    let path = figcraft_geom::BezPath::from_svg(d).ok()?;
+    let path = lizard_geom::BezPath::from_svg(d).ok()?;
     let path = crate::draw::ts_path(&path)?;
     let scale = f64::from(px) / 24.0;
     let mut pix = Pixmap::new(px, px)?;

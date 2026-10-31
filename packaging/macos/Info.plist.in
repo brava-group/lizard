@@ -45,16 +45,16 @@
   <key>NSRequiresAquaSystemAppearance</key>
   <false/>
   <key>NSHumanReadableCopyright</key>
-  <string>Copyright © Lizard and FigCraft contributors. MIT OR Apache-2.0.</string>
+  <string>Copyright © Lizard and Lizard contributors. MIT OR Apache-2.0.</string>
 
-  <!-- FigCraft's own format. -->
+  <!-- Lizard's own format. -->
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.figcraft.document</string>
+      <string>com.brava.lizard.document</string>
       <key>UTTypeDescription</key>
-      <string>FigCraft Document</string>
+      <string>Lizard Document</string>
       <key>UTTypeConformsTo</key>
       <array>
         <string>public.data</string>
@@ -65,23 +65,23 @@
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
-        <array><string>figcraft</string></array>
+        <array><string>lizard</string></array>
         <key>public.mime-type</key>
-        <array><string>application/x-figcraft</string></array>
+        <array><string>application/x-lizard</string></array>
       </dict>
     </dict>
   </array>
 
-  <!-- figcraft://join?... live session invite links open FigCraft. -->
+  <!-- lizard://join?... live session invite links open Lizard. -->
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
       <key>CFBundleURLName</key>
-      <string>ai.storyteller.figcraft.invite</string>
+      <string>com.brava.lizard.invite</string>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>CFBundleURLSchemes</key>
-      <array><string>figcraft</string></array>
+      <array><string>lizard</string></array>
     </dict>
   </array>
 
@@ -89,7 +89,7 @@
   <array>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>FigCraft Document</string>
+      <string>Lizard Document</string>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>LSHandlerRank</key>
@@ -97,7 +97,7 @@
       <key>CFBundleTypeIconFile</key>
       <string>Lizard</string>
       <key>LSItemContentTypes</key>
-      <array><string>ai.storyteller.figcraft.document</string></array>
+      <array><string>com.brava.lizard.document</string></array>
     </dict>
     <!-- Offered under "Open With", never forced as the default. -->
     <dict>

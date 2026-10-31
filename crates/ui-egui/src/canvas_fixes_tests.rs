@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use egui::{Pos2, Rect, Shape};
-use figcraft_color::Color;
-use figcraft_doc::{GridAlign, GridKind, LayoutGrid};
-use figcraft_engine::Session;
+use lizard_color::Color;
+use lizard_doc::{GridAlign, GridKind, LayoutGrid};
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -132,11 +132,11 @@ fn selected_curved_and_polygonal_shapes_show_their_transform_box() {
 }
 
 /// A job a few hundred milliseconds of rendering big.
-fn big_job(doc: &Arc<figcraft_doc::Document>, page: figcraft_doc::NodeId, scale: f64) -> crate::render_worker::Job {
+fn big_job(doc: &Arc<lizard_doc::Document>, page: lizard_doc::NodeId, scale: f64) -> crate::render_worker::Job {
     crate::render_worker::Job {
         doc: doc.clone(),
         page,
-        view: figcraft_render::View { origin: (0.0, 0.0), scale, width: 2400, height: 2400 },
+        view: lizard_render::View { origin: (0.0, 0.0), scale, width: 2400, height: 2400 },
         outline: false,
         outline_extras: Default::default(),
         outlined: vec![],
@@ -220,7 +220,7 @@ fn the_pen_draws_the_handles_of_the_point_being_dragged_and_a_curved_band() {
 fn the_pencil_previews_its_stroke_in_its_colour_and_weight() {
     let mut u = Ui::new(Session::new());
     u.app.run("tool.set", json!({"tool": "pencil"}));
-    let (color, weight) = figcraft_engine::tools::PENCIL_STROKE;
+    let (color, weight) = lizard_engine::tools::PENCIL_STROKE;
     let preview = |shapes: &[Shape]| {
         shapes.iter().find_map(|s| match s {
             Shape::Path(p) if !p.closed && p.points.len() >= 3 && p.stroke.color == egui::epaint::ColorMode::Solid(crate::theme::c32(color)) => {

@@ -2,7 +2,7 @@
 # Build, sign and (optionally) notarize the macOS release artifacts:
 #
 #   $DIST/lizard-<version>-macos-<arch>.dmg            Lizard.app on a drag-to-Applications DMG
-#   $DIST/figcraft-cli-<version>-macos-<arch>.zip      the headless CLI (when apps/figcraft-cli exists)
+#   $DIST/lizard-cli-<version>-macos-<arch>.zip      the headless CLI (when apps/lizard-cli exists)
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
 #
@@ -41,9 +41,9 @@ SHORT_VERSION="${VERSION%%-*}"
 WORK="$CARGO_TARGET_DIR/macos-package"
 APP="$WORK/Lizard.app"
 DMG="$DIST/lizard-$VERSION-macos-$ARCH.dmg"
-CLI_ZIP="$DIST/figcraft-cli-$VERSION-macos-$ARCH.zip"
+CLI_ZIP="$DIST/lizard-cli-$VERSION-macos-$ARCH.zip"
 BINS=(lizard)
-[ "$HAS_CLI" = 1 ] && BINS+=(figcraft-cli)
+[ "$HAS_CLI" = 1 ] && BINS+=(lizard-cli)
 
 NOTARIZE=0
 if [ "$IDENTITY" = "-" ]; then
@@ -59,9 +59,9 @@ echo "==> Lizard $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, no
 # ---- build -------------------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = 0 ]; then
   for t in "${TARGETS[@]}"; do
-    (cd "$ROOT" && cargo build --release --locked -p figcraft --bin lizard --target "$t")
+    (cd "$ROOT" && cargo build --release --locked -p lizard --bin lizard --target "$t")
     if [ "$HAS_CLI" = 1 ]; then
-      (cd "$ROOT" && cargo build --release --locked -p figcraft-cli --bin figcraft-cli --target "$t")
+      (cd "$ROOT" && cargo build --release --locked -p lizard-cli --bin lizard-cli --target "$t")
     fi
   done
 fi
@@ -103,14 +103,14 @@ notarize() {
 }
 
 # ---- icon --------------------------------------------------------------------------------------
-# The .icns is generated here from the committed PNGs (assets/app-icon/figcraft-<size>.png, made by
+# The .icns is generated here from the committed PNGs (assets/app-icon/lizard-<size>.png, made by
 # `cargo xtask icon`); it is never committed.
 ICONS="$ROOT/assets/app-icon"
 ICONSET="$WORK/Lizard.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
-  cp "$ICONS/figcraft-$s.png" "$ICONSET/icon_${s}x${s}.png"
-  cp "$ICONS/figcraft-$((s * 2)).png" "$ICONSET/icon_${s}x${s}@2x.png"
+  cp "$ICONS/lizard-$s.png" "$ICONSET/icon_${s}x${s}.png"
+  cp "$ICONS/lizard-$((s * 2)).png" "$ICONSET/icon_${s}x${s}@2x.png"
 done
 iconutil -c icns -o "$WORK/Lizard.icns" "$ICONSET"
 
@@ -126,7 +126,7 @@ if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   copy_font_licences "$APP/Contents/Resources/Licenses"
 fi
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
-  -e "s/@BUILD_SHA@/${FIGCRAFT_BUILD_SHA:-unknown}/g" \
+  -e "s/@BUILD_SHA@/${LIZARD_BUILD_SHA:-unknown}/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
@@ -169,22 +169,22 @@ fi
 # ---- CLI ---------------------------------------------------------------------------------------
 if [ "$HAS_CLI" = 1 ]; then
   echo "==> building $CLI_ZIP"
-  CLI_DIR="$WORK/figcraft-cli-$VERSION-macos-$ARCH"
+  CLI_DIR="$WORK/lizard-cli-$VERSION-macos-$ARCH"
   mkdir -p "$CLI_DIR"
-  cp "$WORK/bin/figcraft-cli" "$CLI_DIR/"
+  cp "$WORK/bin/lizard-cli" "$CLI_DIR/"
   copy_docs "$CLI_DIR"
   # Same Developer ID and hardened runtime as the app, with an explicit reverse-DNS identifier
   # (codesign would otherwise use the bare file name).
-  sign --options runtime --identifier ai.storyteller.figcraft-cli "$CLI_DIR/figcraft-cli"
-  codesign --verify --strict --verbose=2 "$CLI_DIR/figcraft-cli"
+  sign --options runtime --identifier com.brava.lizard-cli "$CLI_DIR/lizard-cli"
+  codesign --verify --strict --verbose=2 "$CLI_DIR/lizard-cli"
   rm -f "$CLI_ZIP"
   ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"
   # notarytool accepts a zip of the bare binary. A bare Mach-O can't carry a stapled ticket, so
   # Gatekeeper looks the notarization up online when a quarantined copy first runs.
   if [ "$NOTARIZE" = 1 ]; then notarize "$CLI_ZIP"; fi
-  "$WORK/bin/figcraft-cli" --version
+  "$WORK/bin/lizard-cli" --version
 else
-  warn "apps/figcraft-cli is not in this workspace: no CLI zip"
+  warn "apps/lizard-cli is not in this workspace: no CLI zip"
   rm -f "$CLI_ZIP"
 fi
 

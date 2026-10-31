@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::bridge::{self, Edit};
 
-pub const WORKER_ARG: &str = "--figcraft-figma-plugin-worker";
+pub const WORKER_ARG: &str = "--lizard-figma-plugin-worker";
 pub const MAX_SOURCE_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
@@ -141,13 +141,13 @@ pub fn execute(request: Request) -> Result<Response, String> {
     context.eval(Source::from_bytes(&setup)).map_err(|e| format!("plugin setup: {e}"))?;
     context.eval(Source::from_bytes(&request.source)).map_err(|e| format!("plugin JavaScript: {e}"))?;
     context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
-    context.eval(Source::from_bytes("__figcraftRun()")).map_err(|e| format!("plugin event: {e}"))?;
+    context.eval(Source::from_bytes("__lizardRun()")).map_err(|e| format!("plugin event: {e}"))?;
     context.run_jobs().map_err(|e| format!("plugin JavaScript task: {e}"))?;
     bridge::run_timers(&mut context)?;
     if let Some(reason) = hooks.rejected_promise.borrow().as_ref() {
         return Err(format!("plugin Promise was rejected: {reason}"));
     }
-    let value = context.eval(Source::from_bytes("__figcraftTake()")).map_err(|e| format!("plugin result: {e}"))?;
+    let value = context.eval(Source::from_bytes("__lizardTake()")).map_err(|e| format!("plugin result: {e}"))?;
     let output = value.to_string(&mut context).map_err(|e| format!("plugin result: {e}"))?.to_std_string_escaped();
     if output.len() > MAX_RESPONSE_BYTES {
         return Err("plugin response is too large".into());

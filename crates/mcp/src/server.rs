@@ -3,7 +3,7 @@
 use std::io::{BufRead, Read, Write};
 use std::sync::Arc;
 
-use figcraft_engine::file_access::{Roots, confined};
+use lizard_engine::file_access::{Roots, confined};
 
 use serde_json::{Value, json};
 
@@ -40,7 +40,7 @@ on the selection; new layers become the selection. Colours are \"#RRGGBB\" or \"
 For ordinary UI glyphs, search_icons with a preferredLibrary, then create_node type icon using the returned exact library/name. Keep one icon library across a screen; use a fallback family only when the preferred one has no suitable match. Verify your work: \
 inspect_document / get_node return the layer tree as JSON (check sizes, fills, layout, overrides), and \
 screenshot returns a PNG of the page or of given layers to look at. undo/redo step through history. \
-Resources: figcraft://document, figcraft://node/{id}, figcraft://command/{id}. prompts/list has workflows.";
+Resources: lizard://document, lizard://node/{id}, lizard://command/{id}. prompts/list has workflows.";
 
 /// An MCP server bound to one backend.
 pub struct Server {
@@ -69,7 +69,7 @@ impl Server {
     }
 
     /// Confine the files every request reads and writes to `roots` (see
-    /// [`figcraft_engine::file_access`]).
+    /// [`lizard_engine::file_access`]).
     pub fn with_roots(mut self, roots: Option<Roots>) -> Self {
         self.roots = roots.map(Arc::new);
         self
@@ -201,7 +201,7 @@ impl Server {
                         "resources": {"subscribe": false, "listChanged": false},
                         "prompts": {"listChanged": false},
                     },
-                    "serverInfo": {"name": "figcraft", "title": "Lizard", "version": env!("CARGO_PKG_VERSION")},
+                    "serverInfo": {"name": "lizard", "title": "Lizard", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": format!("{INSTRUCTIONS} Backend: {}.{}", self.backend.describe(), self.roots_note()),
                 }))
             }

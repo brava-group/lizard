@@ -3,10 +3,10 @@
 
 use std::sync::Arc;
 
-use figcraft_color::{ColorProfile, ImageFilters, ImageScaleMode, Paint};
-use figcraft_doc::{Document, ImageData, NodeKind};
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame, RgbaImage};
+use lizard_color::{ColorProfile, ImageFilters, ImageScaleMode, Paint};
+use lizard_doc::{Document, ImageData, NodeKind};
 
 use crate::images::{self, MAX_FRAMES};
 

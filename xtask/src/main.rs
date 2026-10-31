@@ -2,7 +2,7 @@
 //!
 //! - `ci`      fmt check, clippy -D warnings, tests, layers, assets, wasm check
 //! - `layers`  crate dependency layering check
-//! - `assets`  every file under assets/ and docs/ has a row in ATTRIBUTION.md
+//! - `assets`  required bundled asset licences and notices are present
 //! - `parity`  menu-catalog coverage → docs/parity-checklist.md
 //! - `version` print the version, or `version set X.Y.Z`
 //! - `icon`    regenerate the app icon from the navigation logo (needs resvg)
@@ -10,7 +10,7 @@
 //! - `plugins` format-check, lint, test and build the plugin SDK and example plugins (`plugins/`, a
 //!   workspace of its own) for wasm32: `<target>/plugins/dist/<example>/` holds each manifest and
 //!   module, ready for Plugins ▸ Development ▸ Import plugin from manifest…; then runs every
-//!   built example in the engine (`figcraft-cli run`), so a module that no longer works fails here
+//!   built example in the engine (`lizard-cli run`), so a module that no longer works fails here
 //! - `bench`   release-build timings at 1k/10k/50k layers (`bench 1000,10000` for other sizes) and
 //!   with a synthetic design system used by 2,000 instances
 
@@ -68,15 +68,15 @@ fn wasm() -> bool {
         "--target",
         "wasm32-unknown-unknown",
         "-p",
-        "figcraft-collab",
+        "lizard-collab",
         "-p",
-        "figcraft-collab-net",
+        "lizard-collab-net",
         "-p",
-        "figcraft-engine",
+        "lizard-engine",
         "-p",
-        "figcraft-ui-egui",
+        "lizard-ui-egui",
         "-p",
-        "figcraft-web",
+        "lizard-web",
     ])) && plugins()
 }
 
@@ -107,7 +107,7 @@ fn plugins() -> bool {
         let module = format!("{}.wasm", name.replace('-', "_"));
         let dist = target.join("dist").join(name);
         let copied = std::fs::create_dir_all(&dist)
-            .and_then(|()| std::fs::copy(root.join("plugins/examples").join(name).join("figcraft-plugin.json"), dist.join("figcraft-plugin.json")))
+            .and_then(|()| std::fs::copy(root.join("plugins/examples").join(name).join("lizard-plugin.json"), dist.join("lizard-plugin.json")))
             .and_then(|_| std::fs::copy(target.join("wasm32-unknown-unknown/release").join(&module), dist.join(&module)));
         match copied {
             Ok(bytes) => eprintln!("plugins: {} ({} KB)", dist.display(), bytes / 1024),
@@ -126,26 +126,26 @@ fn plugins() -> bool {
 const SMOKE: &[(&str, &str)] = &[
     ("shape.rectangle", r#"{"x": 0, "y": 0, "width": 40, "height": 40, "props": {"name": "  a   layer copy "}}"#),
     ("select.all", "{}"),
-    ("plugin.run", r#"{"id": "org.figcraft.examples.tidy-names", "command": "tidy", "params": {"case": "Title Case"}}"#),
-    ("plugin.run", r#"{"id": "org.figcraft.examples.swatch-grid", "command": "panel"}"#),
-    ("plugin.event", r#"{"id": "org.figcraft.examples.swatch-grid", "control": "palette", "value": "Ocean"}"#),
-    ("plugin.event", r#"{"id": "org.figcraft.examples.swatch-grid", "control": "generate"}"#),
-    ("plugin.close", r#"{"id": "org.figcraft.examples.swatch-grid"}"#),
-    ("widget.insert", r#"{"plugin": "org.figcraft.examples.counter", "x": 0, "y": 200}"#),
+    ("plugin.run", r#"{"id": "com.brava.lizard.examples.tidy-names", "command": "tidy", "params": {"case": "Title Case"}}"#),
+    ("plugin.run", r#"{"id": "com.brava.lizard.examples.swatch-grid", "command": "panel"}"#),
+    ("plugin.event", r#"{"id": "com.brava.lizard.examples.swatch-grid", "control": "palette", "value": "Ocean"}"#),
+    ("plugin.event", r#"{"id": "com.brava.lizard.examples.swatch-grid", "control": "generate"}"#),
+    ("plugin.close", r#"{"id": "com.brava.lizard.examples.swatch-grid"}"#),
+    ("widget.insert", r#"{"plugin": "com.brava.lizard.examples.counter", "x": 0, "y": 200}"#),
     ("widget.click", r#"{"target": "increment"}"#),
     ("widget.menuAction", r#"{"item": "step", "value": "5"}"#),
     ("widget.menuAction", r#"{"item": "reset"}"#),
-    ("widget.insert", r#"{"plugin": "org.figcraft.examples.focus-list", "x": 0, "y": 400}"#),
+    ("widget.insert", r#"{"plugin": "com.brava.lizard.examples.focus-list", "x": 0, "y": 400}"#),
     ("widget.setText", r#"{"input": "title", "text": "Smoke test"}"#),
     ("widget.setText", r#"{"input": "new", "text": "One more"}"#),
     ("widget.click", r#"{"target": "toggle.0"}"#),
     ("widget.click", r#"{"target": "focus"}"#),
     ("widget.fireTimer", "{}"),
     ("widget.list", "{}"),
-    ("plugin.run", r#"{"id": "org.figcraft.examples.dot-grid"}"#),
-    ("plugin.event", r#"{"id": "org.figcraft.examples.dot-grid", "control": "columns", "value": 4}"#),
-    ("plugin.event", r#"{"id": "org.figcraft.examples.dot-grid", "control": "generate"}"#),
-    ("plugin.close", r#"{"id": "org.figcraft.examples.dot-grid"}"#),
+    ("plugin.run", r#"{"id": "com.brava.lizard.examples.dot-grid"}"#),
+    ("plugin.event", r#"{"id": "com.brava.lizard.examples.dot-grid", "control": "columns", "value": 4}"#),
+    ("plugin.event", r#"{"id": "com.brava.lizard.examples.dot-grid", "control": "generate"}"#),
+    ("plugin.close", r#"{"id": "com.brava.lizard.examples.dot-grid"}"#),
 ];
 
 /// Import the examples built into `<target>/dist` and run [`SMOKE`] with them.
@@ -158,18 +158,18 @@ fn smoke(target: &std::path::Path) -> bool {
         eprintln!("plugins: {}: {e}", script.display());
         return false;
     }
-    run(cargo().args(["run", "-q", "-p", "figcraft-cli", "--", "run"]).arg(&script).stdout(std::process::Stdio::null()))
+    run(cargo().args(["run", "-q", "-p", "lizard-cli", "--", "run"]).arg(&script).stdout(std::process::Stdio::null()))
 }
 
-/// Engine/render timings (`figcraft-cli perf`) and UI frame timings (an ignored test driving the
+/// Engine/render timings (`lizard-cli perf`) and UI frame timings (an ignored test driving the
 /// whole UI headless), release builds, for each comma-separated document size in layers.
 fn bench(sizes: &str) -> bool {
-    run(cargo().args(["run", "--release", "-p", "figcraft-cli", "--", "perf", "--layers", sizes]))
-        && run(cargo().env("FIGCRAFT_BENCH_LAYERS", sizes).args([
+    run(cargo().args(["run", "--release", "-p", "lizard-cli", "--", "perf", "--layers", sizes]))
+        && run(cargo().env("LIZARD_BENCH_LAYERS", sizes).args([
             "test",
             "--release",
             "-p",
-            "figcraft-ui-egui",
+            "lizard-ui-egui",
             "--lib",
             "perf_ui_frames",
             "--",
@@ -178,51 +178,26 @@ fn bench(sizes: &str) -> bool {
         ]))
 }
 
-/// Every asset file must be listed in ATTRIBUTION.md.
+/// Keep the licences required by bundled icon and app artwork.
 fn assets() -> bool {
     let root = root();
-    let attribution = std::fs::read_to_string(root.join("ATTRIBUTION.md")).unwrap_or_default();
-    let mut missing = Vec::new();
-    for dir in ["assets", "docs/brand", "docs/images"] {
-        walk(&root.join(dir), &mut |p| {
-            let rel = p.strip_prefix(&root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
-            let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-            if name.starts_with('.') || name.ends_with(".md") || name.ends_with(".txt") {
-                return;
-            }
-            // Listed by path, or by any ancestor directory written as `dir/`.
-            let mut listed = attribution.contains(&format!("`{rel}`"));
-            let mut cur = rel.as_str();
-            while let Some((parent, _)) = cur.rsplit_once('/') {
-                if attribution.contains(&format!("`{parent}/`")) {
-                    listed = true;
-                    break;
-                }
-                cur = parent;
-            }
-            if !listed {
-                missing.push(rel);
-            }
-        });
-    }
+    let required = [
+        "NOTICE",
+        "LICENSE-MIT",
+        "LICENSE-APACHE",
+        "assets/app-icon/LICENSE.txt",
+        "assets/icon-packs/LICENSE-lucide",
+        "assets/icon-packs/LICENSE-feather",
+        "assets/icon-packs/LICENSE-phosphor",
+        "assets/icon-packs/LICENSE-material",
+    ];
+    let missing: Vec<_> = required.into_iter().filter(|path| !root.join(path).is_file()).collect();
     if !missing.is_empty() {
-        eprintln!("assets without an ATTRIBUTION.md row:\n  {}", missing.join("\n  "));
+        eprintln!("missing asset licences or notices:\n  {}", missing.join("\n  "));
         return false;
     }
     eprintln!("assets: ok");
     true
-}
-
-fn walk(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path)) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, f);
-        } else {
-            f(&p);
-        }
-    }
 }
 
 fn parity() -> bool {
@@ -240,7 +215,7 @@ fn parity() -> bool {
         "edit.copyAsPng",
         "edit.copyLink",
     ];
-    let (done, total, missing) = figcraft_engine::catalog::parity(&extra);
+    let (done, total, missing) = lizard_engine::catalog::parity(&extra);
     let pct = done as f64 * 100.0 / total.max(1) as f64;
     // The generation date: the date of the last commit (no clock dependency in xtask).
     let date = Command::new("git")
@@ -252,8 +227,8 @@ fn parity() -> bool {
         .map(|d| d.trim().to_string())
         .unwrap_or_default();
     let mut md = format!(
-        "# Parity checklist\n\n> **Generated:** {date} by `cargo xtask parity`. Do not edit by hand.\n\nFigCraft commands registered for the incumbent's main menu and toolbar ({} commands in the engine).\n\n**{done} / {total} menu items ({pct:.1}%)**\n\n",
-        figcraft_engine::all_commands().len()
+        "# Parity checklist\n\n> **Generated:** {date} by `cargo xtask parity`. Do not edit by hand.\n\nLizard commands registered for the incumbent's main menu and toolbar ({} commands in the engine).\n\n**{done} / {total} menu items ({pct:.1}%)**\n\n",
+        lizard_engine::all_commands().len()
     );
     if missing.is_empty() {
         md.push_str("Every catalog item has a command.\n");

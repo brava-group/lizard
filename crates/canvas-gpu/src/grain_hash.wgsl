@@ -1,4 +1,4 @@
-//! 64-bit grain hash, matching figcraft-render::grain on the GPU.
+//! 64-bit grain hash, matching lizard-render::grain on the GPU.
 struct Word64 { lo: u32, hi: u32 };
 
 fn product(a: Word64, b: Word64) -> Word64 {

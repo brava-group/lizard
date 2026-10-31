@@ -6,11 +6,11 @@
 
 use std::time::Duration;
 
-use figcraft_collab::message::{
+use lizard_collab::message::{
     self, Access, Admin, AdminReply, ClientMsg, HostInfo, LibraryReply, LibraryReq, Manage, NewLink, OpenHosting, OpenLibrary, OpenPlugins, PROTOCOL,
     PluginReply, PluginReq, Resolve, ServerMsg,
 };
-use figcraft_engine::live::{Shared, SharedLink};
+use lizard_engine::live::{Shared, SharedLink};
 use tungstenite::{Bytes, Message, WebSocket};
 
 use crate::invite::{Endpoint, Invite};

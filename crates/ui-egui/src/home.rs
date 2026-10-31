@@ -6,10 +6,10 @@
 use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_engine::templates::{Kind, TEMPLATES, Template};
+use lizard_engine::templates::{Kind, TEMPLATES, Template};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y;
 use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon};
@@ -137,7 +137,7 @@ fn listed(ui: &mut Ui, t: &Tokens, id: Id, height: f32, row: &FileRow) -> bool {
     resp.clicked()
 }
 
-pub fn show(app: &mut FigApp, ui: &mut Ui) {
+pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     dropped(app, ui.ctx());
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
@@ -177,18 +177,18 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 /// Files dropped on the home screen: each one the app opens becomes a document of its own (the
 /// editor then shows it), behind an "Opening as a new file" card ([`crate::pending_open`]); anything
 /// else is turned away with a toast. A file that fails to open keeps the engine's own error.
-fn dropped(app: &mut FigApp, ctx: &egui::Context) {
+fn dropped(app: &mut LizardApp, ctx: &egui::Context) {
     let files = ctx.input(|i| i.raw.dropped_files.clone());
     for f in files {
         if !crate::opens(f.path()) {
-            app.toast(tr("Drop a .figcraft, .fig, .json, .svg or image file."));
+            app.toast(tr("Drop a .lizard, .fig, .json, .svg or image file."));
             continue;
         }
         crate::pending_open::open_dropped(app, &f);
     }
 }
 
-fn sidebar(app: &mut FigApp, ui: &mut Ui, t: &Tokens, left: Rect) {
+fn sidebar(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, left: Rect) {
     let mut y = left.min.y + 20.0;
     icons::paint(ui.painter(), Rect::from_min_size(pos2(left.min.x + 16.0, y), vec2(20.0, 20.0)), Icon::Logo, t.icon);
     ui.painter().text(pos2(left.min.x + 44.0, y + 10.0), Align2::LEFT_CENTER, "Lizard", semibold(14.0), t.text);
@@ -228,7 +228,7 @@ fn file_matches(name: &str, location: &str, query: &str) -> bool {
 
 /// One search over known files and starter templates. It never sends a query or owner token to a
 /// server; online files are opened through their existing owner-token command only on click.
-fn search_results(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn search_results(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     heading(ui, t, tr("Search results"));
     let query = app.ui.home_view.file_query.trim().to_lowercase();
     let mut count = open_files(app, ui, t, &query);
@@ -240,7 +240,7 @@ fn search_results(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         subheading(ui, t, tr("Online files"));
         for f in &online {
             count += 1;
-            let host = figcraft_engine::online::server_host(&f.server);
+            let host = lizard_engine::online::server_host(&f.server);
             let icon = crate::online::mark(f.shared.is_some());
             let row = FileRow {
                 mark: Some((icon, if f.shared.is_some() { t.success } else { t.icon_secondary })),
@@ -319,12 +319,12 @@ fn action_card(ui: &mut Ui, t: &Tokens, icon: Icon, title: &str, sub: &str) -> b
     resp.clicked()
 }
 
-fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn recents(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     heading(ui, t, tr("Recents"));
     let (mut new_file, mut open) = (false, false);
     ui.horizontal(|ui| {
         new_file = action_card(ui, t, Icon::Plus, tr("New design file"), tr("Start from a blank canvas"));
-        open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .figcraft, .svg or images"));
+        open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .lizard, .svg or images"));
     });
     if new_file {
         app.run("file.new", json!({}));
@@ -366,8 +366,8 @@ fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 
 /// The Open files list: the documents whose name or path has `query` (lower case; all for ""), a
 /// row each; choosing one shows its tab. How many are listed.
-fn open_files(app: &mut FigApp, ui: &mut Ui, t: &Tokens, query: &str) -> usize {
-    let hit = |d: &&figcraft_engine::DocState| file_matches(&d.doc.name, d.path.as_deref().unwrap_or_default(), query);
+fn open_files(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, query: &str) -> usize {
+    let hit = |d: &&lizard_engine::DocState| file_matches(&d.doc.name, d.path.as_deref().unwrap_or_default(), query);
     let count = app.session.docs.iter().filter(hit).count();
     if count == 0 {
         return 0;
@@ -397,8 +397,8 @@ fn open_files(app: &mut FigApp, ui: &mut Ui, t: &Tokens, query: &str) -> usize {
 
 /// The file joined from the home screen (a code, or one of your online files) opened in a tab of
 /// its own: show it. (A join that was left is forgotten.)
-fn opened_join(app: &mut FigApp) {
-    match app.ui.live.home_join.map(|id| app.session.live.get(id).map(figcraft_engine::live::Live::syncing)) {
+fn opened_join(app: &mut LizardApp) {
+    match app.ui.live.home_join.map(|id| app.session.live.get(id).map(lizard_engine::live::Live::syncing)) {
         Some(Some(true)) => {
             app.ui.live.home_join = None;
             app.ui.home = false;
@@ -410,7 +410,7 @@ fn opened_join(app: &mut FigApp) {
 
 /// The Getting started card: short tips with their shortcuts as the keymap has them now, and a
 /// button that puts the card away (Help ▸ Getting started brings it back).
-fn getting_started(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn getting_started(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     let width = ui.available_width().min(3.0 * CARD_W + 2.0 * GAP);
     let columns = if width >= 720.0 { 3 } else { 1 };
     let (cell_w, cell_h) = ((width - 32.0) / columns as f32, 62.0);
@@ -450,7 +450,7 @@ fn getting_started(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 
 /// A command's shortcut as this platform writes it, as the keymap has it now.
 pub(crate) fn shortcut(command: &str) -> Option<String> {
-    crate::shortcuts::shortcut(command).map(|key| figcraft_engine::keymap::display(key, crate::shortcuts::platform()))
+    crate::shortcuts::shortcut(command).map(|key| lizard_engine::keymap::display(key, crate::shortcuts::platform()))
 }
 
 /// `text` wrapped at `width`, at most `rows` lines (the last one ends with an ellipsis).
@@ -469,7 +469,7 @@ fn matches(template: &Template, query: &str, kind: Option<Kind>) -> bool {
             || has(template.size))
 }
 
-fn templates(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+fn templates(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     heading(ui, t, tr("Templates"));
     ui.horizontal(|ui| {
         let search = widgets::text_input(ui, Id::new("home_template_search"), &mut app.ui.home_view.query, 260.0, tr("Search templates"));
@@ -502,7 +502,7 @@ fn templates(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
 }
 
 /// Template cards in as many columns as fit; choosing one opens a new document made from it.
-fn template_grid(app: &mut FigApp, ui: &mut Ui, t: &Tokens, list: &[&Template]) {
+fn template_grid(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, list: &[&Template]) {
     let columns = (((ui.available_width() + GAP) / (CARD_W + GAP)).floor() as usize).max(1);
     let dark = ui.visuals().dark_mode;
     let mut thumbs: Thumbs = ui.data(|d| d.get_temp(Id::new("template_thumbs"))).unwrap_or_default();
@@ -580,19 +580,19 @@ struct Thumb {
 struct Thumbs(BTreeMap<(&'static str, bool), Option<Thumb>>);
 
 /// Build `template` and render the top of its first page to fit a card.
-fn thumbnail(ctx: &egui::Context, template: &Template, background: figcraft_color::Color) -> Option<Thumb> {
+fn thumbnail(ctx: &egui::Context, template: &Template, background: lizard_color::Color) -> Option<Thumb> {
     let doc = template.build(background).ok()?;
     let frames = doc.node(doc.first_page()?)?.children.clone();
-    let bounds = frames.iter().filter_map(|id| figcraft_render::export_bounds(&doc, *id)).reduce(|a, b| a.union(b))?;
+    let bounds = frames.iter().filter_map(|id| lizard_render::export_bounds(&doc, *id)).reduce(|a, b| a.union(b))?;
     if !(bounds.width() > 0.0 && bounds.height() > 0.0) {
         return None;
     }
     // A page much taller than a card shows its top, as wide as the card.
     let (w, h) = (f64::from(CARD_W - 22.0), f64::from(THUMB_H - 22.0));
-    let area = figcraft_geom::Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1.min(bounds.y0 + bounds.width() * h / w * 1.5));
+    let area = lizard_geom::Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1.min(bounds.y0 + bounds.width() * h / w * 1.5));
     let scale = (w / area.width()).min(h / area.height()) * f64::from(ctx.pixels_per_point());
-    let pix = figcraft_engine::cmd::file::render_export_area_screen(&doc, &frames, area, scale.min(1.0))?;
-    let image = crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb);
+    let pix = lizard_engine::cmd::file::render_export_area_screen(&doc, &frames, area, scale.min(1.0))?;
+    let image = crate::render_worker::screen_image(&pix, lizard_color::ColorProfile::Srgb);
     let texture = ctx.load_texture(format!("template-thumb-{}", template.id), image, egui::TextureOptions::LINEAR);
     Some(Thumb { texture, page: crate::theme::c32(background) })
 }

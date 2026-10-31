@@ -5,11 +5,11 @@ use std::path::Path;
 use std::time::Instant;
 
 use canvas_strategies_bench::gpu_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_in_view, make_scene_with_images};
-use figcraft_doc::NodeKind;
-use figcraft_render::View;
+use lizard_doc::NodeKind;
+use lizard_render::View;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (doc, warnings) = figcraft_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft"))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard"))?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

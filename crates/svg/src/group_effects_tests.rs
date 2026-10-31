@@ -2,8 +2,8 @@
 //! layers, over them) makes the group an embedded render; a background blur is an image of what
 //! lies beneath, through the outlines of the group's layers, under them.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Blur, Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Blur, Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
 
 use super::*;
 

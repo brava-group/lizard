@@ -10,7 +10,7 @@
 FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release --locked -p figcraft-server \
+RUN cargo build --release --locked -p lizard-server \
  && mkdir -p /out/data \
  && printf 'listen = "0.0.0.0:47900"\ndata = "/data"\n' > /out/server.toml
 

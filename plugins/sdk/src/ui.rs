@@ -5,7 +5,7 @@
 //! `json!` works everywhere too.
 //!
 //! ```ignore
-//! use figcraft_plugin_sdk::ui::{Node, menu_toggle, render};
+//! use lizard_plugin_sdk::ui::{Node, menu_toggle, render};
 //!
 //! let root = Node::column()
 //!     .padding(12.0)

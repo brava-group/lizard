@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use figcraft_color::{Paint, PaintKind};
-use figcraft_doc::{Document, NodeId, NodeKind, StyleKind};
+use lizard_color::{Paint, PaintKind};
+use lizard_doc::{Document, NodeId, NodeKind, StyleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 

@@ -1,9 +1,9 @@
 //! The documented gradient shorthand (`{"type":"linearGradient","stops":["#hex",…]}`) works
-//! through every route into the engine, not only MCP (#252): `figcraft-cli run` and the control
+//! through every route into the engine, not only MCP (#252): `lizard-cli run` and the control
 //! channel send params straight to `Session::execute`.
 
-use figcraft_color::Paint;
-use figcraft_doc::NodeId;
+use lizard_color::Paint;
+use lizard_doc::NodeId;
 use serde_json::{Value, json};
 
 use crate::Session;

@@ -1,7 +1,7 @@
 //! Texture scatter on an isolated layer. The source, scatter and result stay on the GPU.
 
-use figcraft_doc::Texture;
-use figcraft_geom::Affine;
+use lizard_doc::Texture;
+use lizard_geom::Affine;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_noise::GRAIN_HASH_WGSL;

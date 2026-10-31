@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use crate::Session;
 use crate::params::id_of;
 use crate::tools::{PointerEvent, PointerKind, pressure_profile};
-use figcraft_doc::{NodeId, NodeKind};
-use figcraft_geom::Point;
+use lizard_doc::{NodeId, NodeKind};
+use lizard_geom::Point;
 
 fn id(v: Value) -> NodeId {
     id_of(&v["id"]).unwrap()
@@ -23,9 +23,9 @@ fn line(s: &mut Session) -> NodeId {
 /// The alpha of the page's layers at page point (`x`, `y`), rendered at 1x without the page colour.
 fn alpha(s: &Session, x: f64, y: f64) -> u8 {
     let doc = s.doc().unwrap();
-    let view = figcraft_render::View { origin: (x - 1.0, y - 1.0), scale: 1.0, width: 3, height: 3 };
-    let mut pix = figcraft_render::Pixmap::new(3, 3).unwrap();
-    figcraft_render::render_nodes_into(doc, &doc.node(s.page().unwrap()).unwrap().children, &view, &mut pix);
+    let view = lizard_render::View { origin: (x - 1.0, y - 1.0), scale: 1.0, width: 3, height: 3 };
+    let mut pix = lizard_render::Pixmap::new(3, 3).unwrap();
+    lizard_render::render_nodes_into(doc, &doc.node(s.page().unwrap()).unwrap().children, &view, &mut pix);
     pix.data()[(3 + 1) * 4 + 3]
 }
 
@@ -60,8 +60,8 @@ fn brushes_draw_along_the_stroke_and_outline_to_vectors() {
     // Exports draw it too.
     s.execute("stroke.brush", &json!({"ids": [v], "preset": "stars"})).unwrap();
     let doc = s.doc().unwrap();
-    assert!(figcraft_svg::export_svg(doc, &[v], &figcraft_svg::SvgOptions::default()).unwrap().contains("<path"));
-    assert!(figcraft_pdf::export_nodes_pdf(doc, &[v]).is_ok());
+    assert!(lizard_svg::export_svg(doc, &[v], &lizard_svg::SvgOptions::default()).unwrap().contains("<path"));
+    assert!(lizard_pdf::export_nodes_pdf(doc, &[v]).is_ok());
 }
 
 #[test]

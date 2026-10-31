@@ -66,7 +66,7 @@ for commands (გვერდის დამატება) and keeps a noun s
 CJK text needs a CJK font, which egui and Inter lack: the desktop app adds an installed one when
 something on screen needs it (see `crates/ui-egui/src/cjk.rs`). The web build has no system fonts,
 so Japanese, Korean and Chinese appear there only in a build with craft-fonts and
-`FIGCRAFT_EMBED_CJK=1` (Noto Sans CJK SC, +16 MB); otherwise they are left out of the picker. A
+`LIZARD_EMBED_CJK=1` (Noto Sans CJK SC, +16 MB); otherwise they are left out of the picker. A
 Chinese UI puts its Chinese face first so Han takes Simplified Chinese shapes. Georgian is drawn in
 craft-fonts' Noto Sans Georgian, one of the built-in faces in `theme::install_fonts`, or else in an
 installed font on the desktop. Web builds keep it only when the craft-fonts they're built with has
@@ -79,7 +79,7 @@ picker leaves Georgian out. A new CJK or other non-Latin language also needs its
 1. Copy `crates/ui-egui/locales/es.toml` to `<code>.toml` (a BCP 47 code: `fr`, `pt-BR`, `ja`) and
    set `[meta] name` and `status = "draft — needs native review"`.
 2. Translate every value; keep the keys. Keep `{placeholders}` exactly, "…" where English has it,
-   brand names and keyboard glyphs. English labels of commands: `figcraft-cli commands`.
+   brand names and keyboard glyphs. English labels of commands: `lizard-cli commands`.
 3. Plurals: give `one` only if the language has a singular form (Japanese, Korean and Chinese give
    only `other`). `other` is required; `one`, `few` and `many` are optional. `trn` picks `one` for
    1 (also 0 in French and Brazilian Portuguese). Russian uses `one` for 1, 21, 31… except 11;
@@ -100,7 +100,7 @@ picker leaves Georgian out. A new CJK or other non-Latin language also needs its
    add its code to `COMPLETE` locally and run the check.
 5. Run the check and look at the panels in the app (longer words must fit the right panel):
 
-       cargo test -p figcraft-ui-egui i18n
+       cargo test -p lizard-ui-egui i18n
 
    Dropdowns, the right panel's two-column labels and the home cards cut a label that doesn't fit
    with "…" and show it in full on hover; elsewhere, look for clipped or wrapped text.

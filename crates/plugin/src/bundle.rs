@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! "FCPLUGB1"                          magic
-//! u32 LE length, manifest JSON        (UTF-8, `figcraft-plugin.json`)
+//! u32 LE length, manifest JSON        (UTF-8, `lizard-plugin.json`)
 //! u32 LE length, WebAssembly module
 //! u32 LE asset count, then per asset: u32 LE length, name (UTF-8), u32 LE length, bytes
 //! ```

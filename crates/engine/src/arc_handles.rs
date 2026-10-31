@@ -17,8 +17,8 @@
 
 use std::f64::consts::TAU;
 
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_geom::{Affine, Point, Vec2};
+use lizard_doc::{Document, NodeId, NodeKind};
+use lizard_geom::{Affine, Point, Vec2};
 use serde::Serialize;
 
 /// One of an ellipse's arc handles.

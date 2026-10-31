@@ -12,9 +12,9 @@
 //! step. Rounded
 //! points are drawn in, as the fill shows them.
 
-use figcraft_doc::{Document, VectorNetwork, WindingRule};
-use figcraft_geom::kurbo::{self, ParamCurveNearest, PathEl};
-use figcraft_geom::{Affine, Point, Rect, Shape, Vec2};
+use lizard_doc::{Document, VectorNetwork, WindingRule};
+use lizard_geom::kurbo::{self, ParamCurveNearest, PathEl};
+use lizard_geom::{Affine, Point, Rect, Shape, Vec2};
 
 use super::{VectorEdit, network};
 

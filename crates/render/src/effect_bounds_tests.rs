@@ -1,7 +1,7 @@
 //! Effect bounds include children and use page-space units under transforms.
 
-use figcraft_doc::{Document, Effect, EffectKind, NodeKind};
-use figcraft_geom::Affine;
+use lizard_doc::{Document, Effect, EffectKind, NodeKind};
+use lizard_geom::Affine;
 
 #[test]
 fn group_blur_reaches_past_its_child() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +38,7 @@ fn scaled_shadow_keeps_its_page_space_offset() -> Result<(), Box<dyn std::error:
     let bounds = doc.world_render_bounds(id).ok_or("missing shadow bounds")?;
     assert!(bounds.y1 >= 130.0, "shadow offset remains 80 page units after halving: {bounds:?}");
     let local = super::draw::local_paint_bounds(&doc, doc.node(id).ok_or("missing rectangle")?, doc.world_transform(id), 0, None);
-    let drawn = figcraft_geom::transform_rect_bbox(doc.world_transform(id), local);
+    let drawn = lizard_geom::transform_rect_bbox(doc.world_transform(id), local);
     assert!(drawn.y1 >= 130.0, "canvas layer must not crop the shadow: {drawn:?}");
     Ok(())
 }

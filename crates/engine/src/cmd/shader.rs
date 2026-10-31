@@ -1,7 +1,7 @@
 //! Shader definition and fill-instance commands. All edits participate in document history.
 
-use figcraft_color::{BlendMode, Color, Paint, PaintKind, ShaderFill};
-use figcraft_doc::{ShaderDefinition, ShaderParameterControl};
+use lizard_color::{BlendMode, Color, Paint, PaintKind, ShaderFill};
+use lizard_doc::{ShaderDefinition, ShaderParameterControl};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
@@ -21,7 +21,7 @@ fn register(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "shader.register";
     let definition: ShaderDefinition = serde_json::from_value(p.get("definition").cloned().ok_or_else(|| bad(CMD, "definition is required"))?)
         .map_err(|e| bad(CMD, e.to_string()))?;
-    figcraft_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
+    lizard_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
     let id = definition.id.clone();
     let doc = s.doc_mut()?;
     doc.shaders.insert(id.clone(), definition);
@@ -39,7 +39,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets(CMD, s, p)?;
     let shader_id = req_string(CMD, p, "shaderId")?;
     let definition = s.doc()?.shaders.get(&shader_id).cloned().ok_or_else(|| bad(CMD, "unknown shader id"))?;
-    figcraft_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
+    lizard_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
     let values = definition.parameters.iter().flat_map(|parameter| parameter.default_entries()).collect();
     let paint = Paint { kind: PaintKind::Shader(ShaderFill { shader_id, values }), opacity: 1.0, visible: true, blend: BlendMode::Normal };
     for id in ids {
@@ -56,8 +56,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
 fn demo(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "shader.demo";
     let ids = req_targets(CMD, s, p)?;
-    let definition = figcraft_shader::demo();
-    figcraft_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
+    let definition = lizard_shader::demo();
+    lizard_shader::validate(&definition).map_err(|e| bad(CMD, e))?;
     let values = definition.parameters.iter().flat_map(|parameter| parameter.default_entries()).collect();
     let paint = Paint {
         kind: PaintKind::Shader(ShaderFill { shader_id: definition.id.clone(), values }),
@@ -133,23 +133,23 @@ mod tests {
         let id = session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 80, "height": 60})).unwrap()["id"].as_u64().unwrap();
         session.execute("shader.demo", &json!({"ids": [id]})).unwrap();
         session.execute("shader.setParameter", &json!({"ids": [id], "parameter": "frequency", "value": 7.0})).unwrap();
-        let node = session.doc().unwrap().node(figcraft_doc::NodeId(id)).unwrap();
+        let node = session.doc().unwrap().node(lizard_doc::NodeId(id)).unwrap();
         assert!(matches!(&node.fills.last().unwrap().kind, PaintKind::Shader(fill) if fill.values.get("frequency") == Some(&7.0)));
         let bytes = crate::cmd::file::file_bytes(session.ds().unwrap()).unwrap();
-        let (loaded, _) = figcraft_format::load_bytes(&bytes).unwrap();
-        assert!(loaded.shaders.contains_key(figcraft_shader::DEMO_ID));
+        let (loaded, _) = lizard_format::load_bytes(&bytes).unwrap();
+        assert!(loaded.shaders.contains_key(lizard_shader::DEMO_ID));
         assert!(
-            matches!(&loaded.node(figcraft_doc::NodeId(id)).unwrap().fills.last().unwrap().kind, PaintKind::Shader(fill) if fill.values.get("frequency") == Some(&7.0))
+            matches!(&loaded.node(lizard_doc::NodeId(id)).unwrap().fills.last().unwrap().kind, PaintKind::Shader(fill) if fill.values.get("frequency") == Some(&7.0))
         );
         session.execute("edit.undo", &json!({})).unwrap();
-        let node = session.doc().unwrap().node(figcraft_doc::NodeId(id)).unwrap();
+        let node = session.doc().unwrap().node(lizard_doc::NodeId(id)).unwrap();
         assert!(matches!(&node.fills.last().unwrap().kind, PaintKind::Shader(fill) if fill.values.get("frequency") == Some(&2.0)));
     }
 
     #[test]
     fn invalid_definition_never_enters_document() {
         let mut session = Session::new();
-        let mut definition = figcraft_shader::demo();
+        let mut definition = lizard_shader::demo();
         definition.id = "broken".into();
         definition.source = "not WGSL".into();
         assert!(session.execute("shader.register", &json!({"definition": definition})).is_err());
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn typed_shader_values_survive_save_and_undo() {
         let mut session = Session::new();
-        let aurora = figcraft_shader::presets().into_iter().find(|definition| definition.id == "lizard.aurora");
+        let aurora = lizard_shader::presets().into_iter().find(|definition| definition.id == "lizard.aurora");
         assert!(aurora.is_some());
         let Some(aurora) = aurora else { return };
         session.execute("shader.register", &json!({"definition": aurora})).unwrap();
@@ -169,13 +169,13 @@ mod tests {
         session.execute("shader.setParameter", &json!({"ids": [id], "parameter": "paletteDirection", "value": 1})).unwrap();
         assert!(session.execute("shader.setParameter", &json!({"ids": [id], "parameter": "paletteDirection", "value": 0.5})).is_err());
         let bytes = crate::cmd::file::file_bytes(session.ds().unwrap()).unwrap();
-        let (loaded, _) = figcraft_format::load_bytes(&bytes).unwrap();
-        let paint = loaded.node(figcraft_doc::NodeId(id)).and_then(|node| node.fills.last());
+        let (loaded, _) = lizard_format::load_bytes(&bytes).unwrap();
+        let paint = loaded.node(lizard_doc::NodeId(id)).and_then(|node| node.fills.last());
         assert!(
             matches!(paint.map(|paint| &paint.kind), Some(PaintKind::Shader(fill)) if fill.values.get("color1.r") == Some(&1.0) && fill.values.get("paletteDirection") == Some(&1.0))
         );
         session.execute("edit.undo", &json!({})).unwrap();
-        let paint = session.doc().unwrap().node(figcraft_doc::NodeId(id)).and_then(|node| node.fills.last());
+        let paint = session.doc().unwrap().node(lizard_doc::NodeId(id)).and_then(|node| node.fills.last());
         assert!(matches!(paint.map(|paint| &paint.kind), Some(PaintKind::Shader(fill)) if fill.values.get("paletteDirection") == Some(&0.0)));
     }
 }

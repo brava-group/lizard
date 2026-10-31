@@ -1,7 +1,7 @@
-//! Opening invite links from the system: a `figcraft://join?…` link clicked in a browser, a chat
+//! Opening invite links from the system: a `lizard://join?…` link clicked in a browser, a chat
 //! or an email opens Lizard, which joins the session (milestone M9).
 //!
-//! The app makes itself the opener of the `figcraft` URL scheme. Where the app registers it at run
+//! The app makes itself the opener of the `lizard` URL scheme. Where the app registers it at run
 //! time (Windows: per user, no administrator rights), the desktop app installs a
 //! [`LinkRegistrar`] (like the [`LiveLink`](crate::live::LiveLink)); the engine keeps the
 //! preference ([`Prefs::invite_links`](crate::Prefs::invite_links)) and the
@@ -15,7 +15,7 @@ use crate::cmd::CommandSpec;
 use crate::params::boolean;
 use crate::{EngineError, Result, Session, spec};
 
-/// Registers this copy of the app as the opener of `figcraft://` links (the desktop app installs
+/// Registers this copy of the app as the opener of `lizard://` links (the desktop app installs
 /// one: `session.live.links`).
 pub trait LinkRegistrar: Send {
     /// This copy of the app is the registered opener.
@@ -58,7 +58,7 @@ fn register(s: &mut Session, p: &Value) -> Result<Value> {
     let Some(r) = s.live.links.as_mut() else {
         return Err(EngineError::Disabled(
             CMD.into(),
-            "this app doesn't register link openers itself (the Windows desktop app does; the macOS and Linux packages declare figcraft:// when installed)"
+            "this app doesn't register link openers itself (the Windows desktop app does; the macOS and Linux packages declare lizard:// when installed)"
                 .into(),
         ));
     };
@@ -73,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![spec!(
         "collab.registerLinks",
         "Open invite links in Lizard",
-        "{on? (default: switch)} → {on, registered}: make this app the opener of figcraft:// invite links (or stop); also the Preferences checkbox",
+        "{on? (default: switch)} → {on, registered}: make this app the opener of lizard:// invite links (or stop); also the Preferences checkbox",
         false,
         register
     )]

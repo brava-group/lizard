@@ -9,7 +9,7 @@ use crate::a11y::Tip;
 use crate::i18n::{tr, trf};
 use crate::icons::{self, Icon};
 use crate::theme::{Tokens, regular};
-use crate::{FigApp, TitleBar};
+use crate::{LizardApp, TitleBar};
 
 pub const HEIGHT: f32 = 40.0;
 const DOCUMENT_BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF7);
@@ -97,7 +97,7 @@ fn tab_drop_position(visible: &[(usize, Rect)], from: usize, pointer_x: f32) -> 
     }
 }
 
-pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
+pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Panel::top("tab_bar").exact_size(HEIGHT).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
         let rect = ui.max_rect();
@@ -401,7 +401,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
     });
 }
 
-fn resume_presentation(app: &mut FigApp) {
+fn resume_presentation(app: &mut LizardApp) {
     let Some(uid) = app.ui.present_uid else { return };
     let Some(index) = app.session.docs.iter().position(|d| d.uid == uid) else {
         app.ui.paused_present = None;
@@ -416,13 +416,13 @@ fn resume_presentation(app: &mut FigApp) {
 /// What the tab of document `uid` says about its live session: others get in (`true`: a session
 /// this app hosts or joined, a file shared online), only you do (`false`: a file of yours on a
 /// server, not shared now), or it has none.
-pub fn live_mark(app: &FigApp, uid: u64) -> Option<bool> {
+pub fn live_mark(app: &LizardApp, uid: u64) -> Option<bool> {
     let live = app.session.live_of(uid);
     live.shared().filter(|_| live.doc_uid == Some(uid))
 }
 
 /// Minimise, maximise/restore and close at the right end of the title bar; returns their width.
-fn window_buttons(app: &mut FigApp, ui: &mut Ui, bar: Rect) -> f32 {
+fn window_buttons(app: &mut LizardApp, ui: &mut Ui, bar: Rect) -> f32 {
     const W: f32 = 46.0;
     let t = Tokens::get(ui.ctx());
     let max = window_maximized(ui);

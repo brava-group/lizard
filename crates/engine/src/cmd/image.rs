@@ -1,7 +1,7 @@
 //! Image paints: adjustment presets, built in and saved in the file.
 
-use figcraft_color::{ImageFilters, PaintKind};
-use figcraft_doc::{Document, ImagePreset};
+use lizard_color::{ImageFilters, PaintKind};
+use lizard_doc::{Document, ImagePreset};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
@@ -79,7 +79,7 @@ fn vectorize(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "image layer has invalid bounds"));
     }
     let name = format!("{} vectorized", source.name);
-    let imported = figcraft_svg::import_svg_with_notes(doc, svg.as_bytes(), parent, 0.0, 0.0, &name)
+    let imported = lizard_svg::import_svg_with_notes(doc, svg.as_bytes(), parent, 0.0, 0.0, &name)
         .map_err(|error| bad(CMD, format!("cannot import traced paths: {error}")))?;
     let frame = imported.frame;
     let traced = doc.node(frame).ok_or_else(|| bad(CMD, "traced layer is missing"))?;
@@ -87,8 +87,8 @@ fn vectorize(s: &mut Session, p: &Value) -> Result<Value> {
         doc.remove(frame)?;
         return Err(bad(CMD, "VTracer produced no editable paths"));
     }
-    let world = figcraft_geom::Affine::translate((bounds.x0, bounds.y0))
-        * figcraft_geom::Affine::scale_non_uniform(bounds.width() / traced.width, bounds.height() / traced.height);
+    let world = lizard_geom::Affine::translate((bounds.x0, bounds.y0))
+        * lizard_geom::Affine::scale_non_uniform(bounds.width() / traced.width, bounds.height() / traced.height);
     doc.set_world_transform(frame, world)?;
     doc.remove(id)?;
     doc.reparent(frame, parent, Some(at))?;
@@ -113,7 +113,7 @@ fn replace_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     }
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| bad(CMD, format!("invalid image data: {e}")))?;
-    let (hash, _, _) = figcraft_format::add_image(doc, bytes).map_err(|e| bad(CMD, e.to_string()))?;
+    let (hash, _, _) = lizard_format::add_image(doc, bytes).map_err(|e| bad(CMD, e.to_string()))?;
     let node = doc.get_mut(id)?;
     let old = node.fills[index].clone();
     if let PaintKind::Image(image) = &mut node.fills[index].kind {
@@ -258,8 +258,8 @@ fn save_preset(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod replace_tests {
     use base64::Engine as _;
-    use figcraft_color::{ImageScaleMode, PaintKind};
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use lizard_color::{ImageScaleMode, PaintKind};
     use serde_json::json;
 
     use crate::Session;
@@ -284,7 +284,7 @@ mod replace_tests {
         let replacement = base64::engine::general_purpose::STANDARD.encode(png(0));
         let params = json!({"id": id, "index": 0, "expectedImage": source, "data": replacement});
         assert!(session.execute("image.replaceBytes", &params).is_ok());
-        let node = session.doc().ok().and_then(|doc| doc.node(figcraft_doc::NodeId(id)));
+        let node = session.doc().ok().and_then(|doc| doc.node(lizard_doc::NodeId(id)));
         assert!(node.is_some());
         if let Some(node) = node {
             assert_eq!((node.width, node.height), (40.0, 30.0));
@@ -292,7 +292,7 @@ mod replace_tests {
         }
         assert!(session.execute("image.replaceBytes", &params).is_err(), "stale asynchronous result must not overwrite a newer fill");
         assert!(session.execute("edit.undo", &json!({})).is_ok());
-        let node = session.doc().ok().and_then(|doc| doc.node(figcraft_doc::NodeId(id)));
+        let node = session.doc().ok().and_then(|doc| doc.node(lizard_doc::NodeId(id)));
         assert!(node.is_some_and(|node| matches!(&node.fills[0].kind, PaintKind::Image(image) if image.image == source)));
     }
 }

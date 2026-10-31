@@ -1,8 +1,8 @@
 //! Creating nodes.
 
-use figcraft_color::{ImageScaleMode, Paint};
-use figcraft_doc::*;
-use figcraft_geom::Point;
+use lizard_color::{ImageScaleMode, Paint};
+use lizard_doc::*;
+use lizard_geom::Point;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
@@ -162,8 +162,8 @@ fn create_kind(s: &mut Session, p: &Value, t: &str) -> Result<Value> {
 }
 
 /// Parse SVG path data (`M L H V C S Q T A Z`, absolute and relative) into a bezier path.
-pub fn parse_path_data(d: &str) -> Option<figcraft_geom::BezPath> {
-    figcraft_geom::BezPath::from_svg(d).ok()
+pub fn parse_path_data(d: &str) -> Option<lizard_geom::BezPath> {
+    lizard_geom::BezPath::from_svg(d).ok()
 }
 
 /// A vector's geometry made from SVG path data (see [`path_network`]).
@@ -180,7 +180,7 @@ pub(crate) struct PathShape {
 /// to the origin, and `width`/`height` scale it as [`vector_scale`] says. Data that doesn't parse
 /// or draws nothing is refused.
 pub(crate) fn path_network(cmd: &str, d: &str, width: Option<f64>, height: Option<f64>) -> Result<PathShape> {
-    use figcraft_geom::Shape;
+    use lizard_geom::Shape;
     let empty = || bad(cmd, "`path` draws nothing: a vector needs a visible line or area");
     let mut path = parse_path_data(d).ok_or_else(|| bad(cmd, "`path` is not valid SVG path data"))?;
     let bb = path.bounding_box();
@@ -190,10 +190,10 @@ pub(crate) fn path_network(cmd: &str, d: &str, width: Option<f64>, height: Optio
     if bb.width() <= 1e-9 && bb.height() <= 1e-9 {
         return Err(empty());
     }
-    path.apply_affine(figcraft_geom::Affine::translate((-bb.x0, -bb.y0)));
+    path.apply_affine(lizard_geom::Affine::translate((-bb.x0, -bb.y0)));
     let (sx, sy) = vector_scale(width, height, bb.width(), bb.height(), "a path").map_err(|e| bad(cmd, e))?;
     if sx != 1.0 || sy != 1.0 {
-        path.apply_affine(figcraft_geom::Affine::scale_non_uniform(sx, sy));
+        path.apply_affine(lizard_geom::Affine::scale_non_uniform(sx, sy));
     }
     let network = VectorNetwork::from_path(&path);
     if network.segments.is_empty() {
@@ -251,7 +251,7 @@ pub fn create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "sections go on the page or in other sections"));
     }
     // X and Y are in the frame's space: a group parent has none of its own.
-    let space = if pn.kind.bounds_follow_children() { doc.frame_relative(parent) } else { figcraft_geom::Affine::IDENTITY };
+    let space = if pn.kind.bounds_follow_children() { doc.frame_relative(parent) } else { lizard_geom::Affine::IDENTITY };
     let x = num_or(p, "x", 0.0);
     let y = num_or(p, "y", 0.0);
     let (mut w, mut h) = match base {
@@ -278,7 +278,7 @@ pub fn create(s: &mut Session, p: &Value) -> Result<Value> {
             if pts.len() < 2 {
                 return Err(bad(cmd, "`points` needs at least two [x, y] pairs"));
             }
-            let bb = figcraft_geom::points_bounds(pts.iter().copied()).unwrap_or_default();
+            let bb = lizard_geom::points_bounds(pts.iter().copied()).unwrap_or_default();
             if bb.width() <= 1e-9 && bb.height() <= 1e-9 {
                 return Err(bad(cmd, "`points` draws nothing: a vector needs a visible line or area"));
             }
@@ -320,12 +320,12 @@ pub fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if app_text && let Some(fills) = crate::tools::readable_text_fills(doc, parent) {
         node.fills = fills;
     }
-    node.transform = space.inverse() * figcraft_geom::Affine::translate((x + offset.0, y + offset.1));
+    node.transform = space.inverse() * lizard_geom::Affine::translate((x + offset.0, y + offset.1));
     if base == "Arrow" {
         node.stroke.cap_end = StrokeCap::LineArrow;
     }
     if let NodeKind::Text(_) = node.kind
-        && let Some((tw, th)) = figcraft_text::auto_size(&node)
+        && let Some((tw, th)) = lizard_text::auto_size(&node)
     {
         node.width = tw;
         node.height = th;
@@ -435,8 +435,8 @@ pub fn place_image(s: &mut Session, p: &Value) -> Result<Value> {
     };
     if let Some(id) = target {
         let doc = s.doc_mut()?;
-        let (hash, _, _) = figcraft_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
-        let profile = figcraft_render::images::profile_name(&hash, doc.images.get(&hash));
+        let (hash, _, _) = lizard_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
+        let profile = lizard_render::images::profile_name(&hash, doc.images.get(&hash));
         let node = doc.get_mut(id)?;
         replace_with_image_fill(node, hash.clone(), mode);
         return Ok(json!({"id": id, "image": hash, "width": node.width, "height": node.height, "imageProfile": profile}));
@@ -445,8 +445,8 @@ pub fn place_image(s: &mut Session, p: &Value) -> Result<Value> {
     let parent = crate::params::opt_id(cmd, p, "parent")?.unwrap_or(page);
     let ds = s.ds_mut()?;
     let doc = ds.doc_mut();
-    let (hash, iw, ih) = figcraft_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
-    let profile = figcraft_render::images::profile_name(&hash, doc.images.get(&hash));
+    let (hash, iw, ih) = lizard_format::add_image(doc, bytes).map_err(|e| bad(cmd, e.to_string()))?;
+    let profile = lizard_render::images::profile_name(&hash, doc.images.get(&hash));
     let (iw, ih) = (f64::from(iw), f64::from(ih));
     // Fit large images into 1000 px like Figma does when placing.
     let k = (1000.0 / iw.max(ih)).min(1.0);
@@ -455,7 +455,7 @@ pub fn place_image(s: &mut Session, p: &Value) -> Result<Value> {
     let nid = doc.alloc_id();
     let name = string(p, "name").unwrap_or_else(|| "Image".into());
     let mut node = Node::new(nid, NodeKind::Rectangle, name, w, h);
-    node.transform = figcraft_geom::Affine::translate((num_or(p, "x", 0.0), num_or(p, "y", 0.0)));
+    node.transform = lizard_geom::Affine::translate((num_or(p, "x", 0.0), num_or(p, "y", 0.0)));
     node.fills = vec![Paint::image(hash.clone(), mode)];
     doc.insert(node, parent, None)?;
     ds.selection = vec![nid];

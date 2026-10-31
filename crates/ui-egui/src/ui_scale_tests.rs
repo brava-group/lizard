@@ -7,7 +7,7 @@
 
 use egui::accesskit::Role;
 use egui::{RawInput, ViewportId, ViewportInfo};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -83,7 +83,7 @@ fn the_interface_size_menu_has_a_name_a_value_and_a_state_for_a_screen_reader() 
 #[test]
 fn every_window_size_system_scale_and_interface_size_lays_out_inside_the_window() {
     use crate::ui_scale::{FIT_POINTS, SIZES};
-    use crate::{FigApp, NoServices};
+    use crate::{LizardApp, NoServices};
     use egui::{Pos2, Rect, vec2};
 
     // Window sizes in points: the main window's minimum, common laptop and desktop screens up to 5K,
@@ -106,7 +106,7 @@ fn every_window_size_system_scale_and_interface_size_lays_out_inside_the_window(
             let px = vec2(w * native, h * native);
             for want in SIZES {
                 let case = format!("{w}x{h} pt at {native}x, {want}");
-                let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+                let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
                 assert!(app.run("pref.uiScale", json!({"scale": want})).is_some(), "{case}");
                 let ctx = egui::Context::default();
                 let mut time = 0.0;

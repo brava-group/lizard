@@ -30,7 +30,7 @@ NAME="lizard-server-$VERSION-$OS-$ARCH"
 echo "==> lizard-server $VERSION for $OS $ARCH"
 
 if [ "$SKIP_BUILD" = 0 ]; then
-  (cd "$ROOT" && cargo build --release --locked -p figcraft-server)
+  (cd "$ROOT" && cargo build --release --locked -p lizard-server)
 fi
 WORK="$CARGO_TARGET_DIR/server-package"
 STAGE="$WORK/$NAME"

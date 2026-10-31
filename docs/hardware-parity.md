@@ -30,7 +30,7 @@ since 2025). Lizard renders the canvas on the CPU and presents it through wgpu.
 | 10k layers: full 1440×900 render | 7–15 ms | not timed |
 | 10k layers: move one layer, re-render | ~0.2 ms | not timed |
 | Design system of ~300 components × 2,000 instances: recolour a main used ~900 times | 4–18 ms | not timed |
-| `.figcraft` at 50k layers: save / load | ~0.09 s / ~0.16 s | n/a |
+| `.lizard` at 50k layers: save / load | ~0.09 s / ~0.16 s | n/a |
 | Idle window | 0 frames, ~0% CPU | — |
 
 In a 2880×1800 screenshot session on the owner's Mac, moving a 100×70 rectangle in 20-unit
@@ -110,7 +110,7 @@ Nothing has been timed against Figma on the same document (needs `.fig` import).
 | Windows x64 / arm64 | desktop app | `.msi` and portable zip for x64, x86 and arm64 | built in CI; Windows: QA pass done 2026-10-11, findings in PR |
 | Linux | none (browser only) | AppImage, `.deb`, `.rpm`, Flatpak, tarball, x86_64 and aarch64; riscv64 tarball | CI tests run here. Clipboard (also the BSDs): reads run on a helper thread that gives up after 2 s, and images copied in other apps paste under Wayland through the data-control protocol (#693). Under Wayland the app can't tell its window is minimised, so control requests that need a drawn frame may still wait there (#720). None of this run on a Linux desktop here. On a Wayland compositor without server-side decorations (GNOME) the window gets winit's Adwaita controls (#592: checked by its author in a GNOME Wayland session; KDE not run) |
 | FreeBSD | none | tarball | |
-| Web | primary (figma.com) | `figcraft-web` (WASM, WebGPU/WebGL2), web zip | no accessibility tree; file access through the browser; copy and paste through the system clipboard (copies written from the copy event, pastes read from the paste event; no pasting images from other apps) |
+| Web | primary (figma.com) | `lizard-web` (WASM, WebGPU/WebGL2), web zip | no accessibility tree; file access through the browser; copy and paste through the system clipboard (copies written from the copy event, pastes read from the paste event; no pasting images from other apps) |
 | iOS / Android | apps: view, comment, mirror prototypes | none (the web build is not touch-first) | 20–40 h for a viewer |
 
 ## Revision history

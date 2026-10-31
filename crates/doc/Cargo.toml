@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-doc"
+name = "lizard-doc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,8 @@ description = "Lizard document model: pages, the node tree, properties, componen
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-color = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-color = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

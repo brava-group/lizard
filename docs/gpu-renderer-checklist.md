@@ -367,7 +367,7 @@ the migration concerns rasterization and pixel effects.
   - [x] Sample the canvas eyedropper magnifier from the already presented GPU texture with an
     asynchronous 9 × 9 readback, without a per-pointer re-render or synchronous stall. The CPU
     reference remains for WebGL2 and scenes that the GPU canvas cannot draw.
-  - [ ] Move plugin SVG icon thumbnails and other direct `figcraft_render` preview calls to GPU.
+  - [ ] Move plugin SVG icon thumbnails and other direct `lizard_render` preview calls to GPU.
     - [x] Route native plugin grid SVG paths through the document importer and GPU-first export;
       retain the CPU fallback when no compatible device exists.
     - [ ] Route browser plugin grid icons through WebGPU and audit remaining direct preview calls.
@@ -828,7 +828,7 @@ the migration concerns rasterization and pixel effects.
   99 canvas-GPU tests passed; 722 UI tests passed and 3 were ignored. `RUST_TEST_THREADS=1
   CARGO_INCREMENTAL=0 cargo xtask ci` passed across native/WASM, plugins, Clippy, formatting,
   and layer checks.
-- 2026-10-30: the saved `Lizard-new-icon.figcraft` renders through GPU at 1× and 2×, including
+- 2026-10-30: the saved `Lizard-new-icon.lizard` renders through GPU at 1× and 2×, including
   its drop shadow, inner shadow, and layer blur. I inspected the GPU and CPU images; the icon,
   hole, gradient, edges, and shadow remain visually intact. Mean RGB difference was 0.798/255
   at 1× and 0.764/255 at 2×; 0.601% and 0.401% of pixels differed above 8/255. The 1× first

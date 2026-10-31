@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-collab"
+name = "lizard-collab"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ description = "Lizard real-time collaboration core: the synced object/property m
 workspace = true
 
 [dependencies]
-figcraft-doc = { workspace = true }
+lizard-doc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -18,5 +18,5 @@ base64 = { workspace = true }
 postcard = { workspace = true }
 
 [dev-dependencies]
-figcraft-color = { workspace = true }
-figcraft-geom = { workspace = true }
+lizard-color = { workspace = true }
+lizard-geom = { workspace = true }

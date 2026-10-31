@@ -1,7 +1,7 @@
 //! Three-way merges of documents edited directly (the engine's branch tests run real commands).
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, NodeId, NodeKind, Style, StyleKind};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, NodeId, NodeKind, Style, StyleKind};
 
 use crate::merge::{Key, Plan, Side, plan};
 

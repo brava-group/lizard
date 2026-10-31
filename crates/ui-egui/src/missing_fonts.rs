@@ -3,10 +3,10 @@
 //! the installed fonts are indexed and any import report is closed), and from Text ▸ Missing fonts.
 
 use egui::RichText;
-use figcraft_engine::fonts::{Missing, missing};
+use lizard_engine::fonts::{Missing, missing};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, trn};
 use crate::theme::{Tokens, regular};
 
@@ -31,7 +31,7 @@ impl Shown {
 /// After the user opened a file, or imported pages into one (results with a `summary`; not a
 /// placed image or SVG, a file that was open already, or Clear recent): look for missing fonts in
 /// it once that can be told ([`show`]). Not in the browser, which has only its built-in fonts.
-pub fn check_later(app: &mut FigApp, command: &str, result: Option<&Value>) {
+pub fn check_later(app: &mut LizardApp, command: &str, result: Option<&Value>) {
     if !cfg!(target_arch = "wasm32")
         && matches!(command, "file.open" | "file.openRecent" | "file.import")
         && result.is_some_and(|r| r.get("summary").is_some())
@@ -42,7 +42,7 @@ pub fn check_later(app: &mut FigApp, command: &str, result: Option<&Value>) {
 }
 
 /// The window for document `uid`, listing what it misses (even nothing, when asked for).
-fn list(app: &mut FigApp, uid: u64) -> Option<Vec<Missing>> {
+fn list(app: &mut LizardApp, uid: u64) -> Option<Vec<Missing>> {
     let ds = app.session.docs.iter().find(|d| d.uid == uid)?;
     let families = missing(&ds.doc);
     app.ui.missing_fonts = Some(Shown { uid, families: families.clone(), indexing: false });
@@ -50,19 +50,19 @@ fn list(app: &mut FigApp, uid: u64) -> Option<Vec<Missing>> {
 }
 
 /// Text ▸ Missing fonts (`dialog.missingFonts`): the window for the file in front.
-pub fn request(app: &mut FigApp) {
+pub fn request(app: &mut LizardApp) {
     let Ok(uid) = app.session.ds().map(|d| d.uid) else { return };
-    if figcraft_text::installed_fonts_known() {
+    if lizard_text::installed_fonts_known() {
         list(app, uid);
     } else {
         app.ui.missing_fonts = Some(Shown { uid, families: Vec::new(), indexing: true });
     }
 }
 
-pub fn show(app: &mut FigApp, ctx: &egui::Context) {
+pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     // Whether the installed fonts are indexed is asked only while a list waits for it.
     let waiting = app.ui.missing_fonts.as_ref().filter(|m| m.indexing).map(|m| m.uid);
-    if (waiting.is_some() || !app.ui.font_checks.is_empty()) && figcraft_text::installed_fonts_known() {
+    if (waiting.is_some() || !app.ui.font_checks.is_empty()) && lizard_text::installed_fonts_known() {
         if let Some(uid) = waiting {
             list(app, uid);
         }

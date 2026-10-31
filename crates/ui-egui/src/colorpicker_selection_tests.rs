@@ -1,8 +1,8 @@
 //! The colour picker of a layer's paint or effect closes when that layer is no longer the
 //! selection, so it never keeps editing a layer that was deselected (#396).
 
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::colorpicker::PickerTarget;

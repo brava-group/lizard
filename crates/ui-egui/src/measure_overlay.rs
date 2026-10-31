@@ -4,7 +4,7 @@
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::theme::{Tokens, semibold};
 
 /// Space between a label and the line it labels (or another label), in screen pixels.
@@ -14,7 +14,7 @@ const PAD: Vec2 = vec2(4.0, 2.0);
 
 /// Draw the tool overlay's guides, measurement labels and measured box; labels keep clear of
 /// `avoid` (the selection's size label).
-pub fn draw(app: &FigApp, painter: &egui::Painter, t: &Tokens, avoid: Option<Rect>) {
+pub fn draw(app: &LizardApp, painter: &egui::Painter, t: &Tokens, avoid: Option<Rect>) {
     let ov = &app.session.tool.overlay;
     let line = Stroke::new(1.0, t.guide);
     if let Some([x0, y0, x1, y1]) = ov.measure_box {

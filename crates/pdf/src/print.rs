@@ -21,13 +21,13 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use figcraft_color::Color;
-use figcraft_doc::PrintSettings;
-use figcraft_geom::{BezPath, Rect, Shape};
 use krilla::color::{cmyk, rgb};
 use krilla::image::{BitsPerComponent, CustomImage, Image, ImageColorspace};
 use krilla::paint::{FillRule, LineCap, Stroke};
 use krilla::surface::Surface;
+use lizard_color::Color;
+use lizard_doc::PrintSettings;
+use lizard_geom::{BezPath, Rect, Shape};
 
 use crate::draw::{norm, to_path};
 

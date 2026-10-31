@@ -3,8 +3,8 @@
 //! shape, and the blur reads what lies under the layer with its own shadow there, so a shadow
 //! that shows behind transparent areas is seen, blurred, through the layer.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Blur, Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Blur, Document, Effect, EffectKind, NodeId, NodeKind, Shadow};
 
 use super::*;
 

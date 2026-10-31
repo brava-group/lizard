@@ -69,15 +69,15 @@ pub mod widgets;
 
 pub use batch::{BatchScope, BatchStep};
 pub use cmd::{CommandSpec, all_commands, find_command};
-pub use figcraft_collab;
-pub use figcraft_doc as doc;
-pub use figcraft_svg::looks_like_svg;
+pub use lizard_collab;
+pub use lizard_doc as doc;
+pub use lizard_svg::looks_like_svg;
 pub use tools::{PointerEvent, PointerKind, ToolId};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use figcraft_doc::{Document, Node, NodeId};
+use lizard_doc::{Document, Node, NodeId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -104,10 +104,10 @@ pub enum EngineError {
     Internal { cmd: String, msg: String },
 }
 
-impl From<figcraft_doc::DocError> for EngineError {
-    fn from(e: figcraft_doc::DocError) -> Self {
+impl From<lizard_doc::DocError> for EngineError {
+    fn from(e: lizard_doc::DocError) -> Self {
         match e {
-            figcraft_doc::DocError::NoNode(id) => EngineError::NoNode(id),
+            lizard_doc::DocError::NoNode(id) => EngineError::NoNode(id),
             other => EngineError::Other(other.to_string()),
         }
     }
@@ -225,11 +225,11 @@ impl ViewState {
         self.zoom = z;
     }
     /// Fit a page rectangle into the viewport with margin.
-    pub fn fit(&mut self, r: figcraft_geom::Rect, max_zoom: f64) {
+    pub fn fit(&mut self, r: lizard_geom::Rect, max_zoom: f64) {
         self.fit_with_margins(r, max_zoom, 128.0, 128.0);
     }
     /// Fit with total horizontal and vertical breathing room in viewport points.
-    pub fn fit_with_margins(&mut self, r: figcraft_geom::Rect, max_zoom: f64, horizontal: f64, vertical: f64) {
+    pub fn fit_with_margins(&mut self, r: lizard_geom::Rect, max_zoom: f64, horizontal: f64, vertical: f64) {
         if !(r.width() > 0.0 || r.height() > 0.0) || !r.x0.is_finite() {
             self.cx = r.center().x;
             self.cy = r.center().y;
@@ -322,10 +322,10 @@ pub struct DocState {
     /// Vector edit mode: the vector being edited, its selected points and the edit tool.
     pub vector_edit: Option<vectoredit::VectorEdit>,
     pub uid: u64,
-    /// The file's version history, oldest first (saved in the `.figcraft` file; not undoable).
-    pub versions: Vec<figcraft_format::Version>,
-    /// The file's branches (saved in the `.figcraft` file; not undoable).
-    pub branches: Vec<figcraft_format::Branch>,
+    /// The file's version history, oldest first (saved in the `.lizard` file; not undoable).
+    pub versions: Vec<lizard_format::Version>,
+    /// The file's branches (saved in the `.lizard` file; not undoable).
+    pub branches: Vec<lizard_format::Branch>,
     /// This tab shows a branch: the `uid` of its main file's tab and the branch id. Its edits go
     /// into the main file's branch (and are saved with the main file).
     pub branch_of: Option<(u64, String)>,
@@ -354,7 +354,7 @@ pub struct DocState {
     pub(crate) widget_timers: Vec<widgets::Timer>,
     /// The part of a widget shown in its hover style and the page point the pointer is at: `doc`
     /// shows that look as a live preview (`text_preview` keeps the document itself).
-    pub(crate) widget_hover: Option<(NodeId, figcraft_geom::Point)>,
+    pub(crate) widget_hover: Option<(NodeId, lizard_geom::Point)>,
 }
 
 /// A version shown on the canvas in place of the document: read-only until it's restored or the
@@ -431,26 +431,26 @@ impl DocState {
     }
 
     /// With the version history read from its file.
-    pub fn with_versions(mut self, versions: Vec<figcraft_format::Version>) -> Self {
+    pub fn with_versions(mut self, versions: Vec<lizard_format::Version>) -> Self {
         self.versions = versions;
         self
     }
 
     /// With the branches read from its file.
-    pub fn with_branches(mut self, branches: Vec<figcraft_format::Branch>) -> Self {
+    pub fn with_branches(mut self, branches: Vec<lizard_format::Branch>) -> Self {
         self.branches = branches;
         self
     }
 
     /// The branches, for editing (the file then has unsaved changes).
-    pub fn branches_mut(&mut self) -> &mut Vec<figcraft_format::Branch> {
+    pub fn branches_mut(&mut self) -> &mut Vec<lizard_format::Branch> {
         self.versions_changed = true;
         &mut self.branches
     }
 
     /// Take a widget part's hover look off (see [`widgets::set_hover`]): the document shows as it
     /// is. Returns the page point the pointer was at, to put the look back for.
-    pub(crate) fn end_widget_hover(&mut self) -> Option<figcraft_geom::Point> {
+    pub(crate) fn end_widget_hover(&mut self) -> Option<lizard_geom::Point> {
         let (_, at) = self.widget_hover.take()?;
         if let Some(base) = self.text_preview.take() {
             self.doc = base;
@@ -470,7 +470,7 @@ impl DocState {
     }
 
     /// The version history, for editing (the file then has unsaved changes).
-    pub fn versions_mut(&mut self) -> &mut Vec<figcraft_format::Version> {
+    pub fn versions_mut(&mut self) -> &mut Vec<lizard_format::Version> {
         self.versions_changed = true;
         &mut self.versions
     }
@@ -649,7 +649,7 @@ pub struct Prefs {
     pub auto_save: bool,
     /// The desktop app starts on the Home screen instead of in a new file.
     pub start_on_home: bool,
-    /// `figcraft://` invite links open this app (`collab.registerLinks`); `None`: on for installed
+    /// `lizard://` invite links open this app (`collab.registerLinks`); `None`: on for installed
     /// builds, off for development builds.
     pub invite_links: Option<bool>,
     /// Installed plugins (Plugins menu), in menu order.
@@ -750,12 +750,12 @@ pub struct UiRequest {
 #[derive(Clone, Debug, Default)]
 pub struct Clipboard {
     /// Copied subtrees: (root, nodes) in z-order.
-    pub nodes: Vec<(NodeId, Vec<figcraft_doc::Node>)>,
-    pub images: std::collections::BTreeMap<String, figcraft_doc::ImageData>,
+    pub nodes: Vec<(NodeId, Vec<lizard_doc::Node>)>,
+    pub images: std::collections::BTreeMap<String, lizard_doc::ImageData>,
     /// Copied properties (Copy properties / Paste properties).
     pub props: Option<Value>,
     /// The page-space bounds of the copied selection.
-    pub bounds: Option<figcraft_geom::Rect>,
+    pub bounds: Option<lizard_geom::Rect>,
     pub source_doc: u64,
     /// Copied component/set roots, excluding cuts and originals discarded by undo (ids are reused).
     pub copied_components: std::collections::BTreeSet<NodeId>,
@@ -780,7 +780,7 @@ pub struct Session {
     /// (`file.import` with `data`) are not logged, so the log never holds a copy of a pasted file.
     pub journal: Vec<(String, Value)>,
     /// Recently used colours.
-    pub recent_colors: Vec<figcraft_color::Color>,
+    pub recent_colors: Vec<lizard_color::Color>,
     /// The last undoable command executed through [`Session::execute`], excluding "Repeat".
     pub last_command: Option<(String, Value)>,
     /// Status / toast message for the UI.
@@ -850,8 +850,8 @@ impl Session {
     }
 
     /// The background a new file's page gets: the dark page colour while the interface is dark.
-    pub fn new_page_background(&self) -> figcraft_color::Color {
-        if self.ui_dark == Some(true) { figcraft_color::Color::DARK_PAGE } else { figcraft_color::Color::DEFAULT_PAGE }
+    pub fn new_page_background(&self) -> lizard_color::Color {
+        if self.ui_dark == Some(true) { lizard_color::Color::DARK_PAGE } else { lizard_color::Color::DEFAULT_PAGE }
     }
 
     /// Tell the engine the interface's theme (the UI does, every frame). The first time, a new
@@ -867,7 +867,7 @@ impl Session {
             let blank = pages.iter().all(|p| {
                 ds.doc.node(*p).is_some_and(|n| {
                     n.children.is_empty()
-                        && matches!(n.kind, figcraft_doc::NodeKind::Page { background, .. } if background == figcraft_color::Color::DEFAULT_PAGE)
+                        && matches!(n.kind, lizard_doc::NodeKind::Page { background, .. } if background == lizard_color::Color::DEFAULT_PAGE)
                 })
             });
             if !(untouched && blank) {
@@ -875,8 +875,8 @@ impl Session {
             }
             let mut doc = (*ds.doc).clone();
             for p in pages {
-                if let Some(figcraft_doc::NodeKind::Page { background, .. }) = doc.node_mut(p).map(|n| &mut n.kind) {
-                    *background = figcraft_color::Color::DARK_PAGE;
+                if let Some(lizard_doc::NodeKind::Page { background, .. }) = doc.node_mut(p).map(|n| &mut n.kind) {
+                    *background = lizard_color::Color::DARK_PAGE;
                 }
             }
             // Still a file without changes.
@@ -1090,7 +1090,7 @@ impl Session {
     /// How many undo and redo steps the active document has (the user's own in a live session).
     pub fn undo_depth(&self) -> (usize, usize) {
         match self.ds() {
-            Ok(ds) if self.live_doc(ds.uid) => self.live().client().map_or((0, 0), figcraft_collab::Client::history_len),
+            Ok(ds) if self.live_doc(ds.uid) => self.live().client().map_or((0, 0), lizard_collab::Client::history_len),
             Ok(ds) => (ds.history.undo.len(), ds.history.redo.len()),
             Err(_) => (0, 0),
         }
@@ -1203,8 +1203,7 @@ impl Session {
         let (uid, doc) = (ds.uid, ds.doc.clone());
         if self.clipboard.source_doc == uid {
             self.clipboard.copied_components.retain(|id| {
-                doc.node(*id)
-                    .is_some_and(|n| matches!(n.kind, figcraft_doc::NodeKind::Component { .. } | figcraft_doc::NodeKind::ComponentSet { .. }))
+                doc.node(*id).is_some_and(|n| matches!(n.kind, lizard_doc::NodeKind::Component { .. } | lizard_doc::NodeKind::ComponentSet { .. }))
             });
         }
         Ok(true)
@@ -1398,16 +1397,16 @@ pub fn normalize(doc: &mut Document, before: &Document) {
     // 0b. Fill and hug only where they can apply (a layer moved out of auto layout, a parent that
     // started to hug or lost auto layout): the rest becomes fixed at its current size.
     for id in live(doc, &touched) {
-        figcraft_layout::coherent_sizing(doc, id);
+        lizard_layout::coherent_sizing(doc, id);
     }
     touched.extend(doc.take_dirty());
     // 1. Text auto-size.
     for id in live(doc, &touched) {
         let Some(n) = doc.node(id) else { continue };
-        if let Some((w, h)) = figcraft_text::auto_size(n)
+        if let Some((w, h)) = lizard_text::auto_size(n)
             && ((w - n.width).abs() > 1e-6 || (h - n.height).abs() > 1e-6)
         {
-            figcraft_layout::set_size(doc, id, w, h);
+            lizard_layout::set_size(doc, id, w, h);
         }
     }
     touched.extend(doc.take_dirty());
@@ -1476,7 +1475,7 @@ pub fn normalize(doc: &mut Document, before: &Document) {
             .into_iter()
             .filter_map(|i| doc.node_arc(i).map(|a| (a.clone(), doc.dirty().contains(&i))))
             .collect();
-        figcraft_layout::layout_frame(doc, f, &m);
+        lizard_layout::layout_frame(doc, f, &m);
         for (a, was_dirty) in kept {
             doc.keep_if_unchanged(a, was_dirty);
         }
@@ -1516,7 +1515,7 @@ fn binding_scope(doc: &Document, before: &Document, touched: &BTreeSet<NodeId>) 
         return None;
     }
     let main = |n: &Node| match n.kind {
-        figcraft_doc::NodeKind::Instance { component, .. } => Some(component),
+        lizard_doc::NodeKind::Instance { component, .. } => Some(component),
         _ => None,
     };
     let mut out = BTreeSet::new();
@@ -1532,7 +1531,7 @@ fn binding_scope(doc: &Document, before: &Document, touched: &BTreeSet<NodeId>) 
         } else {
             out.insert(id);
         }
-        if modes && matches!(n.kind, figcraft_doc::NodeKind::Component { .. }) {
+        if modes && matches!(n.kind, lizard_doc::NodeKind::Component { .. }) {
             for i in components::instances_of(doc, id) {
                 out.extend(doc.subtree(i));
             }
@@ -1545,7 +1544,7 @@ fn binding_scope(doc: &Document, before: &Document, touched: &BTreeSet<NodeId>) 
 /// design `touched` changed (added, removed or edited; the handoff status itself and hiding a
 /// section's contents don't count).
 fn mark_dev_changes(doc: &mut Document, before: &Document, touched: &BTreeSet<NodeId>) {
-    let ready = |d: &Document, id: NodeId| d.node(id).is_some_and(|n| n.dev_status == figcraft_doc::DevStatus::ReadyForDev);
+    let ready = |d: &Document, id: NodeId| d.node(id).is_some_and(|n| n.dev_status == lizard_doc::DevStatus::ReadyForDev);
     let mut changed: BTreeSet<NodeId> = BTreeSet::new();
     for &id in touched {
         // Ready-for-dev frames around it first (the cheap test).
@@ -1577,7 +1576,7 @@ fn mark_dev_changes(doc: &mut Document, before: &Document, touched: &BTreeSet<No
     }
     // Snapshots last until the change is resolved, the layer is marked again or it's deleted.
     if !doc.dev_snapshots.is_empty() {
-        let keep = |d: &Document, id: NodeId| d.node(id).is_some_and(|n| n.dev_status == figcraft_doc::DevStatus::ReadyForDev && n.dev_changed);
+        let keep = |d: &Document, id: NodeId| d.node(id).is_some_and(|n| n.dev_status == lizard_doc::DevStatus::ReadyForDev && n.dev_changed);
         let stale: Vec<NodeId> = doc.dev_snapshots.keys().copied().filter(|id| !keep(doc, *id)).collect();
         for id in stale {
             doc.dev_snapshots.remove(&id);

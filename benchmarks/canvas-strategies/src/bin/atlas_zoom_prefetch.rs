@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use canvas_strategies_bench::geometry_atlas::GeometryAtlas;
 use canvas_strategies_bench::gpu_scene::GpuCanvas;
-use figcraft_render::View;
+use lizard_render::View;
 
 fn camera(center: (f64, f64), scale: f64, width: u32, height: u32) -> View {
     View { origin: (center.0 - f64::from(width) / (2.0 * scale), center.1 - f64::from(height) / (2.0 * scale)), scale, width, height }
@@ -21,7 +21,7 @@ fn percentile(values: &[f64], quantile: f64) -> f64 {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().collect();
-    let file = args.iter().find_map(|arg| arg.strip_prefix("--file=")).ok_or("pass --file=<saved .figcraft file>")?;
+    let file = args.iter().find_map(|arg| arg.strip_prefix("--file=")).ok_or("pass --file=<saved .lizard file>")?;
     let width = args.iter().find_map(|arg| arg.strip_prefix("--width=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(1266);
     let height = args.iter().find_map(|arg| arg.strip_prefix("--height=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(1720);
     let capacity = args.iter().find_map(|arg| arg.strip_prefix("--slots=").and_then(|value| value.parse::<u32>().ok())).unwrap_or(144);
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let high_first = args.iter().any(|arg| arg == "--high-first");
     let projection_order = if high_first { [(3, 3.21), (2, 1.61), (1, 0.81)] } else { [(1, 0.81), (2, 1.61), (3, 3.21)] };
     let pan = args.iter().any(|arg| arg == "--pan");
-    let (doc, warnings) = figcraft_format::load_file(Path::new(file))?;
+    let (doc, warnings) = lizard_format::load_file(Path::new(file))?;
     if !warnings.is_empty() {
         return Err(format!("document warnings: {warnings:?}").into());
     }

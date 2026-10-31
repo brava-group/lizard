@@ -6,11 +6,11 @@ use web_time::Instant;
 
 use egui::{Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
 
-use crate::FigApp;
+use crate::LizardApp;
 
 const BLUE: Color32 = Color32::from_rgb(0x7C, 0xC4, 0xF7);
 
-pub fn draw(app: &mut FigApp, painter: &Painter, ctx: &egui::Context) {
+pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     let now = Instant::now();
     let Some(document) = app.session.ds().ok().map(|ds| ds.uid) else { return };
     let presence = &app.ui.agent.presence;
@@ -103,8 +103,8 @@ pub fn draw(app: &mut FigApp, painter: &Painter, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
-    use figcraft_doc::NodeId;
-    use figcraft_engine::Session;
+    use lizard_doc::NodeId;
+    use lizard_engine::Session;
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;

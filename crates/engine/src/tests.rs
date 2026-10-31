@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use figcraft_doc::NodeKind;
+use lizard_doc::NodeKind;
 
 fn sess() -> Session {
     Session::new()
@@ -153,7 +153,7 @@ fn text_create_autosize_and_edit() {
     textedit::end(&mut s).unwrap();
     let n = s.doc().unwrap().node(t).unwrap().clone();
     assert_eq!(n.kind.text().unwrap().characters, "Hello worl");
-    if figcraft_text::find_face("Inter", "Regular").is_some() {
+    if lizard_text::find_face("Inter", "Regular").is_some() {
         assert!(n.width > w0);
     }
     // One undo step for the whole edit session.
@@ -353,7 +353,7 @@ fn pointer_draw_move_resize() {
     s.pointer(&PointerEvent::at(PointerKind::Move, 60.0, 40.0, z)).unwrap();
     s.pointer(&PointerEvent::at(PointerKind::Up, 60.0, 40.0, z)).unwrap();
     let r = s.selection()[0];
-    assert_eq!(s.doc().unwrap().world_bounds(r).unwrap(), figcraft_geom::Rect::new(10.0, 10.0, 60.0, 40.0));
+    assert_eq!(s.doc().unwrap().world_bounds(r).unwrap(), lizard_geom::Rect::new(10.0, 10.0, 60.0, 40.0));
     assert_eq!(s.tool.tool, ToolId::Move);
     let undo_len = s.ds().unwrap().history.undo.len();
     // Move it.
@@ -567,7 +567,7 @@ fn arrows_reorder_auto_layout_children_and_cmd_arrows_resize() {
     s.execute("node.set", &json!({"id": row, "props": {"sizingH": "hug", "sizingV": "hug"}})).unwrap();
     s.execute("transform.nudgeSize", &json!({"ids": [row], "dw": 1, "dh": 0, "big": true})).unwrap();
     let r = s.doc().unwrap().node(row).unwrap().clone();
-    assert_eq!(r.child_layout.sizing_v, figcraft_doc::Sizing::Hug);
+    assert_eq!(r.child_layout.sizing_v, lizard_doc::Sizing::Hug);
 }
 
 #[test]
@@ -633,9 +633,9 @@ fn find_replace_matches_and_replaces_case_insensitively() {
 #[test]
 fn find_replace_changing_only_the_case_replaces_every_occurrence() {
     let mut s = sess();
-    let t = id(&s.execute("text.create", &json!({"text": "figcraft and FIGCRAFT, figcraft", "x": 0, "y": 0})).unwrap());
-    let f = id(&s.execute("frame.create", &json!({"x": 0, "y": 80, "width": 50, "height": 50, "name": "figcraft / figcraft"})).unwrap());
-    s.execute("edit.findReplace", &json!({"find": "figcraft", "replace": "Lizard", "layerNames": true})).unwrap();
+    let t = id(&s.execute("text.create", &json!({"text": "lizard and LIZARD, lizard", "x": 0, "y": 0})).unwrap());
+    let f = id(&s.execute("frame.create", &json!({"x": 0, "y": 80, "width": 50, "height": 50, "name": "lizard / lizard"})).unwrap());
+    s.execute("edit.findReplace", &json!({"find": "lizard", "replace": "Lizard", "layerNames": true})).unwrap();
     assert_eq!(s.doc().unwrap().node(t).unwrap().kind.text().unwrap().characters, "Lizard and Lizard, Lizard");
     assert_eq!(s.doc().unwrap().node(f).unwrap().name, "Lizard / Lizard");
 }

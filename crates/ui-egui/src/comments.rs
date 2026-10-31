@@ -6,12 +6,12 @@
 
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Align2, Color32, CornerRadius, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
-use figcraft_doc::{Comment, Message, NodeId, mention_ranges};
-use figcraft_engine::ToolId;
-use figcraft_engine::cmd::comment::{self as cc, Filter, Query, Sort};
+use lizard_doc::{Comment, Message, NodeId, mention_ranges};
+use lizard_engine::ToolId;
+use lizard_engine::cmd::comment::{self as cc, Filter, Query, Sort};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, Icon};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
@@ -208,12 +208,12 @@ pub fn rich_text(text: &str, people: &[&str], color: Color32, mention_color: Col
 // Pins.
 
 /// The user's name (comments are signed with it).
-fn me(app: &FigApp) -> String {
+fn me(app: &LizardApp) -> String {
     cc::user_name(&app.session)
 }
 
 /// Pins are visible with the Comment tool, or when View › Comments is on (Shift+C).
-fn visible(app: &FigApp) -> bool {
+fn visible(app: &LizardApp) -> bool {
     app.session.tool.tool == ToolId::Comment
         || app.session.ds().is_ok_and(|ds| ds.view.comments)
         || app.ui.comments.open.is_some()
@@ -239,7 +239,7 @@ impl Pin {
 
 /// The current page's pins (those the panel's filter keeps, and the open thread's) in drawing
 /// order: oldest first, the open one on top; a dragged pin sits under the pointer.
-fn pins(app: &FigApp) -> Vec<Pin> {
+fn pins(app: &LizardApp) -> Vec<Pin> {
     let Ok(ds) = app.session.ds() else { return Vec::new() };
     let me = me(app);
     let cu = &app.ui.comments;
@@ -273,7 +273,7 @@ enum Spot {
 
 /// Pins, crowded ones gathered into clusters (the open and the dragged pin always stand alone, on
 /// top).
-fn spots(app: &FigApp) -> Vec<Spot> {
+fn spots(app: &LizardApp) -> Vec<Spot> {
     let cu = &app.ui.comments;
     let alone = |p: &Pin| cu.open == Some(p.id) || cu.drag.is_some_and(|d| d.id == p.id);
     let (solo, rest): (Vec<Pin>, Vec<Pin>) = pins(app).into_iter().partition(alone);
@@ -355,7 +355,7 @@ fn paint_pin(painter: &egui::Painter, r: Rect, p: &Pin, hot: bool) {
     painter.rect_stroke(r, BUBBLE, Stroke::new(1.0, Color32::from_black_alpha(30)), StrokeKind::Inside);
     let fill = if p.resolved { Color32::from_gray(150) } else { author_color(&p.author) };
     painter.circle_filled(r.center(), 11.0, fill);
-    painter.text(r.center(), Align2::CENTER_CENTER, figcraft_engine::live::initials(&p.author), semibold(9.0), Color32::WHITE);
+    painter.text(r.center(), Align2::CENTER_CENTER, lizard_engine::live::initials(&p.author), semibold(9.0), Color32::WHITE);
     if p.unread {
         let c = r.right_top() + vec2(-2.0, 2.0);
         painter.circle_filled(c, 4.5, Color32::WHITE);
@@ -382,7 +382,7 @@ fn paint_cluster(painter: &egui::Painter, at: Pos2, n: usize, hot: bool) {
 }
 
 /// Draw the pins, clusters and the draft pin.
-pub fn draw(app: &FigApp, painter: &egui::Painter) {
+pub fn draw(app: &LizardApp, painter: &egui::Painter) {
     if !visible(app) {
         return;
     }
@@ -405,7 +405,7 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 }
 
 /// Open a thread, or close it when it's the open one.
-fn toggle(app: &mut FigApp, id: u64) {
+fn toggle(app: &mut LizardApp, id: u64) {
     if app.ui.comments.open == Some(id) {
         app.ui.comments.close();
     } else {
@@ -416,7 +416,7 @@ fn toggle(app: &mut FigApp, id: u64) {
 /// Pointer handling: a pin click opens its thread, dragging your pin moves it (onto the frame
 /// under it), a cluster click zooms in until its pins come apart. Returns true when the comments
 /// own the pointer.
-pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Pos2) -> bool {
     if !visible(app) {
         app.ui.comments.drag = None;
         return false;
@@ -466,7 +466,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
 }
 
 /// Start a new comment at a page point (the Comment tool's click).
-pub fn start_draft(app: &mut FigApp, x: f64, y: f64) {
+pub fn start_draft(app: &mut LizardApp, x: f64, y: f64) {
     app.ui.comments.close();
     app.ui.comments.draft = Some((x, y, String::new()));
 }
@@ -804,7 +804,7 @@ fn popover_frame(t: &Tokens) -> egui::Frame {
 
 /// Escape: ends an edit, else closes the open thread or the draft (an open @mention picker takes
 /// it first). True when they closed.
-fn escape(app: &mut FigApp, ctx: &egui::Context) -> bool {
+fn escape(app: &mut LizardApp, ctx: &egui::Context) -> bool {
     let cu = &mut app.ui.comments;
     if (cu.open.is_none() && cu.draft.is_none()) || cu.mention.active() || !ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
         return false;
@@ -817,7 +817,7 @@ fn escape(app: &mut FigApp, ctx: &egui::Context) -> bool {
 }
 
 /// The thread popover and the draft composer, floating next to their pins on the canvas.
-pub fn popovers(app: &mut FigApp, ctx: &egui::Context) {
+pub fn popovers(app: &mut LizardApp, ctx: &egui::Context) {
     if escape(app, ctx) {
         return;
     }
@@ -859,7 +859,7 @@ pub fn popovers(app: &mut FigApp, ctx: &egui::Context) {
 
 /// A thread's popover next to the spot `anchor` (screen), kept inside `bounds`: its messages and a
 /// reply field. Showing it reads the thread.
-pub fn thread(app: &mut FigApp, ctx: &egui::Context, id: u64, anchor: Pos2, bounds: Rect) {
+pub fn thread(app: &mut LizardApp, ctx: &egui::Context, id: u64, anchor: Pos2, bounds: Rect) {
     let t = Tokens::get(ctx);
     let Ok(ds) = app.session.ds() else { return };
     let previewing = ds.preview.is_some();
@@ -971,7 +971,7 @@ fn panel_params(cu: &CommentUi, dir: i32) -> Value {
 
 /// Open the next (`dir` 1) or previous (-1) thread in the panel's list, bring it into view and
 /// put the keyboard in its reply field (where the arrows go on stepping while it's empty).
-pub fn step(app: &mut FigApp, ctx: &egui::Context, dir: i32) -> Option<Value> {
+pub fn step(app: &mut LizardApp, ctx: &egui::Context, dir: i32) -> Option<Value> {
     let p = panel_params(&app.ui.comments, dir);
     let r = app.session.execute("comment.next", &p).ok();
     app.handle_ui_requests();
@@ -986,7 +986,7 @@ pub fn step(app: &mut FigApp, ctx: &egui::Context, dir: i32) -> Option<Value> {
 
 /// Up and Down step through the panel's threads while the Comment tool is active and nothing is
 /// being typed (an empty reply field doesn't count).
-pub fn keys(app: &mut FigApp, ctx: &egui::Context) {
+pub fn keys(app: &mut LizardApp, ctx: &egui::Context) {
     let cu = &app.ui.comments;
     if app.session.tool.tool != ToolId::Comment || cu.draft.is_some() || cu.editing.is_some() || cu.mention.active() {
         return;
@@ -1006,7 +1006,7 @@ pub fn keys(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// The Comments panel (right side, Comment tool).
-pub fn panel(app: &mut FigApp, ui: &mut Ui) {
+pub fn panel(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(ds) = app.session.ds() else { return };
     let page = ds.page;
@@ -1156,7 +1156,7 @@ pub fn panel(app: &mut FigApp, ui: &mut Ui) {
 
 /// Pins on the presented `frame` (placed by the player's `place`, inside `clip`) while the
 /// presenter shows comments, and the open thread's popover (read and reply).
-pub fn presenter(app: &mut FigApp, ctx: &egui::Context, frame: NodeId, place: crate::present::Place, clip: Rect) {
+pub fn presenter(app: &mut LizardApp, ctx: &egui::Context, frame: NodeId, place: crate::present::Place, clip: Rect) {
     if escape(app, ctx) {
         return;
     }

@@ -1,5 +1,5 @@
 use super::*;
-use figcraft_geom::Point;
+use lizard_geom::Point;
 
 fn page(doc: &Document) -> NodeId {
     doc.first_page().unwrap()
@@ -200,15 +200,15 @@ fn text_case() {
 #[test]
 fn vector_network_paths() {
     let net = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0)], true);
-    use figcraft_geom::Shape;
+    use lizard_geom::Shape;
     assert!((net.fill_path().area().abs() - 50.0).abs() < 1e-9);
     let open = VectorNetwork::from_points(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0)], false);
     assert!(open.fill_path().elements().is_empty());
     assert_eq!(open.stroke_path().segments().count(), 2);
     assert!((open.paint_path().area().abs() - 50.0).abs() < 1e-9);
-    assert!(!matches!(open.stroke_path().elements().last(), Some(figcraft_geom::kurbo::PathEl::ClosePath)));
+    assert!(!matches!(open.stroke_path().elements().last(), Some(lizard_geom::kurbo::PathEl::ClosePath)));
     let disjoint = VectorNetwork::from_path(&{
-        let mut path = figcraft_geom::BezPath::new();
+        let mut path = lizard_geom::BezPath::new();
         path.move_to((0.0, 0.0));
         path.line_to((10.0, 0.0));
         path.line_to((10.0, 10.0));
@@ -219,7 +219,7 @@ fn vector_network_paths() {
     });
     assert!((disjoint.paint_path().area().abs() - 100.0).abs() < 1e-9);
     // Round-trip a bezier path.
-    let rr = figcraft_geom::rounded_rect(40.0, 20.0, [5.0; 4], 0.0);
+    let rr = lizard_geom::rounded_rect(40.0, 20.0, [5.0; 4], 0.0);
     let n2 = VectorNetwork::from_path(&rr);
     assert!((n2.fill_path().area() - rr.area()).abs() < 1e-6);
     let mut bad = VectorNetwork {
@@ -234,8 +234,8 @@ fn vector_network_paths() {
 
 #[test]
 fn vector_paint_path_includes_open_subpaths_next_to_regions() {
-    use figcraft_geom::Shape;
-    let mut path = figcraft_geom::BezPath::new();
+    use lizard_geom::Shape;
+    let mut path = lizard_geom::BezPath::new();
     path.move_to((0.0, 0.0));
     path.line_to((10.0, 0.0));
     path.line_to((10.0, 10.0));
@@ -250,12 +250,12 @@ fn vector_paint_path_includes_open_subpaths_next_to_regions() {
     assert_eq!(network.fill_path().winding(Point::new(25.0, 5.0)), 0);
     assert_ne!(network.paint_path().winding(Point::new(25.0, 5.0)), 0);
     assert!((network.paint_path().area().abs() - 200.0).abs() < 1e-9);
-    assert_eq!(network.stroke_path().elements().iter().filter(|element| matches!(element, figcraft_geom::kurbo::PathEl::ClosePath)).count(), 1);
+    assert_eq!(network.stroke_path().elements().iter().filter(|element| matches!(element, lizard_geom::kurbo::PathEl::ClosePath)).count(), 1);
 }
 
 #[test]
 fn isolated_vector_corner_can_use_the_full_edge() -> Result<(), &'static str> {
-    use figcraft_geom::Shape;
+    use lizard_geom::Shape;
     let mut open = VectorNetwork::from_points(&[Point::new(0.0, 10.0), Point::new(10.0, 10.0), Point::new(10.0, 0.0)], false);
     for vertex in &mut open.vertices {
         vertex.radius = 10.0;

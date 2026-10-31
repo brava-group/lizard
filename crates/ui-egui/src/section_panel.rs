@@ -2,10 +2,10 @@
 //! handoff status (with resolving a change to a ready-for-dev layer) and resize to fit.
 
 use egui::{CornerRadius, Sense, Stroke, Ui, vec2};
-use figcraft_doc::{DevStatus, Document, NodeId, NodeKind};
+use lizard_doc::{DevStatus, Document, NodeId, NodeKind};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::Icon;
 use crate::right::{common, menu_item, menu_popup, row};
@@ -27,11 +27,11 @@ fn is_section(doc: &Document, id: NodeId) -> bool {
     doc.node(id).is_some_and(|n| matches!(n.kind, NodeKind::Section { .. }))
 }
 
-pub use figcraft_engine::devinspect::has_status;
+pub use lizard_engine::devinspect::has_status;
 
 /// The handoff status of `ids` as a dropdown `width` wide ("Changed" when edited since marked ready,
 /// "Mixed" when they differ).
-pub fn status_dropdown(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[NodeId], width: f32) {
+pub fn status_dropdown(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ids: &[NodeId], width: f32) {
     let label = match common(doc, ids, |n| (n.dev_status, n.dev_changed)) {
         Some((DevStatus::ReadyForDev, true)) => tr("Changed"),
         Some((d, _)) => tr(d.label()),
@@ -48,7 +48,7 @@ pub fn status_dropdown(app: &mut FigApp, ui: &mut Ui, doc: &Document, ids: &[Nod
     });
 }
 
-pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let sections = !sel.is_empty() && sel.iter().all(|i| is_section(doc, *i));
     if sel.is_empty() || !sel.iter().all(|i| has_status(doc, *i)) {
         return;
@@ -63,7 +63,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             let current = common(doc, sel, |n| n.fills.first().and_then(|p| p.solid_color()).map(|c| c.to_hex()));
             for (name, hex) in SECTION_COLORS {
                 let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                let c = figcraft_color::Color::from_hex(hex).unwrap_or(figcraft_color::Color::WHITE);
+                let c = lizard_color::Color::from_hex(hex).unwrap_or(lizard_color::Color::WHITE);
                 ui.painter().rect_filled(r, CornerRadius::same(9), crate::theme::doc_c32(ui.ctx(), c));
                 let on = current.as_ref().and_then(|c| c.as_ref()).is_some_and(|h| h.eq_ignore_ascii_case(hex.trim_start_matches('#')));
                 let stroke = if on { Stroke::new(2.0, crate::theme::ACCENT) } else { Stroke::new(1.0, t.border) };

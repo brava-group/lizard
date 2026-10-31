@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-figma-plugin"
+name = "lizard-figma-plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 # The plugin SDK and examples build for wasm32 in a workspace of their own (`cargo xtask plugins`).
 exclude = ["plugins", "vendor/egui-winit"]
-# default-members = ["crates/*", "apps/figcraft", "apps/figcraft-cli", "xtask"]
+# default-members = ["crates/*", "apps/lizard", "apps/lizard-cli", "xtask"]
 
 [workspace.package]
 version = "0.9.0"
@@ -13,26 +13,27 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 # internal
-figcraft-geom = { path = "crates/geom" }
-figcraft-color = { path = "crates/color" }
-figcraft-doc = { path = "crates/doc" }
-figcraft-layout = { path = "crates/layout" }
-figcraft-text = { path = "crates/text" }
-figcraft-pathops = { path = "crates/pathops" }
-figcraft-render = { path = "crates/render" }
-figcraft-canvas-gpu = { path = "crates/canvas-gpu" }
-figcraft-shader = { path = "crates/shader" }
-figcraft-svg = { path = "crates/svg" }
-figcraft-pdf = { path = "crates/pdf" }
-figcraft-format = { path = "crates/format" }
-figcraft-tools = { path = "crates/tools" }
-figcraft-collab = { path = "crates/collab" }
-figcraft-engine = { path = "crates/engine" }
-figcraft-ui-egui = { path = "crates/ui-egui" }
-figcraft-mcp = { path = "crates/mcp" }
-figcraft-collab-net = { path = "crates/collab-net" }
-figcraft-plugin = { path = "crates/plugin" }
-figcraft-figma-plugin = { path = "crates/figma-plugin" }
+lizard-geom = { path = "crates/geom" }
+lizard-color = { path = "crates/color" }
+lizard-doc = { path = "crates/doc" }
+lizard-layout = { path = "crates/layout" }
+lizard-text = { path = "crates/text" }
+lizard-pathops = { path = "crates/pathops" }
+lizard-render = { path = "crates/render" }
+lizard-canvas-gpu = { path = "crates/canvas-gpu" }
+lizard-shader = { path = "crates/shader" }
+lizard-svg = { path = "crates/svg" }
+lizard-pdf = { path = "crates/pdf" }
+lizard-format = { path = "crates/format" }
+lizard-tools = { path = "crates/tools" }
+lizard-collab = { path = "crates/collab" }
+lizard-engine = { path = "crates/engine" }
+lizard-ui-egui = { path = "crates/ui-egui" }
+workbench-ui = { path = "crates/workbench-ui" }
+lizard-mcp = { path = "crates/mcp" }
+lizard-collab-net = { path = "crates/collab-net" }
+lizard-plugin = { path = "crates/plugin" }
+lizard-figma-plugin = { path = "crates/figma-plugin" }
 
 # Which paths stored in a document may be followed (craft-libs).
 craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "82a24b006eefa036b43c09a67fb9a3fbd17ffe63" }
@@ -115,7 +116,7 @@ opt-level = 1
 lto = "thin"
 codegen-units = 4
 
-# The browser build only (apps/figcraft-web/index.html: data-cargo-profile). Optimised for size:
+# The browser build only (apps/lizard-web/index.html: data-cargo-profile). Optimised for size:
 # packaging/web/package.sh fails a .wasm over 24 MiB (Cloudflare's per-file cap is 25 MiB).
 # wasm32-unknown-unknown always aborts on panic, so panic = "abort" changes nothing there.
 [profile.web-release]

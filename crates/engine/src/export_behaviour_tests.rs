@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::Session;
 use crate::params::id_of;
-use figcraft_doc::{Effect, EffectKind, NodeId};
+use lizard_doc::{Effect, EffectKind, NodeId};
 
 fn ex(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd}: {e}"))
@@ -135,7 +135,7 @@ fn export_file_names_take_the_suffix_and_slashes_make_folders() {
         assert_eq!(names.get(i).map(String::as_str), Some(*want), "{why}");
     }
     // Into a folder: the slash makes a subfolder.
-    let dir = std::env::temp_dir().join(format!("figcraft-export-names-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lizard-export-names-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     ex(&mut s, "file.exportLayers", json!({"ids": [close], "dir": dir.to_string_lossy()}));
@@ -300,7 +300,7 @@ fn svg_export_options() {
     assert!(!outlined.contains("<text"), "outline text is on by default: text becomes paths");
     let live = text(&export(&mut s, json!({"ids": [t], "format": "svg", "svgOutlineText": false})));
     // Without a font nothing lays out, so there is no text to keep (CI has no fonts).
-    let has_glyphs = figcraft_text::layout_node(s.doc().unwrap().node(t).unwrap()).is_some_and(|(l, _)| !l.glyphs.is_empty());
+    let has_glyphs = lizard_text::layout_node(s.doc().unwrap().node(t).unwrap()).is_some_and(|(l, _)| !l.glyphs.is_empty());
     if has_glyphs {
         assert!(live.contains("<text") && live.contains("Hello"), "with outline text off, text stays text (selectable, needs the font)");
     }
@@ -328,7 +328,7 @@ fn copy_as_png_svg_and_code() {
     let screen = crate::cmd::file::copy_png_screen(doc, &[a, b]).unwrap();
     assert_eq!((screen.width(), screen.height()), (200, 40));
     assert_eq!(screen.pixel(20, 20), png.pixel(20, 20), "an sRGB document keeps its clipboard colors");
-    let svg = crate::cmd::file::export_bytes(doc, &[a, b], figcraft_doc::ExportFormat::Svg, 1.0).unwrap();
+    let svg = crate::cmd::file::export_bytes(doc, &[a, b], lizard_doc::ExportFormat::Svg, 1.0).unwrap();
     assert!(text(&svg).starts_with("<svg width=\"100\""), "Copy as SVG is the selection's SVG export");
     let css = crate::codegen::code_for(doc, a, crate::codegen::CodeLang::Css);
     assert!(css.contains("background: #FF0000;"), "Copy as CSS is the layer's CSS from Inspect");

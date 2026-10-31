@@ -7,7 +7,7 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-use figcraft_render::{Pixmap, View};
+use lizard_render::{Pixmap, View};
 
 const SHADER: &str = r#"
 struct Camera { origin: vec2<f32>, zoom: f32, width: f32, height: f32,

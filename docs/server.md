@@ -1,7 +1,7 @@
 # Lizard collaboration server
 
-Lizard includes its own collaboration server. The Cargo package keeps its inherited internal name,
-`figcraft-server`, for compatibility; the shipped executable is `lizard-server`. Online sharing is off until users
+Lizard includes its own collaboration server. The Cargo package and shipped executable are both
+`lizard-server`. Online sharing is off until users
 configure a server. The manual deployment instructions below use only this repository.
 
 `lizard-server` keeps Lizard files for a team and serves their live sessions. A file published
@@ -23,7 +23,7 @@ The protocol and the design behind it are in [`collab-protocol.md`](collab-proto
 ## Running it
 
 ```sh
-cargo build --release --locked -p figcraft-server
+cargo build --release --locked -p lizard-server
 target/release/lizard-server --listen 0.0.0.0:47900 --data /srv/lizard
 ```
 
@@ -174,13 +174,12 @@ A [join code](#sharing-with-a-join-code) is the short way in. Share links look l
 app's invite links and join the same way (the same **Join with a code** field takes them, as do
 **File ▸ Join live session…**, opening the link, and `collab.join {link}`):
 
-- `figcraft://join?host=<host:port>&file=<id>&token=<token>` for a plain `ws://` server;
-- `figcraft://join?server=wss://design.example.com/&file=<id>&token=<token>` for a server behind
+- `lizard://join?host=<host:port>&file=<id>&token=<token>` for a plain `ws://` server;
+- `lizard://join?server=wss://design.example.com/&file=<id>&token=<token>` for a server behind
   a TLS reverse proxy or under a path;
 - `ws://<host:port>/?file=<id>&token=<token>` or `wss://…` (the same link as a WebSocket URL).
 
-The `figcraft://` desktop link scheme remains for compatibility with existing documents and
-invites; it does not select an upstream server.
+The `lizard://` desktop link scheme opens Lizard invites; it does not select a default server.
 
 The file opens as a new tab. With a **view link** you see everyone's changes and presence, and
 others see your cursor and selection, but you can't change anything: the toolbar shows a **View
@@ -232,8 +231,8 @@ port as everything else; no other service is involved.
   are no publisher accounts, so give it only to people you trust to put code on your team's
   machines. A plugin's author is shown as the publisher typed it in the manifest; nothing verifies
   it.
-- **Publishing.** `figcraft-cli plugin publish FOLDER --server ws://host:47900/` with the key in
-  `FIGCRAFT_SERVER_KEY` (or `?key=` in the address), or `plugin.directory.publish` from the app's
+- **Publishing.** `lizard-cli plugin publish FOLDER --server ws://host:47900/` with the key in
+  `LIZARD_SERVER_KEY` (or `?key=` in the address), or `plugin.directory.publish` from the app's
   scripts and MCP. Each version must be newer than the last (`1.0.0` → `1.0.1`); the server keeps
   every version until it is unpublished, and lists the latest.
 - **What the server checks** before keeping a bundle: its size (`max_plugin_mb`), that it decodes
@@ -324,7 +323,7 @@ behaves as before (blocked addresses, report rates and the limits on
                                a link with a join code its stretched hash and the wrapped token
 <data>/files/<id>/snapshot.bin its state at the last compaction (with a checksum)
 <data>/files/<id>/log.bin      what changed since, one checksummed record per change
-<data>/files/<id>/library-<version>.bin  its team library, when one was published (a .figcraft
+<data>/files/<id>/library-<version>.bin  its team library, when one was published (a .lizard
                                archive; library.bin when it was published by an older server)
 <data>/files/<id>/usage.json   which files use that library's components, as their apps report it
 <data>/plugins/index.json      the plugin directory: every version kept (manifest fields, size, SHA-256)
@@ -394,11 +393,11 @@ gives people `wss://` links (and browsers the `wss://` they need on an `https://
 - Tokens never travel in the WebSocket request (the client sends them inside its first message),
   so the proxy's access logs don't record them.
 
-The desktop app, `figcraft-cli` (and so agents through MCP) and the browser build all open
+The desktop app, `lizard-cli` (and so agents through MCP) and the browser build all open
 `wss://` links. The desktop app and the CLI check the certificate against Mozilla's list of root
 authorities built into them (not the operating system's store), so a certificate from a public
 authority such as Let's Encrypt just works. For a certificate from a private authority (or a
-self-signed one, such as Caddy's `tls internal`), set the environment variable `FIGCRAFT_CA_FILE`
+self-signed one, such as Caddy's `tls internal`), set the environment variable `LIZARD_CA_FILE`
 to that authority's certificate (a PEM file) before starting the app: it is trusted in addition
 to the built-in list. There is no way to skip the check: a certificate that has expired, is for
 another name or comes from an unknown authority is refused, and the app says which.
@@ -552,14 +551,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 . "$HOME/.cargo/env"
 git clone https://github.com/brava-group/lizard.git
 cd lizard
-cargo build --release --locked -p figcraft-server
+cargo build --release --locked -p lizard-server
 sudo install -m 755 target/release/lizard-server /usr/local/bin/lizard-server
 cd packaging/server
 ```
 
 If the repository is private, authenticate Git on the VPS or copy a verified checkout there.
-The Cargo package retains its internal `figcraft-server` name for compatibility; the executable
-and service are named `lizard-server`.
+The Cargo package, executable, and service are named `lizard-server`.
 
 **2. A user of its own, its data directory and its settings:**
 

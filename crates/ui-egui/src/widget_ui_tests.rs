@@ -10,8 +10,8 @@ use std::time::Duration;
 use base64::Engine as _;
 use egui::accesskit::{Node, Role};
 use egui::{Event, Key, Modifiers, Pos2, Rect};
-use figcraft_doc::{Document, NodeId};
-use figcraft_engine::Session;
+use lizard_doc::{Document, NodeId};
+use lizard_engine::Session;
 use serde_json::{Value, json};
 
 use crate::a11y::Region;
@@ -39,7 +39,7 @@ fn module(imports: &str, cases: &[(&str, Value, i32)], call: &str) -> Vec<u8> {
     }
     let wat = format!(
         r#"(module
-          (import "figcraft" "reply_read" (func $reply_read (param i32 i32) (result i32)))
+          (import "lizard" "reply_read" (func $reply_read (param i32 i32) (result i32)))
           {imports}
           (memory (export "memory") 4)
           {data}
@@ -56,7 +56,7 @@ fn module(imports: &str, cases: &[(&str, Value, i32)], call: &str) -> Vec<u8> {
               (local.set $i (i32.add (local.get $i) (i32.const 1)))
               (br $outer)))
             (i32.const 0))
-          (func (export "figcraft_run") (param $n i32) (result i32)
+          (func (export "lizard_run") (param $n i32) (result i32)
             (drop (call $reply_read (i32.const 100000) (local.get $n)))
             {call}
             {body}
@@ -83,14 +83,14 @@ fn look(n: i64) -> Value {
 }
 
 /// A session with the note widget's plugin: inserted it is in state 1; `go` draws 2 and asks for
-/// a timer in a minute, `soon` draws 5 and asks for one in 100 ms, a timer draws 3, text typed
+/// a timer in five minutes, `soon` draws 5 and asks for one in 100 ms, a timer draws 3, text typed
 /// into the title draws 4, the menu's `reset` draws 0 and its other items draw nothing.
 pub(crate) fn session() -> Session {
-    let imports = r#"(import "figcraft" "widget_render" (func $draw (param i32 i32) (result i32)))
-          (import "figcraft" "widget_timer" (func $timer (param i32) (result i32)))"#;
+    let imports = r#"(import "lizard" "widget_render" (func $draw (param i32 i32) (result i32)))
+          (import "lizard" "widget_timer" (func $timer (param i32) (result i32)))"#;
     let cases = [
         (r#""timer":true"#, look(3), -1),
-        (r#""target":"go""#, look(2), 60_000),
+        (r#""target":"go""#, look(2), 300_000),
         (r#""target":"soon""#, look(5), 100),
         (r#""input":"title""#, look(4), -1),
         (r#""menu":"reset""#, look(0), -1),
@@ -110,7 +110,7 @@ fn insert(s: &mut Session) -> NodeId {
 }
 
 pub(crate) fn state(doc: &Document, w: NodeId) -> String {
-    doc.node(w).and_then(|n| n.plugin_data.get("figcraft.widget.state").cloned()).unwrap_or_default()
+    doc.node(w).and_then(|n| n.plugin_data.get("lizard.widget.state").cloned()).unwrap_or_default()
 }
 
 /// The layer called `name` inside widget `w`.
@@ -119,7 +119,7 @@ pub(crate) fn part(doc: &Document, w: NodeId, name: &str) -> NodeId {
 }
 
 /// Where the layer called `name` of widget `w` shows on the canvas.
-fn on_canvas(app: &crate::FigApp, w: NodeId, name: &str) -> Rect {
+fn on_canvas(app: &crate::LizardApp, w: NodeId, name: &str) -> Rect {
     let doc = app.session.doc().unwrap();
     let b = doc.world_bounds(if name.is_empty() { w } else { part(doc, w, name) }).unwrap();
     Rect::from_two_pos(app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1))
@@ -277,10 +277,10 @@ fn a_pending_timer_wakes_the_window_when_it_is_due_and_at_no_other_time() {
     let mut h = Harness::new(s);
     // No timer: the next frame is the autosave's, minutes away.
     assert!(h.settle() > Duration::from_secs(60));
-    // A timer a minute off: the window sleeps until then, and draws nothing meanwhile.
+    // A timer five minutes off: the window sleeps until then, and draws nothing meanwhile.
     h.run("widget.click", json!({"id": w, "target": "go"}));
     let wake = h.settle();
-    assert!(wake > Duration::from_secs(30) && wake <= Duration::from_secs(60), "{wake:?}");
+    assert!(wake > Duration::from_secs(60) && wake <= Duration::from_secs(300), "{wake:?}");
     h.assert_idle("a widget with a timer pending");
     assert_eq!(state(h.app.session.doc().unwrap(), w), r#"{"n":2}"#);
     // One due in 100 ms fires in the frame after that: its plugin is called back.
@@ -326,8 +326,8 @@ fn a_panels_slider_tells_its_plugin_now_and_then_while_it_is_dragged() {
     let hex = |s: &str| s.bytes().map(|b| format!("\\{b:02x}")).collect::<String>();
     let (cmd, rect, needle, text) = ("shape.rectangle", r#"{"x":0,"y":0,"width":5,"height":5}"#, r#""event""#, spec.to_string());
     let imports = format!(
-        r#"(import "figcraft" "ui_show" (func $show (param i32 i32) (result i32)))
-          (import "figcraft" "call" (func $call (param i32 i32 i32 i32) (result i32)))
+        r#"(import "lizard" "ui_show" (func $show (param i32 i32) (result i32)))
+          (import "lizard" "call" (func $call (param i32 i32 i32 i32) (result i32)))
           (data (i32.const 200) "{}") (data (i32.const 300) "{}") (data (i32.const 400) "{}") (data (i32.const 50000) "{}")"#,
         hex(cmd),
         hex(rect),

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use figcraft_doc::{ShaderDefinition, ShaderParameterControl};
+use lizard_doc::{ShaderDefinition, ShaderParameterControl};
 
 use crate::{MAX_DIMENSION, MAX_PARAMETERS, MAX_PIXELS, PRELUDE, validate};
 

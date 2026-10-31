@@ -249,7 +249,7 @@ fn the_models_table_is_as_tall_as_its_rows() {
 fn the_about_window_draws_every_tab() {
     // The whole app, with the compiled-in credits (whatever contributors.json held, or none).
     let ctx = egui::Context::default();
-    let mut app = crate::FigApp::new(figcraft_engine::Session::new(), Box::new(crate::NoServices));
+    let mut app = crate::LizardApp::new(lizard_engine::Session::new(), Box::new(crate::NoServices));
     app.ui.about = true;
     for (i, tab) in crate::dialogs::AboutTab::ALL.into_iter().enumerate() {
         app.ui.about_tab = tab;

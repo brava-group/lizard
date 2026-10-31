@@ -1,11 +1,11 @@
 //! Pasting a system clipboard image through the canvas shortcut.
 
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
-use figcraft_color::PaintKind;
-use figcraft_doc::NodeKind;
-use figcraft_engine::Session;
+use lizard_color::PaintKind;
+use lizard_doc::NodeKind;
+use lizard_engine::Session;
 
-use crate::{FigApp, Services};
+use crate::{LizardApp, Services};
 
 struct ImageClipboard;
 
@@ -16,7 +16,7 @@ impl Services for ImageClipboard {
 }
 
 fn paste(events: Vec<Event>) {
-    let mut app = FigApp::new(Session::new(), Box::new(ImageClipboard));
+    let mut app = LizardApp::new(Session::new(), Box::new(ImageClipboard));
     let ctx = egui::Context::default();
     for time in [0.0, 1.0 / 60.0] {
         let input = RawInput {

@@ -1,8 +1,8 @@
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::import_report::{MAX_NOTE_CHARS, MAX_NOTES, Report, note_text};
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 #[test]
 fn import_results_with_warnings_become_reports_with_counts() {
@@ -74,13 +74,13 @@ fn vector_style_notes_are_known_import_notes() {
 
 #[test]
 fn opening_a_rest_json_file_reports_what_was_skipped() {
-    let path = std::env::temp_dir().join(format!("figcraft-import-report-{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lizard-import-report-{}.json", std::process::id()));
     let file = json!({"document": {"id": "0:0", "name": "Synthetic", "type": "DOCUMENT", "children": [
         {"id": "0:1", "name": "Page 1", "type": "CANVAS", "children": [
             {"id": "1:1", "name": "Card", "type": "FRAME", "size": {"x": 200, "y": 100}, "relativeTransform": [[1, 0, 10], [0, 1, 20]],
                 "children": [{"id": "1:2", "name": "No type"}]}]}]}});
     std::fs::write(&path, file.to_string()).unwrap();
-    let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
     // A programmatic open (control channel, MCP) never opens the window.
     assert!(app.run("file.open", json!({"path": path.to_string_lossy()})).is_some());
     assert!(app.ui.import_report.is_none());
@@ -167,7 +167,7 @@ fn the_report_goes_when_its_document_closes_and_counts_omitted_notes_in_the_sing
 
 #[test]
 fn a_dropped_file_shows_its_report_once_it_opens() {
-    let path = std::env::temp_dir().join(format!("figcraft-import-report-drop-{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lizard-import-report-drop-{}.json", std::process::id()));
     let file = json!({"document": {"id": "0:0", "name": "Dropped", "type": "DOCUMENT", "children": [
         {"id": "0:1", "name": "Page 1", "type": "CANVAS", "children": [{"id": "1:1", "name": "No type"}]}]}});
     std::fs::write(&path, file.to_string()).unwrap();
@@ -193,7 +193,7 @@ fn a_file_opened_from_base64_data_has_a_summary_too() {
     let file = json!({"document": {"id": "0:0", "name": "From data", "type": "DOCUMENT", "children": [
         {"id": "0:1", "name": "Page 1", "type": "CANVAS", "children": [{"id": "1:1", "name": "No type"}]}]}});
     let data = base64::engine::general_purpose::STANDARD.encode(file.to_string());
-    let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+    let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
     let opened = app.run_user("file.open", json!({"data": data, "name": "Dropped.json"})).unwrap();
     assert_eq!(opened["summary"]["pages"], 1);
     let report = app.ui.import_report.as_ref().expect("a report for the REST import");

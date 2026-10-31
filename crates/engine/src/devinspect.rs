@@ -2,8 +2,8 @@
 //! typography, fills, strokes, effects), each with the style or variable behind it when there is
 //! one. The Inspect tab shows these, and `inspect.properties` returns them.
 
-use figcraft_color::{Color, GradientKind, Hsb, Hsl, PaintKind};
-use figcraft_doc::*;
+use lizard_color::{Color, GradientKind, Hsb, Hsl, PaintKind};
+use lizard_doc::*;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -463,7 +463,7 @@ pub fn properties_with(doc: &Document, id: NodeId, fmt: ColorFormat) -> Vec<Sect
 
 /// A style or variable applies to the whole list: show it on the first row.
 /// One paint's row: its kind and colour (or stops, or opacity for images).
-fn paint_row(p: &figcraft_color::Paint, fmt: ColorFormat) -> Prop {
+fn paint_row(p: &lizard_color::Paint, fmt: ColorFormat) -> Prop {
     match &p.kind {
         PaintKind::Solid { color } => {
             let c = color.with_alpha(color.a * p.opacity);
@@ -506,14 +506,14 @@ fn layout(doc: &Document, id: NodeId, n: &Node) -> Section {
         rows.push(prop("Top", num(b.y0 - origin.1)));
         rows.push(prop("Left", num(b.x0 - origin.0)));
     }
-    let rot = figcraft_geom::rotation_degrees(n.transform);
+    let rot = lizard_geom::rotation_degrees(n.transform);
     if rot.abs() > 0.01 {
         rows.push(prop("Rotation", format!("{}°", num(rot))));
     }
     if n.opacity < 0.999 {
         rows.push(prop("Opacity", format!("{}%", (f64::from(n.opacity) * 100.0).round())).token(variable(doc, n, "opacity")));
     }
-    if !matches!(n.blend, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough) {
+    if !matches!(n.blend, lizard_color::BlendMode::Normal | lizard_color::BlendMode::PassThrough) {
         rows.push(prop("Blend", n.blend.label()));
     }
     if n.kind.has_corner_radius() {
@@ -596,7 +596,7 @@ fn typography(doc: &Document, n: &Node, t: &TextData) -> Section {
     if t.paragraph_spacing > 0.0 {
         rows.push(prop("Paragraph spacing", num(t.paragraph_spacing)));
     }
-    if t.leading_trim == figcraft_doc::LeadingTrim::CapHeight {
+    if t.leading_trim == lizard_doc::LeadingTrim::CapHeight {
         rows.push(prop("Vertical trim", "cap height to baseline"));
     }
     let align = match t.align_h {
@@ -609,9 +609,9 @@ fn typography(doc: &Document, n: &Node, t: &TextData) -> Section {
     if s.decoration != TextDecoration::None {
         let l = s.look();
         let style = match l.style {
-            figcraft_doc::DecorationStyle::Solid => "",
-            figcraft_doc::DecorationStyle::Dotted => ", dotted",
-            figcraft_doc::DecorationStyle::Wavy => ", wavy",
+            lizard_doc::DecorationStyle::Solid => "",
+            lizard_doc::DecorationStyle::Dotted => ", dotted",
+            lizard_doc::DecorationStyle::Wavy => ", wavy",
         };
         let kind = if s.decoration == TextDecoration::Underline { "underline" } else { "strikethrough" };
         rows.push(prop("Decoration", format!("{kind}{style}")));

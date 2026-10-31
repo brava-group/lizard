@@ -5,8 +5,8 @@
 //! behaviour. What the gestures do to the document is in the engine's `panels_behaviour_tests`.
 
 use egui::{Event, Id, Modifiers, Pos2};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
+use lizard_doc::NodeId;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -449,7 +449,7 @@ fn the_line_between_pages_and_layers_drags_to_size_the_pages_list() {
     let kept = u.app.session.prefs.pages_height.expect("kept in the preferences");
     let mut next = Session::new();
     next.prefs = u.app.session.prefs.clone();
-    assert_eq!(crate::FigApp::new(next, Box::new(crate::NoServices)).ui.pages_height, Some(kept));
+    assert_eq!(crate::LizardApp::new(next, Box::new(crate::NoServices)).ui.pages_height, Some(kept));
     // A double-click puts back the default.
     let edge = pages_edge_at(&mut u, after);
     let p = Pos2::new(150.0, edge);

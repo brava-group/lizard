@@ -1,8 +1,8 @@
 //! Regions in vector edit mode (`regions.rs`): hover, the hit priority and clearances, selecting
 //! and dragging regions, and the hatch's geometry (spacing by zoom, anchoring, clipping).
 
-use figcraft_doc::{NodeId, NodeKind, Region, Segment, VectorNetwork, Vertex, WindingRule};
-use figcraft_geom::{Affine, Point, Rect, Shape, Vec2};
+use lizard_doc::{NodeId, NodeKind, Region, Segment, VectorNetwork, Vertex, WindingRule};
+use lizard_geom::{Affine, Point, Rect, Shape, Vec2};
 use serde_json::json;
 
 use super::regions::*;
@@ -50,9 +50,9 @@ fn editing_vector(s: &mut Session, n: VectorNetwork) -> NodeId {
     let id = crate::params::id_of(&r["id"]).unwrap();
     let doc = s.doc_mut().unwrap();
     let node = doc.get_mut(id).unwrap();
-    node.kind = figcraft_doc::NodeKind::Vector { network: n };
+    node.kind = lizard_doc::NodeKind::Vector { network: n };
     node.transform = Affine::IDENTITY;
-    node.fills = vec![figcraft_color::Paint::solid(figcraft_color::Color::DEFAULT_SHAPE)];
+    node.fills = vec![lizard_color::Paint::solid(lizard_color::Color::DEFAULT_SHAPE)];
     super::refit(doc, id).unwrap();
     ex(s, "vector.edit.begin", json!({"id": id}));
     id
@@ -70,9 +70,9 @@ fn selected_region_fill_is_independent_and_undoable() {
     assert!(network.regions[0].fills.is_none());
     assert_eq!(
         network.regions[1].fills.as_ref().and_then(|fills| fills.first()).and_then(|paint| paint.solid_color()),
-        figcraft_color::Color::from_hex("FF2200")
+        lizard_color::Color::from_hex("FF2200")
     );
-    assert_ne!(node.fills[0].solid_color(), figcraft_color::Color::from_hex("FF2200"));
+    assert_ne!(node.fills[0].solid_color(), lizard_color::Color::from_hex("FF2200"));
     let roundtrip: VectorNetwork = serde_json::from_value(serde_json::to_value(network).unwrap()).unwrap();
     assert_eq!(roundtrip.regions[1].fills, network.regions[1].fills);
     assert!(session.undo().unwrap());
@@ -92,7 +92,7 @@ fn paint_bucket_selects_the_face_for_individual_color_editing() {
     let network = net(&session, id);
     assert_eq!(
         network.regions[selected[0]].fills.as_ref().and_then(|fills| fills.first()).and_then(|paint| paint.solid_color()),
-        figcraft_color::Color::from_hex("FF2200")
+        lizard_color::Color::from_hex("FF2200")
     );
 }
 

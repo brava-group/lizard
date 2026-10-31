@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use figcraft_doc::Glass;
-use figcraft_geom::Affine;
-use figcraft_geom::kurbo::Shape as _;
+use lizard_doc::Glass;
+use lizard_geom::Affine;
+use lizard_geom::kurbo::Shape as _;
 use tiny_skia::Pixmap;
 
 use crate::fx;

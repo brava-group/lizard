@@ -2,8 +2,8 @@ use std::io::Read;
 use std::sync::Arc;
 
 use super::*;
-use figcraft_color::{BlendMode, Color, Gradient, GradientKind, ImageScaleMode, Paint};
-use figcraft_doc::{BoolOp, Effect, EffectKind, ImageData, NodeKind, StrokeAlign, TextData};
+use lizard_color::{BlendMode, Color, Gradient, GradientKind, ImageScaleMode, Paint};
+use lizard_doc::{BoolOp, Effect, EffectKind, ImageData, NodeKind, StrokeAlign, TextData};
 
 pub(crate) fn page_count(pdf: &[u8]) -> usize {
     let s = String::from_utf8_lossy(pdf);
@@ -38,17 +38,17 @@ fn find(h: &[u8], n: &[u8]) -> Option<usize> {
 }
 
 pub(crate) fn png(w: u32, h: u32) -> Vec<u8> {
-    let mut p = figcraft_render::Pixmap::new(w, h).unwrap();
+    let mut p = lizard_render::Pixmap::new(w, h).unwrap();
     for (i, px) in p.data_mut().as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (x, y) = (i as u32 % w, i as u32 / w);
         let v = if (x / 4 + y / 4) % 2 == 0 { 255 } else { 40 };
         *px = [v, 80, 255 - v, 255];
     }
-    figcraft_render::encode_png(&p).unwrap()
+    lizard_render::encode_png(&p).unwrap()
 }
 
 pub(crate) fn has_inter() -> bool {
-    figcraft_text::find_face("Inter", "Regular").is_some()
+    lizard_text::find_face("Inter", "Regular").is_some()
 }
 
 /// A page with two frames: shapes, gradients, an image, strokes, a mask, a boolean, effects, text.
@@ -125,7 +125,7 @@ pub(crate) fn sample_doc() -> (Document, Vec<NodeId>) {
         n.opacity = 0.7;
     }
     let blur = d.create(f2, NodeKind::Ellipse { start: 0.0, sweep: std::f64::consts::TAU, inner: 0.0 }, "Blurred", 120.0, 160.0, 60.0, 60.0).unwrap();
-    d.get_mut(blur).unwrap().effects = vec![Effect { kind: EffectKind::LayerBlur(figcraft_doc::Blur::uniform(6.0)), visible: true }];
+    d.get_mut(blur).unwrap().effects = vec![Effect { kind: EffectKind::LayerBlur(lizard_doc::Blur::uniform(6.0)), visible: true }];
     let frames = d.top_frames(p);
     (d, frames)
 }
@@ -183,7 +183,7 @@ fn every_paint_and_scale_mode() {
     for (i, mode) in [ImageScaleMode::Fill, ImageScaleMode::Fit, ImageScaleMode::Tile, ImageScaleMode::Crop].into_iter().enumerate() {
         let r = d.create(f, NodeKind::Rectangle, "R", i as f64 * 100.0, 0.0, 90.0, 60.0).unwrap();
         let mut paint = Paint::image("i", mode);
-        if let figcraft_color::PaintKind::Image(img) = &mut paint.kind {
+        if let lizard_color::PaintKind::Image(img) = &mut paint.kind {
             img.rotation = i as i32;
             img.scale = 0.5;
             img.filters.exposure = if i == 3 { 0.3 } else { 0.0 };
@@ -198,10 +198,10 @@ fn every_paint_and_scale_mode() {
     let pdf = export_pdf(&d, &[f], &PdfOptions::default()).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     assert!(String::from_utf8_lossy(&pdf).contains("/PatternType 1"), "tiled image pattern");
-    if let Ok(stem) = std::env::var("FIGCRAFT_PDF_SAMPLE") {
+    if let Ok(stem) = std::env::var("LIZARD_PDF_SAMPLE") {
         std::fs::write(format!("{stem}-images.pdf"), &pdf).unwrap();
-        let pix = figcraft_render::render_node(&d, f, 2.0).unwrap();
-        std::fs::write(format!("{stem}-images.png"), figcraft_render::encode_png(&pix).unwrap()).unwrap();
+        let pix = lizard_render::render_node(&d, f, 2.0).unwrap();
+        std::fs::write(format!("{stem}-images.png"), lizard_render::encode_png(&pix).unwrap()).unwrap();
     }
 }
 
@@ -231,10 +231,8 @@ fn hostile_inputs_error_or_skip() {
         let mut g = Gradient::default_for(GradientKind::Linear, Color::BLACK);
         g.to = (f64::NAN, 0.0);
         n.fills = vec![Paint::gradient(g)];
-        n.effects = vec![Effect {
-            kind: EffectKind::DropShadow(figcraft_doc::Shadow { radius: f64::NAN, spread: 1e9, ..Default::default() }),
-            visible: true,
-        }];
+        n.effects =
+            vec![Effect { kind: EffectKind::DropShadow(lizard_doc::Shadow { radius: f64::NAN, spread: 1e9, ..Default::default() }), visible: true }];
     }
     let t = d.create(f, NodeKind::Text(TextData::new("x")), "T", 0.0, 0.0, 10.0, 10.0).unwrap();
     if let NodeKind::Text(td) = &mut d.get_mut(t).unwrap().kind {
@@ -258,16 +256,16 @@ fn hostile_inputs_error_or_skip() {
 }
 
 /// Writes a sample PDF and the renderer's PNG of the same frames for a visual comparison:
-/// `FIGCRAFT_PDF_SAMPLE=/path/stem cargo test -p figcraft-pdf sample`.
+/// `LIZARD_PDF_SAMPLE=/path/stem cargo test -p lizard-pdf sample`.
 #[test]
 fn sample_files() {
-    let Ok(stem) = std::env::var("FIGCRAFT_PDF_SAMPLE") else { return };
+    let Ok(stem) = std::env::var("LIZARD_PDF_SAMPLE") else { return };
     let (d, frames) = sample_doc();
     let pdf = export_pdf(&d, &frames, &PdfOptions::default()).unwrap();
     std::fs::write(format!("{stem}.pdf"), pdf).unwrap();
     for (i, f) in frames.iter().enumerate() {
-        let pix = figcraft_render::render_node(&d, *f, 2.0).unwrap();
-        std::fs::write(format!("{stem}-{}.png", i + 1), figcraft_render::encode_png(&pix).unwrap()).unwrap();
+        let pix = lizard_render::render_node(&d, *f, 2.0).unwrap();
+        std::fs::write(format!("{stem}-{}.png", i + 1), lizard_render::encode_png(&pix).unwrap()).unwrap();
         std::fs::write(format!("{stem}-{}.pdf", i + 1), export_pdf(&d, &[*f], &PdfOptions::default()).unwrap()).unwrap();
     }
 }

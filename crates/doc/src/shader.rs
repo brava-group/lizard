@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use figcraft_color::Color;
+use lizard_color::Color;
 
 /// The initial shader contract. Later schema versions may add effects or resource bindings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

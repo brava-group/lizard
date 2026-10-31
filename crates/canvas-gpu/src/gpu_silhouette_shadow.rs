@@ -1,6 +1,6 @@
 //! Inner and outer shadows of a silhouette, with masks and blur passes on the GPU.
 
-use figcraft_color::Color;
+use lizard_color::Color;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_blur::GpuBlur;

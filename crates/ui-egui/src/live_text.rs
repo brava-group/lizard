@@ -6,9 +6,9 @@
 //! idle session asks for no frames.
 
 use egui::{Align2, Shape, Stroke, vec2};
-use figcraft_engine::live::editing_hint;
+use lizard_engine::live::editing_hint;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::canvas::TextOnScreen;
 use crate::live::{color, name_tag};
 
@@ -18,7 +18,7 @@ const SELECTION_ALPHA: f32 = 0.25;
 const CARET_WIDTH: f32 = 2.0;
 
 /// Draw the carets and selections of everyone typing in a text layer on your page.
-pub fn draw(app: &FigApp, painter: &egui::Painter) {
+pub fn draw(app: &LizardApp, painter: &egui::Painter) {
     let live = app.session.live();
     if live.presence.is_empty() || !app.session.live_shared() {
         return;

@@ -6,23 +6,23 @@
 //! unless it rests on one or turns away.
 
 use egui::{Event, Id, LayerId, Order, Pos2, RawInput, Rect, pos2, vec2};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 
 use crate::menus::{AIM_REST, HOVER_DELAY, heading_for, in_triangle, main_menu_id};
-use crate::{FigApp, NoServices};
+use crate::{LizardApp, NoServices};
 
 const SIZE: egui::Vec2 = vec2(1440.0, 900.0);
 const ROW: f32 = 28.0;
 
 struct Ui {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
 }
 
 impl Ui {
     fn new() -> Self {
-        let app = FigApp::new(Session::new(), Box::new(NoServices));
+        let app = LizardApp::new(Session::new(), Box::new(NoServices));
         let mut u = Self { ctx: egui::Context::default(), app, time: 0.0 };
         for _ in 0..3 {
             u.frame(vec![]);
@@ -93,11 +93,11 @@ fn top(name: &str) -> Id {
 
 /// The submenus of top-level menu `menu` (their keys), from the menu catalog.
 fn submenu_keys(menu: &str) -> Vec<String> {
-    let mut keys: Vec<String> = figcraft_engine::catalog::MENU
+    let mut keys: Vec<String> = lizard_engine::catalog::MENU
         .iter()
         .filter_map(|m| m.menu.strip_prefix(menu).and_then(|r| r.strip_prefix('/')).map(|r| format!("{menu}/{}", r.split('/').next().unwrap_or(r))))
         .collect();
-    keys.extend(figcraft_engine::catalog::MENU.iter().filter(|m| m.menu == menu && m.id == "file.openRecent").map(|m| format!("{menu}/{}", m.label)));
+    keys.extend(lizard_engine::catalog::MENU.iter().filter(|m| m.menu == menu && m.id == "file.openRecent").map(|m| format!("{menu}/{}", m.label)));
     keys.dedup();
     keys
 }

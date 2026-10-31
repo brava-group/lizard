@@ -1,4 +1,4 @@
-Lizard app icon (Lizard-new-icon.figcraft and its generated PNG, ICO and hicolor files).
+Lizard app icon (Lizard-new-icon.lizard and its generated PNG, ICO and hicolor files).
 
 This is original artwork drawn by the project owner in Lizard. Licensed under either of
 

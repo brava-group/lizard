@@ -3,16 +3,16 @@
 //! resize it. A system-drawn title bar leaves all of that to the system.
 
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::json;
 
-use crate::{FigApp, NoServices, TitleBar};
+use crate::{LizardApp, NoServices, TitleBar};
 
 const SIZE: egui::Vec2 = vec2(1440.0, 900.0);
 
 struct Ui {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
     /// What the system reports about the window.
     maximized: bool,
@@ -20,7 +20,7 @@ struct Ui {
 
 impl Ui {
     fn new(title_bar: TitleBar) -> Self {
-        let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
         app.ui.title_bar = title_bar;
         let mut u = Self { ctx: egui::Context::default(), app, time: 0.0, maximized: false };
         for _ in 0..3 {

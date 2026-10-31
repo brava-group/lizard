@@ -8,9 +8,9 @@ use std::sync::{
     mpsc,
 };
 
-use figcraft_doc::{Document, NodeId};
-use figcraft_geom::Rect;
-use figcraft_render::{Options, Pixmap, View, paint_bounds, render_view, render_view_single, retained::damage_between};
+use lizard_doc::{Document, NodeId};
+use lizard_geom::Rect;
+use lizard_render::{Options, Pixmap, View, paint_bounds, render_view, render_view_single, retained::damage_between};
 use rayon::ThreadPool;
 use rayon::prelude::*;
 
@@ -759,7 +759,7 @@ mod tests {
     fn blank_tiles_do_not_consume_atlas_slots() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Sparse icon");
         let page = doc.current_page.ok_or("page missing")?;
-        doc.create(page, figcraft_doc::NodeKind::Rectangle, "Mark", 0.0, 0.0, 32.0, 32.0)?;
+        doc.create(page, lizard_doc::NodeKind::Rectangle, "Mark", 0.0, 0.0, 32.0, 32.0)?;
         let bounds = content_bounds(&doc, page);
         assert!(key_intersects_content(Key { x: 0, y: 0, tier: 0 }, 128, bounds));
         assert!(!key_intersects_content(Key { x: 100, y: 100, tier: 0 }, 128, bounds));

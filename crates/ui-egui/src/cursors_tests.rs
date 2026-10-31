@@ -4,9 +4,9 @@
 //! drop.
 
 use egui::{CursorIcon, Event, Key, Modifiers, Pos2, pos2};
-use figcraft_doc::NodeId;
-use figcraft_engine::Session;
-use figcraft_engine::tools::{Cursor, PenCursor, ToolId};
+use lizard_doc::NodeId;
+use lizard_engine::Session;
+use lizard_engine::tools::{Cursor, PenCursor, ToolId};
 use serde_json::json;
 
 use crate::cursors::{Glyph, Shown, of, on_canvas, resize_icon};

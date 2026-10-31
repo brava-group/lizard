@@ -4,9 +4,9 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use figcraft_doc::{Document, EffectKind, NodeId};
-use figcraft_geom::Rect;
-use figcraft_render::{Pixmap, View};
+use lizard_doc::{Document, EffectKind, NodeId};
+use lizard_geom::Rect;
+use lizard_render::{Pixmap, View};
 
 use crate::vello_scene::{BackdropIndex, GpuCanvas, has_unhandled_effects_on_page_in_view, has_unhandled_effects_with_cached_noise_in_view};
 
@@ -177,13 +177,13 @@ fn selected_export_document(doc: &Document, page: NodeId, ids: &[NodeId]) -> Opt
         .filter_map(|id| doc.node(*id))
         .flat_map(|node| {
             let regions = match &node.kind {
-                figcraft_doc::NodeKind::Vector { network } => {
+                lizard_doc::NodeKind::Vector { network } => {
                     network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>()
                 }
                 _ => Vec::new(),
             };
             node.fills.iter().chain(&node.strokes).chain(regions).filter_map(|paint| match &paint.kind {
-                figcraft_color::PaintKind::Pattern(fill) => Some(NodeId(fill.source)),
+                lizard_color::PaintKind::Pattern(fill) => Some(NodeId(fill.source)),
                 _ => None,
             })
         })
@@ -217,8 +217,8 @@ pub fn render_page_gpu_screen(doc: &Document, page: NodeId, view: &View) -> Opti
 fn render_page_gpu_internal(doc: &Document, page: NodeId, view: &View, screen: bool) -> Option<Pixmap> {
     let page_node = doc.node(page)?;
     let clear = match &page_node.kind {
-        figcraft_doc::NodeKind::Page { background, background_visible: true, .. } => [background.r, background.g, background.b, background.a],
-        figcraft_doc::NodeKind::Page { .. } => [0.0; 4],
+        lizard_doc::NodeKind::Page { background, background_visible: true, .. } => [background.r, background.g, background.b, background.a],
+        lizard_doc::NodeKind::Page { .. } => [0.0; 4],
         _ => return None,
     };
     if view.width == 0 || view.height == 0 || has_unhandled_effects_on_page_in_view(doc, page, view, true) {
@@ -255,12 +255,12 @@ fn render_page_gpu_internal(doc: &Document, page: NodeId, view: &View, screen: b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use figcraft_color::{
-        BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
-    };
-    use figcraft_doc::{Blur, BlurType, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame, RgbaImage};
+    use lizard_color::{
+        BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
+    };
+    use lizard_doc::{Blur, BlurType, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use std::sync::Arc;
 
     #[test]
@@ -388,10 +388,10 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::DropShadow(shadow), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("wide GPU shadow page unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU shadow page unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU shadow page unavailable")?;
         let area = Rect::new(0.0, 0.0, 4200.0, 128.0);
         let gpu_selected = render_area_gpu(&doc, &[id], area, 1.0).ok_or("wide GPU shadow selection unavailable")?;
-        let cpu_selected = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("wide CPU shadow selection unavailable")?;
+        let cpu_selected = lizard_render::render_area(&doc, &[id], area, 1.0).ok_or("wide CPU shadow selection unavailable")?;
         for y in [34, 60, 81, 87, 96] {
             for x in [2026, 2038, 2047, 2048, 2056, 2078, 2090] {
                 for (actual_image, expected_image) in [(&gpu, &cpu), (&gpu_selected, &cpu_selected)] {
@@ -427,7 +427,7 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::LayerBlur(Blur::uniform(5.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("wide GPU blur unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU blur unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU blur unavailable")?;
         for y in [25, 32, 40, 80, 96, 103] {
             for x in [2022, 2030, 2047, 2048, 2064, 2094, 2102] {
                 let actual = gpu.pixel(x, y).ok_or("GPU blur sample missing")?;
@@ -508,7 +508,7 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU page export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU page export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU page export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU sample missing")?;
@@ -523,7 +523,7 @@ mod tests {
         }
         doc.node_mut(pane).ok_or("pane missing")?.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU glass group export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU glass group export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU glass group export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU glass sample missing")?;
@@ -539,9 +539,9 @@ mod tests {
         let group_node = doc.node_mut(group).ok_or("group missing")?;
         group_node.clip = true;
         group_node.corners.radii = [12.0; 4];
-        group_node.transform = figcraft_geom::Affine::translate((30.0, 5.0)) * figcraft_geom::Affine::rotate(0.3);
+        group_node.transform = lizard_geom::Affine::translate((30.0, 5.0)) * lizard_geom::Affine::rotate(0.3);
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU clipped glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU clipped glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU clipped glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU clipped sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU clipped sample missing")?;
@@ -557,13 +557,13 @@ mod tests {
         let mask = doc.create(group, NodeKind::Rectangle, "Mask", 5.0, 5.0, 95.0, 80.0)?;
         let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
         mask_node.is_mask = true;
-        mask_node.mask_type = figcraft_doc::MaskType::Alpha;
+        mask_node.mask_type = lizard_doc::MaskType::Alpha;
         mask_node.fills = vec![Paint::solid(Color::WHITE)];
         let children = &mut doc.node_mut(group).ok_or("group missing")?.children;
         children.retain(|child| *child != mask);
         children.insert(0, mask);
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU masked glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU masked glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU masked glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU masked glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU masked glass sample missing")?;
@@ -578,7 +578,7 @@ mod tests {
         }
         doc.node_mut(group).ok_or("group missing")?.opacity = 1.0;
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU opaque masked glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU opaque masked glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU opaque masked glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU opaque masked glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU opaque masked glass sample missing")?;
@@ -594,7 +594,7 @@ mod tests {
         doc.node_mut(group).ok_or("group missing")?.children.retain(|child| *child != mask);
         doc.node_mut(mask).ok_or("mask missing")?.visible = false;
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU opaque clipped glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU opaque clipped glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU opaque clipped glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU opaque clipped glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU opaque clipped glass sample missing")?;
@@ -618,7 +618,7 @@ mod tests {
         nested_node.fills.clear();
         nested_node.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU nested clipped glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU nested clipped glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU nested clipped glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU nested clipped glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU nested clipped glass sample missing")?;
@@ -634,7 +634,7 @@ mod tests {
         doc.node_mut(group).ok_or("outer group missing")?.opacity = 0.5;
         doc.node_mut(nested).ok_or("nested group missing")?.opacity = 0.5;
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU nested translucent glass export unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU nested translucent glass export unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU nested translucent glass export unavailable")?;
         for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
             let actual = gpu.pixel(x, y).ok_or("GPU nested translucent glass sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU nested translucent glass sample missing")?;
@@ -829,13 +829,13 @@ mod tests {
         }
         let id = doc.create(page, NodeKind::Rectangle, "Scaled across seam", 1018.0, 16.0, 48.0, 48.0)?;
         let node = doc.node_mut(id).ok_or("scaled shadow node missing")?;
-        node.transform = figcraft_geom::Affine::translate((1018.0, 16.0)) * figcraft_geom::Affine::scale(2.0);
+        node.transform = lizard_geom::Affine::translate((1018.0, 16.0)) * lizard_geom::Affine::scale(2.0);
         node.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
         node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 5.0, offset: (5.0, 7.0), ..Shadow::default() }), visible: true }];
         assert!(effect_tile_halo(&doc, 2.0).is_some_and(|halo| halo >= 120));
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 4200, height: 256 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("scaled GPU shadow unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("scaled CPU shadow unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("scaled CPU shadow unavailable")?;
         for y in [25, 40, 80, 180, 230, 245] {
             for x in [2010, 2038, 2047, 2048, 2060, 2100, 2200] {
                 let actual = gpu.pixel(x, y).ok_or("GPU scaled shadow sample missing")?;
@@ -877,7 +877,7 @@ mod tests {
                 let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
                 assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
                 let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("pattern GPU export unavailable")?;
-                let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("pattern CPU export unavailable")?;
+                let cpu = lizard_render::render_area(&doc, &[target], area, scale).ok_or("pattern CPU export unavailable")?;
                 for y in [2, 6, 11, 14, 20, 25, 33, 40] {
                     for x in [2, 7, 11, 15, 23, 34, 45, 55] {
                         let px = (f64::from(x) * scale) as u32;
@@ -906,7 +906,7 @@ mod tests {
         }
         let mut doc = Document::new("GPU text pattern");
         let page = doc.current_page.ok_or("page missing")?;
-        let mut text = figcraft_doc::TextData::new("L");
+        let mut text = lizard_doc::TextData::new("L");
         text.style.font_size = 15.0;
         let source = doc.create(page, NodeKind::Text(text), "Letter tile", 300.0, 300.0, 16.0, 18.0)?;
         doc.node_mut(source).ok_or("source missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.5, 0.8, 1.0))];
@@ -919,7 +919,7 @@ mod tests {
             let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
             let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("GPU text pattern export unavailable")?;
-            let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("CPU text pattern export unavailable")?;
+            let cpu = lizard_render::render_area(&doc, &[target], area, scale).ok_or("CPU text pattern export unavailable")?;
             let painted = cpu.data().chunks_exact(4).filter(|pixel| pixel[3] > 128).count();
             if painted == 0 {
                 return Ok(());
@@ -945,13 +945,13 @@ mod tests {
         if let NodeKind::Text(text) = &mut doc.node_mut(source).ok_or("source missing")?.kind {
             let mut style = text.style.clone();
             style.fills = Some(vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))]);
-            text.runs.push(figcraft_doc::StyleRun { start: 0, end: 1, style });
+            text.runs.push(lizard_doc::StyleRun { start: 0, end: 1, style });
         }
         for scale in [1.0, 2.0] {
             let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
             let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("GPU styled text pattern export unavailable")?;
-            let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("CPU styled text pattern export unavailable")?;
+            let cpu = lizard_render::render_area(&doc, &[target], area, scale).ok_or("CPU styled text pattern export unavailable")?;
             let severe = gpu
                 .data()
                 .chunks_exact(4)
@@ -983,7 +983,7 @@ mod tests {
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 80, height: 48 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         let gpu = render_area_gpu(&doc, &[target], area, 2.0).ok_or("pattern group GPU export unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[target], area, 2.0).ok_or("pattern group CPU export unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[target], area, 2.0).ok_or("pattern group CPU export unavailable")?;
         for y in [2, 6, 10, 14, 18, 22] {
             for x in [2, 6, 10, 14, 18, 22, 26, 30, 34, 38] {
                 let actual = gpu.pixel(x * 2, y * 2).ok_or("GPU group pattern pixel missing")?;
@@ -1053,7 +1053,7 @@ mod tests {
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 64, height: 32 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         let gpu = render_area_gpu(&doc, &[target], area, 2.0).ok_or("clipped pattern GPU export unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[target], area, 2.0).ok_or("clipped pattern CPU export unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[target], area, 2.0).ok_or("clipped pattern CPU export unavailable")?;
         assert!(gpu.pixel(0, 0).ok_or("GPU rounded corner missing")?.alpha() <= 16);
         assert!(gpu.pixel(8, 8).ok_or("GPU rounded center missing")?.alpha() >= 240);
         for y in [0, 1, 2, 4, 6, 7, 8, 9, 12, 15] {
@@ -1093,11 +1093,11 @@ mod tests {
         doc.node_mut(target).ok_or("target missing")?.fills = vec![paint];
         let area = Rect::new(0.0, 0.0, 32.0, 16.0);
         let view = View { origin: (0.0, 0.0), scale: 2.0, width: 64, height: 32 };
-        for mask_type in [figcraft_doc::MaskType::Alpha, figcraft_doc::MaskType::Vector, figcraft_doc::MaskType::Luminance] {
+        for mask_type in [lizard_doc::MaskType::Alpha, lizard_doc::MaskType::Vector, lizard_doc::MaskType::Luminance] {
             doc.node_mut(mask).ok_or("mask missing for type")?.mask_type = mask_type;
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
             let gpu = render_area_gpu(&doc, &[target], area, 2.0).ok_or("masked pattern GPU export unavailable")?;
-            let cpu = figcraft_render::render_area(&doc, &[target], area, 2.0).ok_or("masked pattern CPU export unavailable")?;
+            let cpu = lizard_render::render_area(&doc, &[target], area, 2.0).ok_or("masked pattern CPU export unavailable")?;
             for y in [2, 6, 10, 14] {
                 for x in [2, 6, 10, 14, 18, 22, 26, 30] {
                     let actual = gpu.pixel(x * 2, y * 2).ok_or("GPU masked pattern pixel missing")?;
@@ -1124,11 +1124,11 @@ mod tests {
         let mut doc = Document::new("GPU shader fill");
         let page = doc.current_page.ok_or("page missing")?;
         let id = doc.create(page, NodeKind::Rectangle, "Shader", 8.0, 6.0, 64.0, 40.0)?;
-        let definition = figcraft_shader::demo();
+        let definition = lizard_shader::demo();
         doc.shaders.insert(definition.id.clone(), definition);
         let mut paint = Paint::solid(Color::WHITE);
         paint.kind =
-            PaintKind::Shader(figcraft_color::ShaderFill { shader_id: figcraft_shader::DEMO_ID.into(), values: [("frequency".into(), 4.0)].into() });
+            PaintKind::Shader(lizard_color::ShaderFill { shader_id: lizard_shader::DEMO_ID.into(), values: [("frequency".into(), 4.0)].into() });
         paint.opacity = 0.7;
         doc.node_mut(id).ok_or("shader node missing")?.fills = vec![paint];
         let area = Rect::new(0.0, 0.0, 80.0, 56.0);
@@ -1136,7 +1136,7 @@ mod tests {
             let view = View { origin: (0.0, 0.0), scale, width: (80.0 * scale) as u32, height: (56.0 * scale) as u32 };
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
             let gpu = render_area_gpu(&doc, &[id], area, scale).ok_or("shader GPU export unavailable")?;
-            let cpu = figcraft_render::render_area(&doc, &[id], area, scale).ok_or("shader CPU export unavailable")?;
+            let cpu = lizard_render::render_area(&doc, &[id], area, scale).ok_or("shader CPU export unavailable")?;
             for (x, y) in [(20, 20), (40, 24), (60, 28), (70, 40)] {
                 let px = (f64::from(x) * scale) as u32;
                 let py = (f64::from(y) * scale) as u32;
@@ -1168,7 +1168,7 @@ mod tests {
         doc.node_mut(other).ok_or("other node missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
         let area = Rect::new(0.0, 0.0, 96.0, 96.0);
         let actual = render_area_gpu(&doc, &[selected], area, 1.0).ok_or("GPU export unavailable")?;
-        let reference = figcraft_render::render_area(&doc, &[selected], area, 1.0).ok_or("reference export unavailable")?;
+        let reference = lizard_render::render_area(&doc, &[selected], area, 1.0).ok_or("reference export unavailable")?;
         assert_eq!(actual.width(), 96);
         assert_eq!(actual.height(), 96);
         assert_eq!(actual.pixel(4, 4).ok_or("corner missing")?.alpha(), 0);
@@ -1201,7 +1201,7 @@ mod tests {
         let id = doc.create(page, NodeKind::Rectangle, "GIF", 0.0, 0.0, 4.0, 4.0)?;
         let hash = "animated-export-test".to_string();
         doc.images.insert(hash.clone(), ImageData { bytes: Arc::new(bytes), width: 4, height: 4 });
-        doc.node_mut(id).ok_or("GIF node missing")?.fills = vec![Paint::image(hash, figcraft_color::ImageScaleMode::Fill)];
+        doc.node_mut(id).ok_or("GIF node missing")?.fills = vec![Paint::image(hash, lizard_color::ImageScaleMode::Fill)];
         for (time, expected) in [(0.0, [255, 0, 0]), (0.15, [0, 255, 0]), (0.25, [255, 0, 0])] {
             let gpu = render_area_gpu_at(&doc, &[id], Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, time).ok_or("animated GPU export unavailable")?;
             let pixel = gpu.pixel(2, 2).ok_or("GIF sample missing")?;
@@ -1211,7 +1211,7 @@ mod tests {
             image.filters.saturation = -1.0;
         }
         let gpu = render_area_gpu_at(&doc, &[id], Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, 0.15).ok_or("adjusted animated GPU export unavailable")?;
-        let cpu = figcraft_render::render_node_at(&doc, id, 1.0, 0.15).ok_or("animated CPU reference unavailable")?;
+        let cpu = lizard_render::render_node_at(&doc, id, 1.0, 0.15).ok_or("animated CPU reference unavailable")?;
         let actual = gpu.pixel(2, 2).ok_or("adjusted GIF sample missing")?;
         let expected = cpu.pixel(2, 2).ok_or("adjusted CPU GIF sample missing")?;
         for (actual, expected) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
@@ -1255,7 +1255,7 @@ mod tests {
             }
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected");
             let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("adjusted GPU image unavailable")?;
-            let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("adjusted CPU image unavailable")?;
+            let cpu = lizard_render::render_area(&doc, &[id], area, 1.0).ok_or("adjusted CPU image unavailable")?;
             for (x, y) in [(1, 1), (6, 1), (1, 6), (6, 6)] {
                 let actual = gpu.pixel(x, y).ok_or("GPU image sample missing")?;
                 let expected = cpu.pixel(x, y).ok_or("CPU image sample missing")?;
@@ -1293,7 +1293,7 @@ mod tests {
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 128, height: 128 };
         assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("diamond GPU image unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("diamond CPU image unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[id], area, 1.0).ok_or("diamond CPU image unavailable")?;
         for (x, y) in [(64, 64), (64, 32), (96, 64), (82, 82), (3, 64), (64, 3)] {
             let actual = gpu.pixel(x, y).ok_or("GPU diamond sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU diamond sample missing")?;
@@ -1316,12 +1316,12 @@ mod tests {
         }
         let mut doc = Document::new("GPU diamond region");
         let page = doc.current_page.ok_or("page missing")?;
-        let network = figcraft_doc::VectorNetwork::from_points(
+        let network = lizard_doc::VectorNetwork::from_points(
             &[
-                figcraft_geom::Point::new(0.0, 0.0),
-                figcraft_geom::Point::new(64.0, 0.0),
-                figcraft_geom::Point::new(64.0, 64.0),
-                figcraft_geom::Point::new(0.0, 64.0),
+                lizard_geom::Point::new(0.0, 0.0),
+                lizard_geom::Point::new(64.0, 0.0),
+                lizard_geom::Point::new(64.0, 64.0),
+                lizard_geom::Point::new(0.0, 64.0),
             ],
             true,
         );
@@ -1334,7 +1334,7 @@ mod tests {
         }
         let area = Rect::new(0.0, 0.0, 80.0, 80.0);
         let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("region GPU render unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("region CPU render unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[id], area, 1.0).ok_or("region CPU render unavailable")?;
         for (x, y) in [(40, 40), (40, 20), (55, 40), (20, 55)] {
             let actual = gpu.pixel(x, y).ok_or("GPU region sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("CPU region sample missing")?;
@@ -1370,7 +1370,7 @@ mod tests {
             vec![Paint::gradient(Gradient::default_for(GradientKind::Linear, Color::new(0.1, 0.8, 0.3, 1.0)))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 32 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("P3 GPU page unavailable")?;
-        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU page unavailable")?;
+        let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU page unavailable")?;
         for (x, y) in [(2, 2), (16, 16), (36, 16)] {
             let actual = gpu.pixel(x, y).ok_or("P3 GPU sample missing")?;
             let expected = cpu.pixel(x, y).ok_or("P3 CPU sample missing")?;
@@ -1385,7 +1385,7 @@ mod tests {
         }
         let gpu_screen = render_page_gpu_screen(&doc, page, &view).ok_or("P3 GPU screen page unavailable")?;
         let mut cpu_screen = cpu;
-        figcraft_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
+        lizard_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
         for (x, y) in [(2, 2), (16, 16), (36, 16)] {
             let actual = gpu_screen.pixel(x, y).ok_or("P3 GPU screen pixel missing")?;
             let expected = cpu_screen.pixel(x, y).ok_or("P3 CPU screen pixel missing")?;
@@ -1400,7 +1400,7 @@ mod tests {
         }
         let area = Rect::new(8.0, 8.0, 24.0, 24.0);
         let gpu = render_area_gpu(&doc, &[id], area, 1.0).ok_or("P3 GPU selection unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[id], area, 1.0).ok_or("P3 CPU selection unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[id], area, 1.0).ok_or("P3 CPU selection unavailable")?;
         let actual = gpu.pixel(8, 8).ok_or("P3 GPU selection pixel missing")?;
         let expected = cpu.pixel(8, 8).ok_or("P3 CPU selection pixel missing")?;
         for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
@@ -1413,7 +1413,7 @@ mod tests {
         }
         let gpu_screen = render_area_gpu_screen(&doc, &[id], area, 1.0).ok_or("P3 GPU screen selection unavailable")?;
         let mut cpu_screen = cpu;
-        figcraft_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
+        lizard_render::to_srgb(&mut cpu_screen, ColorProfile::DisplayP3);
         let actual = gpu_screen.pixel(8, 8).ok_or("P3 GPU screen selection pixel missing")?;
         let expected = cpu_screen.pixel(8, 8).ok_or("P3 CPU screen selection pixel missing")?;
         for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
@@ -1446,8 +1446,8 @@ mod tests {
             canvas.render_submit_document_rgba(&doc, page, &view, [0.0; 4])?;
             canvas.convert_for_presentation(ColorProfile::DisplayP3);
             let actual = canvas.presented_pixels()?;
-            let mut expected = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU presentation unavailable")?;
-            figcraft_render::to_srgb(&mut expected, ColorProfile::DisplayP3);
+            let mut expected = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("P3 CPU presentation unavailable")?;
+            lizard_render::to_srgb(&mut expected, ColorProfile::DisplayP3);
             for (x, y) in [(2usize, 2usize), (16, 16), (30, 30)] {
                 let offset = (y * size as usize + x) * 4;
                 for (gpu, cpu) in actual[offset..offset + 4].iter().zip(&expected.data()[offset..offset + 4]) {
@@ -1532,7 +1532,7 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
         let area = Rect::new(0.0, 0.0, 100.0, 100.0);
         let selected = render_area_gpu(&doc, &[dark, pane], area, 1.0).ok_or("selected GPU backdrop unavailable")?;
-        let reference = figcraft_render::render_area(&doc, &[dark, pane], area, 1.0).ok_or("selected CPU backdrop unavailable")?;
+        let reference = lizard_render::render_area(&doc, &[dark, pane], area, 1.0).ok_or("selected CPU backdrop unavailable")?;
         for x in [10, 35, 47, 53, 65, 90] {
             let a = selected.pixel(x, 50).ok_or("GPU sample missing")?;
             let b = reference.pixel(x, 50).ok_or("CPU sample missing")?;
@@ -1562,12 +1562,12 @@ mod tests {
         doc.node_mut(child).ok_or("child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.6, 0.3, 1.0))];
         let area = Rect::new(0.0, 0.0, 80.0, 80.0);
         let selected = render_area_gpu(&doc, &[child], area, 1.0).ok_or("nested GPU export unavailable")?;
-        let reference = figcraft_render::render_area(&doc, &[child], area, 1.0).ok_or("nested reference unavailable")?;
+        let reference = lizard_render::render_area(&doc, &[child], area, 1.0).ok_or("nested reference unavailable")?;
         assert_eq!(selected.pixel(20, 20), reference.pixel(20, 20));
         assert_eq!(selected.pixel(2, 2).ok_or("empty pixel missing")?.alpha(), 0);
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         let actual_page = render_page_gpu(&doc, page, &view).ok_or("page GPU export unavailable")?;
-        let reference_page = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("page reference unavailable")?;
+        let reference_page = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("page reference unavailable")?;
         for (x, y) in [(2, 2), (20, 20)] {
             let actual = actual_page.pixel(x, y).ok_or("GPU pixel missing")?;
             let expected = reference_page.pixel(x, y).ok_or("reference pixel missing")?;
@@ -1590,9 +1590,9 @@ mod tests {
         doc.node_mut(id).ok_or("shape missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.6, 0.9, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4104, height: 24 };
         let gpu_page = render_page_gpu(&doc, page, &view).ok_or("wide GPU page unavailable")?;
-        let cpu_page = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU page unavailable")?;
+        let cpu_page = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("wide CPU page unavailable")?;
         let gpu_area = render_area_gpu(&doc, &[id], Rect::new(0.0, 0.0, 4104.0, 24.0), 1.0).ok_or("wide GPU selection unavailable")?;
-        let cpu_area = figcraft_render::render_area(&doc, &[id], Rect::new(0.0, 0.0, 4104.0, 24.0), 1.0).ok_or("wide CPU selection unavailable")?;
+        let cpu_area = lizard_render::render_area(&doc, &[id], Rect::new(0.0, 0.0, 4104.0, 24.0), 1.0).ok_or("wide CPU selection unavailable")?;
         for x in [0, 2047, 2048, 4095, 4096, 4103] {
             assert_eq!(gpu_page.pixel(x, 12), cpu_page.pixel(x, 12), "page x={x}");
             assert_eq!(gpu_area.pixel(x, 12), cpu_area.pixel(x, 12), "area x={x}");
@@ -1614,7 +1614,7 @@ mod tests {
         doc.node_mut(shape).ok_or("shape missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.2, 0.1, 1.0))];
         let area = Rect::new(0.0, 0.0, 80.0, 80.0);
         let gpu = render_area_gpu(&doc, &[group], area, 1.0).ok_or("masked GPU selection unavailable")?;
-        let cpu = figcraft_render::render_area(&doc, &[group], area, 1.0).ok_or("masked CPU selection unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[group], area, 1.0).ok_or("masked CPU selection unavailable")?;
         for x in [20, 60] {
             let actual = gpu.pixel(x, 40).ok_or("GPU sample missing")?;
             let expected = cpu.pixel(x, 40).ok_or("CPU sample missing")?;
@@ -1640,14 +1640,14 @@ mod tests {
         let top = doc.create(page, NodeKind::Rectangle, "Top", 10.0, 10.0, 60.0, 60.0)?;
         doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
-        for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
+        for blend in lizard_color::BlendMode::ALL {
+            if matches!(blend, lizard_color::BlendMode::PassThrough | lizard_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing")?.blend = blend;
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
             let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU blend export unavailable")?;
-            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend reference unavailable")?;
+            let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend reference unavailable")?;
             let actual = gpu.pixel(40, 40).ok_or("GPU sample missing")?;
             let expected = cpu.pixel(40, 40).ok_or("CPU sample missing")?;
             for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
@@ -1669,14 +1669,14 @@ mod tests {
         let top = doc.create(page, NodeKind::Rectangle, "Top", 10.0, 10.0, 60.0, 60.0)?;
         doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
-        for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
+        for blend in lizard_color::BlendMode::ALL {
+            if matches!(blend, lizard_color::BlendMode::PassThrough | lizard_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing")?.fills[0].blend = blend;
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
             let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU paint blend export unavailable")?;
-            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU paint blend reference unavailable")?;
+            let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU paint blend reference unavailable")?;
             let actual = gpu.pixel(40, 40).ok_or("GPU sample missing")?;
             let expected = cpu.pixel(40, 40).ok_or("CPU sample missing")?;
             for (a, b) in [actual.red(), actual.green(), actual.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
@@ -1702,8 +1702,8 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 4.0, offset: (5.0, 0.0), ..Shadow::default() }), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for opacity in [1.0, 0.65] {
-            for blend in figcraft_color::BlendMode::ALL {
-                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
+            for blend in lizard_color::BlendMode::ALL {
+                if matches!(blend, lizard_color::BlendMode::PassThrough | lizard_color::BlendMode::Normal) {
                     continue;
                 }
                 let node = doc.node_mut(top).ok_or("top missing for blend")?;
@@ -1711,7 +1711,7 @@ mod tests {
                 node.fills[0].blend = blend;
                 assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} opacity={opacity} rejected");
                 let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU blend and shadow unavailable")?;
-                let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend and shadow unavailable")?;
+                let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend and shadow unavailable")?;
                 let changed = gpu
                     .data()
                     .chunks_exact(4)
@@ -1759,8 +1759,8 @@ mod tests {
         doc.node_mut(second).ok_or("second missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 0.7))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for opacity in [1.0, 0.65] {
-            for blend in figcraft_color::BlendMode::ALL {
-                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
+            for blend in lizard_color::BlendMode::ALL {
+                if matches!(blend, lizard_color::BlendMode::PassThrough | lizard_color::BlendMode::Normal) {
                     continue;
                 }
                 let node = doc.node_mut(group).ok_or("group missing")?;
@@ -1768,7 +1768,7 @@ mod tests {
                 node.opacity = opacity;
                 assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
                 let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU group blend export unavailable")?;
-                let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU group blend reference unavailable")?;
+                let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU group blend reference unavailable")?;
                 for (x, y) in [(20, 20), (40, 40), (60, 60)] {
                     let actual = gpu.pixel(x, y).ok_or("GPU sample missing")?;
                     let expected = cpu.pixel(x, y).ok_or("CPU sample missing")?;
@@ -1795,14 +1795,14 @@ mod tests {
         node.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
         node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 4.0, offset: (5.0, 0.0), ..Shadow::default() }), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
-        for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
+        for blend in lizard_color::BlendMode::ALL {
+            if matches!(blend, lizard_color::BlendMode::PassThrough | lizard_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing for blend")?.blend = blend;
             assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} rejected");
             let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU node blend and shadow unavailable")?;
-            let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU node blend and shadow unavailable")?;
+            let cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU node blend and shadow unavailable")?;
             for (x, y) in [(30, 30), (62, 40), (15, 15)] {
                 let actual = gpu.pixel(x, y).ok_or("GPU node blend/shadow sample missing")?;
                 let expected = cpu.pixel(x, y).ok_or("CPU node blend/shadow sample missing")?;
@@ -1835,7 +1835,7 @@ mod tests {
         let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
-        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(figcraft_doc::Blur::uniform(12.0)), visible: true }];
+        node.effects = vec![lizard_doc::Effect { kind: EffectKind::BackgroundBlur(lizard_doc::Blur::uniform(12.0)), visible: true }];
         let group = doc.create(page, NodeKind::Group, "Masked group", 0.0, 0.0, 20.0, 20.0)?;
         let mask = doc.create(group, NodeKind::Rectangle, "Mask", 0.0, 0.0, 10.0, 20.0)?;
         doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
@@ -1843,7 +1843,7 @@ mod tests {
         doc.node_mut(content).ok_or("content missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 100, height: 100 };
         let actual = render_page_gpu(&doc, page, &view).ok_or("GPU page export unavailable")?;
-        let reference = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("reference export unavailable")?;
+        let reference = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("reference export unavailable")?;
         for (x, y) in [(5, 10), (15, 10), (35, 50), (47, 50), (53, 50), (65, 50)] {
             let gpu = actual.pixel(x, y).ok_or("GPU sample missing")?;
             let cpu = reference.pixel(x, y).ok_or("CPU sample missing")?;
@@ -1853,7 +1853,7 @@ mod tests {
             *background_visible = false;
         }
         let transparent_gpu = render_page_gpu(&doc, page, &view).ok_or("transparent GPU page export unavailable")?;
-        let transparent_cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("transparent reference unavailable")?;
+        let transparent_cpu = lizard_render::render_view(&doc, page, &view, &Default::default()).ok_or("transparent reference unavailable")?;
         for (x, y) in [(5, 10), (15, 10), (35, 50), (47, 50), (53, 50), (65, 50), (95, 95)] {
             let gpu = transparent_gpu.pixel(x, y).ok_or("transparent GPU sample missing")?;
             let cpu = transparent_cpu.pixel(x, y).ok_or("transparent CPU sample missing")?;

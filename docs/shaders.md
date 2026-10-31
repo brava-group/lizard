@@ -2,7 +2,7 @@
 
 Lizard stores WGSL shader definitions in `Document.shaders`, keyed by stable ID. A layer's ordered
 `fills` list can contain `{"type":"shader","shaderId":"…","values":{"frequency":2}}`.
-The definition is embedded in the `.figcraft` document; instances share its source and pipeline
+The definition is embedded in the `.lizard` document; instances share its source and pipeline
 but keep individual values. Existing documents load with an empty shader registry. The commands
 below use the normal engine history, so applying a fill and changing a value support undo/redo.
 

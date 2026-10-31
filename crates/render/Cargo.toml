@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-render"
+name = "lizard-render"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,12 @@ description = "Lizard renderer: the scene graph to pixels on tiny-skia (fills, g
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-color = { workspace = true }
-figcraft-doc = { workspace = true }
-figcraft-shader = { workspace = true }
-figcraft-text = { workspace = true }
-figcraft-pathops = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-color = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-shader = { workspace = true }
+lizard-text = { workspace = true }
+lizard-pathops = { workspace = true }
 tiny-skia = { workspace = true }
 image = { workspace = true }
 moxcms = { workspace = true }

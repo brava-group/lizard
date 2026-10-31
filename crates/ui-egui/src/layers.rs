@@ -4,41 +4,41 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_doc::{Document, NodeId, NodeKind};
+use lizard_doc::{Document, NodeId, NodeKind};
 use serde_json::json;
 
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, HeaderIcon, Icon, NavIcon};
 use crate::theme::{ACCENT, ColorRole, Tokens, regular, semibold};
-use crate::{FigApp, LeftTab};
+use crate::{LeftTab, LizardApp};
 
 pub const ROW: f32 = 32.0;
 
 /// A boolean operation's icon.
-pub fn op_icon(op: figcraft_doc::BoolOp) -> Icon {
+pub fn op_icon(op: lizard_doc::BoolOp) -> Icon {
     match op {
-        figcraft_doc::BoolOp::Union => Icon::Union,
-        figcraft_doc::BoolOp::Subtract => Icon::Subtract,
-        figcraft_doc::BoolOp::Intersect => Icon::Intersect,
-        figcraft_doc::BoolOp::Exclude => Icon::Exclude,
+        lizard_doc::BoolOp::Union => Icon::Union,
+        lizard_doc::BoolOp::Subtract => Icon::Subtract,
+        lizard_doc::BoolOp::Intersect => Icon::Intersect,
+        lizard_doc::BoolOp::Exclude => Icon::Exclude,
     }
 }
 
 pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
     let Some(n) = doc.node(id) else { return Icon::Rectangle };
     // An operand combining by an operation other than its group's shows that operation.
-    if let Some(op) = figcraft_engine::booleans::distinct_op(doc, id) {
+    if let Some(op) = lizard_engine::booleans::distinct_op(doc, id) {
         return op_icon(op);
     }
     match &n.kind {
         NodeKind::Page { .. } => Icon::Page,
-        NodeKind::Frame if figcraft_engine::components::is_slot(doc, id) => Icon::Slot,
+        NodeKind::Frame if lizard_engine::components::is_slot(doc, id) => Icon::Slot,
         NodeKind::Frame => {
             if let Some(l) = &n.layout {
                 match l.mode {
-                    figcraft_doc::LayoutMode::Vertical => Icon::LayoutV,
-                    figcraft_doc::LayoutMode::Grid => Icon::LayoutGrid,
+                    lizard_doc::LayoutMode::Vertical => Icon::LayoutV,
+                    lizard_doc::LayoutMode::Grid => Icon::LayoutGrid,
                     _ => Icon::LayoutH,
                 }
             } else {
@@ -48,7 +48,7 @@ pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
         NodeKind::Group => Icon::Group,
         NodeKind::Section { .. } => Icon::Section,
         NodeKind::Rectangle => {
-            if n.fills.iter().any(|f| matches!(f.kind, figcraft_color::PaintKind::Image(_))) {
+            if n.fills.iter().any(|f| matches!(f.kind, lizard_color::PaintKind::Image(_))) {
                 Icon::Image
             } else {
                 Icon::Rectangle
@@ -75,7 +75,7 @@ pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
 }
 
 /// The slim icon rail at the far left: main menu, File, Agent, Assets, Variables.
-pub fn rail(app: &mut FigApp, ui: &mut Ui) {
+pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let r = ui.max_rect();
     let mut y = r.min.y + 8.0;
@@ -147,7 +147,7 @@ pub fn rail(app: &mut FigApp, ui: &mut Ui) {
     }
 }
 
-pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
+pub fn left_panel(app: &mut LizardApp, ui: &mut Ui) {
     if app.ui.versions.open {
         crate::versions::panel(app, ui);
         return;
@@ -195,7 +195,7 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
     }
 }
 
-fn pages(app: &mut FigApp, ui: &mut Ui) {
+fn pages(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
@@ -370,13 +370,13 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
 
 /// The Pages list has the keyboard: a page row (or the add-page button) of the open file was
 /// clicked last, and the list is still on screen.
-pub(crate) fn pages_have_keyboard(app: &FigApp) -> bool {
+pub(crate) fn pages_have_keyboard(app: &LizardApp) -> bool {
     let Ok(ds) = app.session.ds() else { return false };
     app.ui.pages_focus == Some(ds.uid) && app.ui.pages_open && !app.ui.left_collapsed && !ds.view.ui_hidden && app.ui.left_tab == LeftTab::File
 }
 
 /// Delete `page` (no confirmation: Undo brings it back) and say so.
-pub(crate) fn delete_page(app: &mut FigApp, page: NodeId) {
+pub(crate) fn delete_page(app: &mut LizardApp, page: NodeId) {
     if app.run("page.delete", json!({"id": page})).is_some() {
         app.toast(tr("Page deleted"));
     }
@@ -392,7 +392,7 @@ pub(crate) fn pages_list_height(asked: Option<f32>, avail: f32) -> f32 {
 
 /// The line between the pages and the layers: dragging it sizes the pages list (`shown`: its
 /// height now), a double-click puts back the default. The main window keeps it in the preferences.
-fn pages_edge(app: &mut FigApp, ui: &mut Ui, shown: f32) {
+fn pages_edge(app: &mut LizardApp, ui: &mut Ui, shown: f32) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (line, _) = ui.allocate_exact_size(vec2(w, 1.0), Sense::hover());
@@ -543,7 +543,7 @@ fn mask_links(doc: &Document, rows: &[Row]) -> Vec<(usize, usize, bool)> {
 }
 
 /// Whether the children of `n` don't show on the canvas (given whether `n` itself doesn't).
-fn hides_children(n: &figcraft_doc::Node, dimmed: bool) -> bool {
+fn hides_children(n: &lizard_doc::Node, dimmed: bool) -> bool {
     dimmed || !n.visible || n.hides_contents()
 }
 
@@ -569,7 +569,7 @@ fn matching(doc: &Document, id: NodeId, q: &str, out: &mut Vec<Row>) {
         let Some(cn) = doc.node(*c) else { continue };
         let name = if cn.name.is_empty() { cn.kind.label() } else { cn.name.as_str() };
         if name.to_lowercase().contains(q) {
-            let above: Vec<&figcraft_doc::Node> = doc.ancestors(*c).iter().filter_map(|a| doc.node(*a)).filter(|a| !a.is_page()).collect();
+            let above: Vec<&lizard_doc::Node> = doc.ancestors(*c).iter().filter_map(|a| doc.node(*a)).filter(|a| !a.is_page()).collect();
             let dimmed = above.iter().any(|a| hides_children(a, false));
             out.push(Row { id: *c, depth: 0, has_kids: false, dimmed, locked_above: above.iter().any(|a| a.locked) });
         }
@@ -582,7 +582,7 @@ fn matching(doc: &Document, id: NodeId, q: &str, out: &mut Vec<Row>) {
 /// Arrow keys while the layers panel has the keyboard: Up/Down select the row above or below
 /// (Shift extends the range from the anchor), Left collapses a row or goes to its parent, Right
 /// expands a row or goes to its first child. Returns whether the key was used.
-pub(crate) fn key_nav(app: &mut FigApp, key: egui::Key, shift: bool) -> bool {
+pub(crate) fn key_nav(app: &mut LizardApp, key: egui::Key, shift: bool) -> bool {
     use egui::Key;
     if !matches!(key, Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight) {
         return false;
@@ -592,7 +592,7 @@ pub(crate) fn key_nav(app: &mut FigApp, key: egui::Key, shift: bool) -> bool {
     // The rows as listed: the expanded tree, or the search results.
     let filter = app.ui.layer_filter.trim().to_lowercase();
     let rows = listed_rows(&doc, page, &app.ui.expanded, &filter);
-    let select = |app: &mut FigApp, ids: Vec<NodeId>, anchor: NodeId| {
+    let select = |app: &mut LizardApp, ids: Vec<NodeId>, anchor: NodeId| {
         app.ui.layer_anchor = Some(anchor);
         app.run("select.set", json!({"ids": ids}));
     };
@@ -654,7 +654,7 @@ pub struct Rename {
 
 /// Start renaming a layer in the layers panel (Cmd/Ctrl+R): the topmost listed of `ids`, which
 /// becomes the selection. Shows the panel and opens the rows above the layer.
-pub(crate) fn start_rename(app: &mut FigApp, ids: &[NodeId]) {
+pub(crate) fn start_rename(app: &mut LizardApp, ids: &[NodeId]) {
     let Ok(ds) = app.session.ds() else { return };
     let (doc, page) = (ds.doc.clone(), ds.page);
     for a in ids.iter().flat_map(|i| doc.ancestors(*i)).filter(|a| *a != page) {
@@ -667,14 +667,14 @@ pub(crate) fn start_rename(app: &mut FigApp, ids: &[NodeId]) {
 }
 
 /// Collapse layers: every row closes except those leading to the selection.
-pub(crate) fn collapse_all(app: &mut FigApp) {
+pub(crate) fn collapse_all(app: &mut LizardApp) {
     app.ui.expanded.clear();
     let Ok(ds) = app.session.ds() else { return };
     app.ui.expanded.extend(ds.selection.iter().flat_map(|s| ds.doc.ancestors(*s)).filter(|a| *a != ds.page));
 }
 
 /// Rename `id` in its row, selected (the selection follows a rename that moves with Tab).
-fn rename_layer(app: &mut FigApp, id: NodeId) {
+fn rename_layer(app: &mut LizardApp, id: NodeId) {
     app.ui.rename = Some(Rename { id, start: true });
     if app.session.selection() != [id] {
         app.run("select.set", json!({"ids": [id]}));
@@ -695,7 +695,7 @@ fn row_x0(rr: Rect, depth: usize) -> f32 {
 
 /// The name field of the row being renamed (row rect `r`): the new name once committed. The
 /// rename ends when the field lets go of the keyboard.
-fn rename_field(app: &mut FigApp, ui: &mut Ui, id: NodeId, depth: usize, name: &str, r: Rect) -> Option<String> {
+fn rename_field(app: &mut LizardApp, ui: &mut Ui, id: NodeId, depth: usize, name: &str, r: Rect) -> Option<String> {
     let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
     let rect = Rect::from_min_max(pos2(row_x0(rr, depth) + 36.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0));
     let start = app.ui.rename.is_some_and(|x| x.start);
@@ -752,7 +752,7 @@ fn search_field(ui: &mut Ui, t: &Tokens, w: f32, id: Id, hint: &str, text: &mut 
     }
 }
 
-fn layers(app: &mut FigApp, ui: &mut Ui) {
+fn layers(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
@@ -1095,7 +1095,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             // What is inside the dragged layers, and inside an instance, takes no drop.
             refused |= over
                 && (doc.ancestors(row.id).iter().any(|a| moving.contains(a))
-                    || n.parent.is_some_and(|p| figcraft_engine::components::structure_locked(&doc, p)));
+                    || n.parent.is_some_and(|p| lizard_engine::components::structure_locked(&doc, p)));
             if dragging.is_some()
                 && !blocked(row.id)
                 && let Some(p) = ui.input(|i| i.pointer.hover_pos())
@@ -1289,7 +1289,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
         if let Ok(ds) = app.session.ds_mut()
             && ds.text_edit.is_some()
         {
-            let _ = figcraft_engine::textedit::end(&mut app.session);
+            let _ = lizard_engine::textedit::end(&mut app.session);
         }
     }
     let _ = Color32::TRANSPARENT;

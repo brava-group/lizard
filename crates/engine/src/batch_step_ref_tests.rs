@@ -87,7 +87,7 @@ fn text_that_looks_like_a_reference_is_left_alone() {
         .execute("command.batch", &json!({"commands": [{"command": "node.create", "params": {"type": "text", "text": "$step 0 {\"$step\": 0}"}}]}))
         .unwrap();
     let n = s.doc().unwrap().node(id(&results[0])).unwrap().clone();
-    assert!(matches!(n.kind, figcraft_doc::NodeKind::Text(t) if t.characters == "$step 0 {\"$step\": 0}"));
+    assert!(matches!(n.kind, lizard_doc::NodeKind::Text(t) if t.characters == "$step 0 {\"$step\": 0}"));
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn text_that_looks_like_a_named_reference_is_left_alone() {
     let text = "{\"$ref\": \"card\"} $ref";
     let results = s.execute("command.batch", &json!({"commands": [{"command": "node.create", "params": {"type": "text", "text": text}}]})).unwrap();
     let n = s.doc().unwrap().node(id(&results[0])).unwrap().clone();
-    assert!(matches!(n.kind, figcraft_doc::NodeKind::Text(t) if t.characters == text));
+    assert!(matches!(n.kind, lizard_doc::NodeKind::Text(t) if t.characters == text));
 }
 
 /// A nested batch has its own names: it can't see the outer batch's, may reuse them, and the

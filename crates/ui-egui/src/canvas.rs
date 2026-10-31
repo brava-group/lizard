@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
-use figcraft_color::{BlendMode, PaintKind};
-use figcraft_doc::{Document, NodeId, NodeKind};
-use figcraft_engine::Preedit;
-use figcraft_engine::tools::{PointerEvent, PointerKind, ToolId, selection_box, selection_frame};
-use figcraft_geom::Point;
+use lizard_color::{BlendMode, PaintKind};
+use lizard_doc::{Document, NodeId, NodeKind};
+use lizard_engine::Preedit;
+use lizard_engine::tools::{PointerEvent, PointerKind, ToolId, selection_box, selection_frame};
+use lizard_geom::Point;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, trf, trn};
 use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
 use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
@@ -23,7 +23,7 @@ pub trait CanvasGpuBackend {
         &mut self,
         doc: Arc<Document>,
         page: NodeId,
-        view: &figcraft_render::View,
+        view: &lizard_render::View,
         clear: [f32; 3],
         gesture_active: bool,
         proof_srgb: bool,
@@ -35,9 +35,9 @@ pub trait CanvasGpuBackend {
         &mut self,
         _doc: Arc<Document>,
         _page: NodeId,
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
-        _options: figcraft_render::Outline,
+        _options: lizard_render::Outline,
         _pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
@@ -50,9 +50,9 @@ pub trait CanvasGpuBackend {
         _doc: Arc<Document>,
         _page: NodeId,
         _focus: NodeId,
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
-        _options: figcraft_render::Outline,
+        _options: lizard_render::Outline,
         _pixel_preview: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
@@ -64,7 +64,7 @@ pub trait CanvasGpuBackend {
         &mut self,
         _doc: Arc<Document>,
         _page: NodeId,
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
         _proof_srgb: bool,
         _ctx: &egui::Context,
@@ -78,7 +78,7 @@ pub trait CanvasGpuBackend {
         _doc: Arc<Document>,
         _page: NodeId,
         _focus: NodeId,
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
         _proof_srgb: bool,
         _ctx: &egui::Context,
@@ -92,7 +92,7 @@ pub trait CanvasGpuBackend {
         _doc: Arc<Document>,
         _page: NodeId,
         _focus: NodeId,
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
         _proof_srgb: bool,
         _ctx: &egui::Context,
@@ -106,9 +106,9 @@ pub trait CanvasGpuBackend {
         _doc: Arc<Document>,
         _page: NodeId,
         _selected: &[NodeId],
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
-        _options: figcraft_render::Outline,
+        _options: lizard_render::Outline,
         _proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
@@ -121,9 +121,9 @@ pub trait CanvasGpuBackend {
         _doc: Arc<Document>,
         _page: NodeId,
         _selected: &[NodeId],
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
-        _options: figcraft_render::Outline,
+        _options: lizard_render::Outline,
         _proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
@@ -137,9 +137,9 @@ pub trait CanvasGpuBackend {
         _page: NodeId,
         _focus: NodeId,
         _selected: &[NodeId],
-        _view: &figcraft_render::View,
+        _view: &lizard_render::View,
         _clear: [f32; 3],
-        _options: figcraft_render::Outline,
+        _options: lizard_render::Outline,
         _proof_srgb: bool,
         _pixel_preview: bool,
     ) -> Option<egui::TextureId> {
@@ -165,8 +165,8 @@ pub struct CanvasState {
     gpu_presented: bool,
     texture: Option<egui::TextureHandle>,
     tiles: Vec<CanvasTile>,
-    tex_view: Option<figcraft_render::View>,
-    /// The file ([`figcraft_engine::DocState::uid`]) and page the texture shows: it is drawn only
+    tex_view: Option<lizard_render::View>,
+    /// The file ([`lizard_engine::DocState::uid`]) and page the texture shows: it is drawn only
     /// on them.
     tex_of: Option<(u64, NodeId)>,
     /// The document version behind the texture, so stale previews cannot replace newer pixels.
@@ -181,11 +181,11 @@ pub struct CanvasState {
     pub tex_coarse: bool,
     submitted: Option<JobKey>,
     /// The view of the last render asked for.
-    want_view: Option<figcraft_render::View>,
-    visible_view: Option<figcraft_render::View>,
+    want_view: Option<lizard_render::View>,
+    visible_view: Option<lizard_render::View>,
     shader_started: web_time::Instant,
     /// What the last canvas render had to do (shown by `ui.inspect`).
-    pub render_work: Option<figcraft_render::Work>,
+    pub render_work: Option<lizard_render::Work>,
     /// Device pixels uploaded for the last completed render (zero when its texture was reused).
     pub upload_pixels: u64,
     /// From asking for a render to its preview, and its refined image, handed to egui as the
@@ -260,7 +260,7 @@ impl Default for CanvasState {
 struct ZoomFallback {
     texture: Option<egui::TextureHandle>,
     tiles: Vec<CanvasTile>,
-    view: figcraft_render::View,
+    view: lizard_render::View,
     of: (u64, NodeId),
     doc: Arc<Document>,
     style: RenderStyle,
@@ -269,18 +269,18 @@ struct ZoomFallback {
 struct PendingLayer {
     doc: Arc<Document>,
     id: NodeId,
-    visible: figcraft_render::View,
-    image_view: figcraft_render::View,
+    visible: lizard_render::View,
+    image_view: lizard_render::View,
     texture: egui::TextureHandle,
 }
 
 struct CanvasTile {
-    view: figcraft_render::View,
+    view: lizard_render::View,
     image: Arc<egui::ColorImage>,
     texture: egui::TextureHandle,
 }
 
-fn view_area(view: &figcraft_render::View) -> f64 {
+fn view_area(view: &lizard_render::View) -> f64 {
     f64::from(view.width) * f64::from(view.height) / view.scale / view.scale
 }
 
@@ -289,7 +289,7 @@ impl CanvasState {
         self.tiles.len()
     }
 
-    pub(crate) fn texture_current(&self, ds: &figcraft_engine::DocState) -> bool {
+    pub(crate) fn texture_current(&self, ds: &lizard_engine::DocState) -> bool {
         (self.texture.is_some() || !self.tiles.is_empty())
             && self.tex_of == Some((ds.uid, ds.page))
             && !self.tex_coarse
@@ -298,7 +298,7 @@ impl CanvasState {
 
     /// Device pixels without any current image source. This measures texture coverage, including
     /// the retained wide view, before the page background is painted underneath it.
-    pub(crate) fn uncovered_pixels(&self, ds: &figcraft_engine::DocState) -> Option<u64> {
+    pub(crate) fn uncovered_pixels(&self, ds: &lizard_engine::DocState) -> Option<u64> {
         let visible = self.visible_view.as_ref()?;
         let current = self
             .tex_view
@@ -308,7 +308,7 @@ impl CanvasState {
             .zoom_fallback
             .as_ref()
             .filter(|cached| cached.of == (ds.uid, ds.page) && Arc::ptr_eq(&cached.doc, &ds.doc) && self.tex_style.as_ref() == Some(&cached.style));
-        let area = |view: &figcraft_render::View| {
+        let area = |view: &lizard_render::View| {
             let (a, b) = (visible.page_rect(), view.page_rect());
             (a.x1.min(b.x1) - a.x0.max(b.x0)).max(0.0) * (a.y1.min(b.y1) - a.y0.max(b.y0)).max(0.0)
         };
@@ -335,12 +335,12 @@ struct DragVisual {
     page: NodeId,
     root: NodeId,
     source: Arc<Document>,
-    base_view: figcraft_render::View,
-    background_view: Option<figcraft_render::View>,
-    visible_view: figcraft_render::View,
-    root_view: figcraft_render::View,
-    detail: Option<(figcraft_render::View, egui::TextureHandle)>,
-    detail_pending: Option<Receiver<(figcraft_render::View, egui::ColorImage)>>,
+    base_view: lizard_render::View,
+    background_view: Option<lizard_render::View>,
+    visible_view: lizard_render::View,
+    root_view: lizard_render::View,
+    detail: Option<(lizard_render::View, egui::TextureHandle)>,
+    detail_pending: Option<Receiver<(lizard_render::View, egui::ColorImage)>>,
     start_transform: [f64; 6],
     zoom: f64,
     center: (f64, f64),
@@ -366,7 +366,7 @@ fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool 
     while let Some(id) = pending.pop() {
         let Some(n) = doc.node(id) else { return false };
         if n.effects.iter().any(|e| e.visible && e.backdrop_radius() > 0.0)
-            || !matches!(n.blend, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough)
+            || !matches!(n.blend, lizard_color::BlendMode::Normal | lizard_color::BlendMode::PassThrough)
         {
             return false;
         }
@@ -380,7 +380,7 @@ fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn drag_view_for_bounds(bounds: figcraft_geom::Rect, base: &figcraft_render::View, scale: f64, pixel_limit: f64) -> Option<figcraft_render::View> {
+fn drag_view_for_bounds(bounds: lizard_geom::Rect, base: &lizard_render::View, scale: f64, pixel_limit: f64) -> Option<lizard_render::View> {
     if !scale.is_finite() || scale <= 0.0 || ![bounds.x0, bounds.y0, bounds.x1, bounds.y1].iter().all(|n| n.is_finite()) {
         return None;
     }
@@ -392,11 +392,11 @@ fn drag_view_for_bounds(bounds: figcraft_geom::Rect, base: &figcraft_render::Vie
     if !w.is_finite() || !h.is_finite() || !(1.0..=4096.0).contains(&w) || !(1.0..=4096.0).contains(&h) || w * h > pixel_limit {
         return None;
     }
-    Some(figcraft_render::View { origin: (base.origin.0 + x0 / scale, base.origin.1 + y0 / scale), scale, width: w as u32, height: h as u32 })
+    Some(lizard_render::View { origin: (base.origin.0 + x0 / scale, base.origin.1 + y0 / scale), scale, width: w as u32, height: h as u32 })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View) -> Option<figcraft_render::View> {
+fn cropped_drag_view(doc: &Document, root: NodeId, base: &lizard_render::View) -> Option<lizard_render::View> {
     let bounds = doc.world_render_bounds(root)?;
     let width = bounds.width();
     let height = bounds.height();
@@ -417,13 +417,13 @@ fn cropped_drag_view(doc: &Document, root: NodeId, base: &figcraft_render::View)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn drag_background_view(base: &figcraft_render::View) -> Option<figcraft_render::View> {
+fn drag_background_view(base: &lizard_render::View) -> Option<lizard_render::View> {
     let pixels = f64::from(base.width) * f64::from(base.height);
     let factor = (7_900_000.0 / pixels).sqrt().min(8190.0 / f64::from(base.width)).min(8190.0 / f64::from(base.height)).min(1.0);
     if !factor.is_finite() || factor <= 0.0 {
         return None;
     }
-    Some(figcraft_render::View {
+    Some(lizard_render::View {
         origin: base.origin,
         scale: base.scale * factor,
         width: (f64::from(base.width) * factor).ceil() as u32,
@@ -434,10 +434,10 @@ fn drag_background_view(base: &figcraft_render::View) -> Option<figcraft_render:
 /// The part of the original frame needed at the current pointer position, with a small reserve
 /// around the viewport. The preview supplies pixels until this tile is ready.
 #[cfg(not(target_arch = "wasm32"))]
-fn drag_detail_view(visual: &DragVisual, delta: (f64, f64)) -> Option<figcraft_render::View> {
+fn drag_detail_view(visual: &DragVisual, delta: (f64, f64)) -> Option<lizard_render::View> {
     let frame = visual.source.world_render_bounds(visual.root)?;
     let visible = visual.visible_view.page_rect();
-    let needed = figcraft_geom::Rect::new(
+    let needed = lizard_geom::Rect::new(
         (visible.x0 - delta.0).max(frame.x0),
         (visible.y0 - delta.1).max(frame.y0),
         (visible.x1 - delta.0).min(frame.x1),
@@ -449,7 +449,7 @@ fn drag_detail_view(visual: &DragVisual, delta: (f64, f64)) -> Option<figcraft_r
     let scale = visual.base_view.scale;
     let mut margin = 192.0 / scale;
     for _ in 0..5 {
-        let bounds = figcraft_geom::Rect::new(
+        let bounds = lizard_geom::Rect::new(
             (needed.x0 - margin).max(frame.x0),
             (needed.y0 - margin).max(frame.y0),
             (needed.x1 + margin).min(frame.x1),
@@ -464,10 +464,10 @@ fn drag_detail_view(visual: &DragVisual, delta: (f64, f64)) -> Option<figcraft_r
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn detail_covers_visible(visual: &DragVisual, detail: &figcraft_render::View, delta: (f64, f64)) -> bool {
+fn detail_covers_visible(visual: &DragVisual, detail: &lizard_render::View, delta: (f64, f64)) -> bool {
     let Some(frame) = visual.source.world_render_bounds(visual.root) else { return false };
     let visible = visual.visible_view.page_rect();
-    let needed = figcraft_geom::Rect::new(
+    let needed = lizard_geom::Rect::new(
         (visible.x0 - delta.0).max(frame.x0),
         (visible.y0 - delta.1).max(frame.y0),
         (visible.x1 - delta.0).min(frame.x1),
@@ -481,7 +481,7 @@ fn detail_covers_visible(visual: &DragVisual, detail: &figcraft_render::View, de
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
+fn start_drag_visual(app: &mut LizardApp, ctx: &egui::Context) {
     app.canvas.drag_visual = None;
     if app.session.tool.tool != ToolId::Move {
         return;
@@ -511,7 +511,7 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     if (base_view.scale - target_scale).abs() > target_scale * 1e-4 {
         return;
     }
-    let visible = figcraft_render::View {
+    let visible = lizard_render::View {
         origin: ds.view.origin(),
         scale: target_scale,
         width: (app.canvas.rect.width() * ctx.pixels_per_point()).ceil().max(1.0) as u32,
@@ -535,23 +535,22 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     let root_for_job = root_view.clone();
     let repaint = ctx.clone();
     let viewport = ctx.viewport_id();
-    let spawned = std::thread::Builder::new().name("figcraft-drag-layers".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("lizard-drag-layers".into()).spawn(move || {
         let started = web_time::Instant::now();
         let base = if let Some(view) = background_for_job.as_ref() {
             let mut background = (*job_doc).clone();
             let Some(node) = background.node_mut(root) else { return };
             node.visible = false;
-            let Some(pix) = figcraft_engine::cmd::file::render_page_screen_pixels(&background, page, view) else { return };
-            Some(crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb))
+            let Some(pix) = lizard_engine::cmd::file::render_page_screen_pixels(&background, page, view) else { return };
+            Some(crate::render_worker::screen_image(&pix, lizard_color::ColorProfile::Srgb))
         } else {
             None
         };
-        let Some(moving) = figcraft_engine::cmd::file::render_export_area_screen(&job_doc, &[root], root_for_job.page_rect(), root_for_job.scale)
+        let Some(moving) = lizard_engine::cmd::file::render_export_area_screen(&job_doc, &[root], root_for_job.page_rect(), root_for_job.scale)
         else {
             return;
         };
-        let images =
-            (base, crate::render_worker::screen_image(&moving, figcraft_color::ColorProfile::Srgb), started.elapsed().as_secs_f64() * 1000.0);
+        let images = (base, crate::render_worker::screen_image(&moving, lizard_color::ColorProfile::Srgb), started.elapsed().as_secs_f64() * 1000.0);
         if tx.send(images).is_ok() {
             repaint.request_repaint_of(viewport);
         }
@@ -582,7 +581,7 @@ fn start_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn drag_visual_matches_idle_document(app: &FigApp) -> bool {
+fn drag_visual_matches_idle_document(app: &LizardApp) -> bool {
     let Some(visual) = app.canvas.drag_visual.as_ref() else { return false };
     let Ok(ds) = app.session.ds() else { return false };
     visual.uid == ds.uid
@@ -595,14 +594,14 @@ fn drag_visual_matches_idle_document(app: &FigApp) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
+fn poll_drag_visual(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
     if let Some(rx) = visual.pending.as_ref() {
         match rx.try_recv() {
             Ok((base, moving, ms)) => {
                 visual.ready = Some((
-                    base.map(|image| ctx.load_texture("figcraft-drag-base", image, egui::TextureOptions::LINEAR)),
-                    ctx.load_texture("figcraft-drag-frame", moving, egui::TextureOptions::LINEAR),
+                    base.map(|image| ctx.load_texture("lizard-drag-base", image, egui::TextureOptions::LINEAR)),
+                    ctx.load_texture("lizard-drag-frame", moving, egui::TextureOptions::LINEAR),
                 ));
                 visual.pending = None;
                 visual.prepare_ms = Some(ms);
@@ -617,7 +616,7 @@ fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
     if let Some(rx) = visual.detail_pending.as_ref() {
         match rx.try_recv() {
             Ok((view, image)) => {
-                visual.detail = Some((view, ctx.load_texture("figcraft-drag-detail", image, egui::TextureOptions::LINEAR)));
+                visual.detail = Some((view, ctx.load_texture("lizard-drag-detail", image, egui::TextureOptions::LINEAR)));
                 visual.detail_pending = None;
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => visual.detail_pending = None,
@@ -630,7 +629,7 @@ fn poll_drag_visual(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
+fn request_drag_detail(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(delta) = drag_visual_delta(app) else { return };
     let Some(visual) = app.canvas.drag_visual.as_mut() else { return };
     if visual.root_view.scale == visual.base_view.scale
@@ -645,9 +644,9 @@ fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
     let repaint = ctx.clone();
     let viewport = ctx.viewport_id();
     let (tx, rx) = std::sync::mpsc::channel();
-    let spawned = std::thread::Builder::new().name("figcraft-drag-detail".into()).spawn(move || {
-        let Some(pix) = figcraft_engine::cmd::file::render_export_area_screen(&source, &[root], view.page_rect(), view.scale) else { return };
-        let image = crate::render_worker::screen_image(&pix, figcraft_color::ColorProfile::Srgb);
+    let spawned = std::thread::Builder::new().name("lizard-drag-detail".into()).spawn(move || {
+        let Some(pix) = lizard_engine::cmd::file::render_export_area_screen(&source, &[root], view.page_rect(), view.scale) else { return };
+        let image = crate::render_worker::screen_image(&pix, lizard_color::ColorProfile::Srgb);
         if tx.send((view, image)).is_ok() {
             repaint.request_repaint_of(viewport);
         }
@@ -659,7 +658,7 @@ fn request_drag_detail(app: &mut FigApp, ctx: &egui::Context) {
     visual.detail_pending = Some(rx);
 }
 
-pub(crate) fn drag_mode(app: &FigApp) -> &'static str {
+pub(crate) fn drag_mode(app: &LizardApp) -> &'static str {
     #[cfg(not(target_arch = "wasm32"))]
     if app.canvas.dragging && drag_visual_delta(app).is_some() {
         return "composited";
@@ -669,7 +668,7 @@ pub(crate) fn drag_mode(app: &FigApp) -> &'static str {
     "render"
 }
 
-pub(crate) fn drag_prepare_ms(app: &FigApp) -> Option<f64> {
+pub(crate) fn drag_prepare_ms(app: &LizardApp) -> Option<f64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         app.canvas.drag_visual.as_ref().and_then(|v| v.prepare_ms)
@@ -682,7 +681,7 @@ pub(crate) fn drag_prepare_ms(app: &FigApp) -> Option<f64> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn drag_visual_delta(app: &FigApp) -> Option<(f64, f64)> {
+fn drag_visual_delta(app: &LizardApp) -> Option<(f64, f64)> {
     let visual = app.canvas.drag_visual.as_ref()?;
     visual.ready.as_ref()?;
     let ds = app.session.ds().ok()?;
@@ -715,7 +714,7 @@ fn drag_visual_delta(app: &FigApp) -> Option<(f64, f64)> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn paint_drag_visual(app: &FigApp, painter: &egui::Painter) -> bool {
+fn paint_drag_visual(app: &LizardApp, painter: &egui::Painter) -> bool {
     // An idle prepared layer must not replace the normal canvas image. After mouse-up, keep the
     // moved layer visible until the renderer catches up with the committed document.
     if !app.canvas.dragging && drag_visual_matches_idle_document(app) {
@@ -724,7 +723,7 @@ fn paint_drag_visual(app: &FigApp, painter: &egui::Painter) -> bool {
     let Some((dx, dy)) = drag_visual_delta(app) else { return false };
     let Some(visual) = app.canvas.drag_visual.as_ref() else { return false };
     let Some((base, moving)) = visual.ready.as_ref() else { return false };
-    let draw = |tex: &egui::TextureHandle, view: &figcraft_render::View, delta: (f64, f64)| {
+    let draw = |tex: &egui::TextureHandle, view: &lizard_render::View, delta: (f64, f64)| {
         let tl = app.to_screen(view.origin.0 + delta.0, view.origin.1 + delta.1);
         let zoom = app.session.ds().map(|ds| ds.view.zoom).unwrap_or(1.0);
         let size = vec2((f64::from(view.width) / view.scale * zoom) as f32, (f64::from(view.height) / view.scale * zoom) as f32);
@@ -748,8 +747,8 @@ mod drag_visual_tests {
 
     #[test]
     fn isolated_top_frame_matches_full_page_at_rest() {
-        let mut session = figcraft_engine::Session::new();
-        let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+        let mut session = lizard_engine::Session::new();
+        let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
         session.execute("shape.rectangle", &json!({"x": 135, "y": 90, "width": 250, "height": 200, "props": {"fill": "#406080"}})).unwrap();
         let frame =
             id(session.execute("frame.create", &json!({"x": 150, "y": 100, "width": 200, "height": 150, "props": {"fill": "#203040"}})).unwrap());
@@ -758,14 +757,14 @@ mod drag_visual_tests {
             .unwrap();
         let ds = session.ds().unwrap();
         assert!(drag_root_is_independent(&ds.doc, ds.page, frame));
-        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 512, height: 400 };
-        let opts = figcraft_render::Options { lod: true, ..Default::default() };
-        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
-        let opts = figcraft_render::Options { skip: vec![frame], lod: true, ..Default::default() };
-        let mut base = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 512, height: 400 };
+        let opts = lizard_render::Options { lod: true, ..Default::default() };
+        let full = lizard_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let opts = lizard_render::Options { skip: vec![frame], lod: true, ..Default::default() };
+        let mut base = lizard_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
         let crop = cropped_drag_view(&ds.doc, frame, &view).unwrap();
-        let mut moving = figcraft_render::Pixmap::new(crop.width, crop.height).unwrap();
-        figcraft_render::render_nodes_into_preview(&ds.doc, &[frame], &crop, &mut moving, true);
+        let mut moving = lizard_render::Pixmap::new(crop.width, crop.height).unwrap();
+        lizard_render::render_nodes_into_preview(&ds.doc, &[frame], &crop, &mut moving, true);
         let x = ((crop.origin.0 - view.origin.0) * view.scale).round() as i32;
         let y = ((crop.origin.1 - view.origin.1) * view.scale).round() as i32;
         base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
@@ -774,21 +773,21 @@ mod drag_visual_tests {
 
     #[test]
     fn gpu_first_drag_layers_preserve_background_and_moving_frame() {
-        let mut session = figcraft_engine::Session::new();
-        let id = |value: serde_json::Value| figcraft_engine::params::id_of(&value["id"]).unwrap();
+        let mut session = lizard_engine::Session::new();
+        let id = |value: serde_json::Value| lizard_engine::params::id_of(&value["id"]).unwrap();
         session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 120, "height": 80, "props": {"fill": "#406080"}})).unwrap();
         let frame = id(session.execute("frame.create", &json!({"x": 40, "y": 30, "width": 80, "height": 60, "props": {"fill": "#203040"}})).unwrap());
         session
             .execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20, "parent": frame, "props": {"fill": "#e03030"}}))
             .unwrap();
         let ds = session.ds().unwrap();
-        let view = figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
-        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()).unwrap();
+        let view = lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let full = lizard_render::render_view(&ds.doc, ds.page, &view, &Default::default()).unwrap();
         let mut hidden = (*ds.doc).clone();
         hidden.node_mut(frame).unwrap().visible = false;
-        let mut base = figcraft_engine::cmd::file::render_page_pixels(&hidden, ds.page, &view).unwrap();
+        let mut base = lizard_engine::cmd::file::render_page_pixels(&hidden, ds.page, &view).unwrap();
         let crop = cropped_drag_view(&ds.doc, frame, &view).unwrap();
-        let moving = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], crop.page_rect(), crop.scale).unwrap();
+        let moving = lizard_engine::cmd::file::render_export_area(&ds.doc, &[frame], crop.page_rect(), crop.scale).unwrap();
         assert_eq!((moving.width(), moving.height()), (crop.width, crop.height));
         let x = ((crop.origin.0 - view.origin.0) * view.scale).round() as i32;
         let y = ((crop.origin.1 - view.origin.1) * view.scale).round() as i32;
@@ -809,20 +808,20 @@ mod drag_visual_tests {
 
     #[test]
     fn zoomed_frame_uses_bounded_preview_and_sharp_visible_tile() {
-        let mut session = figcraft_engine::Session::new();
-        let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+        let mut session = lizard_engine::Session::new();
+        let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
         let frame =
             id(session.execute("frame.create", &json!({"x": 100, "y": 100, "width": 2048, "height": 1210, "props": {"fill": "#203040"}})).unwrap());
         session
             .execute("shape.rectangle", &json!({"parent": frame, "x": 20, "y": 30, "width": 60, "height": 80, "props": {"fill": "#e03030"}}))
             .unwrap();
         let ds = session.ds().unwrap();
-        let view = figcraft_render::View { origin: (90.0, 90.0), scale: 8.0, width: 1600, height: 900 };
+        let view = lizard_render::View { origin: (90.0, 90.0), scale: 8.0, width: 1600, height: 900 };
         let preview = cropped_drag_view(&ds.doc, frame, &view).unwrap();
         assert!(preview.scale < view.scale);
         assert!(preview.width <= 4096 && preview.height <= 4096);
         assert!(u64::from(preview.width) * u64::from(preview.height) <= 8_000_000);
-        let preview_pixels = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], preview.page_rect(), preview.scale).unwrap();
+        let preview_pixels = lizard_engine::cmd::file::render_export_area(&ds.doc, &[frame], preview.page_rect(), preview.scale).unwrap();
         assert_eq!((preview_pixels.width(), preview_pixels.height()), (preview.width, preview.height));
         let visual = DragVisual {
             uid: ds.uid,
@@ -847,14 +846,14 @@ mod drag_visual_tests {
         assert_eq!(detail.scale, view.scale);
         assert!(detail_covers_visible(&visual, &detail, (0.0, 0.0)));
         assert!(!detail_covers_visible(&visual, &detail, (-90.0, -60.0)));
-        let detail_pixels = figcraft_engine::cmd::file::render_export_area(&ds.doc, &[frame], detail.page_rect(), detail.scale).unwrap();
+        let detail_pixels = lizard_engine::cmd::file::render_export_area(&ds.doc, &[frame], detail.page_rect(), detail.scale).unwrap();
         assert_eq!((detail_pixels.width(), detail_pixels.height()), (detail.width, detail.height));
-        let opts = figcraft_render::Options { lod: true, ..Default::default() };
-        let full = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
-        let opts = figcraft_render::Options { skip: vec![frame], lod: true, ..Default::default() };
-        let mut base = figcraft_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
-        let mut moving = figcraft_render::Pixmap::new(detail.width, detail.height).unwrap();
-        figcraft_render::render_nodes_into_preview(&ds.doc, &[frame], &detail, &mut moving, true);
+        let opts = lizard_render::Options { lod: true, ..Default::default() };
+        let full = lizard_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let opts = lizard_render::Options { skip: vec![frame], lod: true, ..Default::default() };
+        let mut base = lizard_render::render_view(&ds.doc, ds.page, &view, &opts).unwrap();
+        let mut moving = lizard_render::Pixmap::new(detail.width, detail.height).unwrap();
+        lizard_render::render_nodes_into_preview(&ds.doc, &[frame], &detail, &mut moving, true);
         let x = ((detail.origin.0 - view.origin.0) * view.scale).round() as i32;
         let y = ((detail.origin.1 - view.origin.1) * view.scale).round() as i32;
         base.draw_pixmap(x, y, moving.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
@@ -863,7 +862,7 @@ mod drag_visual_tests {
 
     #[test]
     fn large_window_background_is_bounded_without_changing_its_page_extent() {
-        let base = figcraft_render::View { origin: (45.0, -20.0), scale: 2.0, width: 9000, height: 3500 };
+        let base = lizard_render::View { origin: (45.0, -20.0), scale: 2.0, width: 9000, height: 3500 };
         let preview = drag_background_view(&base).unwrap();
         assert!(preview.scale < base.scale);
         assert!(preview.width <= 8192 && preview.height <= 8192);
@@ -885,7 +884,7 @@ pub struct PreeditView {
     pub cursor: usize,
 }
 
-impl FigApp {
+impl LizardApp {
     fn preedit_key(&self) -> Option<(Arc<Document>, Preedit, usize)> {
         let ds = self.session.ds().ok()?;
         let te = ds.text_edit.as_ref()?;
@@ -898,7 +897,7 @@ impl FigApp {
             return;
         }
         self.canvas.preedit = self.preedit_key().and_then(|key| {
-            let (doc, range, cursor) = figcraft_engine::textedit::preedit_doc(&self.session)?;
+            let (doc, range, cursor) = lizard_engine::textedit::preedit_doc(&self.session)?;
             Some(PreeditView { key, doc: Arc::new(doc), range, cursor })
         });
     }
@@ -919,7 +918,7 @@ struct JobKey {
     scale: i64,
     size: (u32, u32),
     outline: bool,
-    outline_extras: figcraft_render::Outline,
+    outline_extras: lizard_render::Outline,
     outlined: Vec<NodeId>,
     skip: Vec<NodeId>,
     solo: Option<NodeId>,
@@ -930,7 +929,7 @@ struct JobKey {
 }
 
 /// Only visible animated paints keep the canvas clock awake. Hidden branches do not count.
-fn animated_shader_visible(doc: &Document, page: NodeId, view: &figcraft_render::View) -> bool {
+fn animated_shader_visible(doc: &Document, page: NodeId, view: &lizard_render::View) -> bool {
     let visible = view.page_rect();
     let mut pending = doc.node(page).map(|node| node.children.clone()).unwrap_or_default();
     while let Some(id) = pending.pop() {
@@ -955,7 +954,7 @@ fn animated_shader_visible(doc: &Document, page: NodeId, view: &figcraft_render:
     false
 }
 
-impl FigApp {
+impl LizardApp {
     /// Page → screen (logical points).
     pub fn to_screen(&self, x: f64, y: f64) -> Pos2 {
         let Ok(ds) = self.session.ds() else { return Pos2::ZERO };
@@ -969,7 +968,7 @@ impl FigApp {
     }
 }
 
-fn pointer_event(app: &FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) -> PointerEvent {
+fn pointer_event(app: &LizardApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) -> PointerEvent {
     let p = app.to_page(pos);
     let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
     PointerEvent {
@@ -1037,9 +1036,9 @@ fn simple_pending_layer(doc: &Document, page: NodeId, id: NodeId) -> bool {
 }
 
 /// The device-pixel rectangle needed for just this layer, aligned with a snapped full render.
-fn pending_layer_view(doc: &Document, id: NodeId, visible: &figcraft_render::View) -> Option<figcraft_render::View> {
-    let (snapped, px) = figcraft_render::retained::snap(visible)?;
-    let bounds = figcraft_render::draw::paint_bounds(doc, id)?;
+fn pending_layer_view(doc: &Document, id: NodeId, visible: &lizard_render::View) -> Option<lizard_render::View> {
+    let (snapped, px) = lizard_render::retained::snap(visible)?;
+    let bounds = lizard_render::draw::paint_bounds(doc, id)?;
     let s = snapped.scale;
     let (left, top, right, bottom) = (bounds.x0 * s, bounds.y0 * s, bounds.x1 * s, bounds.y1 * s);
     if ![left, top, right, bottom].iter().all(|n| n.is_finite() && n.abs() < 1e15) {
@@ -1053,10 +1052,10 @@ fn pending_layer_view(doc: &Document, id: NodeId, visible: &figcraft_render::Vie
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 4_000_000 {
         return None;
     }
-    Some(figcraft_render::View { origin: ((px.0 + i64::from(x0)) as f64 / s, (px.1 + i64::from(y0)) as f64 / s), scale: s, width, height })
+    Some(lizard_render::View { origin: ((px.0 + i64::from(x0)) as f64 / s, (px.1 + i64::from(y0)) as f64 / s), scale: s, width, height })
 }
 
-fn paint_pending_layer(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Context, ppp: f32) {
+fn paint_pending_layer(app: &mut LizardApp, painter: &egui::Painter, ctx: &egui::Context, ppp: f32) {
     // A current GPU texture already contains the newly created layer. Rasterizing a second
     // CPU preview here duplicates work and can briefly paint a stale layer over the GPU scene.
     if app.canvas.gpu_presented {
@@ -1097,8 +1096,8 @@ fn paint_pending_layer(app: &mut FigApp, painter: &egui::Painter, ctx: &egui::Co
     if !cached {
         app.canvas.pending_layer = (|| {
             let image_view = pending_layer_view(&doc, id, &visible)?;
-            let mut pix = figcraft_render::Pixmap::new(image_view.width, image_view.height)?;
-            figcraft_render::render_nodes_into_preview(&doc, &[id], &image_view, &mut pix, true);
+            let mut pix = lizard_render::Pixmap::new(image_view.width, image_view.height)?;
+            lizard_render::render_nodes_into_preview(&doc, &[id], &image_view, &mut pix, true);
             let image = crate::render_worker::screen_image(&pix, doc.color_profile);
             let texture = ctx.load_texture("lizard-pending-layer", image, egui::TextureOptions::LINEAR);
             Some(PendingLayer { doc, id, visible, image_view, texture })
@@ -1142,7 +1141,7 @@ fn canvas_zoom_events(input: &egui::InputState) -> Vec<f64> {
     factors
 }
 
-pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
+pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     let rect = ui.max_rect();
     app.canvas.rect = rect;
     let ctx = ui.ctx().clone();
@@ -1224,7 +1223,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
         let texture = if let Some(focus) = ds.focused() {
             if ds.view.outlines {
-                let options = figcraft_render::Outline {
+                let options = lizard_render::Outline {
                     hidden: ds.view.outline_hidden,
                     bounds: ds.view.outline_bounds,
                     light: ds.doc.node(ds.page).is_some_and(
@@ -1233,7 +1232,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                 };
                 backend.focused_outline_texture(gpu_doc, ds.page, focus, &view, clear, options, ds.view.pixel_preview_scale().is_some(), &ctx)
             } else if ds.view.outlines_selection {
-                let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
+                let options = lizard_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
                 backend.focused_selected_outline_texture(
                     gpu_doc,
                     ds.page,
@@ -1251,7 +1250,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
                 backend.focus_texture(gpu_doc, ds.page, focus, &view, clear, ds.view.proof_srgb, &ctx)
             }
         } else if ds.view.outlines {
-            let options = figcraft_render::Outline {
+            let options = lizard_render::Outline {
                 hidden: ds.view.outline_hidden,
                 bounds: ds.view.outline_bounds,
                 light: ds
@@ -1261,7 +1260,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
             };
             backend.outline_texture(gpu_doc, ds.page, &view, clear, options, ds.view.pixel_preview_scale().is_some(), &ctx)
         } else if ds.view.outlines_selection {
-            let options = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
+            let options = lizard_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
             if ds.view.pixel_preview_scale().is_some() {
                 backend.selected_outline_pixel_texture(gpu_doc, ds.page, &ds.selection, &view, clear, options, ds.view.proof_srgb, &ctx)
             } else {
@@ -1380,7 +1379,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
 }
 
 /// The eyedropper's colour and pixel magnifier follow the pointer's lower-right corner.
-fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
+fn eyedropper_preview(app: &mut LizardApp, ctx: &egui::Context) {
     if app.session.tool.tool != ToolId::Eyedropper {
         app.canvas.eyedrop_sample = None;
         return;
@@ -1403,8 +1402,8 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
             GpuSample::Pending => None,
             GpuSample::Unavailable => app.session.ds().ok().and_then(|ds| {
                 let scale = ds.view.zoom.clamp(0.01, 64.0);
-                let view = figcraft_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
-                figcraft_render::render_view(&ds.doc, ds.page, &view, &Default::default()).map(|pix| figcraft_render::to_rgba8(&pix))
+                let view = lizard_render::View { origin: (point.x - 4.0 / scale, point.y - 4.0 / scale), scale, width: 9, height: 9 };
+                lizard_render::render_view(&ds.doc, ds.page, &view, &Default::default()).map(|pix| lizard_render::to_rgba8(&pix))
             }),
         };
         if let Some(pixels) = pixels {
@@ -1413,7 +1412,7 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
     }
     let Some((_, _, _, pixels)) = &app.canvas.eyedrop_sample else { return };
     let center = pixels.get(160..164).unwrap_or(&[0, 0, 0, 255]);
-    let color = figcraft_color::Color::from_rgba8(center[0], center[1], center[2], 255);
+    let color = lizard_color::Color::from_rgba8(center[0], center[1], center[2], 255);
     let screen = ctx.content_rect();
     let x = (pointer.x + 18.0).min(screen.max.x - 357.0).max(screen.min.x + 8.0);
     let y = (pointer.y + 18.0).min(screen.max.y - 95.0).max(screen.min.y + 8.0);
@@ -1474,7 +1473,7 @@ fn eyedropper_preview(app: &mut FigApp, ctx: &egui::Context) {
     });
 }
 
-fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option<(u64, NodeId)>) {
+fn apply_render(app: &mut LizardApp, ctx: &egui::Context, done: Done, shown: Option<(u64, NodeId)>) {
     // A paste followed by Delete can finish while an older effect render is still running.
     // Never put that older document back on screen after a discrete edit. During a live drag,
     // intermediate snapshots still provide useful visual feedback until the newest one arrives.
@@ -1550,7 +1549,7 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
         (slot @ None, TextureUpdate::Full(image)) => {
             app.canvas.tiles.clear();
             app.canvas.upload_pixels = image.size.iter().map(|n| *n as u64).product();
-            *slot = Some(ctx.load_texture("figcraft-canvas", image, filter));
+            *slot = Some(ctx.load_texture("lizard-canvas", image, filter));
             true
         }
         (slot, TextureUpdate::Tiles(tiles)) => {
@@ -1567,7 +1566,7 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
                     next.push(old.swap_remove(index));
                 } else {
                     uploaded += u64::from(tile.view.width) * u64::from(tile.view.height);
-                    let texture = ctx.load_texture("figcraft-canvas-tile", (*tile.image).clone(), filter);
+                    let texture = ctx.load_texture("lizard-canvas-tile", (*tile.image).clone(), filter);
                     next.push(CanvasTile { view: tile.view, image: tile.image, texture });
                 }
             }
@@ -1603,7 +1602,7 @@ fn apply_render(app: &mut FigApp, ctx: &egui::Context, done: Done, shown: Option
 
 /// The image's screen rect; align native-density renders to device pixels to avoid linear filtering
 /// blending neighbouring texels. Stale and pixel-preview renders retain their original projection.
-pub(super) fn presented_image_rect(tl: Pos2, view: &figcraft_render::View, zoom: f64, ppp: f32, pixel_preview: bool) -> Rect {
+pub(super) fn presented_image_rect(tl: Pos2, view: &lizard_render::View, zoom: f64, ppp: f32, pixel_preview: bool) -> Rect {
     let w = (f64::from(view.width) / view.scale * zoom) as f32;
     let h = (f64::from(view.height) / view.scale * zoom) as f32;
     let native_density = !pixel_preview
@@ -1619,7 +1618,7 @@ pub(super) fn presented_image_rect(tl: Pos2, view: &figcraft_render::View, zoom:
 
 /// What the canvas says to screen readers: the selected layer ("Rectangle 1, Rectangle, 120 by 80,
 /// selected"), how many are selected, or the page with nothing selected.
-pub fn describe(s: &figcraft_engine::Session) -> String {
+pub fn describe(s: &lizard_engine::Session) -> String {
     let Ok(ds) = s.ds() else { return String::new() };
     match ds.selection.as_slice() {
         [] => trf("{page}, nothing selected", &[("page", &ds.doc.node(ds.page).map(|p| p.name.as_str()).unwrap_or(tr("Page")))]),
@@ -1671,14 +1670,14 @@ fn shows(c: &CanvasState, done: &Done, shown: Option<(u64, NodeId)>) -> bool {
 }
 
 /// Whether `outer` shows all of the page that `inner` does.
-fn covers(outer: &figcraft_render::View, inner: &figcraft_render::View) -> bool {
+fn covers(outer: &lizard_render::View, inner: &lizard_render::View) -> bool {
     let (o, i) = (outer.page_rect(), inner.page_rect());
     // Rounding in the snapped origin, well under a device pixel.
     let eps = 1e-6 / inner.scale.max(1e-9);
     o.x0 <= i.x0 + eps && o.y0 <= i.y0 + eps && o.x1 >= i.x1 - eps && o.y1 >= i.y1 - eps
 }
 
-fn visible_view_for(view: &figcraft_engine::ViewState, rect: Rect, ppp: f32) -> figcraft_render::View {
+fn visible_view_for(view: &lizard_engine::ViewState, rect: Rect, ppp: f32) -> lizard_render::View {
     let (mut ox, mut oy) = view.origin();
     let (scale, width, height) = if let Some(k) = view.pixel_preview_scale() {
         // Pixel preview renders whole page pixels and magnifies them without smoothing.
@@ -1688,7 +1687,7 @@ fn visible_view_for(view: &figcraft_engine::ViewState, rect: Rect, ppp: f32) -> 
     } else {
         (view.zoom * f64::from(ppp), (rect.width() * ppp).ceil().max(1.0) as u32, (rect.height() * ppp).ceil().max(1.0) as u32)
     };
-    figcraft_render::View { origin: (ox, oy), scale, width, height }
+    lizard_render::View { origin: (ox, oy), scale, width, height }
 }
 
 #[cfg(test)]
@@ -1697,7 +1696,7 @@ mod visible_view_tests {
 
     #[test]
     fn resizing_changes_gpu_view_dimensions_without_a_cpu_render() {
-        let mut view = figcraft_engine::ViewState { zoom: 2.0, ..Default::default() };
+        let mut view = lizard_engine::ViewState { zoom: 2.0, ..Default::default() };
         let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
         let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 400.0));
         let before = visible_view_for(&view, small, 2.0);
@@ -1710,7 +1709,7 @@ mod visible_view_tests {
     }
 }
 
-fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
+fn request_render(app: &mut LizardApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
     let Ok(ds) = app.session.ds() else { return };
     let visible_view = visible_view_for(&ds.view, app.canvas.rect, ppp);
     let (ox, oy) = visible_view.origin;
@@ -1719,7 +1718,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     let doc = app.preedit_view().map(|p| p.doc.clone()).unwrap_or_else(|| ds.doc.clone());
     let outlined = if ds.view.outlines_selection { ds.selection.clone() } else { vec![] };
     let proof = ds.view.proof_srgb && !doc.color_profile.is_srgb();
-    let outline_extras = figcraft_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
+    let outline_extras = lizard_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
     // Render beyond the visible viewport. During a pan the previous texture then still covers
     // the screen while the worker renders newly exposed content. Request a new buffer before the
     // visible area reaches its edge, rather than exposing an empty strip each pointer move.
@@ -1746,7 +1745,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
         outlined: outlined.clone(),
         skip: vec![],
         solo: ds.focused(),
-        fonts: figcraft_text::layout_generation(),
+        fonts: lizard_text::layout_generation(),
         proof,
         animation_frame,
     };
@@ -1772,7 +1771,7 @@ fn request_render(app: &mut FigApp, worker: &mut Worker, ctx: &egui::Context, pp
     let job = Job {
         doc,
         page: ds.page,
-        view: figcraft_render::View { origin: requested, scale, width: size.0, height: size.1 },
+        view: lizard_render::View { origin: requested, scale, width: size.0, height: size.1 },
         time: animation_time,
         outline: ds.view.outlines,
         outline_extras,
@@ -1845,7 +1844,7 @@ fn overscan_stays_within_texture_and_pixel_budget() {
 
 /// The zoom tool while Z is held (Alt: zoom out): a click zooms a step about the pointer, a drag
 /// zooms to the dragged area. Takes the pointer from the other tools while it's active.
-fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: egui::Modifiers, typing: bool) -> bool {
+fn zoom_tool(app: &mut LizardApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: egui::Modifiers, typing: bool) -> bool {
     let held = !typing && !mods.command && ui.input(|i| i.key_down(egui::Key::Z));
     app.canvas.zoom_tool = held.then_some(mods.alt);
     let Some(start) = app.canvas.zoom_drag.or_else(|| (held && resp.hovered() && ui.input(|i| i.pointer.primary_pressed())).then_some(pos)) else {
@@ -1871,7 +1870,7 @@ fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: 
 /// The pointer and keys on the canvas. False when something on it with a cursor of its own has
 /// the pointer (a comment pin, a ruler guide, a gradient or padding handle): the tool's cursor
 /// then doesn't show.
-fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
+fn input(app: &mut LizardApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     if crate::proto_canvas::input(app, ui, resp) {
         // A prototype gesture is a press on the canvas too: the Pages list gives up the keyboard.
         app.ui.pages_focus = None;
@@ -2052,7 +2051,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
 }
 
 /// Pointer event `kind` at screen point `pos`, to the tools.
-fn send(app: &mut FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) {
+fn send(app: &mut LizardApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) {
     let ev = pointer_event(app, kind, pos, m);
     if kind == PointerKind::Up {
         app.canvas.pressure = None;
@@ -2066,12 +2065,12 @@ fn send(app: &mut FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) {
 
 /// Right-click at screen `pos`: select what's under the pointer (`deep`: the nested layer), then
 /// open the context menu there.
-pub fn open_context_menu(app: &mut FigApp, pos: Pos2, deep: bool) {
+pub fn open_context_menu(app: &mut LizardApp, pos: Pos2, deep: bool) {
     let p = app.to_page(pos);
     if let Ok(ds) = app.session.ds() {
         let (doc, page, sel, zoom) = (ds.doc.clone(), ds.page, ds.selection.clone(), ds.view.zoom.max(1e-6));
         if let Some(leaf) = app.session.hit(&doc, page, p, 2.0 / zoom) {
-            let target = figcraft_doc::geometry::select_target(&doc, leaf, &sel, deep);
+            let target = lizard_doc::geometry::select_target(&doc, leaf, &sel, deep);
             if !sel.contains(&target) {
                 app.session.set_selection(vec![target]);
             }
@@ -2087,12 +2086,12 @@ fn stroke(c: Color32, w: f32) -> Stroke {
 /// A text layer's layout placed on the canvas: where carets and selected characters show (yours
 /// and other people's in a live session).
 pub(crate) struct TextOnScreen {
-    pub layout: Arc<figcraft_text::TextLayout>,
+    pub layout: Arc<lizard_text::TextLayout>,
     /// How many characters the text has.
     pub chars: usize,
     /// The layout's vertical offset in the box (vertical alignment).
     dy: f64,
-    world: figcraft_geom::Affine,
+    world: lizard_geom::Affine,
 }
 
 impl TextOnScreen {
@@ -2100,26 +2099,26 @@ impl TextOnScreen {
     pub(crate) fn of(doc: &Document, id: NodeId) -> Option<Self> {
         let n = doc.node(id)?;
         let NodeKind::Text(t) = &n.kind else { return None };
-        let (layout, dy) = figcraft_text::layout_node(n)?;
+        let (layout, dy) = lizard_text::layout_node(n)?;
         Some(Self { layout, chars: t.char_count(), dy, world: doc.world_transform(id) })
     }
 
     /// Layout point `(x, y)` on screen (on the path, for text on a path).
-    pub(crate) fn at(&self, app: &FigApp, x: f64, y: f64) -> Pos2 {
+    pub(crate) fn at(&self, app: &LizardApp, x: f64, y: f64) -> Pos2 {
         let q = self.layout.warp_point(x, y);
         let p = self.world * Point::new(q.x, q.y + self.dy);
         app.to_screen(p.x, p.y)
     }
 
     /// The highlight of characters `a..b`, one screen quad per line.
-    pub(crate) fn selection(&self, app: &FigApp, a: usize, b: usize) -> Vec<[Pos2; 4]> {
+    pub(crate) fn selection(&self, app: &LizardApp, a: usize, b: usize) -> Vec<[Pos2; 4]> {
         let rects = self.layout.selection_rects(a, b);
         rects.iter().map(|r| [self.at(app, r.x0, r.y0), self.at(app, r.x1, r.y0), self.at(app, r.x1, r.y1), self.at(app, r.x0, r.y1)]).collect()
     }
 
     /// The caret before character `index`: its top and bottom on screen (an empty layer: a line
     /// of default height at its origin).
-    pub(crate) fn caret(&self, app: &FigApp, index: usize, zoom: f64) -> [Pos2; 2] {
+    pub(crate) fn caret(&self, app: &LizardApp, index: usize, zoom: f64) -> [Pos2; 2] {
         let (cx, li) = self.layout.caret(index);
         match self.layout.lines.get(li).or(self.layout.lines.last()) {
             Some(line) => [self.at(app, cx, line.top), self.at(app, cx, line.top + line.height)],
@@ -2132,7 +2131,7 @@ impl TextOnScreen {
 }
 
 /// A node's oriented outline in screen space.
-pub(crate) fn node_quad(app: &FigApp, doc: &Document, id: NodeId) -> Option<[Pos2; 4]> {
+pub(crate) fn node_quad(app: &LizardApp, doc: &Document, id: NodeId) -> Option<[Pos2; 4]> {
     let n = doc.node(id)?;
     let w = doc.world_transform(id);
     let corners = [Point::new(0.0, 0.0), Point::new(n.width, 0.0), Point::new(n.width, n.height), Point::new(0.0, n.height)];
@@ -2149,8 +2148,8 @@ fn quad(painter: &egui::Painter, q: [Pos2; 4], s: Stroke) {
 /// The slots of the selected components and instances (and a slot being dropped onto): a dashed
 /// outline and the slot's name above its top-left corner, like a frame label (never over the
 /// content).
-fn slot_badges(app: &FigApp, painter: &egui::Painter, doc: &Document, sel: &[NodeId], drop: Option<NodeId>) {
-    use figcraft_engine::components::{owning_component, owning_instance, slot_name, slots_of};
+fn slot_badges(app: &LizardApp, painter: &egui::Painter, doc: &Document, sel: &[NodeId], drop: Option<NodeId>) {
+    use lizard_engine::components::{owning_component, owning_instance, slot_name, slots_of};
     let mut roots: Vec<NodeId> = Vec::new();
     for id in sel {
         let root = match doc.node(*id).map(|n| &n.kind) {
@@ -2188,7 +2187,7 @@ fn slot_badges(app: &FigApp, painter: &egui::Painter, doc: &Document, sel: &[Nod
 
 /// The instance an Alt-drop of a component from the Assets panel swaps: tinted and outlined in
 /// the component colour, with a "Swap instance" label above its top-left corner.
-fn swap_highlight(app: &FigApp, painter: &egui::Painter, doc: &Document, id: NodeId) {
+fn swap_highlight(app: &LizardApp, painter: &egui::Painter, doc: &Document, id: NodeId) {
     let Some(q) = node_quad(app, doc, id) else { return };
     // White on the component colour, in both themes (like the canvas's selection labels).
     let ink = Color32::WHITE;
@@ -2211,7 +2210,7 @@ fn swap_highlight(app: &FigApp, painter: &egui::Painter, doc: &Document, id: Nod
 /// The outline colour for a layer: purple for components, sets and instances and every layer in
 /// them, the page's overlay `green` otherwise.
 fn outline_colour(doc: &Document, id: NodeId, green: Color32) -> Color32 {
-    use figcraft_engine::components::{owning_component, owning_instance};
+    use lizard_engine::components::{owning_component, owning_instance};
     let set = matches!(doc.node(id).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. }));
     if set || owning_component(doc, id).is_some() || owning_instance(doc, id).is_some() { COMPONENT } else { green }
 }
@@ -2222,7 +2221,7 @@ fn has_path_outline(kind: &NodeKind) -> bool {
 }
 
 /// The outline path of shapes (ellipses, vectors) for hover/selection outlines.
-fn outline_shape(app: &FigApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos2>>> {
+fn outline_shape(app: &LizardApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos2>>> {
     let n = doc.node(id)?;
     if !has_path_outline(&n.kind) {
         return None;
@@ -2231,13 +2230,13 @@ fn outline_shape(app: &FigApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos
     // follow the network's segments, including any dangling segments on a filled vector.
     let path = match &n.kind {
         NodeKind::Vector { network } => network.stroke_path(),
-        _ => figcraft_render::node_outline(doc, n)?.0,
+        _ => lizard_render::node_outline(doc, n)?.0,
     };
     let w = doc.world_transform(id);
     let mut out = Vec::new();
     let mut cur: Vec<Pos2> = Vec::new();
-    figcraft_geom::kurbo::flatten(path.iter(), 0.5 / app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0), |el| {
-        use figcraft_geom::kurbo::PathEl::*;
+    lizard_geom::kurbo::flatten(path.iter(), 0.5 / app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0), |el| {
+        use lizard_geom::kurbo::PathEl::*;
         match el {
             MoveTo(p) => {
                 if cur.len() > 1 {
@@ -2267,7 +2266,7 @@ fn outline_shape(app: &FigApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos
 
 /// A layer's outline on the canvas: its shape for ellipses, vectors, polygons, stars and boolean
 /// groups, its box otherwise.
-fn draw_outline(app: &FigApp, painter: &egui::Painter, doc: &Document, id: NodeId, s: Stroke) {
+fn draw_outline(app: &LizardApp, painter: &egui::Painter, doc: &Document, id: NodeId, s: Stroke) {
     match outline_shape(app, doc, id) {
         Some(lines) => {
             for l in lines {
@@ -2284,7 +2283,7 @@ fn draw_outline(app: &FigApp, painter: &egui::Painter, doc: &Document, id: NodeI
 
 /// Everything drawn over the rendered page; returns the frame labels drawn (frame, corners on the
 /// page) for the engine to hit-test.
-fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [Point; 4])> {
+fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [Point; 4])> {
     let mut labels = Vec::new();
     let Ok(ds) = app.session.ds() else { return labels };
     let doc = ds.doc.clone();
@@ -2322,7 +2321,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
         if !on_screen.intersects(app.canvas.rect) {
             continue;
         }
-        if view.layout_grids && !n.grids.is_empty() && figcraft_layout::grids_shown(&doc, *c) {
+        if view.layout_grids && !n.grids.is_empty() && lizard_layout::grids_shown(&doc, *c) {
             let w = doc.world_transform(*c);
             let a = w * Point::new(0.0, 0.0);
             let b = w * Point::new(n.width, n.height);
@@ -2331,11 +2330,11 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
                 let grid_painter = painter.with_clip_rect(frame_clip);
                 for g in n.grids.iter().filter(|g| g.visible) {
                     let col = doc_c32(painter.ctx(), g.color);
-                    for r in figcraft_layout::grid_lines(g, n.width, n.height) {
+                    for r in lizard_layout::grid_lines(g, n.width, n.height) {
                         let a = w * Point::new(r.x0, r.y0);
                         let b = w * Point::new(r.x1, r.y1);
                         let (sa, sb) = (app.to_screen(a.x, a.y), app.to_screen(b.x, b.y));
-                        if g.kind == figcraft_doc::GridKind::Grid {
+                        if g.kind == lizard_doc::GridKind::Grid {
                             grid_painter.line_segment([sa, sb], stroke(col, 1.0));
                         } else {
                             grid_painter.rect_filled(Rect::from_two_pos(sa, sb), CornerRadius::ZERO, col);
@@ -2363,7 +2362,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
     }
     // Inside a boolean group (an operand selected or in vector edit mode): every operand's outline,
     // so the shapes making the live result stay visible while one of them changes.
-    let operands = figcraft_engine::booleans::outlined_operands(&doc, &sel, ds.vector_edit.as_ref().map(|ve| ve.id));
+    let operands = lizard_engine::booleans::outlined_operands(&doc, &sel, ds.vector_edit.as_ref().map(|ve| ve.id));
     for id in operands.iter().filter(|o| !sel.contains(o)) {
         draw_outline(app, painter, &doc, *id, stroke(outline_colour(&doc, *id, accent(painter)).gamma_multiply(0.6), 1.0));
     }
@@ -2388,7 +2387,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
     if let Some(d) = ov.drop_target
         && let Some(q) = node_quad(app, &doc, d)
     {
-        quad(painter, q, stroke(if figcraft_engine::components::is_slot(&doc, d) { COMPONENT } else { accent(painter) }, 1.0));
+        quad(painter, q, stroke(if lizard_engine::components::is_slot(&doc, d) { COMPONENT } else { accent(painter) }, 1.0));
     }
     slot_badges(app, painter, &doc, &sel, ov.drop_target);
     if let Some(t) = ov.swap_target {
@@ -2407,15 +2406,15 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
     // The selection's size label, which measurement labels keep clear of.
     let mut size_label = None;
     if let Some(ve) = ds.vector_edit.clone()
-        && let Some(o) = figcraft_engine::vectoredit::overlay(&doc, &ve)
+        && let Some(o) = lizard_engine::vectoredit::overlay(&doc, &ve)
     {
         // The Variable width tool shows width points in place of the path's points.
-        let width_tool = ve.tool == figcraft_engine::vectoredit::VTool::Width;
+        let width_tool = ve.tool == lizard_engine::vectoredit::VTool::Width;
         // Other layers edited at once go under the active one; the hover shows on its own layer.
         let ov = &app.session.tool.overlay;
         let hover_on = |id| ov.vector_hover.filter(|_| ov.vector_hover_on.unwrap_or(ve.id) == id);
         for part in &ve.others {
-            if let Some(po) = figcraft_engine::vectoredit::overlay(&doc, &ve.view(part)) {
+            if let Some(po) = lizard_engine::vectoredit::overlay(&doc, &ve.view(part)) {
                 vector_overlay(app, painter, &po, !width_tool, hover_on(part.id), false);
             }
         }
@@ -2447,11 +2446,11 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
             }
             // A layer smaller than its handles on screen shows just its outline (they still answer
             // just outside it).
-            let tiny = figcraft_engine::tools::box_sides_px(&b, zoom).1 < figcraft_engine::tools::SMALL_BOX_PX;
+            let tiny = lizard_engine::tools::box_sides_px(&b, zoom).1 < lizard_engine::tools::SMALL_BOX_PX;
             // Measuring to another layer (Alt held) shows just the outlines: no handles or size.
             let measuring = app.session.tool.overlay.measure_box.is_some();
             // Locked layers (selected in the layers panel) can't be resized: no handles either.
-            let handles = if measuring || sel.iter().any(|i| figcraft_engine::tools::locked_in(&doc, *i)) {
+            let handles = if measuring || sel.iter().any(|i| lizard_engine::tools::locked_in(&doc, *i)) {
                 0
             } else if is_line {
                 2
@@ -2478,7 +2477,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
                 // The point that stays put: the dragged pivot, else the anchor.
                 let pivot = scale
                     .map(|h| Point::new(h.pivot[0], h.pivot[1]))
-                    .or_else(|| figcraft_engine::tools::scale_anchor_point(&doc, &sel, app.session.tool.scale_anchor));
+                    .or_else(|| lizard_engine::tools::scale_anchor_point(&doc, &sel, app.session.tool.scale_anchor));
                 if let Some(p) = pivot {
                     let c = app.to_screen(p.x, p.y);
                     painter.circle_filled(c, 4.0, Color32::WHITE);
@@ -2500,7 +2499,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
         }
     }
     if app.session.tool.tool == ToolId::ShapeBuilder
-        && let Some(arr) = figcraft_engine::shapebuilder::current(&app.session)
+        && let Some(arr) = lizard_engine::shapebuilder::current(&app.session)
     {
         builder_overlay(app, painter, t, &arr);
     }
@@ -2563,7 +2562,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
         let pts: Vec<Pos2> = ov.pen.iter().map(|[x, y]| app.to_screen(*x, *y)).collect();
         if app.session.tool.tool == ToolId::Pencil {
             // The stroke it will make, in its colour and weight (at least a point when zoomed out).
-            let (color, weight) = figcraft_engine::tools::PENCIL_STROKE;
+            let (color, weight) = lizard_engine::tools::PENCIL_STROKE;
             painter.add(Shape::line(pts, stroke(doc_c32(painter.ctx(), color), ((weight * zoom) as f32).max(1.0))));
         } else {
             for [x0, y0, x1, y1] in &ov.pen_handles {
@@ -2626,7 +2625,7 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
 /// A transform box (screen corners tl, tr, br, bl): its outline when `outline`, the first `handles`
 /// corner handles and, when dimensions are shown, the size `label` (if any) under it (its box returned).
 fn transform_box(
-    app: &FigApp,
+    app: &LizardApp,
     painter: &egui::Painter,
     q: [Pos2; 4],
     col: Color32,
@@ -2661,8 +2660,8 @@ fn pill(painter: &egui::Painter, at: Pos2, align: Align2, text: String, col: Col
 
 /// The selected ellipse's arc handles (the hovered or dragged one larger, Start with a dot inside)
 /// and, while one is dragged, its readout beside it.
-fn arc_overlay(app: &FigApp, painter: &egui::Painter, col: Color32) {
-    use figcraft_engine::arc_handles::ArcHandle;
+fn arc_overlay(app: &LizardApp, painter: &egui::Painter, col: Color32) {
+    use lizard_engine::arc_handles::ArcHandle;
     let Some(hs) = app.session.arc_handles() else { return };
     let ov = &app.session.tool.overlay;
     for h in [ArcHandle::Ratio, ArcHandle::Start, ArcHandle::Sweep] {
@@ -2683,8 +2682,8 @@ fn arc_overlay(app: &FigApp, painter: &egui::Painter, col: Color32) {
 
 /// The selected shape's corner radius handles and a star's ratio handle (the hovered or dragged
 /// one larger) and, while one is dragged, its value beside it.
-fn shape_overlay(app: &FigApp, painter: &egui::Painter, col: Color32) {
-    use figcraft_engine::shape_handles::ShapeHandle;
+fn shape_overlay(app: &LizardApp, painter: &egui::Painter, col: Color32) {
+    use lizard_engine::shape_handles::ShapeHandle;
     let ov = &app.session.tool.overlay;
     for (h, [x, y]) in app.session.shape_handles() {
         let r = if ov.shape_hover == Some(h) { 4.5 } else { 3.5 };
@@ -2704,12 +2703,12 @@ fn shape_overlay(app: &FigApp, painter: &egui::Painter, col: Color32) {
 
 /// Variable width tool: each width point on the path with a bar across the stroke to its two
 /// width handles (the selected point filled), and a faint preview where a drag would add one.
-fn width_overlay(app: &FigApp, painter: &egui::Painter, doc: &Document, ve: &figcraft_engine::vectoredit::VectorEdit, zoom: f64) {
-    use figcraft_doc::WidthSide;
-    use figcraft_engine::vectoredit::{WHit, width_handles, width_preview};
+fn width_overlay(app: &LizardApp, painter: &egui::Painter, doc: &Document, ve: &lizard_engine::vectoredit::VectorEdit, zoom: f64) {
+    use lizard_doc::WidthSide;
+    use lizard_engine::vectoredit::{WHit, width_handles, width_preview};
     let hover = app.session.tool.overlay.width_hover;
     let sp = |p: &[f64; 2]| app.to_screen(p[0], p[1]);
-    let draw = |h: &figcraft_engine::vectoredit::WidthHandle, ghost: bool| {
+    let draw = |h: &lizard_engine::vectoredit::WidthHandle, ghost: bool| {
         let (c, a, b) = (sp(&h.at), sp(&h.sides[0]), sp(&h.sides[1]));
         let col = if ghost { accent(painter).gamma_multiply(0.5) } else { accent(painter) };
         painter.line_segment([a, b], stroke(Color32::from_white_alpha(160), 3.0));
@@ -2747,14 +2746,14 @@ fn bezier_handle(painter: &egui::Painter, v: Pos2, e: Pos2, r: f32, fill: Color3
 /// Vector edit mode: a layer's segments, handles and points (`points`) with its `hover`ed part, and
 /// for the `active` layer the closed area under the paint bucket and the pen's rubber band.
 fn vector_overlay(
-    app: &FigApp,
+    app: &LizardApp,
     painter: &egui::Painter,
-    o: &figcraft_engine::vectoredit::EditOverlay,
+    o: &lizard_engine::vectoredit::EditOverlay,
     points: bool,
-    hover: Option<figcraft_engine::vectoredit::VHit>,
+    hover: Option<lizard_engine::vectoredit::VHit>,
     active: bool,
 ) {
-    use figcraft_engine::vectoredit::VHit;
+    use lizard_engine::vectoredit::VHit;
     let ov = &app.session.tool.overlay;
     let sp = |p: &[f64; 2]| app.to_screen(p[0], p[1]);
     // Paint bucket target: hatched like a fill to come.
@@ -2810,13 +2809,13 @@ const REGION_HATCH_WIDTH: f32 = 1.4;
 
 /// Vector edit mode: the selected regions and the hovered one hatched in the selection colour,
 /// under the segments and points (the engine lays out and clips the lines).
-fn region_hatch(app: &FigApp, painter: &egui::Painter) {
+fn region_hatch(app: &LizardApp, painter: &egui::Painter) {
     let Ok(ds) = app.session.ds() else { return };
     let (ox, oy) = ds.view.page_to_screen(0.0, 0.0);
     let (z, min) = (ds.view.zoom, app.canvas.rect.min);
-    let view = figcraft_geom::Affine::new([z, 0.0, 0.0, z, f64::from(min.x) + ox, f64::from(min.y) + oy]);
+    let view = lizard_geom::Affine::new([z, 0.0, 0.0, z, f64::from(min.x) + ox, f64::from(min.y) + oy]);
     let r = painter.clip_rect();
-    let clip = figcraft_geom::Rect::new(f64::from(r.min.x), f64::from(r.min.y), f64::from(r.max.x), f64::from(r.max.y));
+    let clip = lizard_geom::Rect::new(f64::from(r.min.x), f64::from(r.min.y), f64::from(r.max.x), f64::from(r.max.y));
     for [a, b] in app.session.vector_region_hatch(view, Some(clip)) {
         painter.line_segment([pos2(a.x as f32, a.y as f32), pos2(b.x as f32, b.y as f32)], stroke(accent(painter), REGION_HATCH_WIDTH));
     }
@@ -2824,9 +2823,9 @@ fn region_hatch(app: &FigApp, painter: &egui::Painter) {
 
 /// Shape builder: every region's edges, and the hovered or collected regions hatched (in the
 /// danger colour when releasing removes them).
-fn builder_overlay(app: &FigApp, painter: &egui::Painter, t: &Tokens, arr: &figcraft_engine::shapebuilder::Arrangement) {
+fn builder_overlay(app: &LizardApp, painter: &egui::Painter, t: &Tokens, arr: &lizard_engine::shapebuilder::Arrangement) {
     let ov = &app.session.tool.overlay;
-    let screen = |r: &figcraft_engine::shapebuilder::Region| -> Vec<Vec<Pos2>> {
+    let screen = |r: &lizard_engine::shapebuilder::Region| -> Vec<Vec<Pos2>> {
         r.polys.iter().map(|poly| poly.iter().map(|p| app.to_screen(p.x, p.y)).collect()).collect()
     };
     // Edges read on any fill: a light halo under a thin accent line.
@@ -2915,17 +2914,17 @@ fn boards(doc: &Document, page: NodeId) -> Vec<NodeId> {
 
 /// A frame's or section's handoff status as its badge says it, with the badge colour ("Changed"
 /// once a ready-for-dev layer was edited; `None` without a status).
-pub(crate) fn status_label(n: &figcraft_doc::Node) -> Option<(&'static str, Color32)> {
+pub(crate) fn status_label(n: &lizard_doc::Node) -> Option<(&'static str, Color32)> {
     match n.dev_status {
-        figcraft_doc::DevStatus::None => None,
-        figcraft_doc::DevStatus::ReadyForDev if n.dev_changed => Some((tr("Changed"), crate::theme::DEV_CHANGED)),
-        figcraft_doc::DevStatus::ReadyForDev => Some((tr("Ready for dev"), crate::theme::DEV_READY)),
-        figcraft_doc::DevStatus::Completed => Some((tr("Completed"), crate::theme::DEV_COMPLETED)),
+        lizard_doc::DevStatus::None => None,
+        lizard_doc::DevStatus::ReadyForDev if n.dev_changed => Some((tr("Changed"), crate::theme::DEV_CHANGED)),
+        lizard_doc::DevStatus::ReadyForDev => Some((tr("Ready for dev"), crate::theme::DEV_READY)),
+        lizard_doc::DevStatus::Completed => Some((tr("Completed"), crate::theme::DEV_COMPLETED)),
     }
 }
 
 /// A frame's or section's handoff status as a small pill left-centred on `at`; the pill's area.
-pub(crate) fn status_badge(painter: &egui::Painter, n: &figcraft_doc::Node, at: Pos2) -> Option<Rect> {
+pub(crate) fn status_badge(painter: &egui::Painter, n: &lizard_doc::Node, at: Pos2) -> Option<Rect> {
     let (label, fill) = status_label(n)?;
     let galley = painter.layout_no_wrap(label.to_string(), semibold(10.0), Color32::WHITE);
     let r = Rect::from_min_size(pos2(at.x, at.y - galley.size().y / 2.0 - 2.0), galley.size() + vec2(10.0, 4.0));
@@ -2934,13 +2933,13 @@ pub(crate) fn status_badge(painter: &egui::Painter, n: &figcraft_doc::Node, at: 
     Some(r)
 }
 
-fn rulers(app: &FigApp, painter: &egui::Painter, t: &Tokens, doc: &Document, sel: &[NodeId]) {
+fn rulers(app: &LizardApp, painter: &egui::Painter, t: &Tokens, doc: &Document, sel: &[NodeId]) {
     let r = app.canvas.rect;
     let size = 20.0;
     painter.rect_filled(Rect::from_min_size(r.min, vec2(r.width(), size)), CornerRadius::ZERO, t.panel);
     painter.rect_filled(Rect::from_min_size(r.min, vec2(size, r.height())), CornerRadius::ZERO, t.panel);
     let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
-    let step = figcraft_engine::guides::ruler_step(zoom);
+    let step = lizard_engine::guides::ruler_step(zoom);
     let p0 = app.to_page(r.min);
     let p1 = app.to_page(r.max);
     // Highlight the selection's span.
@@ -2993,8 +2992,8 @@ fn accent(p: &egui::Painter) -> Color32 {
 mod stale_render_tests {
     use std::{sync::Arc, time::Duration};
 
-    use figcraft_doc::{Document, NodeId};
-    use figcraft_engine::Session;
+    use lizard_doc::{Document, NodeId};
+    use lizard_engine::Session;
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
@@ -3009,7 +3008,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3023,9 +3022,9 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 selected: &[NodeId],
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
-                _options: figcraft_render::Outline,
+                _options: lizard_render::Outline,
                 _proof_srgb: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
@@ -3036,7 +3035,7 @@ mod stale_render_tests {
 
         let mut session = Session::new();
         let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
-        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let id = lizard_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
         let mut ui = Ui::new(session);
         let seen = Arc::new(Mutex::new(Vec::new()));
         ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
@@ -3067,7 +3066,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3082,9 +3081,9 @@ mod stale_render_tests {
                 _page: NodeId,
                 focus: NodeId,
                 selected: &[NodeId],
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
-                _options: figcraft_render::Outline,
+                _options: lizard_render::Outline,
                 _proof_srgb: bool,
                 pixel_preview: bool,
             ) -> Option<egui::TextureId> {
@@ -3095,7 +3094,7 @@ mod stale_render_tests {
 
         let mut session = Session::new();
         let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
-        let focus = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let focus = lizard_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
         let mut ui = Ui::new(session);
         let seen = Arc::new(Mutex::new(Vec::new()));
         ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
@@ -3129,7 +3128,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3143,7 +3142,7 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 focus: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _proof_srgb: bool,
                 _ctx: &egui::Context,
@@ -3155,7 +3154,7 @@ mod stale_render_tests {
 
         let mut session = Session::new();
         let created = session.execute("frame.create", &json!({"x": 10, "y": 10, "width": 80, "height": 60}))?;
-        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
+        let id = lizard_engine::params::id_of(&created["id"]).ok_or("frame command returned no ID")?;
         let mut ui = Ui::new(session);
         let seen = Arc::new(Mutex::new(Vec::new()));
         ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&seen))));
@@ -3170,13 +3169,13 @@ mod stale_render_tests {
     fn pixel_preview_offers_a_low_resolution_view_to_the_gpu() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::Mutex;
 
-        struct Capture(Arc<Mutex<Vec<figcraft_render::View>>>);
+        struct Capture(Arc<Mutex<Vec<lizard_render::View>>>);
         impl super::CanvasGpuBackend for Capture {
             fn texture(
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3189,7 +3188,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
                 _proof_srgb: bool,
                 _ctx: &egui::Context,
@@ -3216,13 +3215,13 @@ mod stale_render_tests {
     fn outline_mode_is_offered_to_the_gpu_backend() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::{Arc, Mutex};
 
-        struct Capture(Arc<Mutex<Vec<(figcraft_render::Outline, bool, f64)>>>);
+        struct Capture(Arc<Mutex<Vec<(lizard_render::Outline, bool, f64)>>>);
         impl super::CanvasGpuBackend for Capture {
             fn texture(
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3235,9 +3234,9 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
-                options: figcraft_render::Outline,
+                options: lizard_render::Outline,
                 pixel_preview: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
@@ -3277,7 +3276,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3291,9 +3290,9 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 focus: NodeId,
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
-                _options: figcraft_render::Outline,
+                _options: lizard_render::Outline,
                 pixel_preview: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
@@ -3334,7 +3333,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3348,7 +3347,7 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 focus: NodeId,
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
                 _proof_srgb: bool,
                 _ctx: &egui::Context,
@@ -3384,7 +3383,7 @@ mod stale_render_tests {
                 &mut self,
                 _doc: Arc<Document>,
                 _page: NodeId,
-                _view: &figcraft_render::View,
+                _view: &lizard_render::View,
                 _clear: [f32; 3],
                 _gesture_active: bool,
                 _proof_srgb: bool,
@@ -3398,9 +3397,9 @@ mod stale_render_tests {
                 _doc: Arc<Document>,
                 _page: NodeId,
                 selected: &[NodeId],
-                view: &figcraft_render::View,
+                view: &lizard_render::View,
                 _clear: [f32; 3],
-                _options: figcraft_render::Outline,
+                _options: lizard_render::Outline,
                 _proof_srgb: bool,
                 _ctx: &egui::Context,
             ) -> Option<egui::TextureId> {
@@ -3430,12 +3429,12 @@ mod stale_render_tests {
     fn current_gpu_scene_clears_the_cpu_creation_preview() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = Session::new();
         let created = session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 60, "height": 40}))?;
-        let id = figcraft_engine::params::id_of(&created["id"]).ok_or("rectangle command returned no ID")?;
+        let id = lizard_engine::params::id_of(&created["id"]).ok_or("rectangle command returned no ID")?;
         session.ds_mut()?.selection = vec![id];
-        let mut app = crate::FigApp::new(session, Box::new(crate::NoServices));
+        let mut app = crate::LizardApp::new(session, Box::new(crate::NoServices));
         let ctx = egui::Context::default();
         app.canvas.rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0));
-        app.canvas.visible_view = Some(figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 300, height: 200 });
+        app.canvas.visible_view = Some(lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 300, height: 200 });
         let frame =
             || egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))), ..Default::default() };
         let mut first = ctx.run_ui(frame(), |ui| super::paint_pending_layer(&mut app, ui.painter(), ui.ctx(), 1.0));
@@ -3452,10 +3451,10 @@ mod stale_render_tests {
     fn a_new_simple_layer_has_a_cropped_immediate_preview() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = Session::new();
         let created = session.execute("text.create", &json!({"text": "Pasted text", "x": 10, "y": 10}))?;
-        let Some(id) = figcraft_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
+        let Some(id) = lizard_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
         let ds = session.ds()?;
         assert!(super::simple_pending_layer(&ds.doc, ds.page, id));
-        let visible = figcraft_render::View { origin: (0.0, 0.0), scale: 16.0, width: 1600, height: 900 };
+        let visible = lizard_render::View { origin: (0.0, 0.0), scale: 16.0, width: 1600, height: 900 };
         let Some(crop) = super::pending_layer_view(&ds.doc, id, &visible) else { return Err("text has no visible preview".into()) };
         assert!(crop.width < visible.width && crop.height < visible.height, "a small text layer must not rasterize the whole canvas");
         session.execute("effect.add", &json!({"ids": [id], "type": "dropShadow"}))?;
@@ -3468,12 +3467,12 @@ mod stale_render_tests {
     fn deleted_text_cannot_reappear_from_an_older_render() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = Session::new();
         let created = session.execute("text.create", &json!({"text": "temporary", "x": 10, "y": 10}))?;
-        let Some(id) = figcraft_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
+        let Some(id) = lizard_engine::params::id_of(&created["id"]) else { return Err("text command returned no ID".into()) };
         let ds = session.ds()?;
         let job = crate::render_worker::Job {
             doc: ds.doc.clone(),
             page: ds.page,
-            view: figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 },
+            view: lizard_render::View { origin: (0.0, 0.0), scale: 1.0, width: 256, height: 256 },
             time: 0.0,
             outline: false,
             outline_extras: Default::default(),
@@ -3505,7 +3504,7 @@ mod stale_render_tests {
     fn a_style_change_retries_when_the_submitted_render_left_a_stale_texture() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = Session::new();
         let created = session.execute("shape.rectangle", &json!({"x": 40, "y": 40, "width": 80, "height": 60, "props": {"fill": "#D9D9D9"}}))?;
-        let Some(rect) = figcraft_engine::params::id_of(&created["id"]) else { return Err("rectangle command returned no ID".into()) };
+        let Some(rect) = lizard_engine::params::id_of(&created["id"]) else { return Err("rectangle command returned no ID".into()) };
         let mut ui = Ui::new(session);
         for _ in 0..300 {
             ui.frame(vec![]);

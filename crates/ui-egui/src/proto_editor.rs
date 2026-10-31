@@ -5,12 +5,12 @@
 //! `proto.conditional.*` command (one undo step each).
 
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_doc::proto::{Action, ConditionalBlock, Expr, ExprOp};
-use figcraft_doc::{Document, NodeId, VariableType, VariableValue, Variables};
-use figcraft_engine::cmd::proto_actions::{action_at, start_value};
+use lizard_doc::proto::{Action, ConditionalBlock, Expr, ExprOp};
+use lizard_doc::{Document, NodeId, VariableType, VariableValue, Variables};
+use lizard_engine::cmd::proto_actions::{action_at, start_value};
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon};
@@ -55,7 +55,7 @@ pub struct VarSlot {
 }
 
 /// Run `cmd` on the action at `slot` (for every layer edited together), with `extra` params.
-pub fn run_at(app: &mut FigApp, slot: &Slot, cmd: &str, extra: Value) -> Option<Value> {
+pub fn run_at(app: &mut LizardApp, slot: &Slot, cmd: &str, extra: Value) -> Option<Value> {
     let mut p = json!({"ids": targets_for(app, slot.node), "index": slot.k, "path": slot.path});
     if let (Some(o), Value::Object(x)) = (p.as_object_mut(), extra) {
         o.extend(x);
@@ -64,11 +64,11 @@ pub fn run_at(app: &mut FigApp, slot: &Slot, cmd: &str, extra: Value) -> Option<
 }
 
 /// Replace the action at `slot`.
-pub fn set_action(app: &mut FigApp, slot: &Slot, a: Action) {
+pub fn set_action(app: &mut LizardApp, slot: &Slot, a: Action) {
     run_at(app, slot, "proto.action.set", json!({ "action": a }));
 }
 
-fn set_condition(app: &mut FigApp, slot: &Slot, block: usize, e: &Expr) {
+fn set_condition(app: &mut LizardApp, slot: &Slot, block: usize, e: &Expr) {
     run_at(app, slot, "proto.conditional.setCondition", json!({"block": block, "condition": e}));
 }
 
@@ -156,7 +156,7 @@ pub(crate) fn list_key(node: NodeId, k: usize, prefix: &[usize]) -> (&'static st
 
 /// An action list: the interaction's (`prefix` empty) or a conditional block's (`prefix` =
 /// `[action, block, …]`), then "Add action". Rows drag by their grip to reorder the list.
-pub fn action_list(app: &mut FigApp, ui: &mut Ui, cx: &Cx, list: &[Action], prefix: &[usize]) {
+pub fn action_list(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, list: &[Action], prefix: &[usize]) {
     let open = open_path(ui.ctx(), cx);
     // An interaction with one action shows its editor as it is.
     let single = prefix.is_empty() && list.len() == 1;
@@ -178,7 +178,7 @@ pub fn action_list(app: &mut FigApp, ui: &mut Ui, cx: &Cx, list: &[Action], pref
                 && next.starts_with(prefix)
                 && let Some(at) = next.get_mut(prefix.len())
             {
-                *at = figcraft_engine::cmd::lists::moved_index(*at, from, to);
+                *at = lizard_engine::cmd::lists::moved_index(*at, from, to);
                 set_open(ui.ctx(), cx, next);
             }
         }
@@ -200,7 +200,7 @@ fn link_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     resp
 }
 
-fn add_action_row(app: &mut FigApp, ui: &mut Ui, cx: &Cx, path: Vec<usize>) {
+fn add_action_row(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, path: Vec<usize>) {
     row(ui, 28.0, |ui| {
         let resp = link_button(ui, Icon::Plus, tr("Add action"));
         menu_popup(&resp).width(200.0).show(|ui| {
@@ -222,7 +222,7 @@ fn add_action_row(app: &mut FigApp, ui: &mut Ui, cx: &Cx, path: Vec<usize>) {
 /// One action: its kind (open) or a summary (closed) with a menu to move or remove it, and when
 /// open its settings below. Returns its row and the area it covers with its settings.
 #[allow(clippy::too_many_arguments)]
-fn action_item(app: &mut FigApp, ui: &mut Ui, cx: &Cx, a: &Action, path: Vec<usize>, count: usize, open: bool, single: bool) -> (Rect, Rect) {
+fn action_item(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, a: &Action, path: Vec<usize>, count: usize, open: bool, single: bool) -> (Rect, Rect) {
     let t = Tokens::get(ui.ctx());
     let i = path.last().copied().unwrap_or(0);
     let removable = path.len() > 1 || count > 1;
@@ -312,7 +312,7 @@ fn action_item(app: &mut FigApp, ui: &mut Ui, cx: &Cx, a: &Action, path: Vec<usi
 
 /// The if / else if / else blocks of a conditional action: each one's condition and actions,
 /// then "Else if" and "Else".
-fn conditional_blocks(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, blocks: &[ConditionalBlock]) {
+fn conditional_blocks(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, blocks: &[ConditionalBlock]) {
     let t = Tokens::get(ui.ctx());
     for (b, block) in blocks.iter().enumerate() {
         let label = match (&block.condition, b) {
@@ -347,7 +347,7 @@ fn text_mode_id(slot: &Slot, b: usize) -> Id {
     slot.id("proto_cond_text").with(b)
 }
 
-fn block_header(app: &mut FigApp, ui: &mut Ui, slot: &Slot, b: usize, label: &str, cond: Option<&Expr>) {
+fn block_header(app: &mut LizardApp, ui: &mut Ui, slot: &Slot, b: usize, label: &str, cond: Option<&Expr>) {
     let t = Tokens::get(ui.ctx());
     row(ui, 28.0, |ui| {
         let buttons = if cond.is_some() { 56.0 } else { 24.0 };
@@ -443,7 +443,7 @@ fn with_op(s: &Simple, op: ExprOp, vars: &Variables) -> Simple {
 
 /// Block `b`'s condition: the builder (variable, operator, value or variable) when it fits,
 /// otherwise (or by choice) an expression field.
-fn condition_editor(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, c: &Expr) {
+fn condition_editor(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, c: &Expr) {
     let vars = &cx.doc.variables;
     let text = ui.data(|d| d.get_temp::<bool>(text_mode_id(slot, b))).unwrap_or(false);
     match simple(c).filter(|_| !text) {
@@ -457,7 +457,7 @@ fn condition_editor(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usiz
     }
 }
 
-fn builder_row(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, s: &Simple) {
+fn builder_row(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, s: &Simple) {
     let vars = &cx.doc.variables;
     let var = vars.get(&s.var);
     let kind = var.map(|v| v.kind);
@@ -482,7 +482,7 @@ fn builder_row(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize, s:
             }
         });
         let field = Rect::from_min_size(ui.cursor().min, vec2(side, FIELD_H));
-        let commit = |app: &mut FigApp, rhs: Rhs| set_condition(app, slot, b, &Simple { rhs, ..s.clone() }.expr());
+        let commit = |app: &mut LizardApp, rhs: Rhs| set_condition(app, slot, b, &Simple { rhs, ..s.clone() }.expr());
         match &s.rhs {
             Rhs::Nothing => {}
             Rhs::Variable(other) => {
@@ -532,10 +532,10 @@ fn literal_field(ui: &mut Ui, id: Id, cur: &VariableValue, w: f32) -> Option<Var
         }
         VariableValue::Color(c) => {
             let swatch = 16.0;
-            widgets::swatch(ui, &figcraft_color::Paint::solid(*c), swatch);
+            widgets::swatch(ui, &lizard_color::Paint::solid(*c), swatch);
             let hex = c.to_hex();
             widgets::text_field(ui, id, &hex, (w - swatch - 8.0).max(32.0), "")
-                .and_then(|h| figcraft_color::Color::from_hex_or_name(&h))
+                .and_then(|h| lizard_color::Color::from_hex_or_name(&h))
                 .filter(|n| n.to_hex() != hex)
                 .map(VariableValue::Color)
         }
@@ -546,7 +546,7 @@ fn literal_field(ui: &mut Ui, id: Id, cur: &VariableValue, w: f32) -> Option<Var
 
 /// A set variable action: the variable (from the variable picker) and the value it gets, fixed or
 /// computed by an expression when the action runs (`count + 1`, `"Hi " + name`).
-fn set_variable_fields(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, variable: &str, value: &Value, expr: Option<&Expr>) {
+fn set_variable_fields(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, variable: &str, value: &Value, expr: Option<&Expr>) {
     let vars = &cx.doc.variables;
     let var = vars.get(variable);
     widgets::sublabels(ui, tr("Variable"), None);
@@ -561,7 +561,7 @@ fn set_variable_fields(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, vari
     });
     let Some(var) = var else { return };
     let set =
-        |app: &mut FigApp, value: Value, expr: Option<Expr>| set_action(app, slot, Action::SetVariable { variable: var.id.clone(), value, expr });
+        |app: &mut LizardApp, value: Value, expr: Option<Expr>| set_action(app, slot, Action::SetVariable { variable: var.id.clone(), value, expr });
     // The toggle between a fixed value and an expression ends the value's row.
     let toggle = |ui: &mut Ui| {
         let on = expr.is_some();
@@ -597,7 +597,7 @@ fn set_variable_fields(app: &mut FigApp, ui: &mut Ui, cx: &Cx, slot: &Slot, vari
             }
         }
         None => {
-            let cur = figcraft_engine::proto_run::literal(var.kind, value).unwrap_or_else(|| start_value(vars, var));
+            let cur = lizard_engine::proto_run::literal(var.kind, value).unwrap_or_else(|| start_value(vars, var));
             row(ui, 32.0, |ui| {
                 let w = ui.available_width() - 32.0;
                 if let Some(v) = literal_field(ui, slot.id("proto_set_value"), &cur, w) {
@@ -663,7 +663,7 @@ fn expr_field(
 }
 
 /// Use the variable picked in the variable picker in the action `vs` points at.
-pub fn pick_variable(app: &mut FigApp, vs: &VarSlot, id: &str) {
+pub fn pick_variable(app: &mut LizardApp, vs: &VarSlot, id: &str) {
     let Ok(doc) = app.session.ds().map(|d| d.doc.clone()) else { return };
     let vars = &doc.variables;
     let Some(picked) = vars.get(id) else { return };

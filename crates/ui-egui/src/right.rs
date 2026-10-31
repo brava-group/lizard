@@ -1,9 +1,9 @@
 //! The right panel: Design, Prototype and Inspect tabs.
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_color::{BlendMode, Paint, PaintKind};
-use figcraft_doc::*;
-use figcraft_engine::cmd::lists::{moved_index, removed_index};
+use lizard_color::{BlendMode, Paint, PaintKind};
+use lizard_doc::*;
+use lizard_engine::cmd::lists::{moved_index, removed_index};
 use serde_json::{Value, json};
 
 use crate::a11y::{self, Tip};
@@ -14,7 +14,7 @@ use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonV
 use crate::style_picker::{self, StyleSlot};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
 use crate::widgets::{self, Edit, FIELD_H, FieldEdit, Lead, PAD};
-use crate::{FigApp, RightTab};
+use crate::{LizardApp, RightTab};
 
 /// Common value of `f` across `ids` (None when mixed or empty).
 pub(crate) fn common<T: PartialEq + Clone>(doc: &Document, ids: &[NodeId], f: impl Fn(&Node) -> T) -> Option<T> {
@@ -27,11 +27,11 @@ pub(crate) fn common<T: PartialEq + Clone>(doc: &Document, ids: &[NodeId], f: im
 
 /// A value for the edited points, including the ends of selected segments. The outer `None`
 /// means no points are selected; the inner `None` means their radii differ.
-pub(crate) fn selected_point_radius(doc: &Document, edit: &figcraft_engine::vectoredit::VectorEdit) -> Option<Option<f64>> {
+pub(crate) fn selected_point_radius(doc: &Document, edit: &lizard_engine::vectoredit::VectorEdit) -> Option<Option<f64>> {
     let mut first = None;
     let mut mixed = false;
     for part in edit.parts() {
-        let Some(net) = figcraft_engine::vectoredit::network(doc, part.id) else { continue };
+        let Some(net) = lizard_engine::vectoredit::network(doc, part.id) else { continue };
         let mut points = part.vertices;
         for segment in part.segments.iter().filter_map(|index| net.segments.get(*index)) {
             points.extend([segment.a, segment.b]);
@@ -67,7 +67,7 @@ fn layer_corner_radius_base(node: &Node) -> f64 {
     }
 }
 
-impl FigApp {
+impl LizardApp {
     /// Set properties on `ids` (one undo step).
     pub fn set_props(&mut self, ids: &[NodeId], props: Value) {
         if ids.is_empty() {
@@ -123,7 +123,7 @@ impl FigApp {
     }
 }
 
-pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
+pub fn right_panel(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 0.0;
     let w = ui.available_width();
@@ -238,14 +238,14 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, t.border));
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
-        if app.session.tool.tool == figcraft_engine::ToolId::Comment {
+        if app.session.tool.tool == lizard_engine::ToolId::Comment {
             crate::comments::panel(app, ui);
             ui.add_space(80.0);
             return;
         }
         match app.ui.right_tab {
             // The Frame tool shows the frame presets.
-            RightTab::Design if app.session.tool.tool == figcraft_engine::ToolId::Frame => crate::frame_presets::panel(app, ui),
+            RightTab::Design if app.session.tool.tool == lizard_engine::ToolId::Frame => crate::frame_presets::panel(app, ui),
             RightTab::Design => design(app, ui),
             RightTab::Prototype => crate::proto_panel::prototype(app, ui),
             RightTab::Inspect => inspect(app, ui),
@@ -277,7 +277,7 @@ pub enum CatalogSection {
 }
 
 #[cfg(feature = "catalog")]
-pub fn catalog_section(app: &mut FigApp, ui: &mut Ui, section: CatalogSection) {
+pub fn catalog_section(app: &mut LizardApp, ui: &mut Ui, section: CatalogSection) {
     let Ok(ds) = app.session.ds() else { return };
     let doc = ds.doc.clone();
     let sel = ds.selection.clone();
@@ -390,7 +390,7 @@ pub(crate) fn block(ui: &mut Ui, h: f32, inset_y: f32, add: impl FnOnce(&mut Ui)
     r
 }
 
-fn design(app: &mut FigApp, ui: &mut Ui) {
+fn design(app: &mut LizardApp, ui: &mut Ui) {
     let Ok(ds) = app.session.ds() else { return };
     // The panel shows the document itself, not a live text preview over it.
     let doc = ds.text_preview.clone().unwrap_or_else(|| ds.doc.clone());
@@ -416,7 +416,7 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
         Some(ve) => crate::vector_panel::points(app, ui, &doc, &ve),
         None => {
             crate::section_panel::section(app, ui, &doc, &sel);
-            if app.session.tool.tool == figcraft_engine::ToolId::Scale {
+            if app.session.tool.tool == lizard_engine::ToolId::Scale {
                 crate::scale_panel::section(app, ui, &doc, &sel);
                 widgets::separator(ui);
             }
@@ -456,11 +456,11 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
     crate::export_panel::section(app, ui, &doc, &sel);
 }
 
-fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
+fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
     let Ok(page) = app.session.page() else { return };
     let (bg, background_visible) = match doc.node(page).map(|n| &n.kind) {
         Some(NodeKind::Page { background, background_visible, .. }) => (*background, *background_visible),
-        _ => (figcraft_color::Color::DEFAULT_PAGE, true),
+        _ => (lizard_color::Color::DEFAULT_PAGE, true),
     };
     widgets::section_header(ui, tr("Page"), &[], false);
     let mut color_change = crate::primitives::ColorControlResponse::default();
@@ -490,7 +490,7 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
         app.ui.picker = Some(crate::colorpicker::PickerTarget::PageBackground);
     }
     if let Some(h) = color_change.edited_hex
-        && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+        && let Some(c) = lizard_color::Color::from_hex_or_name(&h)
     {
         app.run("page.setBackground", json!({"color": c.to_css_hex()}));
     }
@@ -503,7 +503,7 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     widgets::separator(ui);
     widgets::section_header(ui, tr("Color profile"), &[], false);
     row(ui, 32.0, |ui| {
-        let profiles = figcraft_color::ColorProfile::ALL;
+        let profiles = lizard_color::ColorProfile::ALL;
         let labels = profiles.map(|profile| profile.label());
         let selected = profiles.iter().position(|profile| *profile == doc.color_profile).unwrap_or(0);
         if let Some(index) =
@@ -517,7 +517,7 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     ui.add_space(12.0);
     widgets::separator(ui);
     // Local variables & styles.
-    let vars = doc.variables.variables.iter().filter(|v| !figcraft_engine::library::is_remote_variable(doc, &v.id)).count();
+    let vars = doc.variables.variables.iter().filter(|v| !lizard_engine::library::is_remote_variable(doc, &v.id)).count();
     widgets::section_header(ui, tr("Local variables"), &[], vars == 0);
     row(ui, 32.0, |ui| {
         let label = trf("Open variables ({count})", &[("count", &vars)]);
@@ -543,7 +543,7 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     crate::export_panel::page_section(app, ui, doc, page);
 }
 
-fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let t = Tokens::get(ui.ctx());
     let label = match common(doc, sel, |n| n.kind.label()) {
         Some(l) if sel.len() == 1 => tr(l).to_string(),
@@ -554,7 +554,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let is_frame = sel.len() == 1 && sel.first().and_then(|i| doc.node(*i)).is_some_and(|n| matches!(n.kind, NodeKind::Frame));
     // Frames and groups convert into each other from the type menu.
     let is_group = !sel.is_empty() && sel.iter().all(|i| doc.node(*i).is_some_and(|n| matches!(n.kind, NodeKind::Group)));
-    let kind_items = |app: &mut FigApp, ui: &mut Ui, frame: bool| {
+    let kind_items = |app: &mut LizardApp, ui: &mut Ui, frame: bool| {
         for (to_frame, label, cmd) in [(true, tr("Frame"), "object.convertToFrame"), (false, tr("Group"), "object.convertToGroup")] {
             if menu_check(ui, to_frame == frame, label, "") {
                 if to_frame != frame {
@@ -599,7 +599,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 kind_items(app, ui, true);
                 crate::primitives::Menu::separator(ui, None);
                 let mut cat = "";
-                for (c, name, pw, ph) in figcraft_engine::cmd::create::FRAME_PRESETS {
+                for (c, name, pw, ph) in lizard_engine::cmd::create::FRAME_PRESETS {
                     if *c != cat {
                         cat = c;
                         ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
@@ -659,7 +659,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         x -= 32.0;
     }
     // Layers in boolean groups, or one boolean group: the operation they use (checked in the menu).
-    let current = figcraft_engine::booleans::shown_op(doc, sel);
+    let current = lizard_engine::booleans::shown_op(doc, sel);
     let bool_menu_rect = action_rect(x, 16.0);
     let bool_menu = ui.interact(bool_menu_rect, ui.id().with("bool_menu"), Sense::click()).tip(tr("Boolean groups"));
     if bool_menu.hovered() {
@@ -734,10 +734,10 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     crate::component_panel::instance_section(app, ui, doc, sel);
 }
 
-fn position(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn position(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     widgets::section_header(ui, tr("Alignment"), &[], false);
     // Layers inside an instance take their place and constraints from the main component.
-    let nested = sel.iter().any(|i| figcraft_engine::components::inside_instance(doc, *i));
+    let nested = sel.iter().any(|i| lizard_engine::components::inside_instance(doc, *i));
     ui.add_enabled_ui(!nested, |ui| position_fields(app, ui, doc, sel))
         .response
         .on_disabled_hover_text(tr("Layers in an instance take their position from the main component"));
@@ -770,7 +770,7 @@ fn position_segments(ui: &mut Ui, items: &[(PositionIcon, &str)], width: f32) ->
     picked
 }
 
-fn position_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let col = widgets::col_width(ui.available_width());
     block(ui, 24.0, 0.0, |ui| {
@@ -784,7 +784,7 @@ fn position_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]
             (PositionIcon::AlignVCenter, tip(tr("Align vertical centers"), cmds[4])),
             (PositionIcon::AlignBottom, tip(tr("Align bottom"), cmds[5])),
         ];
-        let picked = ui.add_enabled_ui(figcraft_engine::cmd::arrange::can_align(doc, sel), |ui| {
+        let picked = ui.add_enabled_ui(lizard_engine::cmd::arrange::can_align(doc, sel), |ui| {
             let h = position_segments(ui, &items[..3], col);
             let v = position_segments(ui, &items[3..], col).map(|i| i + 3);
             h.or(v)
@@ -799,7 +799,7 @@ fn position_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]
     // What each field shows of a layer (a relative edit of mixed values starts from it).
     let x_of = |n: &Node| (doc.frame_relative(n.id).as_coeffs()[4] * 100.0).round() / 100.0;
     let y_of = |n: &Node| (doc.frame_relative(n.id).as_coeffs()[5] * 100.0).round() / 100.0;
-    let rot_of = |n: &Node| (figcraft_geom::rotation_degrees(n.transform) * 100.0).round() / 100.0;
+    let rot_of = |n: &Node| (lizard_geom::rotation_degrees(n.transform) * 100.0).round() / 100.0;
     let (x, y, rot) = (common(doc, sel, x_of), common(doc, sel, y_of), common(doc, sel, rot_of));
     block(ui, 24.0, 0.0, |ui| {
         let e = widgets::number_field_mixed(ui, Id::new("pos_x"), Lead::Text("X"), x, "", col, 1.0);
@@ -870,7 +870,7 @@ fn position_fields(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]
 /// the other way) and Ratio (the inner radius), the same values the canvas arc handles drag
 /// (`node.set`'s `arcStart` / `arcSweep` / `arcInner`; bindable to number variables, sweep and
 /// ratio ones holding percentages). Returns whether it showed.
-fn arc_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+fn arc_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
     let arcs: Vec<(f64, f64, f64)> = sel
         .iter()
         .filter_map(|i| match doc.node(*i)?.kind {
@@ -891,7 +891,7 @@ fn arc_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) ->
     let ratio = same(&|a| a.2 * 100.0);
     widgets::section_header(ui, tr("Arc"), &[], false);
     let col = widgets::col_width(ui.available_width());
-    let field = |app: &mut FigApp, ui: &mut Ui, key: &str, icon: Icon, name: &str, value: Option<f64>, suffix: &str, width: f32| {
+    let field = |app: &mut LizardApp, ui: &mut Ui, key: &str, icon: Icon, name: &str, value: Option<f64>, suffix: &str, width: f32| {
         crate::variable_ui::number_field(app, ui, &ids, key, Id::new(("arc", key)), Lead::Icon(icon, name), value, suffix, width)
     };
     widgets::sublabels(ui, tr("Start"), Some(tr("Sweep")));
@@ -913,7 +913,7 @@ fn arc_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) ->
 /// The selected polygons' and stars' point count (3 to 60 on stars), and the stars' ratio (the
 /// inner radius as a share of the outer one), as `node.set`'s `pointCount` / `innerRadius`.
 /// Returns whether it showed.
-fn points_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+fn points_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
     let shapes: Vec<(u32, Option<f64>)> = sel
         .iter()
         .filter_map(|i| match doc.node(*i)?.kind {
@@ -982,7 +982,7 @@ fn appearance_header(ui: &mut Ui, visible: bool) -> Option<usize> {
     clicked
 }
 
-fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let visible = common(doc, sel, |n| n.visible).unwrap_or(true);
     let hdr = appearance_header(ui, visible);
@@ -1227,7 +1227,7 @@ fn appearance(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
 /// collection with more than one mode, Auto (the mode the layer inherits from its parent) or a mode
 /// of its own (`variable.setMode`). Collections from enabled libraries follow under their
 /// library's name (`library.setVariableMode` copies the collection in). Returns whether it showed.
-fn variable_modes(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
+fn variable_modes(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
     if !sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.kind.is_frame_like())) {
         return false;
     }
@@ -1303,7 +1303,7 @@ fn variable_modes(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
 
 /// Set `sel`'s mode of the collection of `row` (`mode` null: Auto). A library collection goes
 /// through `library.setVariableMode` (copying it in); Auto on one never used here is already so.
-fn set_variable_mode(app: &mut FigApp, sel: &[NodeId], row: &crate::variable_ui::ModeRow, mode: Value) {
+fn set_variable_mode(app: &mut LizardApp, sel: &[NodeId], row: &crate::variable_ui::ModeRow, mode: Value) {
     match (row.library, row.key, row.local) {
         (Some((lib, _)), Some(key), _) if !mode.is_null() => {
             app.run("library.setVariableMode", json!({"library": lib, "collection": key, "ids": sel, "mode": mode}));
@@ -1316,7 +1316,7 @@ fn set_variable_mode(app: &mut FigApp, sel: &[NodeId], row: &crate::variable_ui:
 }
 
 /// While a range of text is selected, the Fill section edits that range's colour.
-fn range_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, start: usize, end: usize) {
+fn range_fill(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId, start: usize, end: usize) {
     let t = Tokens::get(ui.ctx());
     widgets::section_header(ui, tr("Fill"), &[], false);
     // The fills over the range, if every character shares them.
@@ -1342,7 +1342,7 @@ fn range_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, start: 
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text_r));
                     if let Some(h) =
                         widgets::text_field_inline(&mut child, Id::new("range_hex"), &c.to_hex(), text_r.shrink2(vec2(0.0, 4.0)), regular(11.0))
-                        && let Some(nc) = figcraft_color::Color::from_hex_or_name(&h)
+                        && let Some(nc) = lizard_color::Color::from_hex_or_name(&h)
                     {
                         app.run("text.style", json!({"id": id, "start": start, "end": end, "textFills": [nc.to_css_hex()]}));
                     }
@@ -1364,7 +1364,7 @@ fn range_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, start: 
     });
 }
 
-fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: bool) {
+fn paints(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: bool) {
     if fills
         && let Some(ve) = app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref())
         && !ve.regions.is_empty()
@@ -1377,7 +1377,7 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
         return;
     }
     if fills
-        && let Some((id, a, b)) = figcraft_engine::textedit::selected_range(&app.session)
+        && let Some((id, a, b)) = lizard_engine::textedit::selected_range(&app.session)
         && a < b
         && sel.contains(&id)
     {
@@ -1413,7 +1413,7 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
                 .find(|paint| paint.visible)
                 .or_else(|| paints.last())
                 .cloned()
-                .unwrap_or_else(|| Paint::solid(figcraft_color::Color::TRANSPARENT));
+                .unwrap_or_else(|| Paint::solid(lizard_color::Color::TRANSPARENT));
             Some((style.name.as_str(), preview))
         });
     if let Some((name, preview)) = styled {
@@ -1551,7 +1551,7 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
         // each side binds to a number variable on its own.
         if let Some(sides) = common(doc, sel, |n| n.stroke.sides).flatten() {
             let col = widgets::col_width(ui.available_width());
-            let fields = ["T", "R", "B", "L"].into_iter().zip(figcraft_engine::cmd::props::STROKE_SIDES);
+            let fields = ["T", "R", "B", "L"].into_iter().zip(lizard_engine::cmd::props::STROKE_SIDES);
             for first in [0, 2] {
                 self::row(ui, 32.0, |ui| {
                     for (k, (label, field)) in fields.clone().enumerate().skip(first).take(2) {
@@ -1566,7 +1566,7 @@ fn paints(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], fills: 
     ui.add_space(12.0);
 }
 
-fn region_paints(app: &mut FigApp, ui: &mut Ui, id: NodeId, regions: Vec<usize>, list: Vec<Paint>) {
+fn region_paints(app: &mut LizardApp, ui: &mut Ui, id: NodeId, regions: Vec<usize>, list: Vec<Paint>) {
     if widgets::section_header(ui, tr("Fill"), &[(Icon::Plus, tr("Add fill"))], list.is_empty()).is_some()
         && app.run("vector.region.fill.add", json!({"id": id, "regions": regions})).is_some()
     {
@@ -1587,7 +1587,7 @@ fn region_paints(app: &mut FigApp, ui: &mut Ui, id: NodeId, regions: Vec<usize>,
 
 /// A linked paint style occupies one row for its whole paint list. The style control opens the
 /// browser; unlink keeps the paints as editable values, while remove clears the paint list.
-fn styled_paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], fills: bool, name: &str, preview: &Paint) {
+fn styled_paint_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], fills: bool, name: &str, preview: &Paint) {
     let t = Tokens::get(ui.ctx());
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let control = Rect::from_min_size(pos2(row.left() + 16.0, row.top() + 4.0), vec2((row.width() - 84.0).max(64.0), 24.0));
@@ -1645,7 +1645,7 @@ fn stroke_side_menu_row(ui: &mut Ui, label: &str, index: usize, selected: bool) 
 }
 
 /// Compact floating editor opened from the advanced stroke button.
-fn stroke_settings_panel(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], header: Rect) -> bool {
+fn stroke_settings_panel(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], header: Rect) -> bool {
     let ids = sel.to_vec();
     let t = Tokens::get(ui.ctx());
     let dark = t.dark;
@@ -1791,7 +1791,7 @@ fn stroke_settings_panel(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[N
         && let Some(profile) = profile
     {
         let points: Vec<Value> =
-            profile.points.iter().rev().map(|q| figcraft_engine::cmd::props::width_point_json(&WidthPoint { t: 1.0 - q.t, ..*q })).collect();
+            profile.points.iter().rev().map(|q| lizard_engine::cmd::props::width_point_json(&WidthPoint { t: 1.0 - q.t, ..*q })).collect();
         app.run("stroke.widthProfile", json!({"ids": ids, "points": points}));
     }
 
@@ -1892,7 +1892,7 @@ pub(crate) fn profile_art(painter: &egui::Painter, rect: Rect, profile: Option<&
 }
 
 /// Stroke settings ▸ Width profile: the presets (each with its shape) and a flip.
-fn width_profile_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], profile: Option<Option<WidthProfile>>) {
+fn width_profile_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], profile: Option<Option<WidthProfile>>) {
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Width profile"), None);
     row(ui, 32.0, |ui| {
@@ -1928,7 +1928,7 @@ fn width_profile_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], profile: Opt
             && let Some(p) = custom
         {
             let pts: Vec<Value> =
-                p.points.iter().rev().map(|q| figcraft_engine::cmd::props::width_point_json(&WidthPoint { t: 1.0 - q.t, ..*q })).collect();
+                p.points.iter().rev().map(|q| lizard_engine::cmd::props::width_point_json(&WidthPoint { t: 1.0 - q.t, ..*q })).collect();
             app.run("stroke.widthProfile", json!({"ids": ids, "points": pts}));
         }
     });
@@ -1936,14 +1936,14 @@ fn width_profile_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], profile: Opt
 
 /// A brush drawn along a short line across `rect`, as outlines (egui fills only convex shapes).
 pub(crate) fn brush_art(painter: &egui::Painter, rect: Rect, preset: &str, col: Color32) {
-    use figcraft_geom::kurbo::{self, PathEl};
-    let mut line = figcraft_geom::BezPath::new();
+    use lizard_geom::kurbo::{self, PathEl};
+    let mut line = lizard_geom::BezPath::new();
     line.move_to((0.0, 0.0));
     line.line_to((f64::from(rect.width()), 0.0));
     let brush = Brush::new(preset);
     let props = StrokeProps { weight: f64::from(rect.height()), align: StrokeAlign::Center, brush: Some(brush.clone()), ..Default::default() };
-    let Some(out) = figcraft_pathops::brush::outline(&line, props.weight, &props, &brush) else { return };
-    for sub in figcraft_geom::split_subpaths(&out) {
+    let Some(out) = lizard_pathops::brush::outline(&line, props.weight, &props, &brush) else { return };
+    for sub in lizard_geom::split_subpaths(&out) {
         let mut pts = Vec::new();
         kurbo::flatten(sub.iter(), 0.25, |el| {
             if let PathEl::MoveTo(p) | PathEl::LineTo(p) = el {
@@ -1955,8 +1955,8 @@ pub(crate) fn brush_art(painter: &egui::Painter, rect: Rect, preset: &str, col: 
 }
 
 /// Stroke settings ▸ Brush: a plain stroke, a stretch brush or a scatter brush, each with its look.
-fn brush_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], brush: Option<Option<Brush>>, width: f32) {
-    use figcraft_pathops::brush::{PRESETS, preset};
+fn brush_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], brush: Option<Option<Brush>>, width: f32) {
+    use lizard_pathops::brush::{PRESETS, preset};
     let t = Tokens::get(ui.ctx());
     widgets::sublabels(ui, tr("Brush"), None);
     row(ui, 32.0, |ui| {
@@ -1999,7 +1999,7 @@ fn brush_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], brush: Option<Option
     });
     // A scatter brush's spacing and jitter.
     let Some(Some(b)) =
-        brush.filter(|b| b.as_ref().and_then(|b| preset(&b.preset)).is_some_and(|p| p.kind == figcraft_pathops::brush::BrushKind::Scatter))
+        brush.filter(|b| b.as_ref().and_then(|b| preset(&b.preset)).is_some_and(|p| p.kind == lizard_pathops::brush::BrushKind::Scatter))
     else {
         return;
     };
@@ -2042,7 +2042,7 @@ fn brush_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], brush: Option<Option
 }
 
 /// Advanced stroke settings: dash pattern, width profile, join and the end points of open paths.
-fn stroke_settings(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn stroke_settings(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let half = widgets::col_width(ui.available_width());
     let st = common(doc, sel, |n| n.stroke.clone());
@@ -2172,7 +2172,7 @@ pub(crate) fn cap_art(p: &egui::Painter, r: Rect, col: Color32, cap: StrokeCap, 
 }
 
 /// Paint `i`'s row (colour control, visibility, remove); returns its area.
-fn paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint, fills: bool, regions: Option<&[usize]>) -> Rect {
+fn paint_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint, fills: bool, regions: Option<&[usize]>) -> Rect {
     let t = Tokens::get(ui.ctx());
     let ids = ids.to_vec();
     let cmd = if regions.is_some() {
@@ -2195,7 +2195,7 @@ fn paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint,
         .is_none()
         .then(|| {
             app.session.doc().ok().and_then(|d| {
-                let key = ids.first().and_then(|id| d.node(*id)).and_then(|n| figcraft_engine::cmd::lists::paint_binding_key(n, fills, i))?;
+                let key = ids.first().and_then(|id| d.node(*id)).and_then(|n| lizard_engine::cmd::lists::paint_binding_key(n, fills, i))?;
                 Some((key.to_string(), crate::variable_ui::bound_name(d, &ids, key)?))
             })
         })
@@ -2232,7 +2232,7 @@ fn paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint,
         app.run("variable.bind", json!({"ids": ids, "field": key, "variable": null}));
     }
     if let Some(h) = change.edited_hex
-        && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+        && let Some(c) = lizard_color::Color::from_hex_or_name(&h)
     {
         app.run(cmd, args("color", json!(c.to_css_hex())));
     }
@@ -2311,7 +2311,7 @@ fn paint_label(p: &Paint) -> String {
     }
 }
 
-fn effects(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let list = common(doc, sel, |n| n.effects.clone());
     let empty = list.as_ref().is_none_or(|l| l.is_empty());
@@ -2478,7 +2478,7 @@ enum EffectTarget<'a> {
 }
 
 impl EffectTarget<'_> {
-    fn set(&self, app: &mut FigApp, index: usize, effect: Effect, scrub: Option<bool>) {
+    fn set(&self, app: &mut LizardApp, index: usize, effect: Effect, scrub: Option<bool>) {
         let (command, params) = match self {
             Self::Layers(ids) => ("effect.set", json!({"ids": ids, "index": index, "effect": effect})),
             Self::Style { id, effects } => {
@@ -2511,12 +2511,12 @@ impl EffectTarget<'_> {
     }
 }
 
-fn effect_popup(app: &mut FigApp, ctx: &egui::Context, ids: &[NodeId], i: usize, e: &Effect) {
+fn effect_popup(app: &mut LizardApp, ctx: &egui::Context, ids: &[NodeId], i: usize, e: &Effect) {
     let anchor = ctx.data(|d| d.get_temp::<Pos2>(Id::new((FX_OPEN, "anchor")))).unwrap_or(pos2(100.0, 140.0));
     effect_popup_target(app, ctx, EffectTarget::Layers(ids), i, e, anchor, effect_panel_id(i), Id::new((FX_OPEN, i)));
 }
 
-pub(crate) fn effect_style_popup(app: &mut FigApp, ctx: &egui::Context, id: &str, effects: &[Effect], index: usize, effect: &Effect, at: Pos2) {
+pub(crate) fn effect_style_popup(app: &mut LizardApp, ctx: &egui::Context, id: &str, effects: &[Effect], index: usize, effect: &Effect, at: Pos2) {
     effect_popup_target(
         app,
         ctx,
@@ -2530,7 +2530,7 @@ pub(crate) fn effect_style_popup(app: &mut FigApp, ctx: &egui::Context, id: &str
 }
 
 fn effect_popup_target(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ctx: &egui::Context,
     target: EffectTarget<'_>,
     i: usize,
@@ -2648,7 +2648,16 @@ fn effect_popup_target(
 }
 
 /// A number field of effect `i` that can be bound to a variable (`effects/<i>/<prop>`).
-fn fx_field(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, prop: &str, lead: Lead, value: f64, width: f32) -> Option<FieldEdit> {
+fn fx_field(
+    app: &mut LizardApp,
+    ui: &mut Ui,
+    target: &EffectTarget<'_>,
+    i: usize,
+    prop: &str,
+    lead: Lead,
+    value: f64,
+    width: f32,
+) -> Option<FieldEdit> {
     match target {
         EffectTarget::Layers(ids) => {
             crate::variable_ui::number_field(app, ui, ids, &format!("effects/{i}/{prop}"), Id::new(("fx", prop, i)), lead, Some(value), "", width)
@@ -2657,7 +2666,7 @@ fn fx_field(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, 
     }
 }
 
-fn fx_icon_field(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, prop: &str, value: f64, icon: usize) -> Option<FieldEdit> {
+fn fx_icon_field(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, prop: &str, value: f64, icon: usize) -> Option<FieldEdit> {
     let origin = ui.cursor().min;
     let result = fx_field(app, ui, target, i, prop, Lead::Text(""), value, 136.0);
     let size = match icon {
@@ -2715,7 +2724,7 @@ fn fx_mode_selector(ui: &mut Ui, labels: &[&str], selected: usize, id: Id) -> Op
 }
 
 fn fx_glass_slider(
-    app: &mut FigApp,
+    app: &mut LizardApp,
     ui: &mut Ui,
     target: &EffectTarget<'_>,
     i: usize,
@@ -2763,7 +2772,7 @@ fn fx_glass_slider(
     effect_target_field(app, target, i, ed, |v| effect(v.max(0.0)));
 }
 
-fn effect_target_field(app: &mut FigApp, target: &EffectTarget<'_>, index: usize, edit: Option<FieldEdit>, effect: impl Fn(f64) -> Effect) {
+fn effect_target_field(app: &mut LizardApp, target: &EffectTarget<'_>, index: usize, edit: Option<FieldEdit>, effect: impl Fn(f64) -> Effect) {
     match edit {
         Some(FieldEdit::Set(value)) => target.set(app, index, effect(value), None),
         Some(FieldEdit::Scrub(value, done)) => target.set(app, index, effect(value), Some(done)),
@@ -2772,27 +2781,27 @@ fn effect_target_field(app: &mut FigApp, target: &EffectTarget<'_>, index: usize
 }
 
 fn fx_glass_light_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let id = Id::new("figcraft_effect_glass_light_texture");
+    let id = Id::new("lizard_effect_glass_light_texture");
     if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
     let rgba = image::load_from_memory(include_bytes!("../assets/effect-glass-light.png")).ok()?.to_rgba8();
     let size = [usize::try_from(rgba.width()).ok()?, usize::try_from(rgba.height()).ok()?];
     let texture =
-        ctx.load_texture("figcraft_effect_glass_light", egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()), egui::TextureOptions::LINEAR);
+        ctx.load_texture("lizard_effect_glass_light", egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()), egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
     Some(texture)
 }
 
-fn effect_settings(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, e: &Effect) {
-    let set = |app: &mut FigApp, e2: Effect, scrub: Option<bool>| target.set(app, i, e2, scrub);
-    let edit = |app: &mut FigApp, ed: Option<FieldEdit>, f: &dyn Fn(f64) -> Effect| match ed {
+fn effect_settings(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, e: &Effect) {
+    let set = |app: &mut LizardApp, e2: Effect, scrub: Option<bool>| target.set(app, i, e2, scrub);
+    let edit = |app: &mut LizardApp, ed: Option<FieldEdit>, f: &dyn Fn(f64) -> Effect| match ed {
         Some(FieldEdit::Set(v)) => set(app, f(v), None),
         Some(FieldEdit::Scrub(v, d)) => set(app, f(v), Some(d)),
         None => {}
     };
     // A new colour for the effect (`secondary`: a duo noise's second colour).
-    let edit_color = |app: &mut FigApp, secondary: bool, c: figcraft_color::Color, scrub: Option<bool>| {
+    let edit_color = |app: &mut LizardApp, secondary: bool, c: lizard_color::Color, scrub: Option<bool>| {
         let mut e2 = e.clone();
         if let Some(slot) = e2.color_mut(secondary) {
             *slot = c;
@@ -3043,7 +3052,7 @@ fn effect_settings(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: 
 }
 
 /// Applies a new colour to an effect: (app, secondary colour, colour, scrubbing: `Some(done)`).
-type ColorEdit<'a> = dyn Fn(&mut FigApp, bool, figcraft_color::Color, Option<bool>) + 'a;
+type ColorEdit<'a> = dyn Fn(&mut LizardApp, bool, lizard_color::Color, Option<bool>) + 'a;
 
 /// `e` with `f` applied to its kind.
 fn tweaked(e: &Effect, f: impl FnOnce(&mut EffectKind)) -> Effect {
@@ -3054,7 +3063,7 @@ fn tweaked(e: &Effect, f: impl FnOnce(&mut EffectKind)) -> Effect {
 
 /// The swatch (opens the colour picker), hex and opacity of effect `i`'s colour (`secondary`: a
 /// duo noise's second colour), in the current row; `edit` applies a new one.
-fn fx_color(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, e: &Effect, secondary: bool, edit: &ColorEdit<'_>) {
+fn fx_color(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, e: &Effect, secondary: bool, edit: &ColorEdit<'_>) {
     let Some(c) = e.color(secondary) else { return };
     let paint = Paint::solid(c);
     let hex = c.to_hex();
@@ -3070,7 +3079,7 @@ fn fx_color(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, 
         app.ui.picker = Some(target.picker(i, secondary));
     }
     if let Some(h) = change.edited_hex
-        && let Some(nc) = figcraft_color::Color::from_hex_or_name(&h)
+        && let Some(nc) = lizard_color::Color::from_hex_or_name(&h)
     {
         edit(app, secondary, nc.with_alpha(c.a), None);
     }
@@ -3082,7 +3091,7 @@ fn fx_color(app: &mut FigApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, 
     }
 }
 
-fn grids(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn grids(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let list = common(doc, sel, |n| n.grids.clone());
     let empty = list.as_ref().is_none_or(|l| l.is_empty());
@@ -3216,7 +3225,7 @@ enum GridTarget<'a> {
 }
 
 impl GridTarget<'_> {
-    fn set(&self, app: &mut FigApp, index: usize, change: impl FnOnce(&mut LayoutGrid), scrub: Option<bool>) {
+    fn set(&self, app: &mut LizardApp, index: usize, change: impl FnOnce(&mut LayoutGrid), scrub: Option<bool>) {
         let (command, params) = match self {
             Self::Layers { ids, grids } => ("node.set", json!({"ids": ids, "props": {"grids": grids_with(grids, index, change)}})),
             Self::Style { id, grids } => ("style.update", json!({"style": id, "value": grids_with(grids, index, change)})),
@@ -3236,7 +3245,7 @@ impl GridTarget<'_> {
     }
 }
 
-fn grid_target_field(app: &mut FigApp, target: &GridTarget<'_>, index: usize, edit: Option<FieldEdit>, change: impl Fn(&mut LayoutGrid, f64)) {
+fn grid_target_field(app: &mut LizardApp, target: &GridTarget<'_>, index: usize, edit: Option<FieldEdit>, change: impl Fn(&mut LayoutGrid, f64)) {
     match edit {
         Some(FieldEdit::Set(value)) => target.set(app, index, |grid| change(grid, value), None),
         Some(FieldEdit::Scrub(value, done)) => target.set(app, index, |grid| change(grid, value), Some(done)),
@@ -3247,10 +3256,10 @@ fn grid_target_field(app: &mut FigApp, target: &GridTarget<'_>, index: usize, ed
 /// Layout grid `i`'s settings: size (grids); count, type, width or height, margin or offset and
 /// gutter (columns and rows); colour. The numbers can be bound to number variables
 /// (`layoutGrids/<i>/<size|count|gutter|offset>`).
-fn grid_settings(app: &mut FigApp, ui: &mut Ui, target: &GridTarget<'_>, i: usize, g: &LayoutGrid) {
+fn grid_settings(app: &mut LizardApp, ui: &mut Ui, target: &GridTarget<'_>, i: usize, g: &LayoutGrid) {
     let col = widgets::col_width(ui.available_width());
     // One bindable number field, applied with `apply` (a scrub is one undo step).
-    let field = |app: &mut FigApp, ui: &mut Ui, name: &str, value: f64, width: f32, apply: &dyn Fn(&mut LayoutGrid, f64)| {
+    let field = |app: &mut LizardApp, ui: &mut Ui, name: &str, value: f64, width: f32, apply: &dyn Fn(&mut LayoutGrid, f64)| {
         let edit = match target {
             GridTarget::Layers { ids, .. } => {
                 let key = format!("layoutGrids/{i}/{name}");
@@ -3369,7 +3378,7 @@ fn grid_settings(app: &mut FigApp, ui: &mut Ui, target: &GridTarget<'_>, i: usiz
         widgets::paint_swatch(ui.painter(), sw, &Paint::solid(g.color));
         let hex_width = (ui.available_width() - 8.0 - 56.0).max(40.0);
         if let Some(h) = widgets::text_field(ui, Id::new(("grid_hex", i)), &g.color.to_hex(), hex_width, "")
-            && let Some(c) = figcraft_color::Color::from_hex_or_name(&h)
+            && let Some(c) = lizard_color::Color::from_hex_or_name(&h)
         {
             target.set(app, i, |grid| grid.color = c.with_alpha(grid.color.a), None);
         }
@@ -3378,7 +3387,7 @@ fn grid_settings(app: &mut FigApp, ui: &mut Ui, target: &GridTarget<'_>, i: usiz
     });
 }
 
-pub(crate) fn grid_style_popup(app: &mut FigApp, ctx: &egui::Context, id: &str, grids: &[LayoutGrid], index: usize, grid: &LayoutGrid, at: Pos2) {
+pub(crate) fn grid_style_popup(app: &mut LizardApp, ctx: &egui::Context, id: &str, grids: &[LayoutGrid], index: usize, grid: &LayoutGrid, at: Pos2) {
     let panel_id = Id::new(("grid_style_settings", id));
     let open_id = Id::new(("grid_style_open", id));
     let mut keep = true;
@@ -3411,7 +3420,7 @@ pub(crate) fn grid_style_popup(app: &mut FigApp, ctx: &egui::Context, id: &str, 
 
 /// One group of inspected properties: label, value (with a swatch for colours) and the style or
 /// variable it comes from. Clicking a row copies its value.
-pub(crate) fn inspect_section(app: &mut FigApp, ui: &mut Ui, s: &figcraft_engine::devinspect::Section) {
+pub(crate) fn inspect_section(app: &mut LizardApp, ui: &mut Ui, s: &lizard_engine::devinspect::Section) {
     let t = Tokens::get(ui.ctx());
     widgets::separator(ui);
     let (hr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
@@ -3424,7 +3433,7 @@ pub(crate) fn inspect_section(app: &mut FigApp, ui: &mut Ui, s: &figcraft_engine
 
 /// An inspected property row: label, value (with a swatch for colours) and the style or variable
 /// it comes from as a chip. Clicking it copies the value.
-pub(crate) fn prop_row(app: &mut FigApp, ui: &mut Ui, p: &figcraft_engine::devinspect::Prop) {
+pub(crate) fn prop_row(app: &mut LizardApp, ui: &mut Ui, p: &lizard_engine::devinspect::Prop) {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
     let resp = resp.tip(trf("Copy {value}", &[("value", &p.value)]));
@@ -3457,7 +3466,7 @@ pub(crate) fn prop_row(app: &mut FigApp, ui: &mut Ui, p: &figcraft_engine::devin
         right = chip.min.x - 6.0;
     }
     let mut x = r.min.x + 96.0;
-    if let Some(c) = p.color.as_deref().and_then(figcraft_color::Color::from_hex) {
+    if let Some(c) = p.color.as_deref().and_then(lizard_color::Color::from_hex) {
         let sw = Rect::from_min_size(pos2(x, r.center().y - 6.0), vec2(12.0, 12.0));
         widgets::paint_swatch(painter, sw, &Paint::solid(c));
         x += 18.0;
@@ -3472,7 +3481,7 @@ pub(crate) fn prop_row(app: &mut FigApp, ui: &mut Ui, p: &figcraft_engine::devin
 
 /// The selection's assets (layers with export settings, icons, images): click one to export it,
 /// or export them all.
-fn inspect_assets(app: &mut FigApp, ui: &mut Ui, assets: &[figcraft_engine::devinspect::Asset]) {
+fn inspect_assets(app: &mut LizardApp, ui: &mut Ui, assets: &[lizard_engine::devinspect::Asset]) {
     let t = Tokens::get(ui.ctx());
     widgets::separator(ui);
     let export_all = [(Icon::Export, tr("Export all"))];
@@ -3511,7 +3520,7 @@ fn inspect_assets(app: &mut FigApp, ui: &mut Ui, assets: &[figcraft_engine::devi
 
 /// The Inspect tab (Dev Mode): the handoff status, annotations, properties, assets and code of
 /// the selected layer, or the list of what's ready for dev.
-fn inspect(app: &mut FigApp, ui: &mut Ui) {
+fn inspect(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Ok(ds) = app.session.ds() else { return };
     let doc = ds.doc.clone();
@@ -3530,7 +3539,7 @@ fn inspect(app: &mut FigApp, ui: &mut Ui) {
     crate::dev_mode::status(app, ui, &doc, &sel);
     crate::dev_mode::annotations_section(app, ui, &doc, first);
     crate::dev_mode::dev_resources_section(app, ui, &doc, first);
-    use figcraft_engine::devinspect::ColorFormat;
+    use lizard_engine::devinspect::ColorFormat;
     let fmt_id = Id::new("inspect_color_format");
     let fmt = ui.data(|d| d.get_temp::<usize>(fmt_id)).and_then(|i| ColorFormat::ALL.get(i).copied()).unwrap_or_default();
     row(ui, 32.0, |ui| {
@@ -3546,11 +3555,11 @@ fn inspect(app: &mut FigApp, ui: &mut Ui) {
             }
         });
     });
-    for s in figcraft_engine::devinspect::properties_with(&doc, first, fmt) {
+    for s in lizard_engine::devinspect::properties_with(&doc, first, fmt) {
         inspect_section(app, ui, &s);
     }
-    inspect_assets(app, ui, &figcraft_engine::devinspect::assets(&doc, &sel));
-    use figcraft_engine::codegen::CodeLang;
+    inspect_assets(app, ui, &lizard_engine::devinspect::assets(&doc, &sel));
+    use lizard_engine::codegen::CodeLang;
     let lang_id = Id::new("inspect_lang");
     let lang = ui.data(|d| d.get_temp::<usize>(lang_id)).and_then(|i| CodeLang::ALL.get(i).copied()).unwrap_or_default();
     // A component tried with other property values: its code replaces the layer's below.
@@ -3586,7 +3595,7 @@ fn inspect(app: &mut FigApp, ui: &mut Ui) {
         }
     });
     let code = played.unwrap_or_else(|| crate::dev_mode::code(app, ui, first, lang));
-    let code = if rem { figcraft_engine::codegen::px_to_rem(&code, 16.0) } else { code };
+    let code = if rem { lizard_engine::codegen::px_to_rem(&code, 16.0) } else { code };
     egui::Frame::NONE
         .fill(t.field)
         .corner_radius(CornerRadius::same(6))
@@ -3638,7 +3647,7 @@ mod effect_panel_tests {
 
     #[test]
     fn shared_effect_editor_updates_effect_styles_through_the_command_engine() {
-        let mut session = figcraft_engine::Session::new();
+        let mut session = lizard_engine::Session::new();
         let created = session.execute(
             "style.create",
             &json!({
@@ -3647,7 +3656,7 @@ mod effect_panel_tests {
         );
         let id = created.ok().and_then(|value| value["id"].as_str().map(str::to_string)).unwrap_or_default();
         assert!(!id.is_empty(), "effect style should be created");
-        let mut app = FigApp::new(session, Box::new(crate::NoServices));
+        let mut app = LizardApp::new(session, Box::new(crate::NoServices));
         let effects = app.session.doc().ok().and_then(|doc| match &doc.style(&id)?.kind {
             StyleKind::Effect { effects } => Some(effects.clone()),
             _ => None,
@@ -3668,7 +3677,7 @@ mod effect_panel_tests {
 
     #[test]
     fn shared_grid_settings_update_grid_styles_through_the_command_engine() {
-        let mut session = figcraft_engine::Session::new();
+        let mut session = lizard_engine::Session::new();
         let created = session.execute(
             "style.create",
             &json!({
@@ -3677,7 +3686,7 @@ mod effect_panel_tests {
         );
         let id = created.ok().and_then(|value| value["id"].as_str().map(str::to_string)).unwrap_or_default();
         assert!(!id.is_empty(), "grid style should be created");
-        let mut app = FigApp::new(session, Box::new(crate::NoServices));
+        let mut app = LizardApp::new(session, Box::new(crate::NoServices));
         let grids = app
             .session
             .doc()

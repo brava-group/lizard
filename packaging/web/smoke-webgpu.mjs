@@ -65,9 +65,9 @@ try {
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     const result = await command('Runtime.evaluate', {
-      expression: `JSON.stringify({ loading: !!document.querySelector('#figcraft_loading'),
-        width: document.querySelector('#figcraft_canvas')?.width ?? 0,
-        height: document.querySelector('#figcraft_canvas')?.height ?? 0 })`,
+      expression: `JSON.stringify({ loading: !!document.querySelector('#lizard_loading'),
+        width: document.querySelector('#lizard_canvas')?.width ?? 0,
+        height: document.querySelector('#lizard_canvas')?.height ?? 0 })`,
       returnByValue: true,
     });
     state = JSON.parse(result.result?.result?.value || '{}');

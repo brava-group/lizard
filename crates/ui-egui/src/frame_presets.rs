@@ -4,18 +4,18 @@
 use egui::{Align2, CornerRadius, Id, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{Tokens, regular, semibold};
 use crate::widgets::{self, PAD};
 
-pub fn panel(app: &mut FigApp, ui: &mut Ui) {
+pub fn panel(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     widgets::section_header(ui, tr("Frame"), &[], false);
     let w = ui.available_width();
     let mut cats: Vec<&str> = Vec::new();
-    for (c, ..) in figcraft_engine::cmd::create::FRAME_PRESETS {
+    for (c, ..) in lizard_engine::cmd::create::FRAME_PRESETS {
         if !cats.contains(c) {
             cats.push(c);
         }
@@ -42,7 +42,7 @@ pub fn panel(app: &mut FigApp, ui: &mut Ui) {
         if !open {
             continue;
         }
-        for (_, name, pw, ph) in figcraft_engine::cmd::create::FRAME_PRESETS.iter().filter(|(c, ..)| *c == cat) {
+        for (_, name, pw, ph) in lizard_engine::cmd::create::FRAME_PRESETS.iter().filter(|(c, ..)| *c == cat) {
             let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
             if resp.hovered() {
                 ui.painter().rect_filled(r.shrink2(vec2(8.0, 1.0)), CornerRadius::same(5), t.hover);

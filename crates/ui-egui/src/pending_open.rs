@@ -6,12 +6,12 @@
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll, Waker};
 
-use figcraft_doc::NodeId;
+use lizard_doc::NodeId;
 use serde_json::{Value, json};
 
 use crate::i18n::{tr, trf, trn};
 use crate::theme::{Tokens, semibold};
-use crate::{FigApp, ReadFuture, RepaintWaker};
+use crate::{LizardApp, ReadFuture, RepaintWaker};
 
 /// A dropped file waiting to be opened (`file.open`, a document of its own) or imported
 /// (`file.import`, into the current document).
@@ -34,7 +34,7 @@ pub struct ImportTarget {
 
 /// Queues dropped file `f` to open as a document of its own: by path, or by its contents when there
 /// is no file on disk to read. Callers checked its extension, so there is a name to tell the format by.
-pub(crate) fn open_dropped(app: &mut FigApp, f: &egui::DroppedFileHandle) {
+pub(crate) fn open_dropped(app: &mut LizardApp, f: &egui::DroppedFileHandle) {
     let path = f.path();
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let (params, read) =
@@ -42,7 +42,7 @@ pub(crate) fn open_dropped(app: &mut FigApp, f: &egui::DroppedFileHandle) {
     app.ui.pending_opens.push(PendingOpen { label: name, params, command: "file.open", target: None, read });
 }
 
-fn run_pending(app: &mut FigApp, pending: PendingOpen) -> Option<Value> {
+fn run_pending(app: &mut LizardApp, pending: PendingOpen) -> Option<Value> {
     let target = match pending.target {
         Some(target) => target,
         None if pending.command != "file.import" => return app.run_user(pending.command, pending.params),
@@ -81,7 +81,7 @@ fn run_pending(app: &mut FigApp, pending: PendingOpen) -> Option<Value> {
 }
 
 /// An import that has no destination left: nothing is imported, and the user is told why.
-fn cancel(app: &mut FigApp, message: String) {
+fn cancel(app: &mut LizardApp, message: String) {
     app.show_error(message);
 }
 
@@ -94,7 +94,7 @@ const FRAMES_BEFORE_OPENING: u8 = 2;
 
 /// Polls the contents still being read: those that arrived go into their file's parameters, files
 /// that couldn't be read are dropped with a message. Whether any are still on their way.
-fn read_contents(app: &mut FigApp, ctx: &egui::Context) -> bool {
+fn read_contents(app: &mut LizardApp, ctx: &egui::Context) -> bool {
     let waker = Waker::from(Arc::new(RepaintWaker(ctx.clone())));
     let mut cx = TaskContext::from_waker(&waker);
     let mut reading = false;
@@ -126,7 +126,7 @@ fn read_contents(app: &mut FigApp, ctx: &egui::Context) -> bool {
 
 /// The card while files wait, then (once it has been on screen and their contents are read) open
 /// them. Called before the import report, so a report for these files shows after them.
-pub fn pending_opens(app: &mut FigApp, ctx: &egui::Context) {
+pub fn pending_opens(app: &mut LizardApp, ctx: &egui::Context) {
     let reading = read_contents(app, ctx);
     if app.ui.pending_opens.is_empty() {
         app.ui.pending_open_frames = 0;

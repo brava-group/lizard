@@ -4,8 +4,8 @@
 //! entering the document, keys pressed while composing are the IME's, and the commit lands once.
 
 use egui::{Event, ImeEvent, Key, Modifiers, RawInput, Rect};
-use figcraft_doc::{NodeId, NodeKind};
-use figcraft_engine::Session;
+use lizard_doc::{NodeId, NodeKind};
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -14,13 +14,13 @@ use crate::layers_drag_tests::Ui;
 fn gpu_backend_receives_the_transient_ime_document() -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::{Arc, Mutex};
 
-    struct Capture(Arc<Mutex<Vec<Arc<figcraft_doc::Document>>>>);
+    struct Capture(Arc<Mutex<Vec<Arc<lizard_doc::Document>>>>);
     impl crate::canvas::CanvasGpuBackend for Capture {
         fn texture(
             &mut self,
-            doc: Arc<figcraft_doc::Document>,
+            doc: Arc<lizard_doc::Document>,
             _page: NodeId,
-            _view: &figcraft_render::View,
+            _view: &lizard_render::View,
             _clear: [f32; 3],
             _gesture_active: bool,
             _proof_srgb: bool,
@@ -33,9 +33,9 @@ fn gpu_backend_receives_the_transient_ime_document() -> Result<(), Box<dyn std::
 
     let mut session = Session::new();
     let created = session.execute("text.create", &json!({"text": "Hi", "x": 40, "y": 40}))?;
-    let id = figcraft_engine::params::id_of(&created["id"]).ok_or("text node missing")?;
+    let id = lizard_engine::params::id_of(&created["id"]).ok_or("text node missing")?;
     let mut ui = Ui::new(session);
-    figcraft_engine::textedit::begin(&mut ui.app.session, id, Some(2), false)?;
+    lizard_engine::textedit::begin(&mut ui.app.session, id, Some(2), false)?;
     let captured = Arc::new(Mutex::new(Vec::new()));
     ui.app.gpu_canvas = Some(Box::new(Capture(Arc::clone(&captured))));
     let (enabled, _) = enabled_disabled();
@@ -83,13 +83,13 @@ fn composing(u: &Ui) -> Option<String> {
 fn pinyin_composes_inline_and_commits_once_with_the_ime_on_every_frame() {
     // The text is measured with a font: without craft-fonts a system one, scanned here rather than
     // by whichever test happens to run first (#333).
-    figcraft_text::scan_system_fonts();
+    lizard_text::scan_system_fonts();
     let mut s = Session::new();
     let t = NodeId(s.execute("text.create", &json!({"text": "Hi", "x": 40, "y": 40})).unwrap()["id"].as_u64().unwrap());
     // On a machine without any font nothing lays out and every caret sits at the start.
-    let fonts = figcraft_text::layout_node(s.doc().unwrap().node(t).unwrap()).is_some_and(|(l, _)| !l.glyphs.is_empty());
+    let fonts = lizard_text::layout_node(s.doc().unwrap().node(t).unwrap()).is_some_and(|(l, _)| !l.glyphs.is_empty());
     let mut u = Ui::new(s);
-    figcraft_engine::textedit::begin(&mut u.app.session, t, Some(2), false).unwrap();
+    lizard_engine::textedit::begin(&mut u.app.session, t, Some(2), false).unwrap();
     // An idle frame (the caret blinking) keeps the IME on, or macOS drops the composition.
     let caret = ime(&mut u, vec![]);
     let ds = u.app.session.ds().unwrap();

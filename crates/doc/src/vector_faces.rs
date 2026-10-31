@@ -7,8 +7,8 @@
 //! Segments are assumed not to cross each other; crossing networks still give well-formed (if
 //! approximate) faces.
 
-use figcraft_geom::kurbo::{ParamCurve, ParamCurveDeriv, PathEl};
-use figcraft_geom::{BezPath, Point, Rect, Shape, Vec2};
+use lizard_geom::kurbo::{ParamCurve, ParamCurveDeriv, PathEl};
+use lizard_geom::{BezPath, Point, Rect, Shape, Vec2};
 
 use crate::vector::{Region, VectorNetwork, WindingRule};
 
@@ -287,7 +287,7 @@ impl VectorNetwork {
         let mut path = BezPath::new();
         for (k, (i, fwd)) in half_edges.iter().enumerate() {
             let Some(c) = self.cubic(*i) else { continue };
-            let c = if *fwd { c } else { figcraft_geom::kurbo::CubicBez::new(c.p3, c.p2, c.p1, c.p0) };
+            let c = if *fwd { c } else { lizard_geom::kurbo::CubicBez::new(c.p3, c.p2, c.p1, c.p0) };
             if k == 0 {
                 path.move_to(c.p0);
             }
@@ -394,7 +394,7 @@ pub fn interior_point(path: &BezPath) -> Option<Point> {
     }
     let mut lines: Vec<(Point, Point)> = Vec::new();
     let (mut start, mut last) = (Point::ZERO, Point::ZERO);
-    figcraft_geom::kurbo::flatten(path.iter(), bb.width().max(bb.height()) * 1e-3, |el| match el {
+    lizard_geom::kurbo::flatten(path.iter(), bb.width().max(bb.height()) * 1e-3, |el| match el {
         PathEl::MoveTo(p) => {
             start = p;
             last = p;
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn curves_and_junk_networks() {
-        let mut circle = figcraft_geom::kurbo::Ellipse::new((50.0, 50.0), (50.0, 50.0), 0.0).to_path(0.01);
+        let mut circle = lizard_geom::kurbo::Ellipse::new((50.0, 50.0), (50.0, 50.0), 0.0).to_path(0.01);
         circle.close_path();
         let mut n = VectorNetwork::from_path(&circle);
         let close = n.vertices.iter().enumerate().any(|(i, a)| n.vertices.iter().skip(i + 1).any(|b| (a.point() - b.point()).hypot() < 1e-3));
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(f.len(), 1);
         assert!((f[0].area - std::f64::consts::PI * 2500.0).abs() < 5.0, "{}", f[0].area);
         // Without the ClosePath (kurbo's ellipse outline) it's still one closed, filled loop.
-        let open = figcraft_geom::kurbo::Ellipse::new((50.0, 50.0), (50.0, 50.0), 0.0).to_path(0.01);
+        let open = lizard_geom::kurbo::Ellipse::new((50.0, 50.0), (50.0, 50.0), 0.0).to_path(0.01);
         let o = VectorNetwork::from_path(&open);
         assert_eq!(o.vertices.len(), n.vertices.len());
         assert_eq!(o.regions.len(), 1);

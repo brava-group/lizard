@@ -11,15 +11,15 @@
 //!   (preferred ones first), select it, reset it to the main's default content.
 
 use egui::{Id, Sense, Ui, vec2};
-use figcraft_doc::*;
-use figcraft_engine::cmd::component::{can_add_variant, can_combine_variants};
-use figcraft_engine::components::{
+use lizard_doc::*;
+use lizard_engine::cmd::component::{can_add_variant, can_combine_variants};
+use lizard_engine::components::{
     PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slots_of, variant_conflicts,
     variant_options, variant_props, variant_set,
 };
 use serde_json::{Value, json};
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trn};
 use crate::icons::{self, Icon};
 use crate::list_drag::ListDrag;
@@ -28,7 +28,7 @@ use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
 
 /// Entry point (called from the Design panel header for every selection).
-pub fn instance_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let [id] = sel else {
         combine_ui(app, ui, doc, sel);
         return;
@@ -63,7 +63,7 @@ pub fn instance_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[No
 }
 
 /// Two or more main components selected: a button combines them into a component set.
-fn combine_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+fn combine_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if !can_combine_variants(doc, sel) {
         return;
     }
@@ -83,7 +83,7 @@ fn combine_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
 }
 
 /// A component's description: a multi-line field, saved when it loses focus.
-fn description_ui(app: &mut FigApp, ui: &mut Ui, id: NodeId, description: &str) {
+fn description_ui(app: &mut LizardApp, ui: &mut Ui, id: NodeId, description: &str) {
     widgets::separator(ui);
     widgets::sublabels(ui, tr("Description"), None);
     if let Some(new) = widgets::multiline_field(ui, Id::new(("comp_desc", id)), description, tr("Describe how and when to use this component"), 3) {
@@ -95,7 +95,7 @@ fn description_ui(app: &mut FigApp, ui: &mut Ui, id: NodeId, description: &str) 
 /// Local components (and component sets, not their variants), for swap menus: (id, label), page
 /// by page. Listed once per document revision (a file with thousands of layers isn't walked every
 /// frame).
-fn local_components(app: &FigApp, ui: &Ui, doc: &Document) -> std::sync::Arc<Vec<(NodeId, String)>> {
+fn local_components(app: &LizardApp, ui: &Ui, doc: &Document) -> std::sync::Arc<Vec<(NodeId, String)>> {
     type Cached = ((u64, u64), std::sync::Arc<Vec<(NodeId, String)>>);
     let key = app.session.ds().map(|d| (d.uid, d.revision)).unwrap_or_default();
     let id = Id::new("component_panel_local_components");
@@ -154,7 +154,7 @@ fn type_icon(d: &PropDef) -> Icon {
 }
 
 /// A selected slot inside an instance: its fill menu.
-fn slot_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, name: &str, preferred: &[NodeId]) {
+fn slot_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, name: &str, preferred: &[NodeId]) {
     let t = Tokens::get(ui.ctx());
     let comps = local_components(app, ui, doc);
     widgets::separator(ui);
@@ -170,7 +170,7 @@ fn slot_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, nam
 
 /// The fill menu of slot `slot` inside an instance: its preferred components first, then every
 /// local component; select the slot; reset it to the main's default content.
-fn slot_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, preferred: &[NodeId], comps: &[(NodeId, String)], w: f32) {
+fn slot_fill(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, preferred: &[NodeId], comps: &[(NodeId, String)], w: f32) {
     let t = Tokens::get(ui.ctx());
     let edited = slot_edited(doc, slot);
     let label = match (edited, doc.node(slot).map_or(0, |n| n.children.len())) {
@@ -180,7 +180,7 @@ fn slot_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, prefer
     };
     let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Slot)).on_hover_text(tr("Add content to this slot"));
     menu_popup(&resp).width(w.max(200.0)).show(|ui| {
-        let insert = |app: &mut FigApp, c: NodeId| app.run("instance.slotInsert", json!({"id": slot, "component": c.0}));
+        let insert = |app: &mut LizardApp, c: NodeId| app.run("instance.slotInsert", json!({"id": slot, "component": c.0}));
         let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));
         if !preferred.is_empty() {
             heading(ui, tr("Preferred"));
@@ -221,7 +221,7 @@ fn prop_defs(doc: &Document, c: NodeId) -> std::collections::BTreeMap<String, Pr
 }
 
 /// Properties of a component or component set.
-fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
+fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
     let t = Tokens::get(ui.ctx());
     let is_set = matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. }));
     // Shared (non-variant) properties live on every variant; read them from the first.
@@ -408,7 +408,7 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
 }
 
 /// Bind a layer inside a component to a component property.
-fn bind_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
+fn bind_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     let t = Tokens::get(ui.ctx());
     let Some(comp) = owning_component(doc, n.id) else { return };
     let defs = prop_defs(doc, comp);
@@ -491,9 +491,9 @@ fn bind_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
 }
 
 /// Overridden property groups of a layer inside an instance, each with a reset button.
-fn overrides_ui(app: &mut FigApp, ui: &mut Ui, n: &Node) {
+fn overrides_ui(app: &mut LizardApp, ui: &mut Ui, n: &Node) {
     let t = Tokens::get(ui.ctx());
-    let groups: Vec<String> = n.overrides.iter().filter(|g| figcraft_engine::components::OVERRIDE_GROUPS.contains(&g.as_str())).cloned().collect();
+    let groups: Vec<String> = n.overrides.iter().filter(|g| lizard_engine::components::OVERRIDE_GROUPS.contains(&g.as_str())).cloned().collect();
     if groups.is_empty() {
         return;
     }
@@ -547,7 +547,7 @@ fn group_label(g: &str) -> String {
 }
 
 /// The instance section: main component + swap, variants, properties, actions.
-fn instance_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
+fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     let t = Tokens::get(ui.ctx());
     let NodeKind::Instance { component, .. } = &n.kind else { return };
     let id = n.id;
@@ -648,7 +648,7 @@ fn instance_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
     instance_props(app, ui, doc, n, &comps);
     // Exposed nested instances: their properties, under their names.
     if !nested {
-        for c in figcraft_engine::components::exposed_copies(doc, id) {
+        for c in lizard_engine::components::exposed_copies(doc, id) {
             let Some(cn) = doc.node(c) else { continue };
             row(ui, 28.0, |ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
@@ -662,11 +662,11 @@ fn instance_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
 
 /// An instance placed inside a main component (not inside another instance).
 fn nested_in_main(doc: &Document, id: NodeId) -> bool {
-    !inside_instance(doc, id) && figcraft_engine::components::owning_component(doc, id).is_some_and(|c| c != id)
+    !inside_instance(doc, id) && lizard_engine::components::owning_component(doc, id).is_some_and(|c| c != id)
 }
 
 /// Variant and component property controls for instance `n`.
-fn instance_props(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node, comps: &[(NodeId, String)]) {
+fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, comps: &[(NodeId, String)]) {
     let NodeKind::Instance { component, props } = &n.kind else { return };
     let id = n.id;
     let set = variant_set(doc, *component);
@@ -696,7 +696,7 @@ fn instance_props(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node, comps
     }
     // Boolean, text and instance-swap properties.
     for (k, d) in prop_defs(doc, *component) {
-        let v = props.get(&k).cloned().unwrap_or_else(|| figcraft_engine::components::prop_default_value(&d));
+        let v = props.get(&k).cloned().unwrap_or_else(|| lizard_engine::components::prop_default_value(&d));
         row(ui, 32.0, |ui| {
             prop_label(ui, &k, type_icon(&d));
             let w = ui.available_width().max(60.0);
@@ -722,7 +722,7 @@ fn instance_props(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node, comps
                     });
                 }
                 PropDef::InstanceSwap { preferred, .. } => {
-                    let cur = figcraft_engine::params::id_of(&v);
+                    let cur = lizard_engine::params::id_of(&v);
                     let label = cur.and_then(|c| doc.node(c)).map(|c| c.name.clone()).unwrap_or_else(|| tr("None").into());
                     let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Instance));
                     menu_popup(&resp).width(200.0).show(|ui| {

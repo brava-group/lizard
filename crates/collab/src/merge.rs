@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use figcraft_doc::{Document, NodeId};
+use lizard_doc::{Document, NodeId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

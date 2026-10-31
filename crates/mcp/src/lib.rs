@@ -4,8 +4,8 @@
 //! 2.0, hand-written (no async runtime). The server exposes Lizard as MCP tools, resources and
 //! prompts, and forwards everything to a [`Backend`]:
 //!
-//! - [`Headless`] hosts an in-process [`figcraft_engine::Session`] and answers the control-channel
-//!   methods itself (rendering with `figcraft-render`), so agents can design without a window.
+//! - [`Headless`] hosts an in-process [`lizard_engine::Session`] and answers the control-channel
+//!   methods itself (rendering with `lizard-render`), so agents can design without a window.
 //! - [`Attached`] talks to a running desktop app through its loopback JSON-lines control channel
 //!   (`lizard --control PORT`): one `{"id","method","params"}` line in, one
 //!   `{"id","ok","result"|"error"}` line out.

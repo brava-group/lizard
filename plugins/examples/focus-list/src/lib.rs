@@ -3,8 +3,8 @@
 //! focus countdown that a timer ticks down every second. The property menu clears the ticked
 //! items, sets the countdown's length and picks the note's colour. Everything it knows is its state.
 
-use figcraft_plugin_sdk::ui::{Node, menu_action, menu_color, menu_dropdown, render};
-use figcraft_plugin_sdk::{Input, Result, Value, WidgetEvent, cancel_timer, entry, json, notify, set_timer};
+use lizard_plugin_sdk::ui::{Node, menu_action, menu_color, menu_dropdown, render};
+use lizard_plugin_sdk::{Input, Result, Value, WidgetEvent, cancel_timer, entry, json, notify, set_timer};
 
 /// Most items on one list, and the longest title or item.
 const MAX_ITEMS: usize = 8;

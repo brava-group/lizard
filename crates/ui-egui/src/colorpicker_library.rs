@@ -1,7 +1,7 @@
 //! Libraries and the adjacent style/variable creation panel of the colour picker.
 use super::*;
-use figcraft_doc::{StyleKind, VariableType, VariableValue};
-use figcraft_engine::library;
+use lizard_doc::{StyleKind, VariableType, VariableValue};
+use lizard_engine::library;
 
 const STATE: &str = "color_picker_library_state";
 
@@ -112,7 +112,7 @@ fn creation_style_paints(s: &State) -> Vec<Paint> {
     s.paints.iter().rev().cloned().collect()
 }
 
-pub(super) fn show_standalone(app: &mut FigApp, ctx: &egui::Context) {
+pub(super) fn show_standalone(app: &mut LizardApp, ctx: &egui::Context) {
     if app.ui.picker.is_some() && !matches!(app.ui.picker, Some(PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable)) {
         return;
     }
@@ -133,7 +133,7 @@ struct Swatch {
     variable: Option<(Option<String>, String)>,
 }
 
-fn collect(app: &FigApp, doc: &figcraft_doc::Document, query: &str, filter: &str) -> Vec<(String, Vec<Swatch>)> {
+fn collect(app: &LizardApp, doc: &lizard_doc::Document, query: &str, filter: &str) -> Vec<(String, Vec<Swatch>)> {
     let q = query.trim().to_lowercase();
     let libs = crate::variable_ui::libraries(app, doc);
     let mut groups = Vec::new();
@@ -205,7 +205,7 @@ fn icon_button(ui: &mut Ui, rect: Rect, id: impl std::hash::Hash + std::fmt::Deb
     response.clicked()
 }
 
-pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint) {
+pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, paint: Paint) {
     let Some(doc) = app.session.doc().ok().cloned() else { return };
     let mut s = state(ctx);
     let screen = ctx.content_rect();
@@ -396,7 +396,7 @@ pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget,
     save(ctx, s);
 }
 
-fn creation_panel(app: &mut FigApp, ctx: &egui::Context, doc: &figcraft_doc::Document, library_pos: Pos2, s: &mut State, kind: CreateKind) {
+fn creation_panel(app: &mut LizardApp, ctx: &egui::Context, doc: &lizard_doc::Document, library_pos: Pos2, s: &mut State, kind: CreateKind) {
     let count = s.paints.len().max(1);
     let height = if kind == CreateKind::Style { 390.0 + (count - 1) as f32 * 32.0 } else { 170.0 };
     let x = (library_pos.x - 312.0).max(ctx.content_rect().min.x + 8.0);

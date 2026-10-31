@@ -10,12 +10,12 @@ enforced while reading: an oversized or unterminated frame stops at the first ex
 JSON-RPC error `-32600` (`message too large`, null id), and closes the stdio session without reading
 the rest or dispatching later requests. Lines within the limit keep the same JSON-RPC behavior.
 
-The server lives in `crates/mcp` (`figcraft-mcp`) and is started by the CLI:
+The server lives in `crates/mcp` (`lizard-mcp`) and is started by the CLI:
 
 | Command | Backend |
 |---|---|
-| `figcraft-cli mcp` | **Headless**: an in-process engine session with one untitled document. No window; renders with the CPU renderer. |
-| `figcraft-cli mcp --attach <port>` | **Attached**: drives a running Lizard app through its control channel (`lizard --control <port>`). The user sees every change live. |
+| `lizard-cli mcp` | **Headless**: an in-process engine session with one untitled document. No window; renders with the CPU renderer. |
+| `lizard-cli mcp --attach <port>` | **Attached**: drives a running Lizard app through its control channel (`lizard --control <port>`). The user sees every change live. |
 
 `--attach` also takes `host:port`. The control channel only listens on 127.0.0.1.
 
@@ -35,11 +35,11 @@ of the window itself (`screenshot` with `window`) needs it on screen: it is then
 ### Confining file access
 
 ```sh
-figcraft-cli mcp --automation-read-root /work/project --automation-write-root /work/project/out
+lizard-cli mcp --automation-read-root /work/project --automation-write-root /work/project/out
 ```
 
 ```json
-{"mcpServers": {"figcraft": {"command": "/path/to/figcraft-cli",
+{"mcpServers": {"lizard": {"command": "/path/to/lizard-cli",
   "args": ["mcp", "--automation-read-root", "/work/project", "--automation-write-root", "/work/project/out"]}}}
 ```
 
@@ -94,24 +94,24 @@ The headless server lays text out with the same fonts as the app: the fonts buil
 plus the installed system fonts, indexed once, the first time text is laid out (a session that
 never touches text never pays for it). So text sizes, auto layout and exports match what users see
 in the app. For renders that come out the same on every machine (CI), start it with
-`figcraft-cli mcp --no-system-fonts` or set `FIGCRAFT_NO_SYSTEM_FONTS=1`: text then uses only the
+`lizard-cli mcp --no-system-fonts` or set `LIZARD_NO_SYSTEM_FONTS=1`: text then uses only the
 built-in fonts. Attached, the app's own fonts apply. The browser build has no system fonts.
 
 ## Configure a client
 
-Build the CLI first (`cargo build --release -p figcraft-cli`) and use the absolute path to
-`target/release/figcraft-cli`.
+Build the CLI first (`cargo build --release -p lizard-cli`) and use the absolute path to
+`target/release/lizard-cli`.
 
-The Linux AppImage bundles the CLI: `Lizard.AppImage cli <args>` runs `figcraft-cli <args>`, so
-`/path/to/Lizard.AppImage cli mcp` works wherever `/path/to/figcraft-cli mcp` appears below.
+The Linux AppImage bundles the CLI: `Lizard.AppImage cli <args>` runs `lizard-cli <args>`, so
+`/path/to/Lizard.AppImage cli mcp` works wherever `/path/to/lizard-cli mcp` appears below.
 
 ### Claude Code
 
 ```sh
 # headless
-claude mcp add figcraft -- /path/to/figcraft-cli mcp
+claude mcp add lizard -- /path/to/lizard-cli mcp
 # drive the running app (start it with: lizard --control 7979)
-claude mcp add figcraft-app -- /path/to/figcraft-cli mcp --attach 7979
+claude mcp add lizard-app -- /path/to/lizard-cli mcp --attach 7979
 ```
 
 Or in a project's `.mcp.json`:
@@ -119,7 +119,7 @@ Or in a project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "figcraft": { "command": "/path/to/figcraft-cli", "args": ["mcp"] }
+    "lizard": { "command": "/path/to/lizard-cli", "args": ["mcp"] }
   }
 }
 ```
@@ -131,8 +131,8 @@ Or in a project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "figcraft": { "command": "/path/to/figcraft-cli", "args": ["mcp"] },
-    "figcraft-app": { "command": "/path/to/figcraft-cli", "args": ["mcp", "--attach", "7979"] }
+    "lizard": { "command": "/path/to/lizard-cli", "args": ["mcp"] },
+    "lizard-app": { "command": "/path/to/lizard-cli", "args": ["mcp", "--attach", "7979"] }
   }
 }
 ```
@@ -194,7 +194,7 @@ Or in a project's `.mcp.json`:
   else on the selection. New layers become the selection.
 - Colours are `"#RRGGBB"` or `"#RRGGBBAA"`. Inside fills and strokes, `color` may also be a hex
   string and gradients can be written `{"type": "linearGradient", "stops": ["#7048E8", "#1098AD"]}`;
-  the engine reads them as its paint JSON, so `run_command`, `figcraft-cli run` and the control
+  the engine reads them as its paint JSON, so `run_command`, `lizard-cli run` and the control
   channel take them too. Effects passed through the MCP tools may use hex `color` strings as well.
 - **Blend modes**: `blend` on a layer (`node.set`) or a paint (`fill.set` / `stroke.set`) is a
   menu label or CSS keyword (`"Normal"`, `"pass through"`, `"multiply"`, ...;
@@ -303,7 +303,7 @@ Or in a project's `.mcp.json`:
 | `select {ids}` | Replace the selection (`[]` deselects). |
 | `export {ids, format, scale \| size, path?, bleed?, cropMarks?, bleedMarks?, cmyk?, contentsOnly?, includeBoundingBox?, svgOutlineText?, svgIdAttribute?, svgSimplifyStroke?}` | png, jpg, svg, webp, pdf, or `fig`: the whole file as `.fig`, experimental (see Exporting `.fig` files below); `size` is `2x`, `512w` or `512h`. The image covers what the layers paint (shadows towards their offset, strokes, unclipped children, a mask group's mask; hidden layers take no room; a slice is its area with everything under it); `contentsOnly: false` also draws every other layer showing in that area, `includeBoundingBox` exports the layers' own boxes; SVG: `svgOutlineText: false` keeps `<text>`, `svgIdAttribute` writes unique ids from layer names, `svgSimplifyStroke: false` writes every stroke as an outline. The same options go in export settings (`export.add` / `export.update`). PDF: frames one page each (sized in points), anything else together on one page; print options: `bleed` (points or a length like `"3mm"`, `"0.125in"`), crop and bleed marks, CMYK colour (see Exports below), also taken by `file.export`, `file.exportLayers`, `file.exportFramesPdf` and stored per export setting by `export.add` / `export.update`; `run_command` `file.exportFramesPdf {page?, path?}` writes every top-level frame of a page. Without `path`, images come back as MCP image content, SVG as text. Layers' own export settings: `run_command` with `export.add` / `export.update {index, size?, suffix?, format?}` / `export.remove` and `file.exportLayers {ids?, dir?, assets?}` (every layer once per setting, named `<layer><suffix>.<format>`, a slash in a layer name making a folder; `assets: true` exports the Inspect tab's assets instead: icons as SVG, images as PNG). |
 | `screenshot {ids?, scale?, maxSize?, window?}` | PNG of the page (with background) or of layers, scaled to fit `maxSize` (default 1600). `window: true` captures the app window in front when attached, a window id (see Windows below) that window. |
-| `open_file {path, variables?}` / `save_file {path?}` | Open `.figcraft`, `.json` (Lizard JSON or REST API file JSON with its variables, see below), `.fig` (best effort, see below), `.svg` (see Importing SVG below) or an image; save as `.figcraft`. `open_file` returns `opened` (for a file opened anew, a `summary` of `name`, `pages`, `layers` and `images`, and `warnings` or `repairs`; a file that was already open just gives its `index`) and the document's `document` outline. |
+| `open_file {path, variables?}` / `save_file {path?}` | Open `.lizard`, `.json` (Lizard JSON or REST API file JSON with its variables, see below), `.fig` (best effort, see below), `.svg` (see Importing SVG below) or an image; save as `.lizard`. `open_file` returns `opened` (for a file opened anew, a `summary` of `name`, `pages`, `layers` and `images`, and `warnings` or `repairs`; a file that was already open just gives its `index`) and the document's `document` outline. |
 | `undo` / `redo` | Step through history. |
 | `pointer {kind, x, y, to?, steps?, tool?, shift, alt, cmd, pressure?, pressureTo?}` | Mouse gestures in page coordinates with the current tool: `click`, `double`, `drag`, `down`, `move`, `up`, `hover`. A dragged layer drops into the frame or auto layout slot under the pointer, except one inside a group, a boolean group or an instance (outside its slots), which only moves. `pressure` (0–1) is pen pressure; a drag goes from `pressure` to `pressureTo` (see Brushes and pen pressure). |
 | `key {key, shift, alt, cmd}` | A shortcut or key as if typed on the canvas (every default shortcut, tool keys, Escape, Delete, arrows, number keys for opacity, arrows that pan the view when nothing is selected; while editing text, the text shortcuts and then text editing keys). Keys are names like `A`, `0`, `Enter`, `ArrowLeft`, `=`, `/`, or egui's (`Plus`, `Questionmark`); `cmd` is Cmd on macOS and Ctrl elsewhere. |
@@ -349,7 +349,7 @@ frame around flows that way (a list of rows: Down moves an item into the row bel
 
 ### Keyboard shortcuts
 
-The default shortcuts live in one table (`figcraft_engine::keymap`), grouped like the public shortcut
+The default shortcuts live in one table (`lizard_engine::keymap`), grouped like the public shortcut
 reference (Essential, Tools, View, Zoom, Text, Shape, Selection, Edit, Transform, Arrange,
 Components, Prototype) with the macOS keys and, where they differ, the Windows/Linux keys (for
 example Use as mask is ⌃⌘M on macOS and Ctrl+Alt+M elsewhere; Bring to front ⌥⌘] and
@@ -633,8 +633,8 @@ flow with its description.
 
 ### Local libraries
 
-A `.figcraft` file can be published as a library and used from other files (library files here;
-libraries kept on a `figcraft-server` for a team: [Team libraries](#team-libraries); the browser
+A `.lizard` file can be published as a library and used from other files (library files here;
+libraries kept on a `lizard-server` for a team: [Team libraries](#team-libraries); the browser
 build has no file system, so there the commands that read library files return an error).
 
 - **Publish** (in the library file): `library.publish {description?, include?, exclude?}` publishes
@@ -694,7 +694,7 @@ name and sets them this way);
 
 ### Team libraries
 
-A file kept on a `figcraft-server` ([`server.md`](server.md#team-libraries)) can hold a library that
+A file kept on a `lizard-server` ([`server.md`](server.md#team-libraries)) can hold a library that
 other files use through one of its share links. Each call waits for the server (a few seconds at
 most when it can't be reached).
 
@@ -795,7 +795,7 @@ updates the group's result on every pointer move, one undo step per gesture; a d
 stays in its group. Clicks and `select.layersAt` hit a boolean group where its result is (a click in
 a subtracted hole reaches what's behind it); while the group or one of its operands is selected, its
 operands are hit instead, so each can be picked. `bool.flatten` bakes the result. Only the operands from the edited one up are
-recombined during a drag (`figcraft_render::boolean`; timed by `cargo xtask bench`).
+recombined during a drag (`lizard_render::boolean`; timed by `cargo xtask bench`).
 
 ### Shape builder
 
@@ -973,7 +973,7 @@ Read state is kept per name: a new message is unread for everyone but its author
 unread (not an undo step). `comment.list {page? | "all", filter? (all|open|resolved|mine|unread),
 sort? (date|page), query?, frame?}` returns the threads with their position, `frame`/`frameName`,
 `pageName`, `unread`, `link` and replies (with `edited` times and `reactions`). Links are
-`figcraft://comment/<id>`: `comment.link {id}` returns one, `comment.open {id | link, view?}` goes
+`lizard://comment/<id>`: `comment.link {id}` returns one, `comment.open {id | link, view?}` goes
 to its page, zooms to its frame (`fit`, the default; `center` keeps the zoom; `keep` doesn't move)
 and opens it in the app, and `comment.next {id?, dir?, …list params}` steps to the next or previous
 thread of a list the same way. `comment.zoom {ids}` zooms in on a group of pins. Comment ids made in
@@ -981,7 +981,7 @@ a live session are large numbers (their creator's id space): pass them back as g
 
 ### Version history
 
-Named snapshots of the document, kept in the `.figcraft` file (they persist once the file is saved;
+Named snapshots of the document, kept in the `.lizard` file (they persist once the file is saved;
 a new, renamed or deleted version marks the file as changed). Driven with `run_command`:
 `file.saveVersion {name?, description?}` (returns `{id, index, name, description, time}`; untitled
 versions are named "Version N"), `version.list` (oldest first; `time` is Unix seconds),
@@ -1006,7 +1006,7 @@ Versions stay with the person who saved them: in a live session they aren't shar
 ### Branches
 
 A branch is a copy of the file to try changes in, reviewed against the main file and merged back.
-Branches are kept in the main `.figcraft` file (saving either tab saves the main file with its
+Branches are kept in the main `.lizard` file (saving either tab saves the main file with its
 branches). Driven with `run_command`:
 
 - `branch.create {name?}` copies the file into a new branch tab and returns `{id, name, index}`.
@@ -1103,12 +1103,12 @@ only: a host stops hosting it, a guest leaves it.
   machine, the default), `"lan"` (the local network) or an interface address; the port is 47900,
   or any free one when it's taken, as it is for a second hosted document (`port` picks one, 0
   any). Returns the session as
-  `collab.peers` does, with `link` (`figcraft://join?host=…&file=…&token=…`) and `url`
+  `collab.peers` does, with `link` (`lizard://join?host=…&file=…&token=…`) and `url`
   (`ws://…/?file=…&token=…`): both carry the session's secret, so share them only with people you
   invite. `collab.stop {}` ends the active document's session.
 - `collab.join {code}` or `collab.join {link}` (a join code of either kind: spaces, dashes and
   case don't matter, `O` reads as `0` and `I` or `L` as `1`; or a link in any form: an app's
-  invite, a `figcraft-server` share link, or the `ws(s)://…?file=…&token=…` URL; either parameter
+  invite, a `lizard-server` share link, or the `ws(s)://…?file=…&token=…` URL; either parameter
   takes either) returns at once with the new session (`session`, `status:
   "connecting"`) and touches no other document's session. Its file opens as a new document, which
   becomes the active one: poll
@@ -1118,19 +1118,19 @@ only: a host stops hosting it, a guest leaves it.
   code has expired or its sharing was stopped", "Couldn't reach the server (…)", too many wrong
   codes from your address, a wrong token, a full
   session, a revoked link, an unreachable host, a `wss://` server whose certificate isn't trusted:
-  see `FIGCRAFT_CA_FILE` in [`server.md`](server.md#behind-a-reverse-proxy-tls)). `collab.leave {}`
+  see `LIZARD_CA_FILE` in [`server.md`](server.md#behind-a-reverse-proxy-tls)). `collab.leave {}`
   leaves the active document's session (or ends a join started from it that is still on its way
   or failed); the synced document stays open as your copy.
-- `collab.publish {server, name?, key?}` puts the active document on a `figcraft-server`
+- `collab.publish {server, name?, key?}` puts the active document on a `lizard-server`
   ([`server.md`](server.md)) and syncs it from there (as that document's session; others go on): `server` is the address
-  `figcraft-server key` prints (`ws://host:47900/?key=…`; or give `key` separately), `name` the
+  `lizard-server key` prints (`ws://host:47900/?key=…`; or give `key` separately), `name` the
   file's name (default: the document's). It returns at once with `status: "connecting"`; the
   document is read-only until the upload is done, then `collab.peers` has `published: {server,
   file, name, edit, view}` with the file's first edit link and view link (they carry their
   tokens: share them like passwords). Someone joining with the view link gets `access: "view"`:
   every edit on the synced document is refused with "View only: …" (the server refuses them too).
   On a server open to the public ([`server.md`](server.md#running-a-public-server)) `server` needs no
-  key (`wss://figcraft.example.com/`): `published` then also has `owner` (the owner token, shown this
+  key (`wss://lizard.example.com/`): `published` then also has `owner` (the owner token, shown this
   once: keep it) and `expires` (when the server deletes the file unless someone opens it, seconds
   since 1970), and `hosting` says who runs the server. A server that isn't open answers that it
   takes files only with its key (`reason` in `collab.peers`).
@@ -1241,16 +1241,16 @@ only: a host stops hosting it, a guest leaves it.
   session's message. While the connection is reconnecting, editing goes on; the edits go out when
   it is back (the same client, catching up with what it missed).
 - `collab.registerLinks {on?}` → `{on, registered}` makes the desktop app the opener of
-  `figcraft://` invite links, or stops (no `on`: switch). Only where the app registers them itself
+  `lizard://` invite links, or stops (no `on`: switch). Only where the app registers them itself
   (Windows, per user); elsewhere it reports the command unavailable. It also sets the
-  Preferences checkbox. Starting the app with an invite link (`figcraft "figcraft://join?…"`)
+  Preferences checkbox. Starting the app with an invite link (`lizard "lizard://join?…"`)
   joins that session.
 
 ### Plugins
 
 Sandboxed WebAssembly plugins act through the same commands (see [`plugins.md`](plugins.md) for the
 manifest, the ABI and the Rust SDK). Driven with `run_command`: `plugin.import {path}` (a
-`figcraft-plugin.json` or its folder) or `plugin.import {manifest, wasm}` (the manifest as an
+`lizard-plugin.json` or its folder) or `plugin.import {manifest, wasm}` (the manifest as an
 object or JSON text and the module as base64, for this session only), `plugin.list`,
 `plugin.remove {id}`, and `plugin.run {id, command?, params?, fuel?}`, which returns
 `{plugin, command, output, logs, calls, fuel, panel}`. A run is one undo step and is rolled back when it
@@ -1267,9 +1267,9 @@ returns like `plugin.run`, with the updated `panel`), and `plugin.close {id}` en
 Plugin settings are kept per plugin with the preferences (in a headless session, for the session).
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.run","params":{"id":"org.figcraft.examples.swatch-grid","command":"panel"}}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.event","params":{"id":"org.figcraft.examples.swatch-grid","control":"palette","value":"Forest"}}}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.event","params":{"id":"org.figcraft.examples.swatch-grid","control":"generate"}}}}
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.run","params":{"id":"com.brava.lizard.examples.swatch-grid","command":"panel"}}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.event","params":{"id":"com.brava.lizard.examples.swatch-grid","control":"palette","value":"Forest"}}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.event","params":{"id":"com.brava.lizard.examples.swatch-grid","control":"generate"}}}}
 ```
 
 Widgets (API 3, layers on the canvas a plugin draws) are driven the same way: `widget.insert
@@ -1299,17 +1299,17 @@ and one undo step:
 Hover styles and tooltips are the app's to show and have no command (nothing is called for them).
 
 ```json
-{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"org.figcraft.examples.counter"}}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"com.brava.lizard.examples.counter"}}}}
 {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.click","params":{"id":12,"target":"increment"}}}}
 {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.list","params":{}}}}
 {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.menuAction","params":{"id":12,"item":"step","value":"5"}}}}
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"org.figcraft.examples.focus-list"}}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.insert","params":{"plugin":"com.brava.lizard.examples.focus-list"}}}}
 {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.setText","params":{"input":"title","text":"Release day"}}}}
 {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.click","params":{"target":"focus"}}}}
 {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"widget.fireTimer","params":{}}}}
 ```
 
-Plugins from a `figcraft-server`'s plugin directory ([`plugins.md`](plugins.md#plugin-directories)):
+Plugins from a `lizard-server`'s plugin directory ([`plugins.md`](plugins.md#plugin-directories)):
 `plugin.directory.list {server?, query?}` lists the latest version of each plugin with the
 permissions it asks for (`access`, `commands`), its size and SHA-256, and `installed` / `update`;
 `plugin.directory.install {id, version?, confirm: true, sha256?}` downloads it, checks the SHA-256 and
@@ -1320,7 +1320,7 @@ permissions: without it nothing is downloaded); `plugin.directory.publish {path 
 
 ```json
 {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.directory.list","params":{"server":"ws://127.0.0.1:47900/"}}}}
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.directory.install","params":{"id":"org.figcraft.examples.swatch-grid","confirm":true}}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"plugin.directory.install","params":{"id":"com.brava.lizard.examples.swatch-grid","confirm":true}}}}
 ```
 
 ### Dev Mode
@@ -1359,7 +1359,7 @@ permissions: without it nothing is downloaded); `plugin.directory.publish {path 
   now"}</Button>`. `codeConnect.remove {id?, language?}` (no language: all). `codeConnect.export
   {path?}` → `{text, links}` (or writes the file): `{version: 1, links: [{component, language,
   importPath, name, template}]}`, sorted, meant to live in the code repository as
-  `figcraft.connect.json`; `codeConnect.import {json | path}` → `{linked, warnings}` links each
+  `lizard.connect.json`; `codeConnect.import {json | path}` → `{linked, warnings}` links each
   entry to every component or set with that name (one undo step; at most 5,000 links and 4 MB;
   templates up to 4,000 characters, names 100, import paths 300; invalid entries are skipped with a
   warning). `get_node` lists a component's links as `codeLinks`. In the app, the Inspect tab's
@@ -1411,7 +1411,7 @@ permissions: without it nothing is downloaded); `plugin.directory.publish {path 
   focus button to open it in the focus view).
 - **Compare changes:** when a layer marked Ready for dev first changes (it turns "Changed"), the
   file keeps a copy of it and everything in it as it was just before that edit (saved in the
-  `.figcraft` file only while there is a change; resolving the change, marking it again, another
+  `.lizard` file only while there is a change; resolving the change, marking it again, another
   status or deleting it drops the copy, so the next change compares with that state).
   `dev.compare {id?, show?}` → `{id, name, changed, snapshot, added, removed, modified, truncated,
   changes: [{id, name, type, change: added|removed|changed, depth, layers, properties?: [{section,
@@ -1643,10 +1643,10 @@ tool, malformed JSON, wrong parameter types) are JSON-RPC errors. Nothing crashe
 
 | URI | Content |
 |---|---|
-| `figcraft://document` | The active document (like `inspect_document` at depth 8). |
-| `figcraft://commands` | The command catalog. |
-| `figcraft://node/{id}` (template) | One layer with children to depth 2. |
-| `figcraft://command/{id}` (template) | One command's docs, e.g. `figcraft://command/layout.add`. |
+| `lizard://document` | The active document (like `inspect_document` at depth 8). |
+| `lizard://commands` | The command catalog. |
+| `lizard://node/{id}` (template) | One layer with children to depth 2. |
+| `lizard://command/{id}` (template) | One command's docs, e.g. `lizard://command/layout.add`. |
 
 ## Prompts
 

@@ -1,6 +1,6 @@
 //! Backdrop refraction using GPU distance fields and compositing passes.
 
-use figcraft_doc::Glass;
+use lizard_doc::Glass;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_blur::GpuBlur;

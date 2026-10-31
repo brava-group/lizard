@@ -5,10 +5,10 @@
 //! the history, the file's branches: create one, open one, review and merge, archive.
 
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
-use figcraft_engine::branches::BranchState;
+use lizard_engine::branches::BranchState;
 use serde_json::json;
 
-use crate::FigApp;
+use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, Icon};
@@ -48,20 +48,20 @@ impl Form {
 }
 
 /// Open the panel (File ▸ Show version history).
-pub fn open(app: &mut FigApp) {
+pub fn open(app: &mut LizardApp) {
     app.ui.versions.open = true;
     app.select_left_tab(crate::LeftTab::File);
 }
 
 /// Open the panel with the save form (File ▸ Save to version history…).
-pub fn start_save(app: &mut FigApp) {
+pub fn start_save(app: &mut LizardApp) {
     open(app);
     app.ui.versions.confirm_delete = None;
     app.ui.versions.form = Some(Form::new(None, "", ""));
 }
 
 /// Open the panel with the new branch form (File ▸ Create branch…).
-pub fn start_branch(app: &mut FigApp) {
+pub fn start_branch(app: &mut LizardApp) {
     open(app);
     app.ui.versions.confirm_delete = None;
     app.ui.versions.form = Some(Form::branch());
@@ -107,7 +107,7 @@ enum Action {
 const DOT_X: f32 = 20.0;
 const TEXT_X: f32 = 36.0;
 
-pub fn panel(app: &mut FigApp, ui: &mut Ui) {
+pub fn panel(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let mut action = None;
@@ -152,7 +152,7 @@ pub fn panel(app: &mut FigApp, ui: &mut Ui) {
     let branches: Vec<BranchRow> = app
         .session
         .docs
-        .get(figcraft_engine::branches::file_tab(&app.session))
+        .get(lizard_engine::branches::file_tab(&app.session))
         .map(|m| m.branches.iter().map(|b| BranchRow { id: b.id.clone(), name: b.name.clone(), time: b.time, state: b.state }).collect())
         .unwrap_or_default();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -238,7 +238,7 @@ pub fn panel(app: &mut FigApp, ui: &mut Ui) {
     }
 }
 
-fn act(app: &mut FigApp, a: Action, rows: &[Row]) {
+fn act(app: &mut LizardApp, a: Action, rows: &[Row]) {
     let st = &mut app.ui.versions;
     let name_of = |id: &str| rows.iter().find(|r| r.id == id).map(|r| r.name.clone()).unwrap_or_default();
     match a {
@@ -517,7 +517,7 @@ fn branch_row(ui: &mut Ui, b: &BranchRow) -> Option<Action> {
 }
 
 /// While a version is shown: a banner over the canvas naming it, with Restore and Back.
-pub fn preview_banner(app: &mut FigApp, ctx: &egui::Context, canvas: Rect) {
+pub fn preview_banner(app: &mut LizardApp, ctx: &egui::Context, canvas: Rect) {
     let Some((id, name, time)) = app.session.ds().ok().and_then(|ds| ds.preview.as_ref().map(|p| (p.id.clone(), p.name.clone(), p.time))) else {
         return;
     };

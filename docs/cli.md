@@ -1,8 +1,8 @@
-# figcraft-cli
+# lizard-cli
 
 Lizard without a window: inspect, export, convert and render documents, run command scripts, list
 commands, serve MCP and measure performance. Build it with
-`cargo build --release -p figcraft-cli` (binary `target/release/figcraft-cli`).
+`cargo build --release -p lizard-cli` (binary `target/release/lizard-cli`).
 
 Bad arguments print usage and exit with code 2; failures exit with 1. The CLI never panics on input.
 
@@ -11,7 +11,7 @@ Bad arguments print usage and exit with code 2; failures exit with 1. The CLI ne
 Text lays out and renders with the same fonts as the desktop app: the fonts built into Lizard
 plus the installed system fonts. The system fonts are indexed once per run, the first time text is
 laid out (about 60 ms warm on a Windows machine with ~900 font files; a run without text skips it).
-Every subcommand takes `--no-system-fonts` (or set `FIGCRAFT_NO_SYSTEM_FONTS=1`, which the desktop
+Every subcommand takes `--no-system-fonts` (or set `LIZARD_NO_SYSTEM_FONTS=1`, which the desktop
 app honours too) to use only the built-in fonts, for renders that come out the same on every
 machine, e.g. in CI.
 
@@ -20,7 +20,7 @@ On Linux and other Unix systems except macOS, user fonts are read from
 empty or relative. The legacy `$HOME/.fonts` directory is also scanned.
 
 The collaboration server is a binary of its own, `lizard-server` (`cargo build --release -p
-figcraft-server`): it keeps files with share links and serves their live sessions, and its
+lizard-server`): it keeps files with share links and serves their live sessions, and its
 `key`, `files`, `links`, `reports`, `block-ip` and `check` subcommands manage them (a server can
 be open to the public: [server.md](server.md#running-a-public-server)). See [server.md](server.md).
 
@@ -40,8 +40,8 @@ grey placeholder. `.fig` files are read the same way (best effort, images from t
 `info` lists what wasn't imported as `note:` lines.
 
 ```text
-$ figcraft-cli info app.figcraft
-app.figcraft — App (412 nodes, 6 styles, 12 variables, 3 images)
+$ lizard-cli info app.lizard
+app.lizard — App (412 nodes, 6 styles, 12 variables, 3 images)
 page 1 "Screens": 380 nodes, 4 top-level
   2 FRAME "Home" 393.0×852.0
   …
@@ -77,18 +77,18 @@ page 1 "Screens": 380 nodes, 4 top-level
   output intent (no CMYK profile ships with Lizard), so proof against your printer's profile.
 
 ```sh
-figcraft-cli export app.figcraft -o exports/ --scale 2
-figcraft-cli export app.figcraft -o hero.svg --node "Hero"
-figcraft-cli export app.figcraft -o screens.pdf --page "Screens"
-figcraft-cli export app.figcraft -o poster.pdf --node "Poster" --bleed 3mm --crop-marks --cmyk
-figcraft-cli export app.figcraft -o handoff.fig
+lizard-cli export app.lizard -o exports/ --scale 2
+lizard-cli export app.lizard -o hero.svg --node "Hero"
+lizard-cli export app.lizard -o screens.pdf --page "Screens"
+lizard-cli export app.lizard -o poster.pdf --node "Poster" --bleed 3mm --crop-marks --cmyk
+lizard-cli export app.lizard -o handoff.fig
 ```
 
 ### `convert <in> <out>`
 
-By extension. Inputs: `.figcraft`, `.json` (Lizard or REST API file JSON), `.fig` (best effort), `.svg` (an editable frame: groups,
+By extension. Inputs: `.lizard`, `.json` (Lizard or REST API file JSON), `.fig` (best effort), `.svg` (an editable frame: groups,
 shapes, text, gradients, masks and effects; `info` lists what it left out as `note:` lines), `.png/.jpg/.webp/.gif/.tif/.bmp`
-(an image layer). Outputs: `.figcraft`, `.json` (Lizard JSON, pretty-printed), `.svg`,
+(an image layer). Outputs: `.lizard`, `.json` (Lizard JSON, pretty-printed), `.svg`,
 `.png/.jpg/.webp` (the current page rendered at 1x with its background), `.pdf` (the current page's
 frames, one page each), `.fig` (the whole file, experimental, as `export --format fig`).
 
@@ -153,8 +153,8 @@ them and `file.newFromTemplate` opens one as the document the following steps (a
 
 ```sh
 echo '[{"command": "file.newFromTemplate", "params": {"template": "dashboard"}}]' > start.json
-figcraft-cli run start.json --out dashboard.figcraft
-figcraft-cli export dashboard.figcraft -o dashboard.png
+lizard-cli run start.json --out dashboard.lizard
+lizard-cli export dashboard.lizard -o dashboard.png
 ```
 
 ### Confining a run: `--automation-read-root DIR` / `--automation-write-root DIR`
@@ -167,11 +167,11 @@ is refused — so a run given only a read root cannot write at all. Without eith
 reads and writes as the user who started it.
 
 ```sh
-# Renders in/doc.figcraft to out/ok.png and can touch nothing else.
-figcraft-cli render in/doc.figcraft -o out/ok.png \
+# Renders in/doc.lizard to out/ok.png and can touch nothing else.
+lizard-cli render in/doc.lizard -o out/ok.png \
   --automation-read-root in --automation-write-root out
 
-figcraft-cli render in/doc.figcraft -o ./escaped.png \
+lizard-cli render in/doc.lizard -o ./escaped.png \
   --automation-read-root in --automation-write-root out
 # error: automation path rejected: . is outside the folders that may be written: …/out
 ```
@@ -197,10 +197,10 @@ live sessions (`collab.*`: without a key on a server open to the public, with `c
 
 ### `plugin publish <folder> --server ws://host:port/[?key=KEY]`
 
-Publishes a plugin folder (`figcraft-plugin.json`, the module its `main` names, an optional `assets/`
+Publishes a plugin folder (`lizard-plugin.json`, the module its `main` names, an optional `assets/`
 folder) to a `lizard-server`'s plugin directory as a new version, and prints its name, version,
 size and SHA-256. The server's key comes from the address or, better, from the
-`FIGCRAFT_SERVER_KEY` environment variable (it then stays out of the shell history and process
+`LIZARD_SERVER_KEY` environment variable (it then stays out of the shell history and process
 lists); it is never printed. The bundle is checked before it is sent and again by the server. See
 [plugins.md](plugins.md#plugin-directories).
 

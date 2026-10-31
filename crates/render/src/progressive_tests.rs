@@ -2,8 +2,8 @@
 //! at the end point (layer and background blur), matching a uniform blur where the ramp is flat;
 //! levels, degenerate lines, bands and hostile values.
 
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeId, NodeKind};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Blur, BlurType, Document, Effect, EffectKind, NodeId, NodeKind};
 
 use super::*;
 

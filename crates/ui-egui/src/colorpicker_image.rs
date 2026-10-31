@@ -19,7 +19,7 @@ const FILTER_IDS: [&str; 7] = [
     "cp_image_shadows",
 ];
 
-fn preview_texture(app: &FigApp, ctx: &egui::Context, image: &figcraft_color::ImagePaint) -> Option<egui::TextureHandle> {
+fn preview_texture(app: &LizardApp, ctx: &egui::Context, image: &lizard_color::ImagePaint) -> Option<egui::TextureHandle> {
     if image.image.is_empty() {
         return None;
     }
@@ -27,25 +27,25 @@ fn preview_texture(app: &FigApp, ctx: &egui::Context, image: &figcraft_color::Im
     let profile = doc.color_profile;
     let cache = Id::new("cp_image_preview_texture");
     if let Some((hash, filters, cached_profile, texture)) =
-        ctx.data(|data| data.get_temp::<(String, ImageFilters, figcraft_color::ColorProfile, egui::TextureHandle)>(cache))
+        ctx.data(|data| data.get_temp::<(String, ImageFilters, lizard_color::ColorProfile, egui::TextureHandle)>(cache))
         && hash == image.image
         && filters == image.filters
         && cached_profile == profile
     {
         return Some(texture);
     }
-    let pixels = figcraft_render::images::get(&image.image, doc.images.get(&image.image), &image.filters, profile)?;
+    let pixels = lizard_render::images::get(&image.image, doc.images.get(&image.image), &image.filters, profile)?;
     let color_image = crate::render_worker::screen_image(&pixels, profile);
     let texture = ctx.load_texture(format!("cp-image-{}", image.image), color_image, egui::TextureOptions::LINEAR);
     ctx.data_mut(|data| data.insert_temp(cache, (image.image.clone(), image.filters, profile, texture.clone())));
     Some(texture)
 }
 
-fn upload(app: &mut FigApp, target: &PickerTarget) {
+fn upload(app: &mut LizardApp, target: &PickerTarget) {
     let target = target.clone();
     app.pick_open(tr("Choose image"), &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"], move |app, path| {
         let Ok(bytes) = std::fs::read(&path) else { return };
-        let Some(hash) = app.session.doc_mut().ok().and_then(|doc| figcraft_format_add(doc, bytes)) else { return };
+        let Some(hash) = app.session.doc_mut().ok().and_then(|doc| lizard_format_add(doc, bytes)) else { return };
         if let Some(mut paint) = current_paint(app, &target)
             && let PaintKind::Image(ref mut image) = paint.kind
         {
@@ -111,7 +111,7 @@ fn filter_slider(ui: &mut Ui, origin: Pos2, index: usize, value: f32) -> (Option
     (changed.filter(|next| (next - value).abs() > f32::EPSILON), response.drag_stopped() || response.double_clicked())
 }
 
-fn preview(ui: &mut Ui, app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, image: &figcraft_color::ImagePaint, origin: Pos2) {
+fn preview(ui: &mut Ui, app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, image: &lizard_color::ImagePaint, origin: Pos2) {
     let rect = at(origin, 16.0, 128.0, 208.0, 208.0);
     ui.painter().rect_filled(rect, CornerRadius::same(5), Color32::from_gray(0xe6));
     widgets::checker(&ui.painter().with_clip_rect(rect), rect, 8.0);
@@ -140,7 +140,7 @@ fn preview(ui: &mut Ui, app: &mut FigApp, ctx: &egui::Context, target: &PickerTa
     }
 }
 
-pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
+pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
     let PaintKind::Image(mut image) = paint.kind.clone() else { return };
     let pos = super::initial_position(app, ctx, target);
     let mut open = true;

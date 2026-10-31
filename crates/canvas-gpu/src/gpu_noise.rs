@@ -1,7 +1,7 @@
 //! Document-stable grain over an isolated layer. Both source and result stay on the GPU.
 
-use figcraft_doc::{Noise, NoiseMode};
-use figcraft_geom::Affine;
+use lizard_doc::{Noise, NoiseMode};
+use lizard_geom::Affine;
 use wgpu::util::DeviceExt;
 
 pub(crate) const GRAIN_HASH_WGSL: &str = include_str!("grain_hash.wgsl");

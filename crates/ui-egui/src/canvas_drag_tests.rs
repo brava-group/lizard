@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Event, vec2};
-use figcraft_engine::Session;
+use lizard_engine::Session;
 use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
@@ -28,7 +28,7 @@ fn large_selection_ui_latency() -> Result<(), Box<dyn std::error::Error>> {
                 "x": (index % 36) * 25, "y": (index / 36) * 25, "width": 20, "height": 20,
             }),
         )?;
-        ids.push(figcraft_engine::params::id_of(&value["id"]).ok_or("missing rectangle id")?);
+        ids.push(lizard_engine::params::id_of(&value["id"]).ok_or("missing rectangle id")?);
     }
     session.execute("select.set", &json!({"ids": ids}))?;
     let mut ui = Ui::new(session);
@@ -71,7 +71,7 @@ fn settle(u: &mut Ui) {
 #[test]
 fn a_drag_shows_on_the_canvas_while_it_moves() {
     let mut s = Session::new();
-    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
     let f = id(s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 300, "height": 200})).unwrap());
     s.execute("node.set", &json!({"id": f, "rotation": 25})).unwrap();
     let r =
@@ -111,7 +111,7 @@ fn a_drag_shows_on_the_canvas_while_it_moves() {
 #[test]
 fn topmost_frame_uses_composited_drag_and_returns_to_refined_vector_image() {
     let mut s = Session::new();
-    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
     let frame = id(s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 420, "height": 300, "props": {"fill": "#192736"}})).unwrap());
     let child = id(s
         .execute("shape.rectangle", &json!({"x": 20, "y": 25, "width": 80, "height": 60, "parent": frame, "props": {"fill": "#e03030"}}))
@@ -150,7 +150,7 @@ fn topmost_frame_uses_composited_drag_and_returns_to_refined_vector_image() {
 #[test]
 fn zoomed_into_a_frame_corner_drag_stays_composited() {
     let mut s = Session::new();
-    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
     let frame = id(s.execute("frame.create", &json!({"x": 100, "y": 100, "width": 2048, "height": 1210, "props": {"fill": "#192736"}})).unwrap());
     s.execute("shape.rectangle", &json!({"parent": frame, "x": 20, "y": 30, "width": 80, "height": 60, "props": {"fill": "#e03030"}})).unwrap();
     s.execute("select.set", &json!({"ids": [frame]})).unwrap();
@@ -203,11 +203,11 @@ fn zoomed_into_a_frame_corner_drag_stays_composited() {
 #[ignore = "manual canvas latency benchmark: run with --ignored --nocapture"]
 fn complex_frame_drag_latency() {
     use crate::render_worker::{Job, Renders};
-    use figcraft_render::View;
+    use lizard_render::View;
     use web_time::Instant;
 
     let mut s = Session::new();
-    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
     let root = id(s.execute("frame.create", &json!({"x": 100, "y": 80, "width": 1100, "height": 680, "props": {"fill": "#19191D"}})).unwrap());
     for row in 0..5 {
         for col in 0..7 {
@@ -298,13 +298,13 @@ fn complex_frame_drag_latency() {
 }
 
 /// A repeatable render measurement on the saved icon document. Set LIZARD_BENCH_DOC to the
-/// .figcraft file; the same page centre and device viewport are used at every zoom level.
+/// .lizard file; the same page centre and device viewport are used at every zoom level.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "manual saved-document canvas benchmark: set LIZARD_BENCH_DOC and run with --ignored --nocapture"]
 fn saved_document_zoom_latency() -> Result<(), Box<dyn std::error::Error>> {
     use crate::render_worker::{Job, Renders};
-    use figcraft_render::View;
+    use lizard_render::View;
     use web_time::Instant;
 
     let path = std::env::var("LIZARD_BENCH_DOC")?;
@@ -361,7 +361,7 @@ fn saved_document_zoom_latency() -> Result<(), Box<dyn std::error::Error>> {
 fn releasing_a_canvas_drag_outside_finishes_the_interaction() {
     let mut s = Session::new();
     let r =
-        figcraft_engine::params::id_of(&s.execute("shape.rectangle", &json!({"x": 40, "y": 40, "width": 80, "height": 60})).unwrap()["id"]).unwrap();
+        lizard_engine::params::id_of(&s.execute("shape.rectangle", &json!({"x": 40, "y": 40, "width": 80, "height": 60})).unwrap()["id"]).unwrap();
     s.execute("select.set", &json!({"ids": [r]})).unwrap();
     let mut u = Ui::new(s);
     let start = u.app.to_screen(80.0, 70.0);
@@ -385,7 +385,7 @@ fn key(u: &mut Ui, key: egui::Key) {
 fn a_drag_released_off_the_window_ends_where_the_pointer_was_last_seen_and_later_edits_stay() {
     // #278: a drag left open made a later text edit roll back the changes made since.
     let mut s = Session::new();
-    let id = |v: serde_json::Value| figcraft_engine::params::id_of(&v["id"]).unwrap();
+    let id = |v: serde_json::Value| lizard_engine::params::id_of(&v["id"]).unwrap();
     let kept = id(s.execute("shape.rectangle", &json!({"x": 40, "y": 400, "width": 80, "height": 40})).unwrap());
     let gone = id(s.execute("shape.rectangle", &json!({"x": 160, "y": 400, "width": 80, "height": 40})).unwrap());
     let text = id(s.execute("text.create", &json!({"text": "A", "x": 40, "y": 500})).unwrap());

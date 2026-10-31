@@ -3,13 +3,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use egui::{Event, Key, PointerButton, Pos2, RawInput, Rect, vec2};
-use figcraft_engine::Session;
-use figcraft_ui_egui::{FigApp, NoServices};
+use lizard_engine::Session;
+use lizard_ui_egui::{LizardApp, NoServices};
 use serde_json::json;
 
 struct Frames {
     ctx: egui::Context,
-    app: FigApp,
+    app: LizardApp,
     time: f64,
 }
 
@@ -17,7 +17,7 @@ impl Frames {
     fn new() -> Self {
         let mut session = Session::new();
         session.execute("shape.rectangle", &json!({"x": 100, "y": 100, "width": 300, "height": 200})).unwrap();
-        let mut f = Frames { ctx: egui::Context::default(), app: FigApp::new(session, Box::new(NoServices)), time: 0.0 };
+        let mut f = Frames { ctx: egui::Context::default(), app: LizardApp::new(session, Box::new(NoServices)), time: 0.0 };
         for _ in 0..3 {
             f.frame(vec![]);
         }

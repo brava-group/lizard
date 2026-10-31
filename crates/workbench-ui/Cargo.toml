@@ -1,0 +1,12 @@
+[package]
+name = "workbench-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Reusable egui components for Lizard and other native apps"
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }

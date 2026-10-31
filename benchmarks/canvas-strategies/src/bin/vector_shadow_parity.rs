@@ -2,11 +2,11 @@
 
 use std::error::Error;
 
-use figcraft_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_in_view};
-use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, EffectKind, NodeKind, VectorNetwork};
-use figcraft_geom::{Affine, Point};
-use figcraft_render::{Options, View, draw, render_view};
+use lizard_canvas_gpu::vello_scene::{GpuCanvas, has_unhandled_effects_in_view};
+use lizard_color::{Color, Paint};
+use lizard_doc::{Document, Effect, EffectKind, NodeKind, VectorNetwork};
+use lizard_geom::{Affine, Point};
+use lizard_render::{Options, View, draw, render_view};
 use vello_cpu::filter_effects::{EdgeMode, Filter, FilterPrimitive};
 use vello_cpu::peniko;
 use vello_cpu::{Pixmap, RenderContext, Resources};

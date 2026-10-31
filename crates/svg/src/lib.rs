@@ -23,11 +23,11 @@ pub use import::{ImportError, Imported, import_svg, import_svg_with_notes, looks
 use std::fmt::Write as _;
 
 use base64::Engine as _;
-use figcraft_color::{Color, GradientKind, Paint, PaintKind};
-use figcraft_doc::{Document, EffectKind, Node, NodeId, NodeKind, SPREAD_MITER_LIMIT, Shadow};
-use figcraft_geom::{Affine, BezPath, Rect};
-use figcraft_render::shadow::Outline;
-use figcraft_render::{Alone, ExportDepthError, MAX_EXPORT_DEPTH, Pixmap, View, backdrop, check_export_depth};
+use lizard_color::{Color, GradientKind, Paint, PaintKind};
+use lizard_doc::{Document, EffectKind, Node, NodeId, NodeKind, SPREAD_MITER_LIMIT, Shadow};
+use lizard_geom::{Affine, BezPath, Rect};
+use lizard_render::shadow::Outline;
+use lizard_render::{Alone, ExportDepthError, MAX_EXPORT_DEPTH, Pixmap, View, backdrop, check_export_depth};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum SvgError {
@@ -102,7 +102,7 @@ fn num(v: f64) -> String {
 }
 
 fn path_d(p: &BezPath) -> String {
-    use figcraft_geom::kurbo::PathEl::*;
+    use lizard_geom::kurbo::PathEl::*;
     let mut s = String::new();
     for el in p.elements() {
         match *el {
@@ -142,8 +142,8 @@ fn raster_view(b: Rect, k: f64) -> Option<View> {
 }
 
 /// ` style="mix-blend-mode:…"` for a blend mode other than normal (else nothing).
-fn blend_style(b: figcraft_color::BlendMode) -> String {
-    if matches!(b, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough) {
+fn blend_style(b: lizard_color::BlendMode) -> String {
+    if matches!(b, lizard_color::BlendMode::Normal | lizard_color::BlendMode::PassThrough) {
         String::new()
     } else {
         format!(" style=\"mix-blend-mode:{}\"", b.css())
@@ -219,15 +219,15 @@ impl W<'_> {
                 let png;
                 let (mime, bytes) = match sniff_mime(&data.bytes) {
                     "application/octet-stream" => {
-                        png = figcraft_render::images::decode(&data.bytes).and_then(|p| figcraft_render::encode_png(&p).ok())?;
+                        png = lizard_render::images::decode(&data.bytes).and_then(|p| lizard_render::encode_png(&p).ok())?;
                         ("image/png", png.as_slice())
                     }
                     m => (m, data.bytes.as_slice()),
                 };
                 let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-                let t = figcraft_render::paint::image_transform(img, f64::from(data.width), f64::from(data.height), w, h);
+                let t = lizard_render::paint::image_transform(img, f64::from(data.width), f64::from(data.height), w, h);
                 let m = Affine::new([f64::from(t.sx), f64::from(t.ky), f64::from(t.kx), f64::from(t.sy), f64::from(t.tx), f64::from(t.ty)]);
-                let (pw, ph) = if img.scale_mode == figcraft_color::ImageScaleMode::Tile {
+                let (pw, ph) = if img.scale_mode == lizard_color::ImageScaleMode::Tile {
                     (f64::from(data.width), f64::from(data.height))
                 } else {
                     (f64::from(data.width) * 4.0, f64::from(data.height) * 4.0)
@@ -259,10 +259,10 @@ impl W<'_> {
                 Some(format!("fill=\"url(#{pid})\"{op}{blend}"))
             }
             PaintKind::Shader(_) => {
-                let figcraft_render::paint::Prepared::Pattern { pixmap, .. } = figcraft_render::paint::prepare(p, w, h, 1.0, self.doc)? else {
+                let lizard_render::paint::Prepared::Pattern { pixmap, .. } = lizard_render::paint::prepare(p, w, h, 1.0, self.doc)? else {
                     return None;
                 };
-                let png = figcraft_render::encode_png(&pixmap).ok()?;
+                let png = lizard_render::encode_png(&pixmap).ok()?;
                 let b64 = base64::engine::general_purpose::STANDARD.encode(png);
                 let pid = self.id("shader");
                 let _ = write!(
@@ -281,12 +281,12 @@ impl W<'_> {
 
     /// One cell of pattern `pt` on a `w`×`h` box: the source's vectors at each tile, or (a source
     /// with effects, which draw as page-placed images) an image of the cell.
-    fn pattern_tiles(&mut self, pt: &figcraft_color::PatternPaint, w: f64, h: f64) -> Option<(String, figcraft_color::PatternCell)> {
+    fn pattern_tiles(&mut self, pt: &lizard_color::PatternPaint, w: f64, h: f64) -> Option<(String, lizard_color::PatternCell)> {
         let doc = self.doc;
         let src = doc.node(NodeId(pt.source)).filter(|n| !n.is_page())?;
         if doc.subtree(src.id).iter().filter_map(|i| doc.node(*i)).any(|n| n.effects.iter().any(|e| e.visible)) {
-            let (pix, cell, _) = figcraft_render::pattern::cell_pixmap(doc, pt, w, h, RASTER_SCALE, 0.0)?;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(figcraft_render::encode_png(&pix).ok()?);
+            let (pix, cell, _) = lizard_render::pattern::cell_pixmap(doc, pt, w, h, RASTER_SCALE, 0.0)?;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(lizard_render::encode_png(&pix).ok()?);
             let img = format!(
                 "<image width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" href=\"data:image/png;base64,{b64}\"/>",
                 num(cell.size.0),
@@ -297,7 +297,7 @@ impl W<'_> {
         let cell = pt.cell(src.width, src.height, w, h)?;
         let unrotated = src.transform.inverse();
         let page_body = std::mem::take(&mut self.body);
-        let _ = figcraft_render::pattern::nested(|| {
+        let _ = lizard_render::pattern::nested(|| {
             for (tx, ty) in &cell.tiles {
                 self.node(src.id, Affine::translate((*tx, *ty)) * Affine::scale(cell.scale) * unrotated, 0);
             }
@@ -309,7 +309,7 @@ impl W<'_> {
     /// The layer's filter: drop shadows (but those drawn as `exact` geometry: see
     /// [`W::drop_shadows`]) and layer blur.
     fn filter_for(&mut self, n: &Node, exact: bool, xf: Affine) -> Option<String> {
-        let fx: Vec<&figcraft_doc::Effect> = n
+        let fx: Vec<&lizard_doc::Effect> = n
             .effects
             .iter()
             .filter(|e| e.visible)
@@ -323,11 +323,11 @@ impl W<'_> {
         // The region holds everything the layer and its effects paint (a fixed share of the
         // layer's box cuts off shadows and blurs that reach further).
         let k = xf.determinant().abs().sqrt();
-        let m = figcraft_render::draw::effect_margin(n) * if k.is_finite() { k } else { 1.0 };
+        let m = lizard_render::draw::effect_margin(n) * if k.is_finite() { k } else { 1.0 };
         let region = self
             .doc
             .world_render_bounds(n.id)
-            .map(|b| figcraft_geom::transform_rect_bbox(xf * self.doc.world_transform(n.id).inverse(), b).inflate(m, m))
+            .map(|b| lizard_geom::transform_rect_bbox(xf * self.doc.world_transform(n.id).inverse(), b).inflate(m, m))
             .filter(|r| [r.x0, r.y0, r.x1, r.y1].iter().all(|v| v.is_finite()));
         let mut f = match region {
             Some(r) => format!(
@@ -421,7 +421,7 @@ impl W<'_> {
         }
         let inherited = self.clip.clone();
         let spreads = n.effects.iter().any(|e| e.visible && matches!(&e.kind, EffectKind::DropShadow(s) if s.spread != 0.0));
-        let sil = if spreads { figcraft_render::shadow::silhouette(self.doc, n) } else { None };
+        let sil = if spreads { lizard_render::shadow::silhouette(self.doc, n) } else { None };
         if let Some(sil) = &sil {
             self.drop_shadows(n, sil, xf, &clip_attr(&inherited));
         }
@@ -445,10 +445,10 @@ impl W<'_> {
         let (w, h) = (n.width, n.height);
         let outline = match &n.kind {
             NodeKind::Group | NodeKind::Page { .. } => None,
-            _ => figcraft_render::node_outline(self.doc, n),
+            _ => lizard_render::node_outline(self.doc, n),
         };
-        let fillable = figcraft_doc::geometry::has_fill_geometry(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
-        let closed = figcraft_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
+        let fillable = lizard_doc::geometry::has_fill_geometry(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
+        let closed = lizard_doc::geometry::is_closed(n) || matches!(n.kind, NodeKind::BooleanOp { .. } | NodeKind::Text(_));
         let live_text = if self.opts.outline_text { None } else { self.text_element(n, xf) };
         let run_paths = if live_text.is_none() { text_run_paths(n) } else { None };
         if let Some(t) = &live_text {
@@ -466,7 +466,7 @@ impl W<'_> {
         } else if let Some((path, rule)) = &outline
             && fillable
         {
-            let mut emit = |path: &figcraft_geom::BezPath, even_odd: bool, fills: &[figcraft_color::Paint]| {
+            let mut emit = |path: &lizard_geom::BezPath, even_odd: bool, fills: &[lizard_color::Paint]| {
                 if path.elements().is_empty() {
                     return;
                 }
@@ -486,11 +486,11 @@ impl W<'_> {
                 emit(&drawn.unassigned_paint_path(), false, &n.fills);
                 for (index, region) in drawn.regions.iter().enumerate() {
                     if let Some(path) = drawn.region_path(index) {
-                        emit(&path, region.winding == figcraft_doc::WindingRule::EvenOdd, region.fills.as_ref().unwrap_or(&n.fills));
+                        emit(&path, region.winding == lizard_doc::WindingRule::EvenOdd, region.fills.as_ref().unwrap_or(&n.fills));
                     }
                 }
             } else {
-                emit(path, *rule == figcraft_render::FillRule::EvenOdd, &n.fills);
+                emit(path, *rule == lizard_render::FillRule::EvenOdd, &n.fills);
             }
         }
         // Inner shadows paint over the fills, under the children and strokes.
@@ -520,15 +520,15 @@ impl W<'_> {
                 let Some(&c) = kids.get(run.start) else { continue };
                 if self.doc.node(c).is_some_and(|cn| cn.is_mask && cn.visible) {
                     let kind = self.doc.node(c).map(|mn| mn.mask_type).unwrap_or_default();
-                    if kind == figcraft_doc::MaskType::Vector {
+                    if kind == lizard_doc::MaskType::Vector {
                         // A vector mask is a clip path: its outline.
                         let cid = self.id("clip");
                         let outline =
-                            self.doc.node(c).and_then(|mn| Some((xf * mn.transform, figcraft_render::subtree_outline(self.doc, mn, depth + 1)?)));
+                            self.doc.node(c).and_then(|mn| Some((xf * mn.transform, lizard_render::subtree_outline(self.doc, mn, depth + 1)?)));
                         let (shape, cr) = match &outline {
                             Some((mxf, (mp, rule))) => (
                                 format!(" transform=\"{}\" d=\"{}\"", matrix(*mxf), path_d(mp)),
-                                if *rule == figcraft_render::FillRule::EvenOdd { " clip-rule=\"evenodd\"" } else { "" },
+                                if *rule == lizard_render::FillRule::EvenOdd { " clip-rule=\"evenodd\"" } else { "" },
                             ),
                             None => (" d=\"\"".to_string(), ""),
                         };
@@ -544,7 +544,7 @@ impl W<'_> {
                         self.clip = clip;
                         self.mask = outer;
                         let mask_body = std::mem::replace(&mut self.body, saved);
-                        let alpha = if kind == figcraft_doc::MaskType::Alpha { " style=\"mask-type:alpha\"" } else { "" };
+                        let alpha = if kind == lizard_doc::MaskType::Alpha { " style=\"mask-type:alpha\"" } else { "" };
                         let _ = write!(self.defs, "<mask id=\"{mid}\" maskUnits=\"userSpaceOnUse\"{alpha}>{mask_body}</mask>");
                         let _ = write!(self.body, "<g mask=\"url(#{mid})\">");
                     }
@@ -565,11 +565,11 @@ impl W<'_> {
         } else if n.has_visible_stroke() {
             let geom = match &n.kind {
                 NodeKind::BooleanOp { .. } | NodeKind::Text(_) => outline.as_ref().map(|(p, _)| p.clone()),
-                _ => figcraft_render::draw::painted_stroke_geometry(n),
+                _ => lizard_render::draw::painted_stroke_geometry(n),
             };
             if let Some(g) = geom {
-                let area = figcraft_render::draw::stroke_area(n, &g, closed);
-                let even = n.stroke.sides.is_some() || (n.stroke.dashes.is_empty() && closed && n.stroke.align != figcraft_doc::StrokeAlign::Center);
+                let area = lizard_render::draw::stroke_area(n, &g, closed);
+                let even = n.stroke.sides.is_some() || (n.stroke.dashes.is_empty() && closed && n.stroke.align != lizard_doc::StrokeAlign::Center);
                 let fr = if even { " fill-rule=\"evenodd\"" } else { "" };
                 for p in &n.strokes {
                     if let Some(a) = self.paint_attr(p, w, h) {
@@ -605,7 +605,7 @@ impl W<'_> {
         let chars: Vec<char> = t.characters.chars().collect();
         let mut spans = String::new();
         let mut gxf = xf;
-        if let Some((layout, dy)) = figcraft_text::layout_node(n) {
+        if let Some((layout, dy)) = lizard_text::layout_node(n) {
             gxf = xf * Affine::translate((0.0, dy));
             for line in &layout.lines {
                 let glyphs = layout.glyphs.get(line.glyph_start..line.glyph_end).unwrap_or(&[]);
@@ -652,8 +652,8 @@ impl W<'_> {
         }
         let italic = if st.italic() { " font-style=\"italic\"" } else { "" };
         let spacing = match st.letter_spacing {
-            figcraft_doc::LetterSpacing::Pixels(v) if v != 0.0 => format!(" letter-spacing=\"{}\"", num(v)),
-            figcraft_doc::LetterSpacing::Percent(p) if p != 0.0 => format!(" letter-spacing=\"{}\"", num(p / 100.0 * st.font_size)),
+            lizard_doc::LetterSpacing::Pixels(v) if v != 0.0 => format!(" letter-spacing=\"{}\"", num(v)),
+            lizard_doc::LetterSpacing::Percent(p) if p != 0.0 => format!(" letter-spacing=\"{}\"", num(p / 100.0 * st.font_size)),
             _ => String::new(),
         };
         Some(format!(
@@ -670,7 +670,7 @@ impl W<'_> {
     /// the path, or inside or outside a box or ellipse (drawn centred on it grown or shrunk by half
     /// the weight). `None` otherwise.
     fn simple_stroke(&mut self, n: &Node, xf: Affine) -> Option<String> {
-        use figcraft_doc::{StrokeAlign, StrokeCap, StrokeJoin};
+        use lizard_doc::{StrokeAlign, StrokeCap, StrokeJoin};
         let k = &n.stroke;
         let w = k.weight;
         if k.sides.is_some()
@@ -686,7 +686,7 @@ impl W<'_> {
         let path = match k.align {
             StrokeAlign::Center => match n.kind {
                 NodeKind::Text(_) | NodeKind::BooleanOp { .. } | NodeKind::Group => return None,
-                _ => figcraft_doc::geometry::stroke_geometry(n)?,
+                _ => lizard_doc::geometry::stroke_geometry(n)?,
             },
             align if k.dashes.is_empty() => {
                 let d = if align == StrokeAlign::Inside { -w / 2.0 } else { w / 2.0 };
@@ -696,7 +696,7 @@ impl W<'_> {
                 }
                 match n.kind {
                     NodeKind::Ellipse { sweep, inner, .. } if inner == 0.0 && sweep >= std::f64::consts::TAU - 1e-9 => {
-                        figcraft_geom::kurbo::Shape::to_path(&figcraft_geom::kurbo::Ellipse::from_rect(r), 0.1)
+                        lizard_geom::kurbo::Shape::to_path(&lizard_geom::kurbo::Ellipse::from_rect(r), 0.1)
                     }
                     NodeKind::Rectangle | NodeKind::Frame | NodeKind::Component { .. } | NodeKind::Instance { .. } if n.corners.smoothing == 0.0 => {
                         // A rounded corner keeps a radius only while the shifted radius stays positive.
@@ -705,7 +705,7 @@ impl W<'_> {
                             return None;
                         }
                         let [tl, tr, br, bl] = radii;
-                        figcraft_geom::kurbo::Shape::to_path(&figcraft_geom::kurbo::RoundedRect::from_rect(r, (tl, tr, br, bl)), 0.1)
+                        lizard_geom::kurbo::Shape::to_path(&lizard_geom::kurbo::RoundedRect::from_rect(r, (tl, tr, br, bl)), 0.1)
                     }
                     _ => return None,
                 }
@@ -750,7 +750,7 @@ impl W<'_> {
         if pix.data().iter().skip(3).step_by(4).all(|a| *a == 0) {
             return None;
         }
-        let png = figcraft_render::encode_png(pix).ok()?;
+        let png = lizard_render::encode_png(pix).ok()?;
         let b64 = base64::engine::general_purpose::STANDARD.encode(png);
         let t = self.page * Affine::translate(view.origin) * Affine::scale(1.0 / view.scale.max(1e-9));
         Some(format!(
@@ -785,9 +785,9 @@ impl W<'_> {
         if !whole {
             return false;
         }
-        let Some(view) = figcraft_render::raster_bounds(self.doc, id).and_then(|b| raster_view(b, RASTER_SCALE)) else { return false };
+        let Some(view) = lizard_render::raster_bounds(self.doc, id).and_then(|b| raster_view(b, RASTER_SCALE)) else { return false };
         // The renderer applies the layer's opacity; its blend mode applies to the SVG beneath.
-        let Some(img) = figcraft_render::render_alone(self.doc, id, &view, Alone::WithEffects).and_then(|p| self.image(&p, &view, "")) else {
+        let Some(img) = lizard_render::render_alone(self.doc, id, &view, Alone::WithEffects).and_then(|p| self.image(&p, &view, "")) else {
             return false;
         };
         let back = if backdrop::has_effects(n) { self.backdrop_image(id, Some(n.opacity.clamp(0.0, 1.0))) } else { None };
@@ -798,7 +798,7 @@ impl W<'_> {
     /// Node `id`'s noise grains as images over the layer (crisp pixels, the noise's blend mode),
     /// drawn by the renderer from the layer's content (empty without noise).
     fn grain_images(&self, id: NodeId, n: &Node) -> String {
-        let noises: Vec<&figcraft_doc::Noise> = n
+        let noises: Vec<&lizard_doc::Noise> = n
             .effects
             .iter()
             .filter(|e| e.visible)
@@ -816,14 +816,14 @@ impl W<'_> {
         let cell = noises.iter().map(|nz| nz.grain().0.min(nz.grain().1) * 2.0).fold(f64::INFINITY, f64::min) * sc;
         let k = if cell.is_finite() && cell > 0.0 { (2.0 / cell).clamp(RASTER_SCALE, 4.0) } else { RASTER_SCALE };
         let Some(view) = self.doc.world_render_bounds(id).and_then(|b| raster_view(b, k)) else { return String::new() };
-        let Some(layer) = figcraft_render::render_alone(self.doc, id, &view, Alone::Plain) else { return String::new() };
+        let Some(layer) = lizard_render::render_alone(self.doc, id, &view, Alone::Plain) else { return String::new() };
         let xf = view.transform() * world;
         let mut out = String::new();
         for nz in noises {
             let blend = blend_style(nz.blend);
             let blend = blend.strip_prefix(" style=\"").and_then(|b| b.strip_suffix('"')).map(|b| format!(";{b}")).unwrap_or_default();
             let attrs = format!(" style=\"image-rendering:pixelated{blend}\"");
-            if let Some(img) = figcraft_render::grain::grains(&layer, nz, xf, id.0 as u32).and_then(|g| self.image(&g, &view, &attrs)) {
+            if let Some(img) = lizard_render::grain::grains(&layer, nz, xf, id.0 as u32).and_then(|g| self.image(&g, &view, &attrs)) {
                 out.push_str(&img);
             }
         }
@@ -837,7 +837,7 @@ impl W<'_> {
         let paths = |fill: &str, stroke: Option<(&str, f64)>| -> String {
             let mut s = String::new();
             for (p, rule) in outlines {
-                let fr = if *rule == figcraft_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
+                let fr = if *rule == lizard_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
                 let _ = write!(s, "<path transform=\"{}\" d=\"{}\" fill=\"{fill}\"{fr}/>", matrix(xf), path_d(p));
             }
             if let Some((c, half)) = stroke {
@@ -859,7 +859,7 @@ impl W<'_> {
             return paths(color, (half > 1e-6).then_some((color, half)));
         }
         let bounds =
-            outlines.iter().map(|(p, _)| figcraft_geom::transform_rect_bbox(xf, figcraft_geom::Shape::bounding_box(p))).reduce(|a, b| a.union(b));
+            outlines.iter().map(|(p, _)| lizard_geom::transform_rect_bbox(xf, lizard_geom::Shape::bounding_box(p))).reduce(|a, b| a.union(b));
         let Some(b) = bounds.map(|b| b.inflate(1.0, 1.0)) else { return String::new() };
         let mid = self.id("mask");
         let _ = write!(
@@ -902,12 +902,12 @@ impl W<'_> {
 
     /// The area `n`'s paints cover, as a filter input named `cover` (an image of its outlines
     /// through `xf`), when its drop shadows hide behind it there (see
-    /// [`shadow::hiding_cover`](figcraft_render::shadow::hiding_cover)).
+    /// [`shadow::hiding_cover`](lizard_render::shadow::hiding_cover)).
     fn cover_input(&self, n: &Node, xf: Affine) -> Option<String> {
-        let cover = figcraft_render::shadow::hiding_cover(self.doc, n)?;
+        let cover = lizard_render::shadow::hiding_cover(self.doc, n)?;
         let b = cover
             .iter()
-            .map(|(p, _)| figcraft_geom::transform_rect_bbox(xf, figcraft_geom::Shape::bounding_box(p)))
+            .map(|(p, _)| lizard_geom::transform_rect_bbox(xf, lizard_geom::Shape::bounding_box(p)))
             .reduce(|a, b| a.union(b))?
             .inflate(1.0, 1.0);
         if !(b.width() > 0.0 && b.height() > 0.0 && [b.x0, b.y0, b.x1, b.y1].iter().all(|v| v.is_finite())) {
@@ -923,7 +923,7 @@ impl W<'_> {
             num(b.height())
         );
         for (p, rule) in &cover {
-            let fr = if *rule == figcraft_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
+            let fr = if *rule == lizard_render::FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
             let _ = write!(img, "<path transform=\"{}\" d=\"{}\"{fr}/>", matrix(xf), path_d(p));
         }
         img.push_str("</svg>");
@@ -947,7 +947,7 @@ impl W<'_> {
             }
             let at = Affine::translate(s.offset) * xf;
             let Some(b) =
-                sil.iter().map(|(p, _)| figcraft_geom::transform_rect_bbox(at, figcraft_geom::Shape::bounding_box(p))).reduce(|a, b| a.union(b))
+                sil.iter().map(|(p, _)| lizard_geom::transform_rect_bbox(at, lizard_geom::Shape::bounding_box(p))).reduce(|a, b| a.union(b))
             else {
                 continue;
             };
@@ -956,7 +956,7 @@ impl W<'_> {
             let filter =
                 self.blur_filter(s.radius, b.inflate(reach, reach), cover.as_deref()).map(|f| format!(" filter=\"url(#{f})\"")).unwrap_or_default();
             let op = f64::from(s.color.a * n.opacity.clamp(0.0, 1.0));
-            let blend = if matches!(s.blend, figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PassThrough) {
+            let blend = if matches!(s.blend, lizard_color::BlendMode::Normal | lizard_color::BlendMode::PassThrough) {
                 String::new()
             } else {
                 format!(" style=\"mix-blend-mode:{}\"", s.blend.css())
@@ -972,10 +972,10 @@ impl W<'_> {
         if !(s.offset.0.is_finite() && s.offset.1.is_finite()) {
             return;
         }
-        let b = figcraft_geom::transform_rect_bbox(xf, figcraft_geom::Shape::bounding_box(&o.0));
+        let b = lizard_geom::transform_rect_bbox(xf, lizard_geom::Shape::bounding_box(&o.0));
         let reach = s.spread.abs() * SPREAD_MITER_LIMIT + s.radius.abs() * 1.5 + s.offset.0.abs().max(s.offset.1.abs()) + 2.0;
         let r = b.inflate(reach, reach);
-        let cr = if o.1 == figcraft_render::FillRule::EvenOdd { " clip-rule=\"evenodd\"" } else { "" };
+        let cr = if o.1 == lizard_render::FillRule::EvenOdd { " clip-rule=\"evenodd\"" } else { "" };
         let cid = self.id("clip");
         let _ = write!(self.defs, "<clipPath id=\"{cid}\"><path transform=\"{}\" d=\"{}\"{cr}/></clipPath>", matrix(xf), path_d(&o.0));
         let hole = self.spread_paths(std::slice::from_ref(o), -s.spread, Affine::translate(s.offset) * xf, "black");
@@ -1028,7 +1028,7 @@ pub fn try_export_svg(doc: &Document, ids: &[NodeId], opts: &SvgOptions) -> Resu
     check_export_depth(doc, ids)?;
     let bounds: Rect = match opts.bounds {
         Some(b) if [b.x0, b.y0, b.x1, b.y1].iter().all(|v| v.is_finite()) => b,
-        _ => ids.iter().filter_map(|i| figcraft_render::export_bounds(doc, *i)).reduce(|a, b| a.union(b)).ok_or(SvgError::Empty)?,
+        _ => ids.iter().filter_map(|i| lizard_render::export_bounds(doc, *i)).reduce(|a, b| a.union(b)).ok_or(SvgError::Empty)?,
     };
     let origin = Affine::translate((-bounds.x0, -bounds.y0));
     let mut w = W {
@@ -1064,7 +1064,7 @@ pub fn try_export_svg(doc: &Document, ids: &[NodeId], opts: &SvgOptions) -> Resu
 /// the layer's), in layer space. `None` unless some character range has fills of its own.
 fn text_run_paths(n: &Node) -> Option<Vec<(BezPath, Vec<Paint>)>> {
     let NodeKind::Text(_) = &n.kind else { return None };
-    let (layout, dy) = figcraft_text::layout_node(n)?;
+    let (layout, dy) = lizard_text::layout_node(n)?;
     if !layout.styles.iter().any(|s| s.fills.is_some()) {
         return None;
     }

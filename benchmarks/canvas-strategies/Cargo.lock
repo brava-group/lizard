@@ -481,13 +481,13 @@ dependencies = [
 name = "canvas-strategies-bench"
 version = "0.1.0"
 dependencies = [
- "figcraft-canvas-gpu",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-engine",
- "figcraft-format",
- "figcraft-geom",
- "figcraft-render",
+ "lizard-canvas-gpu",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-engine",
+ "lizard-format",
+ "lizard-geom",
+ "lizard-render",
  "png",
  "pollster",
  "rayon",
@@ -1001,14 +1001,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4beca3cb2444e3304ac30843cc091f44ed58932353cd492ce740067bfce6b12"
 
 [[package]]
-name = "figcraft-canvas-gpu"
+name = "lizard-canvas-gpu"
 version = "0.9.0"
 dependencies = [
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-render",
- "figcraft-shader",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-render",
+ "lizard-shader",
  "pollster",
  "rayon",
  "vello_common",
@@ -1018,11 +1018,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-collab"
+name = "lizard-collab"
 version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
- "figcraft-doc",
+ "lizard-doc",
  "imbl",
  "postcard",
  "serde",
@@ -1031,7 +1031,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-color"
+name = "lizard-color"
 version = "0.9.0"
 dependencies = [
  "kurbo",
@@ -1039,11 +1039,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-doc"
+name = "lizard-doc"
 version = "0.9.0"
 dependencies = [
- "figcraft-color",
- "figcraft-geom",
+ "lizard-color",
+ "lizard-geom",
  "imbl",
  "serde",
  "serde_json",
@@ -1051,26 +1051,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-engine"
+name = "lizard-engine"
 version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "craft-docpath",
- "figcraft-canvas-gpu",
- "figcraft-collab",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-figma-plugin",
- "figcraft-format",
- "figcraft-geom",
- "figcraft-layout",
- "figcraft-pathops",
- "figcraft-pdf",
- "figcraft-plugin",
- "figcraft-render",
- "figcraft-shader",
- "figcraft-svg",
- "figcraft-text",
+ "lizard-canvas-gpu",
+ "lizard-collab",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-figma-plugin",
+ "lizard-format",
+ "lizard-geom",
+ "lizard-layout",
+ "lizard-pathops",
+ "lizard-pdf",
+ "lizard-plugin",
+ "lizard-render",
+ "lizard-shader",
+ "lizard-svg",
+ "lizard-text",
  "flate2",
  "image",
  "log",
@@ -1084,7 +1084,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-figma-plugin"
+name = "lizard-figma-plugin"
 version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
@@ -1095,11 +1095,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-format"
+name = "lizard-format"
 version = "0.9.0"
 dependencies = [
- "figcraft-doc",
- "figcraft-pathops",
+ "lizard-doc",
+ "lizard-pathops",
  "flate2",
  "image",
  "ruzstd",
@@ -1110,7 +1110,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-geom"
+name = "lizard-geom"
 version = "0.9.0"
 dependencies = [
  "kurbo",
@@ -1118,32 +1118,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-layout"
+name = "lizard-layout"
 version = "0.9.0"
 dependencies = [
- "figcraft-doc",
- "figcraft-geom",
+ "lizard-doc",
+ "lizard-geom",
 ]
 
 [[package]]
-name = "figcraft-pathops"
+name = "lizard-pathops"
 version = "0.9.0"
 dependencies = [
- "figcraft-doc",
- "figcraft-geom",
+ "lizard-doc",
+ "lizard-geom",
  "linesweeper",
 ]
 
 [[package]]
-name = "figcraft-pdf"
+name = "lizard-pdf"
 version = "0.9.0"
 dependencies = [
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-render",
- "figcraft-text",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-render",
+ "lizard-text",
  "krilla",
  "log",
  "thiserror 2.0.21",
@@ -1151,10 +1151,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-plugin"
+name = "lizard-plugin"
 version = "0.9.0"
 dependencies = [
- "figcraft-color",
+ "lizard-color",
  "serde",
  "serde_json",
  "sha2",
@@ -1163,16 +1163,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-render"
+name = "lizard-render"
 version = "0.9.0"
 dependencies = [
  "crc32fast",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-shader",
- "figcraft-text",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-shader",
+ "lizard-text",
  "image",
  "log",
  "moxcms",
@@ -1182,11 +1182,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-shader"
+name = "lizard-shader"
 version = "0.9.0"
 dependencies = [
- "figcraft-color",
- "figcraft-doc",
+ "lizard-color",
+ "lizard-doc",
  "log",
  "naga",
  "pollster",
@@ -1194,27 +1194,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-svg"
+name = "lizard-svg"
 version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
- "figcraft-color",
- "figcraft-doc",
- "figcraft-geom",
- "figcraft-pathops",
- "figcraft-render",
- "figcraft-text",
+ "lizard-color",
+ "lizard-doc",
+ "lizard-geom",
+ "lizard-pathops",
+ "lizard-render",
+ "lizard-text",
  "flate2",
  "thiserror 2.0.21",
  "usvg",
 ]
 
 [[package]]
-name = "figcraft-text"
+name = "lizard-text"
 version = "0.9.0"
 dependencies = [
- "figcraft-doc",
- "figcraft-geom",
+ "lizard-doc",
+ "lizard-geom",
  "harfrust 0.13.3",
  "log",
  "png",

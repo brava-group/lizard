@@ -1,5 +1,5 @@
 [package]
-name = "figcraft-text"
+name = "lizard-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,8 @@ description = "Lizard text: font database (embedded craft-fonts + system fonts),
 workspace = true
 
 [dependencies]
-figcraft-geom = { workspace = true }
-figcraft-doc = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-doc = { workspace = true }
 skrifa = { workspace = true }
 harfrust = { workspace = true }
 # Colour emoji: sbix/CBDT strikes are PNG images the text layer decodes for the renderer.

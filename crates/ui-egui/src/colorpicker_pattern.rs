@@ -6,7 +6,7 @@ use super::*;
 const HEIGHT: f32 = 522.0;
 const ACTIVE: Color32 = Color32::from_rgb(0x7c, 0xc4, 0xf8);
 
-fn source_dimensions(app: &FigApp, source: u64) -> (f64, f64) {
+fn source_dimensions(app: &LizardApp, source: u64) -> (f64, f64) {
     app.session
         .doc()
         .ok()
@@ -14,7 +14,7 @@ fn source_dimensions(app: &FigApp, source: u64) -> (f64, f64) {
         .map_or((100.0, 100.0), |bounds| (bounds.width().max(1.0), bounds.height().max(1.0)))
 }
 
-fn preview_texture(app: &FigApp, ctx: &egui::Context, source: u64) -> Option<egui::TextureHandle> {
+fn preview_texture(app: &LizardApp, ctx: &egui::Context, source: u64) -> Option<egui::TextureHandle> {
     let doc = app.session.doc().ok()?;
     let node = doc.node_arc(NodeId(source))?;
     let identity = std::sync::Arc::as_ptr(node) as usize;
@@ -67,7 +67,7 @@ fn value_field(
         .filter(|value| value.is_finite() && (!disabled || *value == 0.0))
 }
 
-pub(super) fn show(app: &mut FigApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
+pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint) {
     let PaintKind::Pattern(mut pattern) = paint.kind.clone() else { return };
     let pos = super::initial_position(app, ctx, target);
     let mut open = true;

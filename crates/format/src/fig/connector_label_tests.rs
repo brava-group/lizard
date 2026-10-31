@@ -106,7 +106,7 @@ fn map_synthetic(version: f32, include_text: bool, text_x: f32) -> (serde_json::
     (rest, warnings)
 }
 
-fn find_node<'a>(doc: &'a figcraft_doc::Document, name: &str) -> &'a figcraft_doc::Node {
+fn find_node<'a>(doc: &'a lizard_doc::Document, name: &str) -> &'a lizard_doc::Node {
     doc.nodes().find(|node| node.name == name).expect("native node")
 }
 
@@ -136,7 +136,7 @@ fn synthetic_label_style_transform_and_container_opacity_survive_native_roundtri
     assert_eq!(text.opacity, 1.0, "root opacity must not be copied to child");
     assert_eq!(text.transform.as_coeffs()[4..], [108.5, 33.0]);
     assert_eq!(text.fills.len(), 1);
-    let figcraft_doc::NodeKind::Text(data) = &text.kind else { panic!("text child kind") };
+    let lizard_doc::NodeKind::Text(data) = &text.kind else { panic!("text child kind") };
     assert_eq!(data.style.font_size, 24.0);
 }
 
@@ -162,7 +162,7 @@ fn synthetic_unlabelled_connector_imports_as_one_vector_with_line_style() {
 
     let (native, _) = crate::rest::import_fig(&rest, &|_| None).unwrap();
     let node = find_node(&native, "synthetic connector");
-    assert!(matches!(node.kind, figcraft_doc::NodeKind::Vector { .. }));
+    assert!(matches!(node.kind, lizard_doc::NodeKind::Vector { .. }));
 }
 
 #[test]

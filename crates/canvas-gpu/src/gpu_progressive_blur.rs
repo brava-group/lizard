@@ -1,7 +1,7 @@
 //! Progressive layer blur: blur levels and per-pixel interpolation stay on the GPU.
 
-use figcraft_doc::Blur;
-use figcraft_geom::Point;
+use lizard_doc::Blur;
+use lizard_geom::Point;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_blur::GpuBlur;

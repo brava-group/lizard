@@ -6,10 +6,10 @@
 use std::io;
 use std::net::{SocketAddr, TcpListener};
 
-use figcraft_collab::message::{Access, ClientMsg, Hello, PROTOCOL, Peer, Presence, ServerMsg};
-use figcraft_collab::{Outgoing, Server, same_secret};
-use figcraft_doc::Document;
-use figcraft_engine::live::{Event, PEOPLE};
+use lizard_collab::message::{Access, ClientMsg, Hello, PROTOCOL, Peer, Presence, ServerMsg};
+use lizard_collab::{Outgoing, Server, same_secret};
+use lizard_doc::Document;
+use lizard_engine::live::{Event, PEOPLE};
 
 pub use crate::hub::REMOVED;
 use crate::hub::{Admission, Backend, Closing, Hosting, Local, clean_name, to_local};
@@ -31,7 +31,7 @@ pub struct HostConfig {
     /// The host's own name (empty: "Host").
     pub name: String,
     pub limits: NetLimits,
-    pub core: figcraft_collab::Limits,
+    pub core: lizard_collab::Limits,
 }
 
 /// A running session host. Dropping it stops it.
@@ -86,7 +86,7 @@ impl Host {
             token: String::new(),
             name,
             color: PEOPLE[0].to_string(),
-            client_version: figcraft_collab::message::client_version(),
+            client_version: lizard_collab::message::client_version(),
             resume: None,
         };
         let (me, outs) = server.join(hello).map_err(|r| io::Error::other(format!("{r:?}")))?;

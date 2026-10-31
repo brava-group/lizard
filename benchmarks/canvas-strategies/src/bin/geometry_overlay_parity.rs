@@ -4,9 +4,9 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
-use figcraft_color::Color;
-use figcraft_doc::EffectKind;
-use figcraft_render::{Options, View, render_view};
+use lizard_color::Color;
+use lizard_doc::EffectKind;
+use lizard_render::{Options, View, render_view};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let icon = std::env::args().any(|arg| arg == "--icon");
@@ -16,11 +16,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(default_factor)
         .clamp(2, 8);
     let path = if icon {
-        Path::new("/Users/matheuspires/Documents/Lizard-new-icon.figcraft")
+        Path::new("/Users/matheuspires/Documents/Lizard-new-icon.lizard")
     } else {
-        Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.figcraft")
+        Path::new("benchmarks/canvas-strategies/fixtures/ultrawide-workbook.lizard")
     };
-    let (doc, warnings) = figcraft_format::load_file(path)?;
+    let (doc, warnings) = lizard_format::load_file(path)?;
     if !warnings.is_empty() {
         return Err(format!("fixture warnings: {warnings:?}").into());
     }

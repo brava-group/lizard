@@ -1,6 +1,6 @@
 //! GPU-generated diamond gradient texture, matching the document gradient handles.
 
-use figcraft_color::Gradient;
+use lizard_color::Gradient;
 use wgpu::util::DeviceExt;
 
 const SIZE: u32 = 256;

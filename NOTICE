@@ -1,5 +1,6 @@
 Lizard
-Based on FigCraft. Copyright (c) 2026 ArtCraft Team and the FigCraft contributors.
+Includes work by ArtCraft Team and the original contributors listed in
+contributors/contributors.json and the preserved git history.
 Lizard changes copyright their respective contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option
 (LICENSE-MIT, LICENSE-APACHE).
@@ -8,11 +9,22 @@ ArtCraft trademarks and logos are not included in Lizard.
 
 Third-party material
 
-The per-file list (author, source, license) of bundled assets is in ATTRIBUTION.md.
+The app icon is licensed MIT OR Apache-2.0; see assets/app-icon/LICENSE.txt. Other original
+interface artwork was supplied by the project owner. The offline icon catalog contains Lucide, Feather, Phosphor and
+Material Symbols artwork. Their ISC, MIT and Apache-2.0 licence texts are preserved in
+assets/icon-packs/LICENSE-lucide, LICENSE-feather, LICENSE-phosphor and LICENSE-material.
 
-Release builds made with the optional craft-fonts build input (CRAFT_FONTS_DIR) embed the fonts
-listed in ATTRIBUTION.md (Inter and others, SIL Open Font License 1.1); each package carries their
-licence texts.
+Interface icons based on Figma's UI3 kit include work by Figma and Abhimanyu Rana (@planetabhi).
+The free Community artwork is licensed CC BY 4.0; source:
+https://www.figma.com/community/file/1486123838948777078/ui3-figmas-ui-kit .
+The optional icon package also claims MIT: https://www.npmjs.com/package/@ui3/icons .
+These notices cover the SVG and JSON artwork in crates/ui-egui/assets/.
+
+The cursor images in crates/ui-egui/assets/cursors/ were supplied from an owner reference;
+their redistribution licence has not been verified. Confirm rights before distributing them.
+
+Release builds made with the optional craft-fonts build input (CRAFT_FONTS_DIR) embed fonts
+including Inter under the SIL Open Font License 1.1. Each package must carry its font licences.
 
 Rust crate dependencies keep their own licenses (MIT, Apache-2.0, BSD, ISC, Zlib, OFL for egui's
 default fonts, CDLA-Permissive-2.0 for the root certificate list webpki-roots compiles in, and

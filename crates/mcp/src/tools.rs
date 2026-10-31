@@ -3,7 +3,7 @@
 //! behave the same.
 
 use base64::Engine as _;
-use figcraft_engine::params::normalize_paint;
+use lizard_engine::params::normalize_paint;
 use serde_json::{Map, Value, json};
 
 use crate::backend::{Backend, decode_data, page_children};
@@ -255,7 +255,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open_file",
             "Open file",
-            "Open a .figcraft or .json document (Lizard or REST API file JSON), a .fig file (best effort, with `warnings` for what wasn't imported), an .svg (becomes vectors) or an image (becomes an image layer) as the active document. Returns the new document's summary.",
+            "Open a .lizard or .json document (Lizard or REST API file JSON), a .fig file (best effort, with `warnings` for what wasn't imported), an .svg (becomes vectors) or an image (becomes an image layer) as the active document. Returns the new document's summary.",
             obj(
                 json!({
                     "path": string("File path"),
@@ -268,8 +268,8 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "save_file",
             "Save file",
-            "Save the active document as a .figcraft file. `path` is required the first time (an untitled document has no path); later saves reuse it. A `path` ending in .fig writes an experimental .fig export copy instead and leaves the document's own path and unsaved changes alone.",
-            obj(json!({"path": string("Output .figcraft path, or a .fig path for an experimental export copy")}), &[]),
+            "Save the active document as a .lizard file. `path` is required the first time (an untitled document has no path); later saves reuse it. A `path` ending in .fig writes an experimental .fig export copy instead and leaves the document's own path and unsaved changes alone.",
+            obj(json!({"path": string("Output .lizard path, or a .fig path for an experimental export copy")}), &[]),
             false,
         ),
         tool("undo", "Undo", "Undo the last change (one command, batch or gesture). Returns {undone: bool}.", empty(), false),
@@ -352,12 +352,12 @@ fn req_s<'a>(a: &'a Map<String, Value>, k: &str) -> Result<&'a str, String> {
 fn n_arg(a: &Map<String, Value>, k: &str) -> Result<Option<f64>, String> {
     match a.get(k) {
         None | Some(Value::Null) => Ok(None),
-        Some(v) => figcraft_engine::params::f64_of(v).map(Some).ok_or_else(|| format!("`{k}` must be a finite number")),
+        Some(v) => lizard_engine::params::f64_of(v).map(Some).ok_or_else(|| format!("`{k}` must be a finite number")),
     }
 }
 
 fn id_arg(v: &Value) -> Result<u64, String> {
-    figcraft_engine::params::id_of(v).map(|i| i.0).ok_or_else(|| format!("{v} is not a layer id"))
+    lizard_engine::params::id_of(v).map(|i| i.0).ok_or_else(|| format!("{v} is not a layer id"))
 }
 
 fn ids_arg(a: &Map<String, Value>, k: &str) -> Result<Option<Vec<u64>>, String> {
@@ -389,7 +389,7 @@ fn bounds_of(b: &mut dyn Backend, ids: &[u64]) -> Option<(f64, f64, f64, f64)> {
 }
 
 /// Make paint/effect JSON friendlier than the engine's strict serde (see
-/// [`figcraft_engine::params::normalize_paint`]). The engine reads paints this way itself; effects
+/// [`lizard_engine::params::normalize_paint`]). The engine reads paints this way itself; effects
 /// still need it here.
 pub fn normalize_props(props: &mut Map<String, Value>) {
     for k in ["fills", "strokes", "effects"] {
@@ -540,8 +540,8 @@ fn search_icons(a: &Map<String, Value>) -> Result<ToolResult, String> {
         None | Some(Value::Null) => 12,
         Some(value) => value.as_u64().filter(|limit| (1..=40).contains(limit)).ok_or("`limit` must be between 1 and 40")? as usize,
     };
-    let result = figcraft_engine::icon_catalog::search(query, preferred, limit)?;
-    let families = figcraft_engine::icon_catalog::counts()?;
+    let result = lizard_engine::icon_catalog::search(query, preferred, limit)?;
+    let families = lizard_engine::icon_catalog::counts()?;
     Ok(ToolResult::json(
         &json!({"search": result, "libraries": families.iter().map(|(name, count)| json!({"id": name, "count": count})).collect::<Vec<_>>() }),
     ))
@@ -820,7 +820,7 @@ fn pointer(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, St
     p.insert("y".into(), json!(y));
     if let Some(to) = a.get("to").filter(|v| !v.is_null()) {
         let arr =
-            to.as_array().filter(|t| t.len() == 2 && t.iter().all(|v| figcraft_engine::params::f64_of(v).is_some())).ok_or("`to` must be [x, y]")?;
+            to.as_array().filter(|t| t.len() == 2 && t.iter().all(|v| lizard_engine::params::f64_of(v).is_some())).ok_or("`to` must be [x, y]")?;
         p.insert("to".into(), Value::Array(arr.clone()));
     }
     if let Some(s) = n_arg(a, "steps")? {
