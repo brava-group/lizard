@@ -125,8 +125,10 @@ the migration concerns rasterization and pixel effects.
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
     node blend, then blended over the page. Lighten, Color Dodge, Hard Light, and Difference remain
     guarded for this effect stack after a pixel probe found larger differences.
-  - [x] Keep Multiply and Screen with partial node opacity on GPU for both orders of one Layer
-    Blur and one Noise effect on rotated leaves; tested 25%, 50%, and 75% opacity at 1× and 2×.
+  - [x] Keep ten verified node blends with partial opacity on GPU for both orders of one Layer
+    Blur and one Noise effect on rotated leaves: Darken, Multiply, Screen, Overlay, Soft Light,
+    Exclusion, Hue, Saturation, Color, and Luminosity. Color Burn and Plus Lighter remain guarded
+    at partial opacity; tested 25%, 50%, and 75% at 1× and 2×.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
@@ -222,6 +224,14 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: 120 GPU/reference comparisons covered ten cached Blur/Noise node blends at
+  25%, 50%, and 75% opacity, both effect orders, and 1×/2×. The worst retained case differed
+  at 21,383/228,800 pixels above 8/255 and none above 48/255. Color Burn and Plus Lighter
+  exceeded the 10% changed-pixel gate in some Blur → Noise cases, so partial opacity for those
+  modes remains guarded. The probe also caught and fixed a regression in cache preparation:
+  blended sources must retain their opacity, while normal-blend sources apply opacity after
+  effects.
 
 - 2026-10-30: the split shadow/fill opacity path now covers all 16 Vello-supported node blend
   modes. A 96-case GPU/reference matrix (16 modes × three opacities × two zoom levels) passed

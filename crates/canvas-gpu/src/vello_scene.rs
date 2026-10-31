@@ -1845,7 +1845,18 @@ mod effect_capability_tests {
         node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
         let mut failures = Vec::new();
-        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+        for blend in [
+            BlendMode::Darken,
+            BlendMode::Multiply,
+            BlendMode::Screen,
+            BlendMode::Overlay,
+            BlendMode::SoftLight,
+            BlendMode::Exclusion,
+            BlendMode::Hue,
+            BlendMode::Saturation,
+            BlendMode::Color,
+            BlendMode::Luminosity,
+        ] {
             for opacity in [0.25, 0.5, 0.75] {
                 for blur_first in [true, false] {
                     let node = doc.node_mut(id).ok_or("shape missing")?;
@@ -1892,6 +1903,13 @@ mod effect_capability_tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
+        for blend in [BlendMode::ColorBurn, BlendMode::PlusLighter] {
+            let node = doc.node_mut(id).ok_or("shape missing")?;
+            node.blend = blend;
+            node.opacity = 0.5;
+            let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 220 };
+            assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} partial opacity stays guarded");
+        }
         Ok(())
     }
 
@@ -4089,7 +4107,7 @@ fn gpu_simple_node_blend_supported(node: &Node) -> bool {
 fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
-        && (node.opacity >= 0.999 || matches!(node.blend, BlendMode::Multiply | BlendMode::Screen) && (0.0..=1.0).contains(&node.opacity))
+        && (node.opacity >= 0.999 || (0.0..=1.0).contains(&node.opacity) && !matches!(node.blend, BlendMode::ColorBurn | BlendMode::PlusLighter))
         && matches!(
             node.blend,
             BlendMode::Darken
@@ -5650,8 +5668,10 @@ impl GpuCanvas {
             let mut source_doc = doc.clone();
             if let Some(node) = source_doc.node_mut(id) {
                 node.effects.clear();
+                let post_effect_opacity =
+                    node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough;
                 node.blend = BlendMode::Normal;
-                if node.opacity < 0.999 {
+                if post_effect_opacity && node.opacity < 0.999 {
                     node.opacity = 1.0;
                 }
             }
