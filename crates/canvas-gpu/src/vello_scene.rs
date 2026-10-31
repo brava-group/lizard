@@ -4024,6 +4024,30 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "pattern glass stack: {changed} changed pixels");
+        for blend in BlendMode::ALL.into_iter().filter(|blend| gpu_blend_mode(*blend).is_some()) {
+            let mut blended = Paint::solid(Color::new(0.4, 0.8, 0.3, 0.7));
+            blended.blend = blend;
+            doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.3, 0.6, 0.7)), blended];
+            let index = BackdropIndex::new(&doc, page);
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} glass stack rejected");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("blended glass stack reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            let severe = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 48))
+                .count();
+            println!("{blend:?} glass stack: changed={changed} severe={severe}");
+            assert!(changed < (view.width * view.height / 20) as usize, "{blend:?} glass stack: {changed} changed pixels");
+            assert_eq!(severe, 0, "{blend:?} glass stack has severe differences");
+        }
         doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.9, 1.0, 0.3))];
         let mask = doc.create(group, NodeKind::Rectangle, "Alpha mask", 5.0, 5.0, 95.0, 80.0)?;
         let mask_node = doc.node_mut(mask).ok_or("mask missing")?;
@@ -6149,7 +6173,9 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
         let unsupported_paint = |paint: &Paint| {
             paint.visible
                 && paint.opacity > 0.0
-                && ((paint.blend != BlendMode::Normal && !gpu_simple_paint_blend_supported(node, paint))
+                && ((paint.blend != BlendMode::Normal
+                    && !gpu_simple_paint_blend_supported(node, paint)
+                    && !(gpu_glass_stack_supported(doc, node) && gpu_blend_mode(paint.blend).is_some()))
                     || match &paint.kind {
                         PaintKind::Gradient(_) => false,
                         PaintKind::Image(_) => false,
@@ -6292,7 +6318,7 @@ fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
         })
         && node.fills.iter().all(|paint| {
             !paint.visible
-                || paint.blend == BlendMode::Normal
+                || (paint.blend == BlendMode::Normal || gpu_blend_mode(paint.blend).is_some())
                     && match &paint.kind {
                         PaintKind::Solid { .. } | PaintKind::Gradient(_) | PaintKind::Image(_) | PaintKind::Shader(_) => true,
                         PaintKind::Pattern(fill) => gpu_pattern_source(doc, fill).is_some(),
