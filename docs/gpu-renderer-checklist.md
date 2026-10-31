@@ -71,6 +71,9 @@ the migration concerns rasterization and pixel effects.
     group compositor. The 25%, 50%, and 75% opacity fixtures at 1× and 2× each stayed below
     1% pixels differing by more than 20/255 from the CPU reference, with painted siblings
     before and after the group. Multiple backdrops, glass, and complex clips remain guarded.
+  - [x] Composite that group over a transparent page without painting the backdrop twice.
+    GPU page-export samples of premultiplied RGBA, including partially transparent layers
+    behind the pane, stayed within 20/255 of the CPU reference.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

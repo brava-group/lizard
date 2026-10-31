@@ -7867,22 +7867,14 @@ impl GpuCanvas {
         let blur_id = self.register_external_texture(blurred);
         let backdrops = HashMap::from([(id, ImageInfo { id: blur_id, width, height, region: None })]);
 
-        let mut full_prefix_doc = doc.clone();
-        if let Some(node) = full_prefix_doc.node_mut(group) {
+        let mut group_doc = doc.clone();
+        hide_below(doc, &mut group_doc, group, page);
+        hide_after_subtree(doc, &mut group_doc, group, page);
+        if let Some(node) = group_doc.node_mut(group) {
             node.opacity = 1.0;
         }
-        figcraft_render::backdrop::hide_above(&mut full_prefix_doc, id, roots);
-        let full_prefix_scene = make_scene_with_images(&full_prefix_doc, page, view, Some(&self.image_info));
-        self.render_submit_with_clear_rgba(&full_prefix_scene, clear)?;
-
-        let mut group_suffix = doc.clone();
-        hide_below(doc, &mut group_suffix, id, page);
-        hide_after_subtree(doc, &mut group_suffix, group, page);
-        if let Some(node) = group_suffix.node_mut(group) {
-            node.opacity = 1.0;
-        }
-        let suffix_scene = make_scene_with_backdrops(&group_suffix, page, view, Some(&self.image_info), Some(&backdrops));
-        self.render_submit_with_target(&suffix_scene, TargetInit::SrcOver)?;
+        let group_scene = make_scene_with_backdrops(&group_doc, page, view, Some(&self.image_info), Some(&backdrops));
+        self.render_submit_with_clear_rgba(&group_scene, [0.0; 4])?;
         let group_surface = self.snapshot_submit();
 
         let base_id = self.register_external_texture(base);

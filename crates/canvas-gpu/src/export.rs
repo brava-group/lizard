@@ -373,6 +373,44 @@ mod tests {
     }
 
     #[test]
+    fn translucent_group_backdrop_export_preserves_alpha() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("translucent group backdrop export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let behind = doc.create(page, NodeKind::Rectangle, "Behind", 0.0, 0.0, 160.0, 120.0)?;
+        doc.node_mut(behind).ok_or("behind missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.2, 0.1, 0.7))];
+        let group = doc.create(page, NodeKind::Group, "Group", 10.0, 10.0, 120.0, 100.0)?;
+        doc.node_mut(group).ok_or("group missing")?.opacity = 0.5;
+        let dark = doc.create(group, NodeKind::Rectangle, "Dark", 0.0, 0.0, 60.0, 100.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(group, NodeKind::Rectangle, "Pane", 35.0, 20.0, 70.0, 60.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU page export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU page export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 20, "at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn wide_progressive_layer_blur_keeps_gpu_page_and_selection_seams() -> Result<(), Box<dyn std::error::Error>> {
         if GpuCanvas::new(1, 1).is_err() {
             return Ok(());
