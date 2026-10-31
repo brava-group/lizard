@@ -1066,6 +1066,53 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn uniform_blur_with_paint_blends_isolates_leaf_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU blurred paint blends");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 240.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blurred", 70.0, 60.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0)), Paint::solid(Color::new(0.28, 0.75, 0.9, 0.65))];
+        node.corners.radii = [12.0; 4];
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        let mut failures = Vec::new();
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+            for opacity in [1.0, 0.25, 0.5, 0.75] {
+                let node = doc.node_mut(id).ok_or("shape missing")?;
+                node.fills[1].blend = blend;
+                node.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    gpu.prepare_static_effects(&doc)?;
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("{blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                    if changed * 100 >= view.width as usize * view.height as usize * 10 || severe * 100 >= view.width as usize * view.height as usize
+                    {
+                        failures.push(format!("{blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}"));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
+    #[test]
     fn supported_masks_use_gpu_and_unimplemented_paints_fall_back() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU content capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -4081,18 +4128,17 @@ fn draw_node(
         scene.set_transform(transform);
         scene.push_filter_layer(Filter::from_function(FilterFunction::Blur { radius: (radius / 2.0) as f32 }));
     }
-    // The CPU reference paints a shadowed leaf's fills into an isolated layer. A paint blend
-    // therefore sees earlier paints of that leaf, but not the page behind it. Keep its shadow
-    // below that layer so Multiply (and the other supported modes) do not darken the fill.
+    // Paint blends see earlier paints of the same leaf, not the page behind it. Isolate those
+    // paints before applying a layer blur or placing a drop shadow underneath them.
     let region_blended = matches!(&node.kind, NodeKind::Vector { network }
         if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(|paint| paint.visible && paint.blend != BlendMode::Normal));
-    let isolate_shadowed_paints = gpu_shadowed_paint_blend_supported(node)
+    let isolate_paints = (gpu_shadowed_paint_blend_supported(node) || gpu_uniform_blur_paint_blend_supported(node))
         && (region_blended || node.fills.iter().chain(&node.strokes).any(|paint| paint.visible && paint.blend != BlendMode::Normal));
-    if isolate_shadowed_paints {
+    if isolate_paints {
         scene.push_opacity_layer(1.0);
     }
     draw_content(scene, doc, node, transform, images, backdrops, cached.inner_shadows, camera, size);
-    if isolate_shadowed_paints {
+    if isolate_paints {
         scene.pop_layer();
     }
     let clipped = if node.clip && !node.children.is_empty() {
@@ -4205,7 +4251,20 @@ fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
 fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
     gpu_blend_mode(paint.blend).is_some()
         && node.children.is_empty()
-        && (node.effects.iter().all(|effect| !effect.visible) || gpu_shadowed_paint_blend_supported(node))
+        && (node.effects.iter().all(|effect| !effect.visible)
+            || gpu_shadowed_paint_blend_supported(node)
+            || gpu_uniform_blur_paint_blend_supported(node))
+}
+
+fn gpu_uniform_blur_paint_blend_supported(node: &Node) -> bool {
+    let mut visible = node.effects.iter().filter(|effect| effect.visible);
+    node.children.is_empty()
+        && node.blend == BlendMode::Normal
+        && (0.0..=1.0).contains(&node.opacity)
+        && visible.next().is_some_and(|effect| {
+            matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=80.0).contains(&blur.radius))
+        })
+        && visible.next().is_none()
 }
 
 fn gpu_shadowed_paint_blend_supported(node: &Node) -> bool {

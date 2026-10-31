@@ -124,6 +124,9 @@ the migration concerns rasterization and pixel effects.
     and 75% node opacity, compositing shadow and blended fill in separate opacity layers.
   - [x] Draw a single uniform Layer Blur with all 16 Vello-supported node blends directly on
     GPU at 100%, 25%, 50%, and 75% opacity, without a CPU or intermediate texture cache.
+  - [x] Apply a single uniform Layer Blur to a leaf with two paints, where the second uses any
+    of the 16 Vello-supported paint blends; isolate the paints before blurring at 100%, 25%,
+    50%, and 75% node opacity.
   - [x] Apply 12 verified Vello node blends to the GPU-cached `Layer Blur ↔ Noise` stack on
     opaque rotated leaves: Darken, Multiply, Color Burn, Screen, Plus Lighter, Overlay, Soft Light,
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
@@ -228,6 +231,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: 128 GPU/reference comparisons covered two paints on one leaf, all 16 Vello
+  paint blends for the second paint, a uniform Layer Blur, four node opacities, and 1×/2×.
+  Every pixel matched. The paint blend now sees earlier paints of its leaf inside an isolated
+  layer before the blur is applied; Plus Darker remains guarded.
 
 - 2026-10-30: a 128-case matrix (16 node blends × four opacities × two zoom levels) for a
   single uniform Layer Blur over a colored backdrop passed GPU/reference comparisons. At most
