@@ -95,6 +95,9 @@ the migration concerns rasterization and pixel effects.
     it with an aligned rectangle, then with a rotated rounded rectangle, also passed in
     separate fixtures. Transparent export RGBA samples for the rotated rounded clip stayed
     within 20/255 of the CPU reference.
+  - [x] Apply a uniform Layer Blur after a glass pane inside the same rotated, rounded,
+    clipped translucent group. The GPU glass texture passes through the layer-blur shader
+    before the next backdrop samples it; the full-frame comparison passed the 5% gate.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

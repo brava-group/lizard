@@ -3858,6 +3858,22 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "rounded clipped glass: {changed} changed pixels");
+        doc.node_mut(pane).ok_or("pane missing")?.effects = vec![
+            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
+            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+        ];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("glass blur stack group reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "glass blur stack group: {changed} changed pixels");
         Ok(())
     }
 
@@ -4320,7 +4336,10 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
                         EffectKind::BackgroundBlur(_) => true,
                         EffectKind::Glass(glass) => gpu_glass_supported(doc, node, view, glass),
                         _ => false,
-                    })
+                    }) || matches!(effects.as_slice(), [glass, blur]
+                        if matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
+                            && matches!(&blur.kind, EffectKind::LayerBlur(effect) if !effect.is_progressive() && effect.radius.is_finite() && (0.0..=32.0).contains(&effect.radius))
+                            && node.fills.iter().all(|paint| !paint.visible))
                 })
         })
 }
@@ -8058,7 +8077,15 @@ impl GpuCanvas {
                 let mask = self.render_glass_mask(doc, id, view, region)?;
                 let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                 let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-                (glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale), Some(region))
+                let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
+                if let Some(node) = doc.node(id)
+                    && let Some(EffectKind::LayerBlur(layer_blur)) =
+                        node.effects.iter().filter(|effect| effect.visible).nth(1).map(|effect| &effect.kind)
+                {
+                    let pass = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                    result = pass.submit(&self.device, &self.queue, &result, (layer_blur.radius * view.scale / 2.0) as f32, 1, None);
+                }
+                (result, Some(region))
             } else if let Some((node, effect)) = progressive {
                 let screen = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1)) * doc.world_transform(id);
                 let safe = effect.sanitized();
