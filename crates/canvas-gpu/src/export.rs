@@ -21,12 +21,16 @@ fn render_tiled(view: &View, halo: u32, mut render: impl FnMut(&View) -> Option<
     if u64::from(view.width) * u64::from(view.height) > MAX_EXPORT_PIXELS {
         return None;
     }
+    let core_side = 4096_u32.checked_sub(halo.checked_mul(2)?)?.min(EXPORT_TILE_SIDE);
+    if core_side == 0 {
+        return None;
+    }
     let mut result = Pixmap::new(view.width, view.height)?;
     let output_stride = usize::try_from(view.width).ok()?.checked_mul(4)?;
-    for y in (0..view.height).step_by(EXPORT_TILE_SIDE as usize) {
-        for x in (0..view.width).step_by(EXPORT_TILE_SIDE as usize) {
-            let core_width = (view.width - x).min(EXPORT_TILE_SIDE);
-            let core_height = (view.height - y).min(EXPORT_TILE_SIDE);
+    for y in (0..view.height).step_by(core_side as usize) {
+        for x in (0..view.width).step_by(core_side as usize) {
+            let core_width = (view.width - x).min(core_side);
+            let core_height = (view.height - y).min(core_side);
             let left = x.saturating_sub(halo);
             let top = y.saturating_sub(halo);
             let right = x.saturating_add(core_width).saturating_add(halo).min(view.width);
@@ -91,7 +95,7 @@ fn effect_tile_halo(doc: &Document, scale: f64) -> Option<u32> {
         return Some(0);
     }
     let pixels = (reach * scale + 2.0).ceil();
-    (pixels.is_finite() && pixels <= 512.0).then_some(pixels as u32)
+    (pixels.is_finite() && pixels < 2048.0).then_some(pixels as u32)
 }
 
 /// Rasterize selected page roots at export resolution on the native GPU. `None` means that the
@@ -325,6 +329,43 @@ mod tests {
                     expected.alpha(),
                 ]) {
                     assert!(a.abs_diff(b) <= 12, "at ({x},{y}): GPU={actual:?}, CPU={expected:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wide_large_blur_export_uses_adaptive_gpu_tiles() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("wide large blur export");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let id = doc.create(page, NodeKind::Rectangle, "Across seam", 2025.0, 24.0, 80.0, 80.0)?;
+        let node = doc.node_mut(id).ok_or("blur node missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.1, 0.3, 1.0))];
+        node.effects = vec![Effect { kind: EffectKind::LayerBlur(Blur::uniform(90.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 4200, height: 128 };
+        let halo = effect_tile_halo(&doc, 1.0).ok_or("large blur halo missing")?;
+        assert!(halo > 512 && halo < 1024);
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("wide large blur GPU export unavailable")?;
+        let crop = View { origin: (1800.0, 0.0), scale: 1.0, width: 520, height: 128 };
+        let expected = render_page_gpu(&doc, page, &crop).ok_or("large blur GPU crop unavailable")?;
+        for y in [20, 40, 64, 88, 108] {
+            for x in [2025, 2047, 2048, 2049, 2070, 2105] {
+                let actual = gpu.pixel(x, y).ok_or("tiled pixel missing")?;
+                let reference = expected.pixel(x - 1800, y).ok_or("crop pixel missing")?;
+                for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                    reference.red(),
+                    reference.green(),
+                    reference.blue(),
+                    reference.alpha(),
+                ]) {
+                    assert!(a.abs_diff(b) <= 12, "at ({x},{y}): tile={actual:?} crop={reference:?}");
                 }
             }
         }

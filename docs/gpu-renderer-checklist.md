@@ -266,6 +266,10 @@ the migration concerns rasterization and pixel effects.
     GPU page, preserving its transparent background and selected paint order. The wide selected
     export matched GPU crops across the tile seam for both effects.
   - [ ] Tile effect-bearing exports with enough overlap for each effect's region of influence.
+  - [x] Choose the tile core from the effect halo instead of imposing a 512 px halo cap.
+    A 4200 × 128 page with a 90 px layer blur used a halo over 512 px on GPU; samples
+    around the 2048 px seam matched an independently rendered GPU crop within 12/255.
+    Effects requiring 2048 px or more of halo still need a separate large-surface strategy.
 - [ ] Move document thumbnail, asset/style/font previews, home cards, vectorization source,
   presentation textures, eyedropper sampling, and headless MCP renders to GPU.
   - [x] Route static previews, vectorization backgrounds, static presentation textures,
