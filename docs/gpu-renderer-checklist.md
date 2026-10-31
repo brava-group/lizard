@@ -216,6 +216,10 @@ the migration concerns rasterization and pixel effects.
     five-effect Blur/Texture/Shadow/Noise/Shadow stack. All 32 GPU/reference comparisons at
     four opacities and 1×/2× passed; shadow-first texture scatter differed by at most 9,459
     pixels above 8/255 and 263 above 48/255 in a 520×480 image.
+  - [x] Cache ordered Texture/Blur, Shadow/Texture/Noise, and Blur/Noise/Texture/Shadow on GPU
+    for a rotated group with painted children and an alpha mask. Eighteen comparisons at
+    25%, 50%, and 75% group opacity and 1×/2× passed; the largest texture case differed by
+    1,389 pixels above 8/255 with no severe pixels.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,

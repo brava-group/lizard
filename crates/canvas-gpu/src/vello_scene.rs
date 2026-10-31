@@ -1941,6 +1941,10 @@ mod effect_capability_tests {
         doc.node_mut(masked).ok_or("masked child missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.8, 0.4, 1.0))];
         let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
         let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        let texture = || figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        };
         let shadow = || {
             let mut effect = figcraft_doc::Effect::drop_shadow();
             if let EffectKind::DropShadow(value) = &mut effect.kind {
@@ -1957,6 +1961,9 @@ mod effect_capability_tests {
             ("shadow-blur-noise", vec![shadow(), blur(), noise()]),
             ("blur-shadow-noise", vec![blur(), shadow(), noise()]),
             ("noise-shadow-blur", vec![noise(), shadow(), blur()]),
+            ("texture-blur", vec![texture(), blur()]),
+            ("shadow-texture-noise", vec![shadow(), texture(), noise()]),
+            ("blur-noise-texture-shadow", vec![blur(), noise(), texture(), shadow()]),
         ] {
             doc.node_mut(group).ok_or("group missing")?.effects = effects;
             for opacity in [0.25, 0.5, 0.75] {
@@ -5399,8 +5406,8 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             _ => false,
         })
         && (0.0..=1.0).contains(&node.opacity)
-        && node.blend == BlendMode::Normal
-        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. })
+        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
+        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Group)
         && gpu_isolated_grain_supported(doc, node)
 }
 
