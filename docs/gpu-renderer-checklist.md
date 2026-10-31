@@ -146,6 +146,8 @@ the migration concerns rasterization and pixel effects.
     severe pixel differences.
   - [x] Apply partial node opacity after the cached Blur/Noise stack on rotated leaves, for both
     two-effect orders and Blur → Noise → Blur; tested 25%, 50%, and 75% opacity at 1× and 2×.
+  - [x] Cache a single uniform Layer Blur on GPU for rotated leaves with 25%, 50%, and 75%
+    opacity, applying opacity after the blur at 1× and 2×.
   - [x] Keep all six orders of one Layer Blur, one Noise, and one Drop Shadow on GPU at 1× and
     2× for rotated shapes and groups, including a group with a masked child. Each pass now runs
     at its position in the effect list rather than moving the shadow to the end.
@@ -212,6 +214,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: six GPU/reference comparisons for one uniform Layer Blur on a rotated
+  partially opaque rectangle over a colored backdrop matched pixel for pixel at 25%, 50%, and
+  75% opacity at 1×/2×. The blur is prepared once in a GPU texture and node opacity is applied
+  during final composition, allowing reuse during pan and zoom.
 
 - 2026-10-30: 36 GPU/reference comparisons covered all six Blur/Noise/Shadow orders on a
   rotated group with three visible child shapes, one alpha mask, and 25%, 50%, or 75% group

@@ -1203,6 +1203,45 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_uniform_blur_reuses_gpu_cache() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent layer blur");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 240.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blurred", 0.0, 0.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
+        for opacity in [0.25, 0.5, 0.75] {
+            doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn stacked_layer_blur_then_noise_stays_on_gpu_in_order() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU ordered layer effects");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -5310,7 +5349,7 @@ impl GpuCanvas {
                 if !node.visible
                     || node.is_mask
                     || !node.children.is_empty()
-                    || node.opacity < 0.999
+                    || !(0.0..=1.0).contains(&node.opacity)
                     || node.blend != BlendMode::Normal
                     || !blur.radius.is_finite()
                     || blur.max_radius() <= 0.0
@@ -5336,6 +5375,7 @@ impl GpuCanvas {
             let mut source_doc = doc.clone();
             if let Some(node) = source_doc.node_mut(id) {
                 node.effects.clear();
+                node.opacity = 1.0;
             }
             let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
             let mut scene = Scene::new(width as u16, height as u16);
