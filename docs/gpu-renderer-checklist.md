@@ -118,6 +118,8 @@ the migration concerns rasterization and pixel effects.
     comparison passed the 5% visual gate.
   - [x] Use a document shader fill on that stack. The shader texture and Glass/Noise/Blur
     passes stay on GPU, and the full-frame comparison passed the 5% visual gate.
+  - [x] Use a supported repeating pattern fill on that Glass stack. Its GPU tile is composed
+    before Noise → Layer Blur, and the full-frame comparison passed the 5% visual gate.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
