@@ -280,6 +280,7 @@ mod tests {
         node.fills = vec![Paint::image(hash, ImageScaleMode::Fill)];
         node.effects = vec![
             Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            Effect { kind: EffectKind::InnerShadow(Shadow { radius: 3.0, spread: 1.0, offset: (1.0, 1.0), ..Shadow::default() }), visible: true },
             Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
             Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
         ];

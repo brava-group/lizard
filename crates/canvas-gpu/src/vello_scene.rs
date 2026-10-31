@@ -5498,7 +5498,10 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     let ordered_stack = visible.len() >= 2
         && visible.iter().all(|effect| {
-            matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
+            matches!(
+                effect.kind,
+                EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_) | EffectKind::InnerShadow(_)
+            )
         });
     node.children.is_empty()
         && (0.0..=1.0).contains(&node.opacity)
@@ -5532,9 +5535,12 @@ fn gpu_ordered_effect_paint_blend_candidate(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
         && visible.len() >= 2
-        && visible
-            .iter()
-            .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_)))
+        && visible.iter().all(|effect| {
+            matches!(
+                effect.kind,
+                EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_) | EffectKind::InnerShadow(_)
+            )
+        })
 }
 
 fn gpu_uniform_blur_paint_blend_supported(node: &Node) -> bool {
@@ -6281,10 +6287,20 @@ fn gpu_noise_supported(doc: &Document, node: &Node, noise: &Noise) -> bool {
         && gpu_isolated_grain_supported(doc, node)
 }
 
+fn gpu_ordered_inner_shadow_supported(shadow: &Shadow) -> bool {
+    shadow.blend == BlendMode::Normal
+        && shadow.spread.is_finite()
+        && (-32.0..=32.0).contains(&shadow.spread)
+        && shadow.radius.is_finite()
+        && (0.0..=32.0).contains(&shadow.radius)
+        && shadow.offset.0.is_finite()
+        && shadow.offset.1.is_finite()
+}
+
 fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() >= 2
-        && visible.iter().any(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+        && visible.iter().any(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::InnerShadow(_)))
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=80.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
@@ -6298,6 +6314,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
                     && shadow.offset.1.is_finite()
                     && shadow_cache_offset_aligned(doc, node, shadow)
             }
+            EffectKind::InnerShadow(shadow) => gpu_ordered_inner_shadow_supported(shadow),
             _ => false,
         })
         && matches!(
@@ -6330,6 +6347,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
                     && shadow.offset.1.is_finite()
                     && shadow_cache_offset_aligned(doc, node, shadow)
             }
+            EffectKind::InnerShadow(shadow) => gpu_ordered_inner_shadow_supported(shadow),
             _ => false,
         })
         && (0.0..=1.0).contains(&node.opacity)
@@ -6602,7 +6620,14 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
             && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_) | EffectKind::Texture(_)))
             || visible_effect_count >= 2
                 && node.effects.iter().filter(|effect| effect.visible).all(|effect| {
-                    matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
+                    matches!(
+                        effect.kind,
+                        EffectKind::LayerBlur(_)
+                            | EffectKind::Noise(_)
+                            | EffectKind::Texture(_)
+                            | EffectKind::DropShadow(_)
+                            | EffectKind::InnerShadow(_)
+                    )
                 }));
     let paint_supported = |paint: &Paint| {
         !paint.visible
@@ -6772,7 +6797,12 @@ fn has_matching_effects_excluding_in_view(
                                         || gpu_stacked_blur_texture_supported(doc, node)
                                         || gpu_backdrop && gpu_glass_stack_supported(doc, node))
                             }
-                            EffectKind::InnerShadow(shadow) => !cached_noise || !gpu_cached_inner_shadow_supported(doc, node, shadow),
+                            EffectKind::InnerShadow(shadow) => {
+                                !cached_noise
+                                    || !(gpu_cached_inner_shadow_supported(doc, node, shadow)
+                                        || gpu_stacked_blur_noise_supported(doc, node)
+                                        || gpu_stacked_blur_texture_supported(doc, node))
+                            }
                             EffectKind::Texture(texture) => {
                                 !cached_noise
                                     || !(gpu_texture_view_supported(doc, node, view, texture) || gpu_stacked_blur_texture_supported(doc, node))
@@ -7312,6 +7342,25 @@ impl GpuCanvas {
                         (shadow.radius * scale / 2.0) as f32,
                         shadow.color,
                         shadow.show_behind,
+                    )
+                }
+                EffectKind::InnerShadow(shadow) => {
+                    let spread_px = (shadow.spread * scale).round() as i32;
+                    let caster = (spread_px != 0).then(|| {
+                        let morph = self.gpu_morph.get_or_insert_with(|| GpuMorph::new(&self.device));
+                        morph.submit(&self.device, &self.queue, &result, spread_px.unsigned_abs(), spread_px < 0)
+                    });
+                    let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                    let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
+                    pass.submit_composited(
+                        &self.device,
+                        &self.queue,
+                        blur,
+                        &result,
+                        caster.as_ref().unwrap_or(&result),
+                        ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
+                        (shadow.radius * scale / 2.0) as f32,
+                        shadow.color,
                     )
                 }
                 _ => continue,
