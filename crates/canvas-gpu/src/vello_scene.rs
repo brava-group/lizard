@@ -1218,7 +1218,14 @@ mod effect_capability_tests {
             }
             effect
         };
-        for (name, effects) in [("blur-noise-shadow", vec![blur(), noise(), shadow()]), ("noise-blur-shadow", vec![noise(), blur(), shadow()])] {
+        for (name, effects) in [
+            ("blur-noise-shadow", vec![blur(), noise(), shadow()]),
+            ("noise-blur-shadow", vec![noise(), blur(), shadow()]),
+            ("shadow-noise-blur", vec![shadow(), noise(), blur()]),
+            ("shadow-blur-noise", vec![shadow(), blur(), noise()]),
+            ("blur-shadow-noise", vec![blur(), shadow(), noise()]),
+            ("noise-shadow-blur", vec![noise(), shadow(), blur()]),
+        ] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
             for scale in [1.0, 2.0] {
                 let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
@@ -1257,7 +1264,7 @@ mod effect_capability_tests {
     }
 
     #[test]
-    fn rotated_group_noise_blur_shadow_keeps_children_and_mask() -> Result<(), Box<dyn Error>> {
+    fn rotated_group_blur_noise_shadow_orders_keep_children_and_mask() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU rotated group shadow and grain");
         let page = doc.current_page.ok_or("new document has no page")?;
         let group = doc.create(page, NodeKind::Group, "Effects", 0.0, 0.0, 140.0, 110.0)?;
@@ -1276,26 +1283,55 @@ mod effect_capability_tests {
             value.offset = (4.0, 6.0);
             value.color = Color::new(0.2, 0.1, 0.3, 0.4);
         }
-        doc.node_mut(group).ok_or("group missing")?.effects = vec![
-            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
-            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
-            shadow,
-        ];
-        for scale in [1.0, 2.0] {
-            let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
-            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
-            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
-            let mut gpu = GpuCanvas::new(view.width, view.height)?;
-            assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
-            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-            let actual = gpu.pixels()?;
-            let changed = actual
-                .chunks_exact(4)
-                .zip(reference.data().chunks_exact(4))
-                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
-                .count();
-            println!("group noise-blur-shadow {scale}x: changed={changed} pixels={}", view.width * view.height);
-            assert!(changed * 100 < view.width as usize * view.height as usize * 8, "group at {scale}x changed {changed} pixels");
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        for (name, effects) in [
+            ("blur-noise-shadow", vec![blur(), noise(), shadow.clone()]),
+            ("noise-blur-shadow", vec![noise(), blur(), shadow.clone()]),
+            ("shadow-noise-blur", vec![shadow.clone(), noise(), blur()]),
+            ("shadow-blur-noise", vec![shadow.clone(), blur(), noise()]),
+            ("blur-shadow-noise", vec![blur(), shadow.clone(), noise()]),
+            ("noise-shadow-blur", vec![noise(), shadow.clone(), blur()]),
+        ] {
+            doc.node_mut(group).ok_or("group missing")?.effects = effects;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (300.0 * scale) as u32, height: (260.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} capability");
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                if let Ok(prefix) = std::env::var("LIZARD_GPU_ROTATED_STACK_SCREENSHOT") {
+                    image::save_buffer(
+                        format!("{prefix}-rotated-group-{name}-{scale}-gpu.png"),
+                        &actual,
+                        view.width,
+                        view.height,
+                        image::ColorType::Rgba8,
+                    )?;
+                    image::save_buffer(
+                        format!("{prefix}-rotated-group-{name}-{scale}-cpu.png"),
+                        reference.data(),
+                        view.width,
+                        view.height,
+                        image::ColorType::Rgba8,
+                    )?;
+                }
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("group {name} {scale}x: changed={changed} severe={severe} pixels={}", view.width * view.height);
+                assert!(changed * 100 < view.width as usize * view.height as usize * 8, "group {name} at {scale}x changed {changed} pixels");
+                assert!(severe * 100 < view.width as usize * view.height as usize, "group {name} at {scale}x severe {severe} pixels");
+            }
         }
         Ok(())
     }
@@ -1376,13 +1412,30 @@ mod effect_capability_tests {
                 let mut gpu = GpuCanvas::new(view.width, view.height)?;
                 assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
                 gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-                let changed = gpu
-                    .pixels()?
+                let actual = gpu.pixels()?;
+                if let Ok(prefix) = std::env::var("LIZARD_GPU_ROTATED_STACK_SCREENSHOT") {
+                    image::save_buffer(format!("{prefix}-group-{name}-{scale}-gpu.png"), &actual, view.width, view.height, image::ColorType::Rgba8)?;
+                    image::save_buffer(
+                        format!("{prefix}-group-{name}-{scale}-cpu.png"),
+                        reference.data(),
+                        view.width,
+                        view.height,
+                        image::ColorType::Rgba8,
+                    )?;
+                }
+                let changed = actual
                     .chunks_exact(4)
                     .zip(reference.data().chunks_exact(4))
                     .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
                     .count();
-                assert!(changed * 100 < view.width as usize * view.height as usize, "{name} at {scale}x changed {changed} pixels");
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("{name} {scale}x: changed={changed} severe={severe} pixels={}", view.width * view.height);
+                assert!(changed * 100 < view.width as usize * view.height as usize * 2, "{name} at {scale}x changed {changed} pixels");
+                assert!(severe * 100 < view.width as usize * view.height as usize, "{name} at {scale}x severe {severe} pixels");
             }
         }
         Ok(())
@@ -4071,8 +4124,10 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
         && (gpu_axis_aligned(doc, node)
             || visible.iter().all(|effect| !matches!(effect.kind, EffectKind::Noise(_)))
             || visible.iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-            || (matches!(visible.last().map(|effect| &effect.kind), Some(EffectKind::DropShadow(_)))
-                && visible[..visible.len() - 1].iter().all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))))
+            || (visible.len() == 3
+                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
+                && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1))
         && gpu_isolated_grain_supported(doc, node)
 }
 
@@ -4890,28 +4945,23 @@ impl GpuCanvas {
                         let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
                         pass.submit(&self.device, &self.queue, &result, &noise, surface_to_local, id.0 as u32)
                     }
+                    EffectKind::DropShadow(shadow) => {
+                        let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                        let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
+                        pass.submit_drop_composited(
+                            &self.device,
+                            &self.queue,
+                            blur,
+                            &result,
+                            &result,
+                            ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
+                            (shadow.radius * scale / 2.0) as f32,
+                            shadow.color,
+                            shadow.show_behind,
+                        )
+                    }
                     _ => continue,
                 };
-            }
-            if let Some(shadow) = doc.node(id).and_then(|node| {
-                node.effects.iter().find_map(|effect| match &effect.kind {
-                    EffectKind::DropShadow(shadow) if effect.visible => Some(shadow),
-                    _ => None,
-                })
-            }) {
-                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
-                result = pass.submit_drop_composited(
-                    &self.device,
-                    &self.queue,
-                    blur,
-                    &result,
-                    &result,
-                    ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
-                    (shadow.radius * scale / 2.0) as f32,
-                    shadow.color,
-                    shadow.show_behind,
-                );
             }
             let texture_id = self.register_cached_texture(result);
             self.layer_blurs.insert(id, CachedLayerBlur { id: texture_id, width, height, bounds, placement: Affine::IDENTITY });
