@@ -122,6 +122,8 @@ the migration concerns rasterization and pixel effects.
     Vello-supported modes match CPU samples at the fill, shadow, and background.
   - [x] Keep all 16 Vello-supported node blends with a single Drop Shadow on GPU at 25%, 50%,
     and 75% node opacity, compositing shadow and blended fill in separate opacity layers.
+  - [x] Draw a single uniform Layer Blur with all 16 Vello-supported node blends directly on
+    GPU at 100%, 25%, 50%, and 75% opacity, without a CPU or intermediate texture cache.
   - [x] Apply 12 verified Vello node blends to the GPU-cached `Layer Blur ↔ Noise` stack on
     opaque rotated leaves: Darken, Multiply, Color Burn, Screen, Plus Lighter, Overlay, Soft Light,
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
@@ -226,6 +228,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: a 128-case matrix (16 node blends × four opacities × two zoom levels) for a
+  single uniform Layer Blur over a colored backdrop passed GPU/reference comparisons. At most
+  48/249,600 pixels differed above 8/255, with none above 48/255. Vello's filter and blend
+  layers draw this case directly on GPU; Plus Darker remains guarded.
 
 - 2026-10-30: a repeating pattern sourced from a uniformly blurred vector rectangle now
   renders through Vello's GPU filter. The complete 64×48 pattern export matched the CPU
