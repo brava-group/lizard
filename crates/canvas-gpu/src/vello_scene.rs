@@ -983,7 +983,8 @@ mod effect_capability_tests {
             shadow.color = Color::new(0.2, 0.1, 0.3, 0.2);
         }
         node.effects = vec![effect];
-        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+        let mut failures = Vec::new();
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
             doc.node_mut(id).ok_or("shape missing")?.blend = blend;
             for opacity in [0.25, 0.5, 0.75] {
                 doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
@@ -1006,11 +1007,14 @@ mod effect_capability_tests {
                         .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
                         .count();
                     println!("{blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
-                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
-                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                    if changed * 100 >= view.width as usize * view.height as usize * 10 || severe * 100 >= view.width as usize * view.height as usize
+                    {
+                        failures.push(format!("{blend:?} opacity={opacity} scale={scale}: changed={changed} severe={severe}"));
+                    }
                 }
             }
         }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
         Ok(())
     }
 
@@ -4109,7 +4113,8 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
 
 fn gpu_shadowed_node_blend_supported(node: &Node) -> bool {
     node.children.is_empty()
-        && (node.opacity >= 0.999 || matches!(node.blend, BlendMode::Multiply | BlendMode::Screen) && (0.0..=1.0).contains(&node.opacity))
+        && (0.0..=1.0).contains(&node.opacity)
+        && gpu_node_blend(node).is_some()
         && node.effects.iter().any(|effect| effect.visible)
         && node.effects.iter().all(|effect| !effect.visible || matches!(effect.kind, EffectKind::DropShadow(_)))
 }
