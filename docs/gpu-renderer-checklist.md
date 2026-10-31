@@ -114,8 +114,11 @@ the migration concerns rasterization and pixel effects.
     stacks remain guarded.
   - [x] Apply node blend modes to opaque leaf content after drawing its Drop Shadow; all
     Vello-supported modes match CPU samples at the fill, shadow, and background.
-  - [x] Apply Multiply and Screen to the GPU-cached `Layer Blur ↔ Noise` stack on opaque rotated
-    leaves. The cached source is rendered without its node blend, then blended over the page.
+  - [x] Apply 12 verified Vello node blends to the GPU-cached `Layer Blur ↔ Noise` stack on
+    opaque rotated leaves: Darken, Multiply, Color Burn, Screen, Plus Lighter, Overlay, Soft Light,
+    Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
+    node blend, then blended over the page. Lighten, Color Dodge, Hard Light, and Difference remain
+    guarded for this effect stack after a pixel probe found larger differences.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
@@ -558,8 +561,14 @@ the migration concerns rasterization and pixel effects.
   or `Noise → Layer Blur` now stay on GPU. At 1× and 2×, `Noise → Blur` matched the CPU reference
   exactly. The largest `Blur → Noise` difference above 8/255 was 10,713/228,800 pixels for
   Screen at 2×; no pixel differed above 48/255. I inspected the GPU and CPU images for that
-  case: the backdrop color, rotated contour, blur, and grain are intact. This does not yet cover
-  other blend modes or partial opacity with cached effect stacks.
+  case: the backdrop color, rotated contour, blur, and grain are intact. This initial check did
+  not cover the additional blends tested below or partial opacity with cached effect stacks.
+- 2026-10-30: an isolated 16-mode probe expanded the cached Blur/Noise leaf path to 12 Vello
+  blends listed above at 1× and 2×. Every retained mode stayed below 8% of pixels differing by
+  more than 8/255 and below 1% differing by more than 48/255. Lighten, Color Dodge, Hard Light,
+  and Difference exceeded those limits in at least one `Blur → Noise` case, so their GPU
+  capability remains off for this stack. The isolated regression checks all 12 retained modes
+  and asserts the other four still request the fallback.
 - 2026-10-30: the canvas capability scan now skips unsupported descendants of hidden groups.
   An isolated test toggled the parent visibility for both a Plus Darker child and a child with
   an unsupported shadow blend, and compared the hidden scene's center pixel against the CPU

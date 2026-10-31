@@ -1346,7 +1346,21 @@ mod effect_capability_tests {
         let node = doc.node_mut(id).ok_or("blended shape missing")?;
         node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
         node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
-        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+        let mut failures = Vec::new();
+        for blend in [
+            BlendMode::Darken,
+            BlendMode::Multiply,
+            BlendMode::ColorBurn,
+            BlendMode::Screen,
+            BlendMode::PlusLighter,
+            BlendMode::Overlay,
+            BlendMode::SoftLight,
+            BlendMode::Exclusion,
+            BlendMode::Hue,
+            BlendMode::Saturation,
+            BlendMode::Color,
+            BlendMode::Luminosity,
+        ] {
             for blur_first in [true, false] {
                 let node = doc.node_mut(id).ok_or("blended shape missing")?;
                 node.blend = blend;
@@ -1388,10 +1402,17 @@ mod effect_capability_tests {
                         .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
                         .count();
                     println!("{blend:?} blur_first={blur_first} {scale}x: changed={changed} severe={severe}");
-                    assert!(changed * 100 < view.width as usize * view.height as usize * 8);
-                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                    if changed * 100 >= view.width as usize * view.height as usize * 8 || severe * 100 >= view.width as usize * view.height as usize {
+                        failures.push(format!("{blend:?} blur_first={blur_first} {scale}x changed={changed} severe={severe}"));
+                    }
                 }
             }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        for blend in [BlendMode::Lighten, BlendMode::ColorDodge, BlendMode::HardLight, BlendMode::Difference] {
+            doc.node_mut(id).ok_or("blended shape missing")?.blend = blend;
+            let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 220 };
+            assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} stays guarded");
         }
         Ok(())
     }
@@ -3529,7 +3550,21 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
         && node.opacity >= 0.999
-        && matches!(node.blend, BlendMode::Multiply | BlendMode::Screen)
+        && matches!(
+            node.blend,
+            BlendMode::Darken
+                | BlendMode::Multiply
+                | BlendMode::ColorBurn
+                | BlendMode::Screen
+                | BlendMode::PlusLighter
+                | BlendMode::Overlay
+                | BlendMode::SoftLight
+                | BlendMode::Exclusion
+                | BlendMode::Hue
+                | BlendMode::Saturation
+                | BlendMode::Color
+                | BlendMode::Luminosity
+        )
         && visible.len() == 2
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
