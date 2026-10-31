@@ -3749,6 +3749,28 @@ mod effect_capability_tests {
             let limit = if outlined == [dark] { 2 } else { 1 };
             assert!(changed < (view.width * view.height * limit / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
         }
+        doc.node_mut(pane).ok_or("pane missing")?.effects = vec![figcraft_doc::Effect {
+            kind: EffectKind::BackgroundBlur(Blur {
+                radius: 16.0,
+                blur_type: figcraft_doc::BlurType::Progressive,
+                start_radius: 0.0,
+                start: (0.0, 0.5),
+                end: (1.0, 0.5),
+            }),
+            visible: true,
+        }];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("progressive group reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 100) as usize, "progressive group: {changed} changed pixels");
         Ok(())
     }
 
@@ -4205,7 +4227,7 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
             isolated_group_for_backdrop(doc, *candidate, page) == Some((group, opacity))
                 && doc.node(*candidate).is_some_and(|node| {
                     let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-                    matches!(effects.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
+                    matches!(effects.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(_)))
                 })
         })
 }
@@ -7611,8 +7633,7 @@ impl GpuCanvas {
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
-        if !has_custom_backdrop
-            && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
+        if let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
         {
             let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options);
@@ -7851,9 +7872,25 @@ impl GpuCanvas {
             let source = self.snapshot_submit();
             prefix_submit_ms += stage.elapsed().as_secs_f64() * 1000.0;
             let stage = Instant::now();
-            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-            let clip = backdrop_clip_rect(doc, id, page, view);
-            let blurred = blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip);
+            let progressive = doc.node(id).and_then(|node| {
+                node.effects.iter().find_map(|effect| match &effect.kind {
+                    EffectKind::BackgroundBlur(blur) if effect.visible && blur.is_progressive() => Some((node, blur)),
+                    _ => None,
+                })
+            });
+            let blurred = if let Some((node, effect)) = progressive {
+                let screen = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1)) * doc.world_transform(id);
+                let safe = effect.sanitized();
+                let start = screen * Point::new(safe.start.0 * node.width, safe.start.1 * node.height);
+                let end = screen * Point::new(safe.end.0 * node.width, safe.end.1 * node.height);
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let mix = self.gpu_progressive_blur.get_or_insert_with(|| GpuProgressiveBlur::new(&self.device));
+                mix.submit(&self.device, &self.queue, blur, &source, effect, view.scale, start, end)
+            } else {
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let clip = backdrop_clip_rect(doc, id, page, view);
+                blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip)
+            };
             let (width, height) = (u16::try_from(blurred.width())?, u16::try_from(blurred.height())?);
             let texture_id = self.register_external_texture(blurred);
             blur_submit_ms += stage.elapsed().as_secs_f64() * 1000.0;

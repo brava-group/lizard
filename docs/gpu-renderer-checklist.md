@@ -82,6 +82,9 @@ the migration concerns rasterization and pixel effects.
     translucent group. The outside case differed in eight pixels above 20/255. The inside
     case differed in 318 of 19,200 pixels above 20/255, confined to the one-pixel outline;
     screenshots confirmed that both blur panes and the other content remain intact.
+  - [x] Combine a progressive background blur followed by a uniform background blur in the
+    same translucent group. The GPU variable-radius pass reads the group's ordered prefix;
+    an isolated full-frame comparison stayed below 1% pixels differing by more than 20/255.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
