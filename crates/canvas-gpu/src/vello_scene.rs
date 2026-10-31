@@ -3470,7 +3470,10 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
     if depth > 64
         || matches!(&node.kind, NodeKind::Text(text) if !text.runs.is_empty())
-        || node.effects.iter().any(|effect| effect.visible)
+        || node.effects.iter().any(|effect| {
+            effect.visible
+                && !matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius))
+        })
         || node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node)
     {
         return false;

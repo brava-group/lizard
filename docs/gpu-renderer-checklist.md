@@ -105,6 +105,8 @@ the migration concerns rasterization and pixel effects.
     center pixels and visually compared the repeated tile against the CPU reference.
   - [x] Render a uniform-style text node as a repeating pattern source on GPU at 1× and 2×;
     rich text runs remain guarded.
+  - [x] Render a repeating pattern whose source has one uniform Layer Blur on GPU at 1× and 2×;
+    progressive blur and other source effects remain guarded.
   - [x] Compose document shader fills directly from GPU textures, with zoom-aware resolution,
     live uniforms, opacity, and bounded replacement of edited textures.
   - [x] Keep native Display P3 export pixels in document space and convert the main native canvas
@@ -224,6 +226,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: a repeating pattern sourced from a uniformly blurred vector rectangle now
+  renders through Vello's GPU filter. The complete 64×48 pattern export matched the CPU
+  reference pixel for pixel at 1× and 2×. Pattern sources with progressive blur or other
+  unsupported effects remain guarded.
 
 - 2026-10-30: 120 GPU/reference comparisons covered ten cached Blur/Noise node blends at
   25%, 50%, and 75% opacity, both effect orders, and 1×/2×. The worst retained case differed
