@@ -4137,6 +4137,31 @@ mod effect_capability_tests {
             assert!(changed < (view.width * view.height * 7 / 100) as usize, "nested clipped glass group at {scale}x: {changed} changed pixels");
             assert!(severe <= 1, "nested clipped glass group at {scale}x has {severe} severe pixels");
         }
+        doc.node_mut(group).ok_or("outer group missing")?.opacity = 0.5;
+        doc.node_mut(nested).ok_or("nested group missing")?.opacity = 0.5;
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
+            let index = BackdropIndex::new(&doc, page);
+            assert_eq!(isolated_group_for_backdrop(&doc, nested_pane, page), Some((group, 0.5)));
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "nested translucent glass group rejected at {scale}x");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("nested translucent group reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            let severe = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 48))
+                .count();
+            println!("nested translucent glass group at {scale}x: changed={changed} severe={severe}");
+            assert!(changed < (view.width * view.height * 7 / 100) as usize, "nested translucent glass group at {scale}x: {changed} changed pixels");
+            assert!(severe <= 1, "nested translucent glass group at {scale}x has {severe} severe pixels");
+        }
         Ok(())
     }
 
