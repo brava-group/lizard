@@ -1357,6 +1357,23 @@ mod effect_capability_tests {
             eprintln!("{label} text luminance mask revealed={revealed} changed={changed}");
             assert!(changed * 100 < view.width as usize * view.height as usize, "{label} text luminance mask changed {changed} pixels");
         }
+        if let NodeKind::Text(text) = &mut doc.node_mut(mask).ok_or("mask missing")?.kind {
+            text.style.fills = Some(vec![Paint::solid(Color::new(0.2, 0.3, 0.8, 1.0))]);
+            let mut style = text.style.clone();
+            style.fills = Some(vec![Paint::solid(Color::new(0.9, 0.8, 0.1, 0.7))]);
+            text.runs.push(figcraft_doc::StyleRun { start: 3, end: 6, style });
+        }
+        assert!(!has_unhandled_effects_in_view(&doc, &view));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("styled reference rendering failed")?;
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 16))
+            .count();
+        println!("styled text luminance mask changed={changed}");
+        assert!(changed * 100 < view.width as usize * view.height as usize);
         Ok(())
     }
 
@@ -4474,14 +4491,16 @@ fn draw_paint_runs(
                     if first.mask_type == MaskType::Luminance {
                         let mut luminance_mask = first.clone();
                         for paint in luminance_mask.fills.iter_mut().chain(&mut luminance_mask.strokes) {
-                            match &mut paint.kind {
-                                PaintKind::Solid { color } => *color = luminance_alpha(*color),
-                                PaintKind::Gradient(gradient) => {
-                                    for stop in &mut gradient.stops {
-                                        stop.color = luminance_alpha(stop.color);
-                                    }
+                            convert_paint_to_luminance_alpha(paint);
+                        }
+                        if let NodeKind::Text(text) = &mut luminance_mask.kind {
+                            if let Some(fills) = &mut text.style.fills {
+                                fills.iter_mut().for_each(convert_paint_to_luminance_alpha);
+                            }
+                            for run in &mut text.runs {
+                                if let Some(fills) = &mut run.style.fills {
+                                    fills.iter_mut().for_each(convert_paint_to_luminance_alpha);
                                 }
-                                _ => {}
                             }
                         }
                         draw_content(scene, doc, &luminance_mask, mask_transform, images, None, cached.inner_shadows, camera, size);
@@ -4524,13 +4543,21 @@ fn luminance_alpha(source: Color) -> Color {
     Color::new(1.0, 1.0, 1.0, source.a * luminance.clamp(0.0, 1.0))
 }
 
-fn gpu_luminance_mask_supported(node: &Node) -> bool {
-    node.effects.iter().all(|effect| !effect.visible)
-        && node.children.is_empty()
-        && !matches!(&node.kind, NodeKind::Text(text) if !text.runs.is_empty())
-        && !matches!(node.kind, NodeKind::Vector { ref network } if network.regions.iter().any(|region| region.fills.is_some()))
-        && node.fills.iter().chain(&node.strokes).filter(|paint| paint.visible && paint.opacity > 0.0).count() == 1
-        && node.fills.iter().chain(&node.strokes).all(|paint| {
+fn convert_paint_to_luminance_alpha(paint: &mut Paint) {
+    match &mut paint.kind {
+        PaintKind::Solid { color } => *color = luminance_alpha(*color),
+        PaintKind::Gradient(gradient) => {
+            for stop in &mut gradient.stops {
+                stop.color = luminance_alpha(stop.color);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn gpu_luminance_paints_supported(paints: &[Paint]) -> bool {
+    paints.iter().filter(|paint| paint.visible && paint.opacity > 0.0).count() <= 1
+        && paints.iter().all(|paint| {
             !paint.visible
                 || paint.blend == BlendMode::Normal
                     && match &paint.kind {
@@ -4539,6 +4566,21 @@ fn gpu_luminance_mask_supported(node: &Node) -> bool {
                         _ => false,
                     }
         })
+}
+
+fn gpu_luminance_mask_supported(node: &Node) -> bool {
+    node.effects.iter().all(|effect| !effect.visible)
+        && node.children.is_empty()
+        && !matches!(node.kind, NodeKind::Vector { ref network } if network.regions.iter().any(|region| region.fills.is_some()))
+        && node.fills.iter().chain(&node.strokes).filter(|paint| paint.visible && paint.opacity > 0.0).count() == 1
+        && gpu_luminance_paints_supported(&node.fills)
+        && gpu_luminance_paints_supported(&node.strokes)
+        && match &node.kind {
+            NodeKind::Text(text) => std::iter::once(&text.style)
+                .chain(text.runs.iter().map(|run| &run.style))
+                .all(|style| style.fills.as_ref().is_none_or(|fills| gpu_luminance_paints_supported(fills))),
+            _ => true,
+        }
 }
 
 pub fn make_scene(doc: &Document, page: NodeId, view: &View) -> Scene {

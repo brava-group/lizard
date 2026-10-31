@@ -154,7 +154,10 @@ the migration concerns rasterization and pixel effects.
   - [x] Compose a single solid or gradient luminance stroke as the mask source on GPU;
     sampled edges and empty interior remain within 16/255 of the reference.
   - [x] Compose uniform-style text luminance masks with one solid or gradient paint on GPU;
-    rich text runs remain guarded until their separate colors can be converted.
+    rich text run colors are converted separately in the following case.
+  - [x] Compose styled text luminance masks on GPU by converting each run's solid or gradient
+    paint to luminance alpha before the destination-in pass. A two-color text mask differed in
+    only 27 pixels above 16/255 in the 200×100 comparison.
 - [x] Keep composited inner and drop shadows on rotated groups in the GPU cache for tested spreads
   through ±32 document units; unsupported descendants and larger effects remain guarded.
   - [x] Cache individual drop and inner shadows on partially opaque rounded rectangles; apply
