@@ -701,6 +701,9 @@ mod tests {
             assert!(changed * 100 < view.width as usize * view.height as usize * 10);
             assert!(severe * 100 < view.width as usize * view.height as usize);
         }
+        doc.node_mut(source).ok_or("tile missing")?.effects.push(Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true });
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 48 };
+        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "a second source blur needs an ordered GPU effect pass");
         Ok(())
     }
 
