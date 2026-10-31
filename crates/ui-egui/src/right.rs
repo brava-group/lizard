@@ -18,9 +18,11 @@ use crate::{FigApp, RightTab};
 
 /// Common value of `f` across `ids` (None when mixed or empty).
 pub(crate) fn common<T: PartialEq + Clone>(doc: &Document, ids: &[NodeId], f: impl Fn(&Node) -> T) -> Option<T> {
-    let mut it = ids.iter().filter_map(|i| doc.node(*i));
-    let first = f(it.next()?);
-    if it.all(|n| f(n) == first) { Some(first) } else { None }
+    crate::selection_cache::with_nodes(doc, ids, |nodes| {
+        let mut present = nodes.flatten();
+        let first = f(present.next()?);
+        if present.all(|node| f(node) == first) { Some(first) } else { None }
+    })
 }
 
 /// A value for the edited points, including the ends of selected segments. The outer `None`
@@ -398,6 +400,7 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
         page_section(app, ui, &doc);
         return;
     }
+    crate::selection_cache::show(&doc, &sel);
     header(app, ui, &doc, &sel);
     let points_selected = vector_edit.as_ref().is_some_and(|ve| !ve.vertices.is_empty() || !ve.segments.is_empty());
     if !points_selected {

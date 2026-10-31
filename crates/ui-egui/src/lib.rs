@@ -61,6 +61,7 @@ pub mod render_worker;
 pub mod right;
 pub mod scale_panel;
 pub mod section_panel;
+mod selection_cache;
 pub mod selection_colors;
 mod selection_spacing;
 pub mod shortcuts;

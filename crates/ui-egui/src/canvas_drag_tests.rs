@@ -11,6 +11,52 @@ use serde_json::json;
 
 use crate::layers_drag_tests::Ui;
 
+/// Manual CPU/UI measurement for upstream #1571 on the current Lizard editor. Raster work has
+/// already been moved to the GPU; this isolates the panel and selection overlay during a drag.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "manual large-selection UI benchmark: run with --ignored --nocapture"]
+fn large_selection_ui_latency() -> Result<(), Box<dyn std::error::Error>> {
+    use std::time::Instant;
+
+    let mut session = Session::new();
+    let mut ids = Vec::with_capacity(648);
+    for index in 0..648 {
+        let value = session.execute(
+            "shape.rectangle",
+            &json!({
+                "x": (index % 36) * 25, "y": (index / 36) * 25, "width": 20, "height": 20,
+            }),
+        )?;
+        ids.push(figcraft_engine::params::id_of(&value["id"]).ok_or("missing rectangle id")?);
+    }
+    session.execute("select.set", &json!({"ids": ids}))?;
+    let mut ui = Ui::new(session);
+    settle(&mut ui);
+    let mut measure = |bypass: bool| {
+        crate::selection_cache::bypass_for_test(bypass);
+        for _ in 0..10 {
+            ui.frame(vec![]);
+        }
+        let mut times = Vec::new();
+        for _ in 0..80 {
+            let start = Instant::now();
+            ui.frame(vec![]);
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        times.sort_by(f64::total_cmp);
+        (times[40], times[76])
+    };
+    let original = measure(true);
+    let cached = measure(false);
+    crate::selection_cache::bypass_for_test(false);
+    println!(
+        "648 selected objects: original median {:.3} ms / p95 {:.3} ms; cached median {:.3} ms / p95 {:.3} ms",
+        original.0, original.1, cached.0, cached.1
+    );
+    Ok(())
+}
+
 /// Frames until the render worker has nothing in flight (a few seconds at most).
 fn settle(u: &mut Ui) {
     for _ in 0..300 {
