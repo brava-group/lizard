@@ -1807,6 +1807,50 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_rotated_texture_keeps_scatter_and_alpha() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent texture");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 240.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Texture", 0.0, 0.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("texture missing")?;
+        node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        node.effects = vec![figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        }];
+        for opacity in [0.25, 0.5, 0.75] {
+            doc.node_mut(id).ok_or("texture missing")?.opacity = opacity;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                assert_eq!(gpu.texture_effects.len(), 1);
+                assert_eq!(gpu.texture_effects_1x.len(), 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn translucent_vector_without_shadow_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Translucent vector baseline");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -4644,7 +4688,7 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
         && ((0.0..=1.0).contains(&node.opacity)
             && node.blend == BlendMode::Normal
             && node.effects.iter().filter(|effect| effect.visible).count() == 1
-            && node.effects.iter().filter(|effect| effect.visible).all(|effect| matches!(effect.kind, EffectKind::Noise(_)))
+            && node.effects.iter().filter(|effect| effect.visible).all(|effect| matches!(effect.kind, EffectKind::Noise(_) | EffectKind::Texture(_)))
             || node.opacity >= 0.999
             || gpu_cached_node_blend_supported(node))
         && (node.blend == BlendMode::Normal
@@ -5384,7 +5428,15 @@ impl GpuCanvas {
             let (Ok(width_u16), Ok(height_u16)) = (u16::try_from(width), u16::try_from(height)) else { continue };
             let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
             let mut scene = Scene::new(width_u16, height_u16);
-            draw_node(&mut scene, doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width_u16, height_u16));
+            let source_doc = doc.node(id).filter(|node| node.opacity < 0.999).map(|_| {
+                let mut copy = doc.clone();
+                if let Some(node) = copy.node_mut(id) {
+                    node.opacity = 1.0;
+                }
+                copy
+            });
+            let cache_source_doc = source_doc.as_ref().unwrap_or(doc);
+            draw_node(&mut scene, cache_source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width_u16, height_u16));
             let mut source = Self::shared_with(self, width, height);
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
@@ -5403,7 +5455,7 @@ impl GpuCanvas {
                 {
                     let camera_1x = Affine::translate((-bounds.x0, -bounds.y0));
                     let mut scene_1x = Scene::new(width_1x, height_1x);
-                    draw_node(&mut scene_1x, doc, id, camera_1x, bounds, 0, None, None, CachedEffects::empty(), (width_1x, height_1x));
+                    draw_node(&mut scene_1x, cache_source_doc, id, camera_1x, bounds, 0, None, None, CachedEffects::empty(), (width_1x, height_1x));
                     let mut source_1x = Self::shared_with(self, u32::from(width_1x), u32::from(height_1x));
                     source_1x.render_submit_with_target(
                         &scene_1x,

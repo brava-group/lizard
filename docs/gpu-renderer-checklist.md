@@ -95,6 +95,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Keep texture scatter on GPU at fractional zoom up to 2× by selecting the 1× or 2×
     precomputed texture. A flat and rotated fixture at 0.75×, 1.25×, and 1.5× retained shape
     coverage and stayed below a 5% viewport difference threshold.
+  - [x] Apply partial node opacity after texture scatter on GPU for rotated shapes, including
+    both the 1× and 2× caches; tested 25%, 50%, and 75% opacity on a colored backdrop.
   - [x] Generate diamond gradients on the GPU, including individually painted vector regions.
   - [x] Generate repeating grid and shifted-hex pattern cells on the GPU for simple leaf and
     group sources, including supported alpha, vector, and luminance masks. Retain a guarded
@@ -204,6 +206,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: a rotated rectangle with one Texture effect and partial node opacity now stays
+  on GPU. The unattenuated source feeds both scatter caches; final composition applies opacity
+  once. All six GPU/reference comparisons at 1× and 2× matched pixel for pixel at 25%, 50%,
+  and 75% opacity. Opaque texture preparation continues without cloning the document.
 
 - 2026-10-30: a translucent rotated rectangle with one Noise effect now remains in the GPU
   canvas. The source stays opaque in the noise cache and its node opacity is applied when the
