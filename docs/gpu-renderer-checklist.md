@@ -135,6 +135,8 @@ the migration concerns rasterization and pixel effects.
     rich text runs remain guarded until their separate colors can be converted.
 - [x] Keep composited inner and drop shadows on rotated groups in the GPU cache for tested spreads
   through ±32 document units; unsupported descendants and larger effects remain guarded.
+  - [x] Cache individual drop and inner shadows on partially opaque rounded rectangles; apply
+    25%, 50%, or 75% node opacity during GPU composition at 1× and 2×.
 - [ ] Support arbitrary ordered combinations of layer/background blur, noise, texture, shadows,
   and glass on rotated/skewed shapes and groups, including multiple shadows.
   - [x] Support `Noise → Layer Blur` on rotated shapes at 1× and 2× zoom with GPU-only passes.
@@ -216,6 +218,11 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: individual drop and inner shadows on partially opaque rounded rectangles now
+  use GPU caches. Twelve GPU/reference comparisons at 25%, 50%, and 75% opacity and 1×/2×
+  differed at most 132/249,600 pixels above 8/255 and none above 48/255. The capability
+  remains limited to rectangles and frames; other translucent shapes retain their guards.
 
 - 2026-10-30: the progressive Layer Blur fixture now covers 100%, 25%, 50%, and 75% node
   opacity at 1× and 2×. All eight GPU/reference comparisons passed the existing 0.1% pixel

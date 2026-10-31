@@ -860,6 +860,57 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_rectangle_shadows_reuse_gpu_cache() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent rectangle shadows");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 240.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Shadowed", 70.0, 60.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        node.corners.radii = [12.0; 4];
+        for inner in [false, true] {
+            let mut effect = if inner { figcraft_doc::Effect::inner_shadow() } else { figcraft_doc::Effect::drop_shadow() };
+            match &mut effect.kind {
+                EffectKind::DropShadow(shadow) | EffectKind::InnerShadow(shadow) => {
+                    shadow.radius = 8.0;
+                    shadow.offset = (4.0, 6.0);
+                    shadow.color = Color::new(0.2, 0.1, 0.3, 0.2);
+                }
+                _ => {}
+            }
+            doc.node_mut(id).ok_or("shape missing")?.effects = vec![effect];
+            for opacity in [0.25, 0.5, 0.75] {
+                doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    let cache_counts = gpu.prepare_static_effects(&doc)?;
+                    assert_eq!(if inner { cache_counts.2 } else { cache_counts.1 }, 1);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("inner={inner} opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn supported_masks_use_gpu_and_unimplemented_paints_fall_back() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU content capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -4726,7 +4777,7 @@ fn gpu_texture_view_supported(doc: &Document, node: &Node, view: &View, texture:
 fn gpu_cached_shadow_bounds_supported(doc: &Document, node: &Node) -> bool {
     node.visible
         && !node.is_mask
-        && node.opacity >= 0.999
+        && (node.opacity >= 0.999 || (0.0..=1.0).contains(&node.opacity) && matches!(node.kind, NodeKind::Rectangle | NodeKind::Frame))
         && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
         && node.effects.iter().filter(|effect| effect.visible).count() == 1
         && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| {
@@ -5416,7 +5467,11 @@ impl GpuCanvas {
                     EffectKind::InnerShadow(shadow) if gpu_cached_inner_shadow_supported(doc, node, shadow) => true,
                     _ => return None,
                 };
-                if !node.visible || node.is_mask || node.opacity < 0.999 || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough) {
+                if !node.visible
+                    || node.is_mask
+                    || (node.opacity < 0.999 && (!(0.0..=1.0).contains(&node.opacity) || !matches!(node.kind, NodeKind::Rectangle | NodeKind::Frame)))
+                    || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+                {
                     return None;
                 }
                 let bounds = figcraft_render::raster_bounds(doc, node.id)?;
