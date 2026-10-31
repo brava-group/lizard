@@ -4845,7 +4845,6 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
     if depth > 64
         || !gpu_styled_text_paints_supported(doc, node)
-        || node.effects.iter().filter(|effect| effect.visible).count() > 3
         || node.effects.iter().any(|effect| {
             effect.visible
                 && !matches!(&effect.kind, EffectKind::LayerBlur(blur) if !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius))
