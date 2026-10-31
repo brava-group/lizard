@@ -2094,6 +2094,79 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn textured_effect_stack_paint_blends_keep_gpu_composition() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU textured paint blends");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 240.0, 200.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.65, 0.8, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Two paints", 0.0, 0.0, 110.0, 82.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((75.0, 58.0)) * Affine::rotate(0.3);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0)), Paint::solid(Color::new(0.15, 0.8, 0.3, 0.7))];
+        let texture = || figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        };
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(5.0)), visible: true };
+        let shadow = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.radius = 8.0;
+                value.offset = (4.0, 6.0);
+                value.color = Color::new(0.1, 0.2, 0.3, 0.4);
+            }
+            effect
+        };
+        let mut failures = Vec::new();
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+            for opacity in [1.0, 0.5] {
+                for texture_first in [true, false] {
+                    for with_shadow in [false, true] {
+                        let node = doc.node_mut(id).ok_or("shape missing")?;
+                        node.fills[1].blend = blend;
+                        node.opacity = opacity;
+                        node.effects = match (texture_first, with_shadow) {
+                            (true, true) => vec![texture(), blur(), shadow()],
+                            (false, true) => vec![shadow(), blur(), texture()],
+                            (true, false) => vec![texture(), blur()],
+                            (false, false) => vec![blur(), texture()],
+                        };
+                        for scale in [1.0, 2.0] {
+                            let view = View { origin: (0.0, 0.0), scale, width: (240.0 * scale) as u32, height: (200.0 * scale) as u32 };
+                            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} capability");
+                            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                            assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                            let actual = gpu.pixels()?;
+                            let changed = actual
+                                .chunks_exact(4)
+                                .zip(reference.data().chunks_exact(4))
+                                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                                .count();
+                            let severe = actual
+                                .chunks_exact(4)
+                                .zip(reference.data().chunks_exact(4))
+                                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                                .count();
+                            println!(
+                                "paint={blend:?} opacity={opacity} texture_first={texture_first} shadow={with_shadow} scale={scale}: changed={changed} severe={severe}"
+                            );
+                            if changed * 100 >= view.width as usize * view.height as usize * 10
+                                || severe * 100 >= view.width as usize * view.height as usize
+                            {
+                                failures.push(format!("{blend:?} opacity={opacity} texture_first={texture_first} shadow={with_shadow} scale={scale}: changed={changed} severe={severe}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
+    #[test]
     fn textured_effect_stack_node_blends_keep_gpu_composition() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU textured node blends");
         let page = doc.current_page.ok_or("page missing")?;
@@ -4829,7 +4902,19 @@ fn gpu_simple_paint_blend_supported(node: &Node, paint: &Paint) -> bool {
         && node.children.is_empty()
         && (node.effects.iter().all(|effect| !effect.visible)
             || gpu_shadowed_paint_blend_supported(node)
-            || gpu_uniform_blur_paint_blend_supported(node))
+            || gpu_uniform_blur_paint_blend_supported(node)
+            || gpu_texture_paint_blend_candidate(node))
+}
+
+fn gpu_texture_paint_blend_candidate(node: &Node) -> bool {
+    let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+    node.children.is_empty()
+        && visible.len() >= 2
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
+        && visible
+            .iter()
+            .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_)))
 }
 
 fn gpu_uniform_blur_paint_blend_supported(node: &Node) -> bool {
@@ -5908,7 +5993,9 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
                     matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
                 }));
     let paint_supported = |paint: &Paint| {
-        !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+        !paint.visible
+            || ((paint.blend == BlendMode::Normal || gpu_texture_paint_blend_candidate(node) && gpu_blend_mode(paint.blend).is_some())
+                && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
     };
     node.visible
         && !node.is_mask

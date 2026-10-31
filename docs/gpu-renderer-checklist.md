@@ -141,6 +141,10 @@ the migration concerns rasterization and pixel effects.
   - [x] Combine one uniform Layer Blur with both a node blend and a second paint blend on GPU.
     Tested all 16 supported node modes paired with supported paint modes at full and half
     opacity, 1× and 2× zoom; all 64 comparisons stayed within the visual difference gates.
+  - [x] Compose a second paint using any of the 16 Vello-supported blend modes inside an
+    ordered Texture/Blur GPU cache, with or without Drop Shadow and at full or half node
+    opacity. All 256 comparisons across both effect orders and 1×/2× passed; the largest
+    shadow-first differences stayed under the visual gate with no severe pixels.
   - [x] Apply 12 verified Vello node blends to the GPU-cached `Layer Blur ↔ Noise` stack on
     opaque rotated leaves: Darken, Multiply, Color Burn, Screen, Plus Lighter, Overlay, Soft Light,
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
