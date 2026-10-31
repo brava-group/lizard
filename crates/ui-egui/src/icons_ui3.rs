@@ -64,6 +64,12 @@ const TOOLBAR_SVGS: [&str; 12] = [
     include_str!("../assets/toolbar-mode-dev.svg"),
 ];
 
+// The two spacing glyphs drawn in the owner's New Trasso Icons document.
+const SELECTION_SPACING_SVGS: [&str; 2] = [
+    include_str!("../assets/selection-spacing-horizontal.svg"),
+    include_str!("../assets/selection-spacing-vertical.svg"),
+];
+
 // Exact paths from the owner's image toolbar reference (node pxhiB).
 const IMAGE_ACTION_SVGS: [&str; 7] = [
     include_str!("../assets/image-crop.svg"),
@@ -480,6 +486,19 @@ pub(super) fn paint_chevron(painter: &Painter, center: egui::Pos2, painted_size:
 }
 
 pub(super) fn paint(painter: &Painter, rect: Rect, icon: super::Icon, color: Color32) -> bool {
+    let spacing = match icon {
+        super::Icon::SelectionSpacingH => Some(0),
+        super::Icon::SelectionSpacingV => Some(1),
+        _ => None,
+    };
+    if let Some(index) = spacing {
+        static ICONS: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
+        let icons = ICONS.get_or_init(|| SELECTION_SPACING_SVGS.iter().map(|svg| build(svg, true)).collect());
+        if let Some(Some(geometry)) = icons.get(index) {
+            paint_geometry_optical(painter, rect, geometry, color, [24.0, 24.0]);
+        }
+        return true;
+    }
     let image_action = match icon {
         super::Icon::ImageCrop => Some(0),
         super::Icon::ImageSelectArea => Some(1),

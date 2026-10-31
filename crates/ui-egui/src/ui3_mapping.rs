@@ -172,6 +172,8 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         | super::super::Icon::ImageExpand
         | super::super::Icon::ImageEnhance
         | super::super::Icon::ImageVectorize
+        | super::super::Icon::SelectionSpacingH
+        | super::super::Icon::SelectionSpacingV
         | super::super::Icon::Trash => None,
     }
 }

@@ -244,6 +244,8 @@ icons! {
     AlignBottom,
     DistributeH,
     DistributeV,
+    SelectionSpacingH,
+    SelectionSpacingV,
     Rotate,
     FlipH,
     FlipV,
@@ -1434,7 +1436,8 @@ fn draw(p: &P, icon: Icon) {
             p.line(8.0, 6.0, 8.0, 9.5);
             p.dot(8.0, 11.5, 0.9);
         }
-        ImageCrop | ImageSelectArea | ImageRemoveBackground | ImageEditPrompt | ImageExpand | ImageEnhance | ImageVectorize => {}
+        ImageCrop | ImageSelectArea | ImageRemoveBackground | ImageEditPrompt | ImageExpand | ImageEnhance | ImageVectorize
+        | SelectionSpacingH | SelectionSpacingV => {}
         Logo => {} // The canonical Lizard SVG is rendered by `paint` above.
     }
 }

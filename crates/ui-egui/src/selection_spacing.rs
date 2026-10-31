@@ -112,12 +112,11 @@ pub fn panel(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId]) {
     if layout.horizontal.is_none() && layout.vertical.is_none() {
         return;
     }
-    widgets::sublabels(ui, tr("Spacing"), None);
     let col = widgets::col_width(ui.available_width());
-    crate::right::row(ui, 32.0, |ui| {
+    crate::right::row(ui, 24.0, |ui| {
         for (axis, key, icon, tip) in [
-            (&layout.horizontal, "horizontal", Icon::DistributeH, tr("Horizontal spacing")),
-            (&layout.vertical, "vertical", Icon::DistributeV, tr("Vertical spacing")),
+            (&layout.horizontal, "horizontal", Icon::SelectionSpacingH, tr("Horizontal spacing")),
+            (&layout.vertical, "vertical", Icon::SelectionSpacingV, tr("Vertical spacing")),
         ] {
             let Some(axis) = axis else { continue };
             let width = if layout.horizontal.is_some() && layout.vertical.is_some() { col } else { ui.available_width() };
