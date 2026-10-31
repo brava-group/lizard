@@ -59,6 +59,9 @@ the migration concerns rasterization and pixel effects.
     unsupported blend at the same coordinates on another page no longer forces CPU rendering.
   - [x] Ignore unsupported paints and effects under hidden ancestors when choosing the GPU
     canvas; those descendants do not contribute pixels to the visible scene.
+  - [x] Skip static GPU effect preparation under hidden ancestors and release retained grain
+    textures when a parent becomes hidden. An isolated test covers single Blur, single
+    Texture, and ordered Texture/Blur behind a toggled group, while a visible sibling stays cached.
   - [x] Combine selected outlines with supported sibling backdrop blur or glass on native and
     browser WebGPU, preserving paint order even when the selected contour is behind the pane.
   - [x] Combine Focus with selected outlines on native and browser WebGPU, with optional Pixel

@@ -5327,6 +5327,46 @@ mod page_capability_tests {
         assert!(has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
         Ok(())
     }
+
+    #[test]
+    fn hidden_effect_subtrees_do_not_allocate_gpu_caches() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("hidden GPU effects");
+        let page = doc.current_page.ok_or("page missing")?;
+        let hidden_group = doc.create(page, NodeKind::Group, "Hidden", 0.0, 0.0, 80.0, 80.0)?;
+        let hidden_blur = doc.create(hidden_group, NodeKind::Rectangle, "Hidden blur", 0.0, 0.0, 40.0, 40.0)?;
+        doc.node_mut(hidden_blur).ok_or("blur node missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true }];
+        let hidden_texture = doc.create(hidden_group, NodeKind::Rectangle, "Hidden texture", 20.0, 20.0, 40.0, 40.0)?;
+        doc.node_mut(hidden_texture).ok_or("texture node missing")?.effects = vec![
+            figcraft_doc::Effect {
+                kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+                visible: true,
+            },
+            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
+        ];
+        let hidden_scatter = doc.create(hidden_group, NodeKind::Rectangle, "Hidden scatter", 5.0, 5.0, 30.0, 30.0)?;
+        doc.node_mut(hidden_scatter).ok_or("scatter node missing")?.effects = vec![figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        }];
+        doc.node_mut(hidden_group).ok_or("hidden group missing")?.visible = false;
+        let visible = doc.create(page, NodeKind::Rectangle, "Visible", 95.0, 20.0, 50.0, 50.0)?;
+        doc.node_mut(visible).ok_or("visible node missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true }];
+        let mut gpu = GpuCanvas::new(180, 120)?;
+        assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+        assert!(gpu.layer_blurs.contains_key(&visible));
+        assert!(!gpu.layer_blurs.contains_key(&hidden_blur));
+        assert!(!gpu.layer_blurs.contains_key(&hidden_texture));
+        assert!(!gpu.grain_cache.contains_key(&hidden_scatter));
+        doc.node_mut(hidden_group).ok_or("hidden group missing")?.visible = true;
+        gpu.prepare_static_effects(&doc)?;
+        assert!(gpu.grain_cache.contains_key(&hidden_scatter));
+        doc.node_mut(hidden_group).ok_or("hidden group missing")?.visible = false;
+        gpu.prepare_static_effects(&doc)?;
+        assert!(!gpu.grain_cache.contains_key(&hidden_scatter));
+        Ok(())
+    }
 }
 
 /// Selected outline roots replace their entire subtrees, so those paints and effects cannot
@@ -6206,6 +6246,9 @@ impl GpuCanvas {
         let candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
+                if !node.visible || has_hidden_ancestor(doc, node) {
+                    return None;
+                }
                 let effect = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
                 let [effect] = effect.as_slice() else { return None };
                 let EffectKind::LayerBlur(blur) = &effect.kind else { return None };
@@ -6266,6 +6309,9 @@ impl GpuCanvas {
         let shadow_candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
+                if !node.visible || has_hidden_ancestor(doc, node) {
+                    return None;
+                }
                 let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
                 let [effect] = effects.as_slice() else { return None };
                 let inner = match &effect.kind {
@@ -6320,6 +6366,9 @@ impl GpuCanvas {
         let candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
+                if !node.visible || has_hidden_ancestor(doc, node) {
+                    return None;
+                }
                 if !gpu_stacked_blur_noise_supported(doc, node) && !gpu_stacked_blur_texture_supported(doc, node) {
                     return None;
                 }
@@ -6461,7 +6510,7 @@ impl GpuCanvas {
             .grain_cache
             .iter()
             .filter_map(|(id, state)| {
-                let same_node = doc.node(*id).is_some_and(|node| node == &state.node);
+                let same_node = doc.node(*id).is_some_and(|node| node == &state.node && node.visible && !has_hidden_ancestor(doc, node));
                 let same_world = doc.world_transform(*id).as_coeffs() == state.world;
                 let same_bounds =
                     figcraft_render::raster_bounds(doc, *id).is_some_and(|bounds| [bounds.x0, bounds.y0, bounds.x1, bounds.y1] == state.bounds);
@@ -6505,6 +6554,9 @@ impl GpuCanvas {
         let candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
+                if !node.visible || has_hidden_ancestor(doc, node) {
+                    return None;
+                }
                 let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
                 let [effect] = effects.as_slice() else { return None };
                 let EffectKind::Noise(noise) = &effect.kind else { return None };
@@ -6568,6 +6620,9 @@ impl GpuCanvas {
         let candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
+                if !node.visible || has_hidden_ancestor(doc, node) {
+                    return None;
+                }
                 let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
                 let [effect] = effects.as_slice() else { return None };
                 let EffectKind::Texture(texture) = &effect.kind else { return None };
