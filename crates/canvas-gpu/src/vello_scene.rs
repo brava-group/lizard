@@ -3727,7 +3727,7 @@ mod effect_capability_tests {
         }
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         let index = BackdropIndex::new(&doc, page);
-        for outlined in [vec![above], vec![dark]] {
+        for outlined in [vec![above], vec![dark], vec![pane]] {
             let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
                 .ok_or("outlined two-pane reference failed")?;
             let mut gpu = GpuCanvas::new(view.width, view.height)?;
@@ -3746,7 +3746,7 @@ mod effect_capability_tests {
                 .zip(reference.data().chunks_exact(4))
                 .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
                 .count();
-            let limit = if outlined == [dark] { 2 } else { 1 };
+            let limit = if outlined == [dark] || outlined == [pane] { 2 } else { 1 };
             assert!(changed < (view.width * view.height * limit / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
         }
         doc.node_mut(pane).ok_or("pane missing")?.effects = vec![figcraft_doc::Effect {

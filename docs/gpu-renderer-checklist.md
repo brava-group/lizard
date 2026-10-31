@@ -81,7 +81,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Combine those group backdrops with a selected outline inside or outside the
     translucent group. The outside case differed in eight pixels above 20/255. The inside
     case differed in 318 of 19,200 pixels above 20/255, confined to the one-pixel outline;
-    screenshots confirmed that both blur panes and the other content remain intact.
+    screenshots confirmed that both blur panes and the other content remain intact. Outlining
+    the first blur pane itself also passed while the second pane continued to sample its prefix.
   - [x] Combine a progressive background blur followed by a uniform background blur in the
     same translucent group. The GPU variable-radius pass reads the group's ordered prefix;
     an isolated full-frame comparison stayed below 1% pixels differing by more than 20/255.
