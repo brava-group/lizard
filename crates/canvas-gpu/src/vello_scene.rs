@@ -682,6 +682,46 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_rotated_noise_keeps_shape_and_alpha() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent grain");
+        let page = doc.current_page.ok_or("new document has no page")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 240.0, 220.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.13, 0.55, 0.71, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Grain", 0.0, 0.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("grain missing")?;
+        node.transform = Affine::translate((60.0, 50.0)) * Affine::rotate(0.36);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true }];
+        for opacity in [0.25, 0.5, 0.75] {
+            doc.node_mut(id).ok_or("grain missing")?.opacity = opacity;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (240.0 * scale) as u32, height: (220.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                assert_eq!(gpu.cached_noise_count(), 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("opacity={opacity} scale={scale}: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn analytic_rectangle_shadow_is_gpu_supported_but_other_shapes_fallback() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Drop shadow capability");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3494,7 +3534,14 @@ fn draw_node(
         if let Some(blend) = blend {
             scene.push_blend_layer(blend);
         }
+        let opacity_layer = node.opacity < 0.999 && node.blend == BlendMode::Normal;
+        if opacity_layer {
+            scene.push_opacity_layer(node.opacity);
+        }
         draw_cached_effect(scene, camera, effect);
+        if opacity_layer {
+            scene.pop_layer();
+        }
         if blend.is_some() {
             scene.pop_layer();
         }
@@ -4594,7 +4641,12 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
         && (node.children.is_empty()
             || matches!(node.kind, NodeKind::Group)
                 && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_simple_group_child_supported(doc, child, 0))))
-        && (node.opacity >= 0.999 || gpu_cached_node_blend_supported(node))
+        && ((0.0..=1.0).contains(&node.opacity)
+            && node.blend == BlendMode::Normal
+            && node.effects.iter().filter(|effect| effect.visible).count() == 1
+            && node.effects.iter().filter(|effect| effect.visible).all(|effect| matches!(effect.kind, EffectKind::Noise(_)))
+            || node.opacity >= 0.999
+            || gpu_cached_node_blend_supported(node))
         && (node.blend == BlendMode::Normal
             || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
             || gpu_cached_node_blend_supported(node))
@@ -5274,9 +5326,26 @@ impl GpuCanvas {
             let (Ok(width_u16), Ok(height_u16)) = (u16::try_from(width), u16::try_from(height)) else { continue };
             let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
             let mut scene = Scene::new(width_u16, height_u16);
-            // draw_node leaves noise and texture to these compute passes, so the original
-            // document can supply the isolated source without cloning every node.
-            draw_node(&mut scene, doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width_u16, height_u16));
+            // Apply node opacity after the grain pass, to its complete result.
+            let source_doc = doc.node(id).filter(|node| node.opacity < 0.999).map(|_| {
+                let mut copy = doc.clone();
+                if let Some(node) = copy.node_mut(id) {
+                    node.opacity = 1.0;
+                }
+                copy
+            });
+            draw_node(
+                &mut scene,
+                source_doc.as_ref().unwrap_or(doc),
+                id,
+                camera,
+                bounds,
+                0,
+                None,
+                None,
+                CachedEffects::empty(),
+                (width_u16, height_u16),
+            );
             let mut source = Self::shared_with(self, width, height);
             source
                 .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;

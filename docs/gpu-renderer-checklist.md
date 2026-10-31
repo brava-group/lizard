@@ -85,6 +85,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Apply the seven image adjustment controls in a WGSL compute pass after decoding.
   - [x] Render isolated noise on skewed shapes through the GPU local-coordinate pass; a skewed
     rectangle matched the CPU reference within the existing pixel tolerance.
+  - [x] Apply partial node opacity after isolated noise on GPU for rotated shapes; tested 25%,
+    50%, and 75% at 1× and 2× on a colored backdrop.
   - [x] Render texture scatter on rotated shapes at 1× and 2× by aligning GPU cache bounds to
     document pixels; clipped and unclipped rotated fixtures match the CPU reference.
   - [x] Keep texture scatter on GPU at 1× and 2× during fractional camera pan. The static cache
@@ -202,6 +204,13 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: a translucent rotated rectangle with one Noise effect now remains in the GPU
+  canvas. The source stays opaque in the noise cache and its node opacity is applied when the
+  cached texture is composited. Six GPU/reference comparisons at 1× and 2× found at most
+  12,169/211,200 pixels different by more than 8/255 and none by more than 48/255. The
+  original pre-noise opacity path differed at 19,935/211,200 pixels at 25% opacity. Opaque
+  noise cache preparation still uses the original document without a full clone.
 
 - 2026-10-30: partial-opacity Multiply and Screen on rotated leaves with cached Blur/Noise
   passed 24 isolated GPU/reference comparisons at 1× and 2×. The largest difference above
