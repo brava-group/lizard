@@ -205,6 +205,9 @@ the migration concerns rasterization and pixel effects.
     four node opacities and 1×/2× passed 112 GPU/reference comparisons. The largest
     shadow-first difference was 5,159 pixels above 8/255 in a 520×480 image; at most two
     pixels per image differed by more than 48/255.
+  - [x] Exercise all 24 orders of Layer Blur, Noise, Texture, and Drop Shadow on the same
+    rotated shape at four opacities and 1×/2×. All 192 additional comparisons kept the
+    effects in GPU order and passed the visual difference gates.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,

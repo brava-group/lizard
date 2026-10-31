@@ -2459,7 +2459,7 @@ mod effect_capability_tests {
             }
             effect
         };
-        for (name, effects) in [
+        let mut cases = vec![
             ("blur-texture", vec![blur(), texture()]),
             ("texture-blur", vec![texture(), blur()]),
             ("noise-texture", vec![noise(), texture()]),
@@ -2484,7 +2484,34 @@ mod effect_capability_tests {
             ("noise-texture-blur", vec![noise(), texture(), blur()]),
             ("texture-blur-noise", vec![texture(), blur(), noise()]),
             ("texture-noise-blur", vec![texture(), noise(), blur()]),
-        ] {
+        ]
+        .into_iter()
+        .map(|(name, effects)| (name.to_owned(), effects))
+        .collect::<Vec<_>>();
+        let effect_names = ["blur", "noise", "texture", "shadow"];
+        for first in 0..4 {
+            for second in 0..4 {
+                for third in 0..4 {
+                    for fourth in 0..4 {
+                        let indices = [first, second, third, fourth];
+                        if indices.iter().enumerate().any(|(position, index)| indices[..position].contains(index)) {
+                            continue;
+                        }
+                        let name = indices.map(|index| effect_names[index]).join("-");
+                        let effects = indices
+                            .map(|index| match index {
+                                0 => blur(),
+                                1 => noise(),
+                                2 => texture(),
+                                _ => shadow(),
+                            })
+                            .to_vec();
+                        cases.push((name, effects));
+                    }
+                }
+            }
+        }
+        for (name, effects) in cases {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
             for opacity in [1.0, 0.25, 0.5, 0.75] {
                 doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
