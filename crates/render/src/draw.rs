@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use figcraft_color::{BlendMode, Paint};
-use figcraft_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, WindingRule};
+use figcraft_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, StrokeJoin, WindingRule};
 use figcraft_geom::{Affine, BezPath, Rect, Shape};
 use tiny_skia::{FillRule, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
 
@@ -163,7 +163,10 @@ pub fn stroke_area(n: &Node, path: &BezPath, closed: bool) -> Arc<BezPath> {
         return Arc::new(figcraft_pathops::rect_side_strokes(n.width, n.height, sides, props.align));
     }
     // Rect/ellipse inside/outside strokes without booleans: an even-odd ring of two outlines.
-    if props.dashes.is_empty() && props.profile().is_none() && props.brush.is_none() && closed && props.align != StrokeAlign::Center {
+    if props.dashes.is_empty() && props.profile().is_none() && props.brush.is_none() && closed && props.align != StrokeAlign::Center
+        // The rectangular ring has mitered outer corners. Round and bevel need the generic outline.
+        && !(props.align == StrokeAlign::Outside && props.join != StrokeJoin::Miter && n.corners.radii.contains(&0.0))
+    {
         let w = props.weight;
         let ring = |inset: f64| -> Option<BezPath> {
             let (x0, y0, ww, hh) = (inset, inset, n.width - 2.0 * inset, n.height - 2.0 * inset);
@@ -417,8 +420,22 @@ fn text_box_bounds(n: &Node) -> Rect {
 /// Local bounds a node paints into (its box grown by stroke/effect reach, plus unclipped children).
 /// Text that overflows its box counts where its glyphs are, so it isn't culled while visible;
 /// text greeked at `greek_scale` (see [`lod::greeked`]) paints only inside [`text_box_bounds`].
-pub(crate) fn local_paint_bounds(doc: &Document, n: &Node, depth: usize, greek_scale: Option<f64>) -> Rect {
-    bounds_within(doc, n, depth, greek_scale, None).0
+pub(crate) fn local_paint_bounds(doc: &Document, n: &Node, to_page: Affine, depth: usize, greek_scale: Option<f64>) -> Rect {
+    bounds_within(doc, n, to_page, depth, greek_scale, None).0
+}
+
+/// Convert an effect's page-space reach into local x/y margins under a scaled or rotated layer.
+fn local_reach(to_page: Affine, reach: f64) -> (f64, f64) {
+    let [a, b, c, d, _, _] = to_page.as_coeffs();
+    let det = (a * d - b * c).abs();
+    if reach <= 0.0 || !reach.is_finite() || !det.is_finite() || det == 0.0 {
+        return (reach, reach);
+    }
+    let along = |u: f64, v: f64| {
+        let value = (u.abs() + v.abs()) / det * reach;
+        if value.is_nan() { reach } else { value.min(1e150) }
+    };
+    (along(d, c), along(b, a))
 }
 
 /// [`local_paint_bounds`], kept in and read from `memo` when there is one. Also returns how many
@@ -428,6 +445,7 @@ pub(crate) fn local_paint_bounds(doc: &Document, n: &Node, depth: usize, greek_s
 pub(crate) fn bounds_within<'a>(
     doc: &'a Document,
     n: &Node,
+    to_page: Affine,
     depth: usize,
     greek_scale: Option<f64>,
     memo: Option<&Bounds<'a>>,
@@ -440,20 +458,31 @@ pub(crate) fn bounds_within<'a>(
     {
         return (r, Some(levels));
     }
-    let reach = n.paint_reach();
-    let mut r = n.local_rect().inflate(reach, reach);
+    let (fx, fy) = n.outline_spreads().fold(local_reach(to_page, n.effect_paint_reach()), |(x, y), (spread, page)| {
+        let (px, py) = local_reach(to_page, page);
+        (x.max(spread + px), y.max(spread + py))
+    });
+    let outline = n.outline_reach();
+    let grow = |box_rect: Rect| box_rect.inflate(outline + fx, outline + fy);
+    let mut r = grow(n.local_rect());
     let mut levels = Some(0);
     let clips = n.clip && n.kind.is_frame_like();
     if (!clips || n.kind.bounds_follow_children()) && !n.hides_contents() {
         if depth < MAX_BOUNDS_DEPTH {
             let mut below = Some(0);
+            let mut children: Option<Rect> = None;
             for c in n.children.iter().filter_map(|c| memo.map_or_else(|| doc.node(*c), |m| m.node(doc, *c))) {
                 if !c.visible {
                     continue;
                 }
-                let (cb, c_levels) = bounds_within(doc, c, depth + 1, greek_scale, memo);
+                let (cb, c_levels) = bounds_within(doc, c, to_page * c.transform, depth + 1, greek_scale, memo);
                 below = below.zip(c_levels).map(|(b, l)| b.max(l));
-                r = r.union(figcraft_geom::transform_rect_bbox(c.transform, cb));
+                let cb = figcraft_geom::transform_rect_bbox(c.transform, cb);
+                children = Some(children.map_or(cb, |bounds| bounds.union(cb)));
+            }
+            if let Some(children) = children {
+                let (ex, ey) = local_reach(to_page, n.effects_reach());
+                r = r.union(children.inflate(ex, ey));
             }
             levels = below.map(|b| b + 1);
         } else if !n.children.is_empty() {
@@ -462,7 +491,7 @@ pub(crate) fn bounds_within<'a>(
     }
     // Text can overflow its box.
     if let NodeKind::Text(_) = n.kind {
-        r = r.union(text_box_bounds(n).inflate(reach, reach));
+        r = r.union(grow(text_box_bounds(n)));
         if !greek_scale.is_some_and(|s| lod::greeked(n, s))
             && let Some((l, dy)) = figcraft_text::layout_node(n)
             && let Some(ink) = l.ink_bounds()
@@ -496,13 +525,18 @@ pub fn effect_margin(n: &Node) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// Everything node `id` can paint, in page coordinates: its paint bounds (glyphs of overflowing
-/// text included) grown by its effects' margin. What a change to the node can affect on screen.
+/// Everything node `id` can paint, in page coordinates, including overflowing glyphs and
+/// effects. The local bounds already include effect reach, so growing them again here would
+/// make small edits to an effected group redraw most of the viewport.
 pub fn paint_bounds(doc: &Document, id: NodeId) -> Option<Rect> {
     let n = doc.node(id)?;
-    let m = effect_margin(n).abs();
-    let local = local_paint_bounds(doc, n, 0, None);
-    Some(figcraft_geom::transform_rect_bbox(doc.world_transform(id), local).inflate(m, m))
+    let world = doc.world_transform(id);
+    let local = local_paint_bounds(doc, n, world, 0, None);
+    Some(figcraft_geom::transform_rect_bbox(world, local))
+}
+
+fn to_page(ctx: &Ctx, xf: Affine) -> Affine {
+    if ctx.scale.is_finite() && ctx.scale > 0.0 { Affine::scale(1.0 / ctx.scale) * xf } else { xf }
 }
 
 fn needs_layer(n: &Node) -> bool {
@@ -564,7 +598,7 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
     }
     let xf = parent_xf * n.transform;
     let (pw, ph) = (pix.width(), pix.height());
-    let local = bounds_within(ctx.doc, n, 0, ctx.lod.then_some(ctx.scale), Some(ctx.bounds)).0;
+    let local = bounds_within(ctx.doc, n, to_page(ctx, xf), 0, ctx.lod.then_some(ctx.scale), Some(ctx.bounds)).0;
     let dev = device_rect(xf, local);
     // Effects that read outside (blur) need a margin when culling. Absurd effects (a spread or
     // blur of millions of pixels) keep a sane layer: what lies further off reads as empty.

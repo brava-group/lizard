@@ -529,6 +529,8 @@ mod boolean_cache_tests;
 #[cfg(test)]
 mod bounds_memo_tests;
 #[cfg(test)]
+mod effect_bounds_tests;
+#[cfg(test)]
 mod effect_order_tests;
 #[cfg(test)]
 mod effects_behaviour_tests;
@@ -546,6 +548,8 @@ mod group_effects_tests;
 mod image_budget_tests;
 #[cfg(test)]
 mod image_profile_tests;
+#[cfg(test)]
+mod join_tests;
 #[cfg(test)]
 mod lod_tests;
 #[cfg(test)]

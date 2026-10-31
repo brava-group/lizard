@@ -717,17 +717,88 @@ impl Node {
         self.strokes.iter().any(|p| p.visible) && self.stroke.weight > 0.0
     }
 
-    /// Maximum distance (in local units) painting can reach outside the node box.
+    /// Maximum reach outside the node box before transforms. Effects themselves use page units.
     pub fn paint_reach(&self) -> f64 {
-        let fx = self.effects.iter().map(Effect::reach).fold(0.0, f64::max);
-        self.outline_reach() + fx + self.spread_miter_reach()
+        self.outline_reach() + self.effect_paint_reach()
+    }
+
+    /// Reach of this node's effects in page units, including sharp spread corners.
+    pub fn effect_paint_reach(&self) -> f64 {
+        self.effects_reach() + self.spread_miter_reach()
+    }
+
+    /// Reach of layer effects followed by the largest remaining effect.
+    pub fn effects_reach(&self) -> f64 {
+        let other = self
+            .effects
+            .iter()
+            .filter(|e| e.visible && !matches!(e.kind, EffectKind::LayerBlur(_) | EffectKind::Texture(_)))
+            .map(Effect::reach)
+            .filter(|r| r.is_finite())
+            .fold(0.0, f64::max);
+        (self.layer_effects_reach() + other).min(1e12)
+    }
+
+    /// Sequential blurs combine by variance; texture displacement adds to their reach.
+    fn layer_effects_reach(&self) -> f64 {
+        let blur_variance: f64 = self
+            .effects
+            .iter()
+            .filter(|e| e.visible && matches!(e.kind, EffectKind::LayerBlur(_)))
+            .map(Effect::reach)
+            .filter(|reach| reach.is_finite())
+            .map(|reach| reach.clamp(0.0, 1e12).powi(2))
+            .sum();
+        let texture: f64 = self
+            .effects
+            .iter()
+            .filter(|e| e.visible && matches!(e.kind, EffectKind::Texture(_)))
+            .map(Effect::reach)
+            .filter(|reach| reach.is_finite())
+            .map(|reach| reach.clamp(0.0, 1e12))
+            .sum();
+        (blur_variance.sqrt() + texture).min(1e12)
+    }
+
+    /// Spread of an outlined shadow follows the local transform; blur and offset remain in page units.
+    pub fn outline_spreads(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        let corners = if self.grows_by_exactly_its_spread() { 1.0 } else { SPREAD_MITER_LIMIT };
+        let outlined = !(matches!(self.kind, NodeKind::Group) || matches!(self.kind, NodeKind::Text(_)) && self.has_visible_stroke());
+        self.effects.iter().filter(|e| e.visible).filter_map(move |e| match &e.kind {
+            EffectKind::DropShadow(s) if outlined && s.spread.is_finite() && s.spread > 0.0 => {
+                let page = s.radius.abs() * 1.5 + s.offset.0.abs().max(s.offset.1.abs());
+                Some((s.spread.min(1e12) * corners, (self.layer_effects_reach() + page).min(1e12)))
+            }
+            _ => None,
+        })
     }
 
     /// The page-space area this node paints itself under `world` (its children aside): its box
     /// grown by its strokes and glyphs, then by its effects (see [`Node::grow_by_effects`]).
     pub fn own_paint_bounds(&self, world: Affine) -> figcraft_geom::Rect {
         let o = self.outline_reach();
-        self.grow_by_effects(figcraft_geom::transform_rect_bbox(world, self.local_rect().inflate(o, o)))
+        let base = self.local_rect().inflate(o, o);
+        let grown = self.grow_by_effects(figcraft_geom::transform_rect_bbox(world, base));
+        let [a, b, c, d, _, _] = world.as_coeffs();
+        self.effects.iter().filter(|e| e.visible).fold(grown, |r, e| match &e.kind {
+            EffectKind::DropShadow(s) if s.spread.is_finite() && s.spread > 0.0 => {
+                let spread = s.spread.min(1e12);
+                let outline = if self.grows_by_exactly_its_spread() {
+                    figcraft_geom::transform_rect_bbox(world, base.inflate(spread, spread))
+                } else {
+                    let m = spread * SPREAD_MITER_LIMIT;
+                    figcraft_geom::transform_rect_bbox(world, base).inflate(m * a.hypot(c), m * b.hypot(d))
+                };
+                let g = self.layer_effects_reach() + s.radius.abs() * 1.5;
+                let (dx, dy) = s.offset;
+                if g.is_finite() && dx.is_finite() && dy.is_finite() && outline.is_finite() {
+                    r.union(outline.inflate(g, g) + figcraft_geom::kurbo::Vec2::new(dx, dy))
+                } else {
+                    r
+                }
+            }
+            _ => r,
+        })
     }
 
     /// Page-space area `b` grown by what this node's visible effects paint around it: blurs all
@@ -735,21 +806,24 @@ impl Node {
     /// shadow falling down adds room below and none above.
     pub fn grow_by_effects(&self, b: figcraft_geom::Rect) -> figcraft_geom::Rect {
         let miter = self.spread_miter_reach();
-        self.effects.iter().filter(|e| e.visible).fold(b, |r, e| match &e.kind {
+        let layer = self.layer_effects_reach();
+        let moved = if layer > 0.0 { b.inflate(layer, layer) } else { b };
+        self.effects.iter().filter(|e| e.visible).fold(moved, |r, e| match &e.kind {
             EffectKind::DropShadow(s) => {
                 let g = s.radius.abs() * 1.5 + s.spread.max(0.0) + miter;
                 let (dx, dy) = s.offset;
-                if g.is_finite() && dx.is_finite() && dy.is_finite() { r.union(b.inflate(g, g) + figcraft_geom::kurbo::Vec2::new(dx, dy)) } else { r }
+                if g.is_finite() && dx.is_finite() && dy.is_finite() {
+                    r.union(moved.inflate(g, g) + figcraft_geom::kurbo::Vec2::new(dx, dy))
+                } else {
+                    r
+                }
             }
-            _ => {
-                let g = e.reach();
-                if g.is_finite() && g > 0.0 { r.union(b.inflate(g, g)) } else { r }
-            }
+            _ => r,
         })
     }
 
     /// How far (local units) strokes and glyphs reach outside the box.
-    fn outline_reach(&self) -> f64 {
+    pub fn outline_reach(&self) -> f64 {
         let stroke = if self.has_visible_stroke() {
             let w = self.stroke.sides.map(|s| s.iter().copied().fold(0.0, f64::max)).unwrap_or_else(|| self.stroke.max_weight());
             let base = match self.stroke.align {
@@ -777,7 +851,7 @@ impl Node {
     /// spread moves the edges out in parallel and they meet in a mitre (see
     /// [`SPREAD_MITER_LIMIT`]). Rectangles, frames and ellipses grow by exactly the spread.
     fn spread_miter_reach(&self) -> f64 {
-        if matches!(self.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Section { .. }) || self.kind.is_frame_like() {
+        if self.grows_by_exactly_its_spread() {
             return 0.0;
         }
         self.effects
@@ -788,5 +862,9 @@ impl Node {
                 _ => None,
             })
             .fold(0.0, f64::max)
+    }
+
+    fn grows_by_exactly_its_spread(&self) -> bool {
+        matches!(self.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Section { .. }) || self.kind.is_frame_like()
     }
 }

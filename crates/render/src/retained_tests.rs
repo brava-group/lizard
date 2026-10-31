@@ -288,7 +288,8 @@ fn edits_under_and_beside_effects_match() {
     let shadowed = edit(&beside, |d| d.get_mut(g1).unwrap().transform = Affine::translate((30.0, 20.0)));
     assert!(partial(check(&mut r, &shadowed, s.page, &v)));
     let shadowed2 = edit(&shadowed, |d| d.get_mut(g1).unwrap().transform = Affine::translate((10.0, 60.0)));
-    assert!(partial(check(&mut r, &shadowed2, s.page, &v)));
+    let work = check(&mut r, &shadowed2, s.page, &v);
+    assert!(partial(work), "second shadowed move: {work:?}");
 }
 
 #[test]
