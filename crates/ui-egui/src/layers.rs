@@ -905,6 +905,9 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
             a11y::tree_item(&resp, if n.name.is_empty() { tr(n.kind.label()) } else { &n.name }, &info);
             let selected_ancestor = doc.ancestors(row.id).into_iter().find(|a| sel.contains(a));
             let in_selected = !selected && selected_ancestor.is_some();
+            let in_selected_component = selected_ancestor.is_some_and(|id| {
+                doc.node(id).is_some_and(|node| matches!(&node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. }))
+            });
             let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. });
             let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
             let hover_rect = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y + 4.0), pos2(r.max.x - 8.0, r.max.y - 4.0));
@@ -913,19 +916,17 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
             let over = resp.contains_pointer();
             let hover_brightness = if t.dark { 1.12 } else { 1.015 };
             if selected {
-                let base = if t.dark {
-                    t.selected_row
-                } else if is_comp {
-                    t.component_row
-                } else {
-                    t.selected_row
-                };
+                let base = if is_comp { t.component_row } else { t.selected_row };
                 let fill = if over { base.gamma_multiply(hover_brightness) } else { base };
                 let joins_body = rows.get(index + 1).is_some_and(|next| next.depth > row.depth);
                 let corners = if joins_body { CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 } } else { CornerRadius::same(5) };
                 ui.painter().rect_filled(rr, corners, fill);
             } else if in_selected {
-                let base = if t.dark { Color32::from_rgb(0x32, 0x39, 0x4D) } else { t.selected_row_child };
+                let base = if in_selected_component {
+                    Color32::from(egui::lerp(egui::Rgba::from(t.panel)..=egui::Rgba::from(t.component_row), 0.65))
+                } else {
+                    t.selected_row_child
+                };
                 let fill = if over || hover == Some(row.id) { base.gamma_multiply(hover_brightness) } else { base };
                 let continues =
                     selected_ancestor.is_some_and(|ancestor| rows.get(index + 1).is_some_and(|next| doc.ancestors(next.id).contains(&ancestor)));

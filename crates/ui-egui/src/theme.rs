@@ -70,7 +70,7 @@ pub fn under_white(c: Color32) -> Color32 {
     c
 }
 
-pub const COMPONENT: Color32 = Color32::from_rgb(0x97, 0x47, 0xFF);
+pub const COMPONENT: Color32 = Color32::from_rgb(0xF7, 0x25, 0x85);
 /// Palette exported from the Workbench UI theme editor for the Lizard application.
 pub const LIZARD_THEME: ThemeRecipe = ThemeRecipe { darkness: 80, primary: [0x73, 0x5D, 0xF7] };
 /// Handoff status badges (white text on these, in both themes).
