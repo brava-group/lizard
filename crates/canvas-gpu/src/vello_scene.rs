@@ -4413,6 +4413,41 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn top_level_glass_stack_applies_node_blend_after_gpu_effects() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU top-level glass node blend");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 160.0, 120.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.2, 0.4, 0.8, 1.0))];
+        let pane = doc.create(page, NodeKind::Rectangle, "Glass", 40.0, 20.0, 75.0, 70.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills = vec![Paint::solid(Color::new(0.8, 0.3, 0.6, 0.7))];
+        node.effects = vec![
+            figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true },
+            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true },
+        ];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+            doc.node_mut(pane).ok_or("pane missing")?.blend = blend;
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} top-level glass rejected");
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            let index = BackdropIndex::new(&doc, page);
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            assert!(changed < (view.width * view.height / 20) as usize, "{blend:?} top-level glass differs in {changed} pixels");
+        }
+        doc.node_mut(pane).ok_or("pane missing")?.blend = BlendMode::Color;
+        assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        Ok(())
+    }
+
+    #[test]
     fn glass_and_drop_shadow_combine_on_gpu() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU glass shadow stack");
         let page = doc.current_page.ok_or("new document has no page")?;

@@ -235,8 +235,9 @@ the migration concerns rasterization and pixel effects.
     full-frame comparisons differed in at most one pixel above 20/255, with no severe pixels.
   - [x] Apply 15 verified Vello node blends after that Glass stack, including the group's
     second pane. The full-frame comparisons differed in at most 26 pixels above 20/255,
-    with no severe pixels. Color remains guarded after its comparison differed in 1,096
-    pixels above 20/255 and three pixels above 48/255.
+    with no severe pixels. A separate top-level Glass/Noise/Blur fixture passed Multiply and
+    Screen. Color remains guarded after its group comparison differed in 1,096 pixels above
+    20/255 and three pixels above 48/255.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Keep an alpha mask around a nested luminance mask on GPU, including a rotated parent
