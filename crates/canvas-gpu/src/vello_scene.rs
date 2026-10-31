@@ -2437,6 +2437,48 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn texture_and_blur_orders_use_gpu_effect_cache() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU texture blur stack");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 0.0, 0.0, 120.0, 84.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((75.0, 60.0)) * Affine::rotate(0.36);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.45, 0.28, 1.0))];
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let texture = || figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        };
+        for (name, effects) in [("blur-texture", vec![blur(), texture()]), ("texture-blur", vec![texture(), blur()])] {
+            doc.node_mut(id).ok_or("shape missing")?.effects = effects;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected at {scale}x");
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.prepare_static_effects(&doc)?;
+                assert_eq!(gpu.layer_blurs.len(), 1);
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("{name} at {scale}x: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn translucent_rotated_texture_keeps_scatter_and_alpha() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU translucent texture");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -5242,6 +5284,22 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
         && gpu_isolated_grain_supported(doc, node)
 }
 
+fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
+    let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+    visible.len() == 2
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
+        && visible.iter().all(|effect| match &effect.kind {
+            EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
+            EffectKind::Texture(texture) => texture.radius.is_finite() && (0.5..=16.0).contains(&texture.radius),
+            _ => false,
+        })
+        && node.opacity >= 0.999
+        && node.blend == BlendMode::Normal
+        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. })
+        && gpu_isolated_grain_supported(doc, node)
+}
+
 fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() >= 2
@@ -5640,6 +5698,7 @@ fn has_matching_effects_excluding_in_view(
                     && (!unsupported_only
                         || (node.effects.iter().filter(|effect| effect.visible).count() > 1
                             && !gpu_stacked_blur_noise_supported(doc, node)
+                            && !gpu_stacked_blur_texture_supported(doc, node)
                             && !gpu_glass_stack_supported(doc, node)
                             && !gpu_glass_shadow_supported(doc, node)
                             && !gpu_multiple_drop_shadows_supported(doc, node))
@@ -5660,7 +5719,10 @@ fn has_matching_effects_excluding_in_view(
                                         || gpu_backdrop && gpu_glass_stack_supported(doc, node))
                             }
                             EffectKind::InnerShadow(shadow) => !cached_noise || !gpu_cached_inner_shadow_supported(doc, node, shadow),
-                            EffectKind::Texture(texture) => !cached_noise || !gpu_texture_view_supported(doc, node, view, texture),
+                            EffectKind::Texture(texture) => {
+                                !cached_noise
+                                    || !(gpu_texture_view_supported(doc, node, view, texture) || gpu_stacked_blur_texture_supported(doc, node))
+                            }
                             EffectKind::Glass(glass) => {
                                 !gpu_backdrop
                                     || !gpu_glass_supported(doc, node, view, glass)
@@ -6047,11 +6109,16 @@ impl GpuCanvas {
         let candidates: Vec<_> = doc
             .nodes()
             .filter_map(|node| {
-                if !gpu_stacked_blur_noise_supported(doc, node) {
+                if !gpu_stacked_blur_noise_supported(doc, node) && !gpu_stacked_blur_texture_supported(doc, node) {
                     return None;
                 }
                 let effects = node.effects.iter().filter(|effect| effect.visible).map(|effect| effect.kind.clone()).collect::<Vec<_>>();
                 let bounds = figcraft_render::raster_bounds(doc, node.id)?;
+                let bounds = if gpu_stacked_blur_texture_supported(doc, node) {
+                    Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil())
+                } else {
+                    bounds
+                };
                 let scale = (4096.0 / bounds.width().max(bounds.height())).min(2.0);
                 let width = (bounds.width() * scale).ceil() as u32;
                 let height = (bounds.height() * scale).ceil() as u32;
@@ -6087,6 +6154,10 @@ impl GpuCanvas {
                     EffectKind::Noise(noise) => {
                         let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
                         pass.submit(&self.device, &self.queue, &result, &noise, surface_to_local, id.0 as u32)
+                    }
+                    EffectKind::Texture(texture) => {
+                        let pass = self.gpu_texture.get_or_insert_with(|| GpuTexture::new(&self.device));
+                        pass.submit(&self.device, &self.queue, &result, &texture, surface_to_local, scale, id.0 as u32)
                     }
                     EffectKind::DropShadow(shadow) => {
                         let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));

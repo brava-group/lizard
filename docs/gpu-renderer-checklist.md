@@ -191,6 +191,9 @@ the migration concerns rasterization and pixel effects.
     opacity, applying opacity after the ordered stack.
   - [x] Keep those same six orders on GPU for a rotated group with multiple painted children and
     an alpha mask at 25%, 50%, and 75% group opacity.
+  - [x] Run both Layer Blur → Texture and Texture → Layer Blur on GPU for an opaque rotated
+    rectangle. The ordered compute passes matched the reference exactly at 2× and had at most
+    1,094 changed pixels (four severe) in the 260×240 viewport at 1×.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
