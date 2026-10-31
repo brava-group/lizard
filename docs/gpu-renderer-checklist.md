@@ -92,7 +92,8 @@ the migration concerns rasterization and pixel effects.
     Selecting an outline inside the group while glass and blur remain visible passed the
     same full-frame visual gate. Rotating the translucent group by 0.3 radians and clipping
     it with an aligned rectangle, then with a rotated rounded rectangle, also passed in
-    separate fixtures.
+    separate fixtures. Transparent export RGBA samples for the rotated rounded clip stayed
+    within 20/255 of the CPU reference.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

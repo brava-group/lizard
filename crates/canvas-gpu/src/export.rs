@@ -452,6 +452,24 @@ mod tests {
                 assert!(a.abs_diff(b) <= 20, "glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
             }
         }
+        let group_node = doc.node_mut(group).ok_or("group missing")?;
+        group_node.clip = true;
+        group_node.corners.radii = [12.0; 4];
+        group_node.transform = figcraft_geom::Affine::translate((30.0, 5.0)) * figcraft_geom::Affine::rotate(0.3);
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU clipped glass export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU clipped glass export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU clipped sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU clipped sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 20, "clipped glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
         Ok(())
     }
 
