@@ -95,6 +95,31 @@ mod shader_cache_tests {
         gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &index)?;
         Ok(())
     }
+
+    #[test]
+    fn framed_children_keep_ordered_effects_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("frame effects");
+        let page = doc.current_page.ok_or("page missing")?;
+        let frame = doc.create(page, NodeKind::Frame, "Effect frame", 10.0, 10.0, 90.0, 90.0)?;
+        let frame_node = doc.node_mut(frame).ok_or("frame missing")?;
+        frame_node.clip = true;
+        frame_node.corners.radii = [10.0; 4];
+        frame_node.opacity = 0.7;
+        frame_node.effects = vec![
+            figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
+            figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
+        ];
+        let child = doc.create(frame, NodeKind::Rectangle, "Child", 20.0, 20.0, 40.0, 40.0)?;
+        doc.node_mut(child).ok_or("child missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(gpu_stacked_blur_noise_supported(&doc, doc.node(frame).ok_or("frame missing")?));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.prepare_static_effects(&doc)?;
+        assert!(gpu.layer_blurs.contains_key(&frame));
+        gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
+        Ok(())
+    }
 }
 
 fn same_global_inputs(before: &Document, after: &Document) -> bool {
@@ -5370,8 +5395,8 @@ fn draw_node(
         if let Some(blend) = blend {
             scene.push_blend_layer(blend);
         }
-        let opacity_layer =
-            node.opacity < 0.999 && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough);
+        let opacity_layer = node.opacity < 0.999
+            && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough);
         if opacity_layer {
             scene.push_opacity_layer(node.opacity);
         }
@@ -6334,7 +6359,8 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
                     && shadow.spread.is_finite()
-                    && ((-32.0..=32.0).contains(&shadow.spread) || !matches!(node.kind, NodeKind::Group) && (0.0..=128.0).contains(&shadow.spread))
+                    && ((-32.0..=32.0).contains(&shadow.spread)
+                        || !matches!(node.kind, NodeKind::Group | NodeKind::Frame) && (0.0..=128.0).contains(&shadow.spread))
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
@@ -6352,6 +6378,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
                 | NodeKind::Star { .. }
                 | NodeKind::Vector { .. }
                 | NodeKind::Group
+                | NodeKind::Frame
         )
         && gpu_isolated_grain_supported(doc, node)
 }
@@ -6367,7 +6394,8 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::DropShadow(shadow) => {
                 shadow.blend == BlendMode::Normal
                     && shadow.spread.is_finite()
-                    && ((-32.0..=32.0).contains(&shadow.spread) || !matches!(node.kind, NodeKind::Group) && (0.0..=128.0).contains(&shadow.spread))
+                    && ((-32.0..=32.0).contains(&shadow.spread)
+                        || !matches!(node.kind, NodeKind::Group | NodeKind::Frame) && (0.0..=128.0).contains(&shadow.spread))
                     && shadow.radius.is_finite()
                     && (0.0..=32.0).contains(&shadow.radius)
                     && shadow.offset.0.is_finite()
@@ -6379,7 +6407,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
         })
         && (0.0..=1.0).contains(&node.opacity)
         && (node.blend == BlendMode::Normal
-            || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
+            || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough
             || gpu_cached_node_blend_supported(node))
         && matches!(
             node.kind,
@@ -6389,6 +6417,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
                 | NodeKind::Star { .. }
                 | NodeKind::Vector { .. }
                 | NodeKind::Group
+                | NodeKind::Frame
         )
         && gpu_isolated_grain_supported(doc, node)
 }
@@ -6641,8 +6670,8 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
     let bounds = figcraft_render::raster_bounds(doc, node.id);
     let visible_effect_count = node.effects.iter().filter(|effect| effect.visible).count();
     let partial_grain = (0.0..=1.0).contains(&node.opacity)
-        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
-        && (node.children.is_empty() || matches!(node.kind, NodeKind::Group))
+        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough)
+        && (node.children.is_empty() || matches!(node.kind, NodeKind::Group | NodeKind::Frame))
         && (visible_effect_count == 1
             && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_) | EffectKind::Texture(_)))
             || visible_effect_count >= 2
@@ -6664,11 +6693,11 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
     node.visible
         && !node.is_mask
         && (node.children.is_empty()
-            || matches!(node.kind, NodeKind::Group)
+            || matches!(node.kind, NodeKind::Group | NodeKind::Frame)
                 && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_simple_group_child_supported(doc, child, 0))))
         && (partial_grain || node.opacity >= 0.999 || gpu_cached_node_blend_supported(node))
         && (node.blend == BlendMode::Normal
-            || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
+            || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough
             || gpu_cached_node_blend_supported(node))
         && [a, b, c, d].iter().all(|value| value.is_finite())
         && (a * d - b * c).abs() > 1e-6
@@ -7294,7 +7323,8 @@ impl GpuCanvas {
         let mut source_doc = doc.clone();
         if let Some(node) = source_doc.node_mut(id) {
             node.effects.clear();
-            let post_effect_opacity = node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough;
+            let post_effect_opacity =
+                node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group | NodeKind::Frame) && node.blend == BlendMode::PassThrough;
             node.blend = BlendMode::Normal;
             if post_effect_opacity && node.opacity < 0.999 {
                 node.opacity = 1.0;
@@ -7325,7 +7355,7 @@ impl GpuCanvas {
                 EffectKind::DropShadow(shadow) => {
                     let spread_px = (shadow.spread * scale).round() as i32;
                     let silhouette = (spread_px > 0)
-                        .then(|| doc.node(id).filter(|node| !matches!(node.kind, NodeKind::Group)))
+                        .then(|| doc.node(id).filter(|node| node.children.is_empty()))
                         .flatten()
                         .and_then(|node| figcraft_render::shadow::silhouette(doc, node));
                     let geometric_caster = if let Some(outlines) = silhouette {
