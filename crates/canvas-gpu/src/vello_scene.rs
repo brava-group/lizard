@@ -3670,6 +3670,44 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn translucent_group_backdrop_matches_reference() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU translucent group backdrop");
+        let page = doc.current_page.ok_or("page missing")?;
+        let behind = doc.create(page, NodeKind::Rectangle, "Behind", 0.0, 0.0, 160.0, 120.0)?;
+        doc.node_mut(behind).ok_or("behind missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.2, 0.1, 1.0))];
+        let group = doc.create(page, NodeKind::Group, "Translucent group", 10.0, 10.0, 120.0, 100.0)?;
+        let dark = doc.create(group, NodeKind::Rectangle, "Dark half", 0.0, 0.0, 60.0, 100.0)?;
+        doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 35.0, 20.0, 70.0, 60.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let above = doc.create(page, NodeKind::Rectangle, "Above", 115.0, 10.0, 30.0, 100.0)?;
+        doc.node_mut(above).ok_or("above missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.6, 0.3, 0.8))];
+        for opacity in [0.25, 0.5, 0.75] {
+            doc.node_mut(group).ok_or("group missing")?.opacity = opacity;
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
+                let index = BackdropIndex::new(&doc, page);
+                assert_eq!(index.visible_ids(&view), vec![pane]);
+                assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((group, opacity)));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+                gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                    .count();
+                assert!(changed < (view.width * view.height / 100) as usize, "opacity={opacity} scale={scale}: {changed} changed pixels");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn stacked_gpu_backdrops_sample_prior_backdrop() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU ordered backdrops");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -4110,6 +4148,19 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
         current = node.parent?;
     }
     group
+}
+
+fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, view: &View) -> bool {
+    if isolated_group_for_backdrop(doc, id, page).is_none() {
+        return false;
+    }
+    if doc.node(id).is_none_or(|node| {
+        let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+        !matches!(visible.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
+    }) {
+        return false;
+    }
+    BackdropIndex::new(doc, page).visible_ids(view) == [id]
 }
 
 fn backdrop_clip_rect(doc: &Document, id: NodeId, page: NodeId, view: &View) -> Option<[u32; 4]> {
@@ -6171,7 +6222,11 @@ fn has_matching_effects_excluding_in_view(
                                     || doc.page_of(node.id).is_none_or(|page| backdrop_requires_cpu(doc, node.id, page))
                             }
                             EffectKind::BackgroundBlur(_) => {
-                                !gpu_backdrop || doc.page_of(node.id).is_none_or(|page| backdrop_requires_cpu(doc, node.id, page))
+                                !gpu_backdrop
+                                    || doc.page_of(node.id).is_none_or(|page| {
+                                        backdrop_requires_cpu(doc, node.id, page)
+                                            && (!excluded.is_empty() || !isolated_group_backdrop_supported(doc, node.id, page, view))
+                                    })
                             }
                             EffectKind::LayerBlur(blur) => {
                                 blur.is_progressive() && (!cached_noise || !gpu_progressive_layer_blur_supported(doc, node, blur))
@@ -7511,7 +7566,6 @@ impl GpuCanvas {
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
         if outlined.is_empty()
-            && std::env::var_os("LIZARD_GPU_GROUP_ISOLATION").is_some()
             && !has_custom_backdrop
             && candidates.len() == 1
             && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
