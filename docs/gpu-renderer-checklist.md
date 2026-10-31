@@ -149,6 +149,8 @@ the migration concerns rasterization and pixel effects.
   - [x] Keep all six orders of one Layer Blur, one Noise, and one Drop Shadow on GPU at 1× and
     2× for rotated shapes and groups, including a group with a masked child. Each pass now runs
     at its position in the effect list rather than moving the shadow to the end.
+  - [x] Keep those six effect orders on GPU for rotated leaves with 25%, 50%, and 75% node
+    opacity, applying opacity after the ordered stack.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
@@ -208,6 +210,12 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: 36 GPU/reference comparisons covered all six orders of one Layer Blur, one
+  Noise, and one Drop Shadow on a rotated partially opaque leaf, at 25%, 50%, and 75% node
+  opacity and 1×/2×. Three orders matched pixel for pixel. The worst order differed at
+  10,527/249,600 pixels above 8/255 and none above 48/255. Group opacity with this stack
+  remains separately guarded.
 
 - 2026-10-30: 18 GPU/reference comparisons for partially opaque rotated Blur/Noise stacks
   passed at 1× and 2×. Noise → Blur and Blur → Noise → Blur matched pixel for pixel; Blur →
