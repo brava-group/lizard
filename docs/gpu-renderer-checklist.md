@@ -212,6 +212,10 @@ the migration concerns rasterization and pixel effects.
     additional five- and six-effect stacks, including repeated Blur and Noise passes, passed
     24 GPU/reference comparisons at four opacities and 1×/2×; the highest pixel difference
     was 7,983 of 249,600 pixels above 8/255, with one pixel above 48/255.
+  - [x] Compose Texture with two distinct Drop Shadows in every three-effect order, plus a
+    five-effect Blur/Texture/Shadow/Noise/Shadow stack. All 32 GPU/reference comparisons at
+    four opacities and 1×/2× passed; shadow-first texture scatter differed by at most 9,459
+    pixels above 8/255 and 263 above 48/255 in a 520×480 image.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,

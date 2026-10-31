@@ -2459,6 +2459,15 @@ mod effect_capability_tests {
             }
             effect
         };
+        let shadow2 = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.radius = 4.0;
+                value.offset = (-3.0, 2.0);
+                value.color = Color::new(0.14, 0.25, 0.72, 0.55);
+            }
+            effect
+        };
         let mut cases = vec![
             ("blur-texture", vec![blur(), texture()]),
             ("texture-blur", vec![texture(), blur()]),
@@ -2487,6 +2496,10 @@ mod effect_capability_tests {
             ("blur-noise-texture-shadow-blur", vec![blur(), noise(), texture(), shadow(), blur()]),
             ("shadow-texture-noise-blur-noise", vec![shadow(), texture(), noise(), blur(), noise()]),
             ("blur-shadow-noise-texture-blur-noise", vec![blur(), shadow(), noise(), texture(), blur(), noise()]),
+            ("texture-shadow-shadow", vec![texture(), shadow(), shadow2()]),
+            ("shadow-texture-shadow", vec![shadow(), texture(), shadow2()]),
+            ("shadow-shadow-texture", vec![shadow(), shadow2(), texture()]),
+            ("blur-texture-shadow-noise-shadow", vec![blur(), texture(), shadow(), noise(), shadow2()]),
         ]
         .into_iter()
         .map(|(name, effects)| (name.to_owned(), effects))
@@ -5369,7 +5382,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() >= 2
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
