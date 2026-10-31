@@ -78,6 +78,10 @@ the migration concerns rasterization and pixel effects.
     The second blur samples the first pane in the GPU prefix. Full-frame 1×/2× comparisons
     stayed below 1% pixels differing by more than 20/255; transparent page-export RGBA
     samples also matched within 20/255.
+  - [x] Combine those group backdrops with a selected outline outside the translucent group.
+    Full-frame GPU/reference comparison differed in eight pixels above 20/255. An outline
+    selected inside that group remains guarded after a separate fixture found 220 pixels
+    above 48/255; its group composition needs correction before enabling it.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

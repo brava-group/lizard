@@ -3725,6 +3725,42 @@ mod effect_capability_tests {
                 .count();
             assert!(changed < (view.width * view.height / 100) as usize, "two panes scale={scale}: {changed} changed pixels");
         }
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
+        let index = BackdropIndex::new(&doc, page);
+        for outlined in [vec![above]] {
+            let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
+                .ok_or("outlined two-pane reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed_outlined(
+                &doc,
+                page,
+                &view,
+                [245.0 / 255.0; 3],
+                &index,
+                &outlined,
+                figcraft_render::Outline::default(),
+            )?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            assert!(changed < (view.width * view.height / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
+        }
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        assert!(
+            gpu.render_with_backdrop_blurs_indexed_outlined(
+                &doc,
+                page,
+                &view,
+                [245.0 / 255.0; 3],
+                &index,
+                &[dark],
+                figcraft_render::Outline::default(),
+            )
+            .is_err()
+        );
         Ok(())
     }
 
@@ -6248,7 +6284,9 @@ fn has_matching_effects_excluding_in_view(
                                 !gpu_backdrop
                                     || doc.page_of(node.id).is_none_or(|page| {
                                         backdrop_requires_cpu(doc, node.id, page)
-                                            && (!excluded.is_empty() || !isolated_group_backdrop_supported(doc, node.id, page, view))
+                                            && (!isolated_group_backdrop_supported(doc, node.id, page, view)
+                                                || isolated_group_for_backdrop(doc, node.id, page)
+                                                    .is_some_and(|(group, _)| excluded.iter().any(|id| *id == group || doc.is_ancestor(group, *id))))
                                     })
                             }
                             EffectKind::LayerBlur(blur) => {
@@ -7588,12 +7626,12 @@ impl GpuCanvas {
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
-        if outlined.is_empty()
-            && !has_custom_backdrop
+        if !has_custom_backdrop
             && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
+            && outlined.iter().all(|id| *id != group && !doc.is_ancestor(group, *id))
         {
-            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity);
+            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options);
             self.release_temporary_textures();
             return result;
         }
@@ -7866,13 +7904,15 @@ impl GpuCanvas {
         candidates: &[(NodeId, f64)],
         group: NodeId,
         opacity: f32,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing")?;
 
         let mut base_doc = doc.clone();
         figcraft_render::backdrop::hide_above(&mut base_doc, group, roots);
-        let base_scene = make_scene_with_images(&base_doc, page, view, Some(&self.image_info));
+        let base_scene = self.make_scene_document_with_backdrops_and_outlines(&base_doc, page, view, None, outlined, options);
         self.render_submit_with_clear_rgba(&base_scene, clear)?;
         let base = self.snapshot_submit();
 
@@ -7881,7 +7921,7 @@ impl GpuCanvas {
         for &(id, radius) in candidates {
             let mut prefix_doc = doc.clone();
             figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
-            let prefix_scene = make_scene_with_backdrops(&prefix_doc, page, view, Some(&self.image_info), Some(&backdrops));
+            let prefix_scene = self.make_scene_document_with_backdrops_and_outlines(&prefix_doc, page, view, Some(&backdrops), outlined, options);
             self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
             let source = self.snapshot_submit();
             let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
@@ -7898,7 +7938,7 @@ impl GpuCanvas {
         if let Some(node) = group_doc.node_mut(group) {
             node.opacity = 1.0;
         }
-        let group_scene = make_scene_with_backdrops(&group_doc, page, view, Some(&self.image_info), Some(&backdrops));
+        let group_scene = self.make_scene_document_with_backdrops_and_outlines(&group_doc, page, view, Some(&backdrops), outlined, options);
         self.render_submit_with_clear_rgba(&group_scene, [0.0; 4])?;
         let group_surface = self.snapshot_submit();
 
@@ -7921,7 +7961,7 @@ impl GpuCanvas {
         if let Some(node) = after_doc.node_mut(group) {
             node.visible = false;
         }
-        let after_scene = make_scene_with_images(&after_doc, page, view, Some(&self.image_info));
+        let after_scene = self.make_scene_document_with_backdrops_and_outlines(&after_doc, page, view, None, outlined, options);
         self.render_with_load(&after_scene)?;
         Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()))
     }
