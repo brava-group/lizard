@@ -2437,7 +2437,7 @@ mod effect_capability_tests {
     }
 
     #[test]
-    fn texture_and_blur_orders_use_gpu_effect_cache() -> Result<(), Box<dyn Error>> {
+    fn texture_with_blur_or_noise_orders_use_gpu_effect_cache() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU texture blur stack");
         let page = doc.current_page.ok_or("page missing")?;
         let id = doc.create(page, NodeKind::Rectangle, "Textured shape", 0.0, 0.0, 120.0, 84.0)?;
@@ -2449,7 +2449,13 @@ mod effect_capability_tests {
             kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
             visible: true,
         };
-        for (name, effects) in [("blur-texture", vec![blur(), texture()]), ("texture-blur", vec![texture(), blur()])] {
+        let noise = || figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+        for (name, effects) in [
+            ("blur-texture", vec![blur(), texture()]),
+            ("texture-blur", vec![texture(), blur()]),
+            ("noise-texture", vec![noise(), texture()]),
+            ("texture-noise", vec![texture(), noise()]),
+        ] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
             for opacity in [1.0, 0.25, 0.5, 0.75] {
                 doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
@@ -4159,6 +4165,7 @@ fn draw_cached_effect(scene: &mut Scene, camera: Affine, cached: &CachedLayerBlu
 #[derive(Clone, Copy)]
 struct CachedEffects<'a> {
     layer_blurs: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
+    layer_blurs_1x: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     drop_shadows: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     inner_shadows: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
     noise: Option<&'a HashMap<NodeId, CachedLayerBlur>>,
@@ -4171,6 +4178,7 @@ impl CachedEffects<'_> {
     fn empty() -> Self {
         Self {
             layer_blurs: None,
+            layer_blurs_1x: None,
             drop_shadows: None,
             inner_shadows: None,
             noise: None,
@@ -4344,9 +4352,10 @@ fn draw_node(
     if !node.visible {
         return;
     }
-    if let Some(effect) = cached
-        .layer_blurs
-        .and_then(|entries| entries.get(&id))
+    if let Some(effect) = (camera.determinant().abs().sqrt() <= 1.0)
+        .then(|| cached.layer_blurs_1x.and_then(|entries| entries.get(&id)))
+        .flatten()
+        .or_else(|| cached.layer_blurs.and_then(|entries| entries.get(&id)))
         .or_else(|| cached.noise.and_then(|entries| entries.get(&id)))
         .or_else(|| cached.texture.and_then(|entries| entries.get(&id)))
     {
@@ -5290,10 +5299,11 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
 fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     visible.len() == 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_))).count() == 1
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
+            EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
             EffectKind::Texture(texture) => texture.radius.is_finite() && (0.5..=16.0).contains(&texture.radius),
             _ => false,
         })
@@ -5558,7 +5568,12 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
             || visible_effect_count == 2
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+                && node
+                    .effects
+                    .iter()
+                    .filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+                    .count()
+                    == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1);
     let paint_supported = |paint: &Paint| {
         !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
@@ -5722,6 +5737,7 @@ fn has_matching_effects_excluding_in_view(
                                 !cached_noise
                                     || !(gpu_noise_supported(doc, node, noise)
                                         || gpu_stacked_blur_noise_supported(doc, node)
+                                        || gpu_stacked_blur_texture_supported(doc, node)
                                         || gpu_backdrop && gpu_glass_stack_supported(doc, node))
                             }
                             EffectKind::InnerShadow(shadow) => !cached_noise || !gpu_cached_inner_shadow_supported(doc, node, shadow),
@@ -5820,6 +5836,7 @@ pub struct GpuCanvas {
     glass_mask_canvas: Option<Box<GpuCanvas>>,
     glass_content_canvas: Option<Box<GpuCanvas>>,
     layer_blurs: HashMap<NodeId, CachedLayerBlur>,
+    layer_blurs_1x: HashMap<NodeId, CachedLayerBlur>,
     drop_shadows: HashMap<NodeId, CachedLayerBlur>,
     inner_shadows: HashMap<NodeId, CachedLayerBlur>,
     noise_effects: HashMap<NodeId, CachedLayerBlur>,
@@ -5865,7 +5882,7 @@ impl GpuCanvas {
         if pairs.iter().any(|(source, _, _)| self.grain_cache.contains_key(source)) {
             return false;
         }
-        for cache in [&mut self.layer_blurs, &mut self.drop_shadows, &mut self.inner_shadows] {
+        for cache in [&mut self.layer_blurs, &mut self.layer_blurs_1x, &mut self.drop_shadows, &mut self.inner_shadows] {
             let additions: Vec<_> = pairs
                 .iter()
                 .filter_map(|(source, copy, delta)| {
@@ -5888,6 +5905,7 @@ impl GpuCanvas {
         };
         for cache in [
             &mut self.layer_blurs,
+            &mut self.layer_blurs_1x,
             &mut self.drop_shadows,
             &mut self.inner_shadows,
             &mut self.noise_effects,
@@ -5924,7 +5942,7 @@ impl GpuCanvas {
         if self.grain_cache.keys().any(|id| after.is_ancestor(root, *id)) {
             return false;
         }
-        for cache in [&mut self.layer_blurs, &mut self.drop_shadows, &mut self.inner_shadows] {
+        for cache in [&mut self.layer_blurs, &mut self.layer_blurs_1x, &mut self.drop_shadows, &mut self.inner_shadows] {
             for (id, effect) in cache.iter_mut() {
                 if after.is_ancestor(root, *id) {
                     effect.placement = delta * effect.placement;
@@ -5943,7 +5961,7 @@ impl GpuCanvas {
         if self.grain_cache.keys().any(|id| after.is_ancestor(root, *id)) {
             return false;
         }
-        for cache in [&self.layer_blurs, &self.drop_shadows, &self.inner_shadows] {
+        for cache in [&self.layer_blurs, &self.layer_blurs_1x, &self.drop_shadows, &self.inner_shadows] {
             for (id, effect) in cache {
                 if after.is_ancestor(root, *id) {
                     let [a, b, _, _, _, _] = (delta * effect.placement).as_coeffs();
@@ -5953,7 +5971,7 @@ impl GpuCanvas {
                 }
             }
         }
-        for cache in [&mut self.layer_blurs, &mut self.drop_shadows, &mut self.inner_shadows] {
+        for cache in [&mut self.layer_blurs, &mut self.layer_blurs_1x, &mut self.drop_shadows, &mut self.inner_shadows] {
             for (id, effect) in cache.iter_mut() {
                 if after.is_ancestor(root, *id) {
                     effect.placement = delta * effect.placement;
@@ -5972,7 +5990,7 @@ impl GpuCanvas {
         if self.grain_cache.keys().any(|id| after.is_ancestor(root, *id)) {
             return false;
         }
-        for cache in [&mut self.layer_blurs, &mut self.drop_shadows, &mut self.inner_shadows] {
+        for cache in [&mut self.layer_blurs, &mut self.layer_blurs_1x, &mut self.drop_shadows, &mut self.inner_shadows] {
             for (id, effect) in cache.iter_mut() {
                 if !after.is_ancestor(root, *id) {
                     continue;
@@ -5993,6 +6011,7 @@ impl GpuCanvas {
     /// Render document-stable effects once on the GPU and reuse them while the camera moves.
     pub fn prepare_static_effects(&mut self, doc: &Document) -> Result<(usize, usize, usize), Box<dyn Error>> {
         self.layer_blurs.clear();
+        self.layer_blurs_1x.clear();
         self.drop_shadows.clear();
         self.inner_shadows.clear();
         self.release_cached_textures();
@@ -6133,60 +6152,80 @@ impl GpuCanvas {
             })
             .collect();
         for (id, effects, bounds, scale, width, height) in candidates {
-            let mut source_doc = doc.clone();
-            if let Some(node) = source_doc.node_mut(id) {
-                node.effects.clear();
-                let post_effect_opacity =
-                    node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough;
-                node.blend = BlendMode::Normal;
-                if post_effect_opacity && node.opacity < 0.999 {
-                    node.opacity = 1.0;
-                }
+            let primary = self.render_stacked_effects(doc, id, &effects, bounds, scale, width, height)?;
+            self.layer_blurs.insert(id, primary);
+            if effects.iter().any(|effect| matches!(effect, EffectKind::Texture(_)))
+                && scale == 2.0
+                && bounds.width() * bounds.height() <= 2_000_000.0
+                && let (Ok(width_1x), Ok(height_1x)) = (u16::try_from(bounds.width().ceil() as u32), u16::try_from(bounds.height().ceil() as u32))
+            {
+                let secondary = self.render_stacked_effects(doc, id, &effects, bounds, 1.0, width_1x, height_1x)?;
+                self.layer_blurs_1x.insert(id, secondary);
             }
-            let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
-            let mut scene = Scene::new(width, height);
-            draw_node(&mut scene, &source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width, height));
-            let mut source = Self::shared_with(self, u32::from(width), u32::from(height));
-            source
-                .render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
-            let surface_to_local = doc.world_transform(id).inverse() * Affine::translate((bounds.x0, bounds.y0)) * Affine::scale(1.0 / scale);
-            let mut result = source.texture.clone();
-            for effect in effects {
-                result = match effect {
-                    EffectKind::LayerBlur(blur_effect) => {
-                        let pass = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                        pass.submit(&self.device, &self.queue, &result, (blur_effect.radius * scale / 2.0) as f32, 1, None)
-                    }
-                    EffectKind::Noise(noise) => {
-                        let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
-                        pass.submit(&self.device, &self.queue, &result, &noise, surface_to_local, id.0 as u32)
-                    }
-                    EffectKind::Texture(texture) => {
-                        let pass = self.gpu_texture.get_or_insert_with(|| GpuTexture::new(&self.device));
-                        pass.submit(&self.device, &self.queue, &result, &texture, surface_to_local, scale, id.0 as u32)
-                    }
-                    EffectKind::DropShadow(shadow) => {
-                        let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-                        let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
-                        pass.submit_drop_composited(
-                            &self.device,
-                            &self.queue,
-                            blur,
-                            &result,
-                            &result,
-                            ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
-                            (shadow.radius * scale / 2.0) as f32,
-                            shadow.color,
-                            shadow.show_behind,
-                        )
-                    }
-                    _ => continue,
-                };
-            }
-            let texture_id = self.register_cached_texture(result);
-            self.layer_blurs.insert(id, CachedLayerBlur { id: texture_id, width, height, bounds, placement: Affine::IDENTITY });
         }
         Ok(())
+    }
+
+    fn render_stacked_effects(
+        &mut self,
+        doc: &Document,
+        id: NodeId,
+        effects: &[EffectKind],
+        bounds: Rect,
+        scale: f64,
+        width: u16,
+        height: u16,
+    ) -> Result<CachedLayerBlur, Box<dyn Error>> {
+        let mut source_doc = doc.clone();
+        if let Some(node) = source_doc.node_mut(id) {
+            node.effects.clear();
+            let post_effect_opacity = node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough;
+            node.blend = BlendMode::Normal;
+            if post_effect_opacity && node.opacity < 0.999 {
+                node.opacity = 1.0;
+            }
+        }
+        let camera = Affine::scale(scale) * Affine::translate((-bounds.x0, -bounds.y0));
+        let mut scene = Scene::new(width, height);
+        draw_node(&mut scene, &source_doc, id, camera, bounds, 0, None, None, CachedEffects::empty(), (width, height));
+        let mut source = Self::shared_with(self, u32::from(width), u32::from(height));
+        source.render_submit_with_target(&scene, TargetInit::Clear(vello_gpu::ClearSettings::Viewport { color: peniko::Color::new([0.0; 4]) }))?;
+        let surface_to_local = doc.world_transform(id).inverse() * Affine::translate((bounds.x0, bounds.y0)) * Affine::scale(1.0 / scale);
+        let mut result = source.texture.clone();
+        for effect in effects {
+            result = match effect {
+                EffectKind::LayerBlur(blur_effect) => {
+                    let pass = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                    pass.submit(&self.device, &self.queue, &result, (blur_effect.radius * scale / 2.0) as f32, 1, None)
+                }
+                EffectKind::Noise(noise) => {
+                    let pass = self.gpu_noise.get_or_insert_with(|| GpuNoise::new(&self.device));
+                    pass.submit(&self.device, &self.queue, &result, noise, surface_to_local, id.0 as u32)
+                }
+                EffectKind::Texture(texture) => {
+                    let pass = self.gpu_texture.get_or_insert_with(|| GpuTexture::new(&self.device));
+                    pass.submit(&self.device, &self.queue, &result, texture, surface_to_local, scale, id.0 as u32)
+                }
+                EffectKind::DropShadow(shadow) => {
+                    let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                    let pass = self.gpu_silhouette_shadow.get_or_insert_with(|| GpuSilhouetteShadow::new(&self.device));
+                    pass.submit_drop_composited(
+                        &self.device,
+                        &self.queue,
+                        blur,
+                        &result,
+                        &result,
+                        ((shadow.offset.0 * scale) as f32, (shadow.offset.1 * scale) as f32),
+                        (shadow.radius * scale / 2.0) as f32,
+                        shadow.color,
+                        shadow.show_behind,
+                    )
+                }
+                _ => continue,
+            };
+        }
+        let texture_id = self.register_cached_texture(result);
+        Ok(CachedLayerBlur { id: texture_id, width, height, bounds, placement: Affine::IDENTITY })
     }
 
     pub fn cached_noise_count(&self) -> usize {
@@ -6568,6 +6607,7 @@ impl GpuCanvas {
         );
         let cached = CachedEffects {
             layer_blurs: Some(&self.layer_blurs),
+            layer_blurs_1x: Some(&self.layer_blurs_1x),
             drop_shadows: Some(&self.drop_shadows),
             inner_shadows: Some(&self.inner_shadows),
             noise: Some(&self.noise_effects),
@@ -6610,6 +6650,7 @@ impl GpuCanvas {
             backdrops,
             CachedEffects {
                 layer_blurs: Some(&self.layer_blurs),
+                layer_blurs_1x: Some(&self.layer_blurs_1x),
                 drop_shadows: Some(&self.drop_shadows),
                 inner_shadows: Some(&self.inner_shadows),
                 noise: Some(&self.noise_effects),
@@ -6639,6 +6680,7 @@ impl GpuCanvas {
             None,
             CachedEffects {
                 layer_blurs: Some(&self.layer_blurs),
+                layer_blurs_1x: Some(&self.layer_blurs_1x),
                 drop_shadows: Some(&self.drop_shadows),
                 inner_shadows: Some(&self.inner_shadows),
                 noise: Some(&self.noise_effects),
@@ -6782,6 +6824,7 @@ impl GpuCanvas {
             glass_mask_canvas: None,
             glass_content_canvas: None,
             layer_blurs: HashMap::new(),
+            layer_blurs_1x: HashMap::new(),
             drop_shadows: HashMap::new(),
             inner_shadows: HashMap::new(),
             noise_effects: HashMap::new(),
