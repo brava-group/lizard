@@ -1992,6 +1992,7 @@ dependencies = [
  "figcraft-geom",
  "figcraft-render",
  "figcraft-shader",
+ "figcraft-text",
  "image 0.25.10",
  "pollster 0.4.0",
  "rayon",

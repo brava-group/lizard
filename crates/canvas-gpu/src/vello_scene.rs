@@ -12,7 +12,7 @@ use figcraft_color::{
     BlendMode, Color, ColorProfile, Gradient, GradientKind, ImagePaint, ImageScaleMode, Paint, PaintKind, PatternPaint, ShaderFill,
 };
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
-use figcraft_geom::{Affine, Point, Rect, Shape};
+use figcraft_geom::{Affine, BezPath, Point, Rect, Shape};
 use figcraft_render::{FillRule, Options, View, draw, render_view};
 use vello_common::TextureId;
 use vello_common::filter_effects::{EdgeMode, Filter, FilterFunction, FilterPrimitive};
@@ -2768,6 +2768,69 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn styled_text_run_fills_render_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU styled text runs");
+        let page = doc.current_page.ok_or("page missing")?;
+        let mut text = figcraft_doc::TextData::new("Lizard");
+        text.style.font_size = 48.0;
+        let mut style = text.style.clone();
+        style.fills = Some(vec![Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0))]);
+        text.runs.push(figcraft_doc::StyleRun { start: 3, end: 6, style });
+        let id = doc.create(page, NodeKind::Text(text), "Text", 25.0, 35.0, 220.0, 70.0)?;
+        doc.node_mut(id).ok_or("text missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))];
+        let Some((layout, _)) = figcraft_text::layout_node(doc.node(id).ok_or("text missing")?) else { return Ok(()) };
+        if layout.glyphs.is_empty() {
+            return Ok(());
+        }
+        for styled_run in [true, false] {
+            if !styled_run && let NodeKind::Text(text) = &mut doc.node_mut(id).ok_or("text missing")?.kind {
+                text.runs.clear();
+                text.style.fills = Some(vec![Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0))]);
+            }
+            for scale in [1.0, 2.0] {
+                let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (150.0 * scale) as u32 };
+                assert!(!has_unhandled_effects_in_view(&doc, &view));
+                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                let actual = gpu.pixels()?;
+                let changed = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = actual
+                    .chunks_exact(4)
+                    .zip(reference.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                println!("styled text run={styled_run} at {scale}x: changed={changed} severe={severe}");
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                assert!(severe * 100 < view.width as usize * view.height as usize);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn styled_text_run_with_unsupported_blend_keeps_fallback() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Unsupported styled run blend");
+        let page = doc.current_page.ok_or("page missing")?;
+        let mut text = figcraft_doc::TextData::new("Lizard");
+        text.style.font_size = 48.0;
+        let mut paint = Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0));
+        paint.blend = BlendMode::PlusDarker;
+        let mut style = text.style.clone();
+        style.fills = Some(vec![paint]);
+        text.runs.push(figcraft_doc::StyleRun { start: 0, end: 6, style });
+        let id = doc.create(page, NodeKind::Text(text), "Text", 25.0, 35.0, 220.0, 70.0)?;
+        doc.node_mut(id).ok_or("text missing")?.fills = vec![Paint::solid(Color::WHITE)];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 260, height: 150 };
+        assert!(has_unhandled_effects_in_view(&doc, &view));
+        Ok(())
+    }
+
+    #[test]
     fn stroked_shape_drop_shadow_uses_gpu_cache() -> Result<(), Box<dyn Error>> {
         for kind in [
             NodeKind::Star { count: 5, inner_ratio: 0.4 },
@@ -3615,7 +3678,7 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
     if depth > 64
-        || matches!(&node.kind, NodeKind::Text(text) if !text.runs.is_empty())
+        || !gpu_styled_text_paints_supported(node)
         || node.effects.iter().filter(|effect| effect.visible).count() > 3
         || node.effects.iter().any(|effect| {
             effect.visible
@@ -3640,6 +3703,17 @@ fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> b
                     })
         })
         && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_pattern_subtree_supported(doc, child, depth + 1)))
+}
+
+fn gpu_styled_text_paints_supported(node: &Node) -> bool {
+    let NodeKind::Text(text) = &node.kind else { return true };
+    std::iter::once(&text.style).chain(text.runs.iter().map(|run| &run.style)).all(|style| {
+        style.fills.as_ref().is_none_or(|fills| {
+            fills.iter().all(|paint| {
+                !paint.visible || paint.blend == BlendMode::Normal && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_))
+            })
+        })
+    })
 }
 
 fn pattern_source_state(doc: &Document, id: NodeId, state: &mut String) {
@@ -3849,6 +3923,29 @@ fn draw_content(
                 scene.reset_paint_transform();
                 if set_paint(scene, doc, paint, node, images) {
                     fill_paint_path(scene, &path, paint);
+                }
+            }
+        }
+    } else if let NodeKind::Text(text) = &node.kind
+        && (!text.runs.is_empty() || text.style.fills.is_some())
+    {
+        if let Some((layout, dy)) = figcraft_text::layout_node(node) {
+            let mut paths = std::collections::BTreeMap::<usize, BezPath>::new();
+            for glyph in &layout.glyphs {
+                paths.entry(glyph.style).or_default().extend(glyph.path().elements().iter().copied());
+            }
+            for decoration in &layout.decorations {
+                paths.entry(decoration.style).or_default().extend(decoration.path().elements().iter().copied());
+            }
+            scene.set_transform(transform * Affine::translate((0.0, dy)));
+            set_rule(scene, FillRule::Winding);
+            for (index, path) in paths {
+                let paints = layout.styles.get(index).and_then(|style| style.fills.as_ref()).unwrap_or(&node.fills);
+                for paint in paints {
+                    scene.reset_paint_transform();
+                    if set_paint(scene, doc, paint, node, images) {
+                        fill_paint_path(scene, &path, paint);
+                    }
                 }
             }
         }
@@ -4953,7 +5050,8 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
                         PaintKind::Solid { .. } => false,
                     })
         };
-        let unsupported = (node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node))
+        let unsupported = !gpu_styled_text_paints_supported(node)
+            || (node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node))
             || (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough) && !gpu_simple_node_blend_supported(node))
             || node.fills.iter().chain(&node.strokes).any(unsupported_paint)
             || matches!(&node.kind, NodeKind::Vector { network }

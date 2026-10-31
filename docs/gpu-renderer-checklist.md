@@ -104,7 +104,10 @@ the migration concerns rasterization and pixel effects.
   - [x] Render a clipped rounded frame used as a pattern source on the GPU; sampled corner and
     center pixels and visually compared the repeated tile against the CPU reference.
   - [x] Render a uniform-style text node as a repeating pattern source on GPU at 1× and 2×;
-    rich text runs remain guarded.
+    rich text runs with unsupported paints remain guarded.
+  - [x] Paint vector text glyphs and decorations by style run on GPU, including node default
+    style fills and solid-color styled text pattern sources at 1× and 2×. Unsupported run paints
+    still trigger the CPU fallback; color glyph ink needs separate coverage.
   - [x] Render a repeating pattern whose source has one uniform Layer Blur on GPU at 1× and 2×;
     progressive blur and other source effects remain guarded.
   - [x] Render pattern sources with two or three uniform Layer Blurs on GPU in effect order.

@@ -623,6 +623,24 @@ mod tests {
             assert!(changed * 100 < view.width as usize * view.height as usize * 5, "text pattern changed {changed} pixels at {scale}x");
             assert_eq!(severe, 0, "text pattern has strong differences at {scale}x");
         }
+        if let NodeKind::Text(text) = &mut doc.node_mut(source).ok_or("source missing")?.kind {
+            let mut style = text.style.clone();
+            style.fills = Some(vec![Paint::solid(Color::new(0.9, 0.2, 0.1, 1.0))]);
+            text.runs.push(figcraft_doc::StyleRun { start: 0, end: 1, style });
+        }
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (64.0 * scale) as u32, height: (48.0 * scale) as u32 };
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let gpu = render_area_gpu(&doc, &[target], area, scale).ok_or("GPU styled text pattern export unavailable")?;
+            let cpu = figcraft_render::render_area(&doc, &[target], area, scale).ok_or("CPU styled text pattern export unavailable")?;
+            let severe = gpu
+                .data()
+                .chunks_exact(4)
+                .zip(cpu.data().chunks_exact(4))
+                .filter(|(actual, expected)| actual.iter().zip(*expected).any(|(a, b)| a.abs_diff(*b) > 32))
+                .count();
+            assert!(severe * 100 < view.width as usize * view.height as usize, "styled text pattern at {scale}x has {severe} severe pixels");
+        }
         Ok(())
     }
 
