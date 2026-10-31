@@ -3966,6 +3966,25 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "gradient glass stack: {changed} changed pixels");
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(4, 4, image::Rgba([120, 180, 240, 110])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+        let image_key = "group-glass-image".to_string();
+        doc.images.insert(image_key.clone(), figcraft_doc::ImageData { bytes: std::sync::Arc::new(bytes), width: 4, height: 4 });
+        doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::image(image_key, ImageScaleMode::Fill)];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "image glass stack rejected");
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("image glass stack reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.register_images(&doc)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "image glass stack: {changed} changed pixels");
         Ok(())
     }
 
@@ -6073,10 +6092,10 @@ fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
             }
             _ => false,
         })
-        && node
-            .fills
-            .iter()
-            .all(|paint| !paint.visible || paint.blend == BlendMode::Normal && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
+        && node.fills.iter().all(|paint| {
+            !paint.visible
+                || paint.blend == BlendMode::Normal && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_) | PaintKind::Image(_))
+        })
         && node.strokes.is_empty()
 }
 
