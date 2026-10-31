@@ -69,6 +69,32 @@ mod shader_cache_tests {
         assert_eq!(canvas.shader_info.len(), 1);
         Ok(())
     }
+
+    #[test]
+    fn rounded_translucent_frame_backdrop_stays_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("frame backdrop");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 120.0, 120.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let frame = doc.create(page, NodeKind::Frame, "Rounded frame", 10.0, 10.0, 100.0, 100.0)?;
+        let frame_node = doc.node_mut(frame).ok_or("frame missing")?;
+        frame_node.clip = true;
+        frame_node.corners.radii = [12.0; 4];
+        frame_node.opacity = 0.7;
+        let pane = doc.create(frame, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
+        let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
+        pane_node.fills.clear();
+        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(backdrop_requires_cpu(&doc, pane, page));
+        assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((frame, 0.7)));
+        assert!(isolated_group_backdrop_supported(&doc, pane, page, &view));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        let index = BackdropIndex::new(&doc, page);
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &index)?;
+        Ok(())
+    }
 }
 
 fn same_global_inputs(before: &Document, after: &Document) -> bool {
@@ -4698,8 +4724,9 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
         let complex_clip =
             node.clip && (transform[1].abs() > 1e-6 || transform[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0));
         let has_mask = node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask));
-        let isolated_group_candidate =
-            current != id && matches!(node.kind, NodeKind::Group) && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough);
+        let isolated_group_candidate = current != id
+            && matches!(node.kind, NodeKind::Group | NodeKind::Frame)
+            && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough);
         if (has_mask || complex_clip) && !isolated_group_candidate {
             return None;
         }
@@ -4707,7 +4734,7 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
             return None;
         }
         if node.opacity < 0.999 {
-            if current == id || !matches!(node.kind, NodeKind::Group) || !matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough) {
+            if !isolated_group_candidate {
                 return None;
             }
             group = Some((current, node.opacity));
@@ -8550,7 +8577,7 @@ impl GpuCanvas {
                 let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
                 let composited = doc.node(id).is_some_and(|node| {
                     gpu_glass_stack_supported(doc, node)
-                        && node.fills.iter().any(|paint| paint.visible)
+                        && node.fills.iter().chain(&node.strokes).any(|paint| paint.visible)
                         && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
                 });
                 if composited {
