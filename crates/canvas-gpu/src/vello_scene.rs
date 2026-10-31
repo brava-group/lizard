@@ -3771,6 +3771,20 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 100) as usize, "progressive group: {changed} changed pixels");
+        doc.node_mut(pane).ok_or("pane missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::Glass(figcraft_doc::Glass::default()), visible: true }];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("glass group reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "glass group: {changed} changed pixels");
         Ok(())
     }
 
@@ -4227,7 +4241,11 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
             isolated_group_for_backdrop(doc, *candidate, page) == Some((group, opacity))
                 && doc.node(*candidate).is_some_and(|node| {
                     let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-                    matches!(effects.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(_)))
+                    matches!(effects.as_slice(), [effect] if match &effect.kind {
+                        EffectKind::BackgroundBlur(_) => true,
+                        EffectKind::Glass(glass) => gpu_glass_supported(doc, node, view, glass),
+                        _ => false,
+                    })
                 })
         })
 }
@@ -6288,7 +6306,9 @@ fn has_matching_effects_excluding_in_view(
                             EffectKind::Glass(glass) => {
                                 !gpu_backdrop
                                     || !gpu_glass_supported(doc, node, view, glass)
-                                    || doc.page_of(node.id).is_none_or(|page| backdrop_requires_cpu(doc, node.id, page))
+                                    || doc.page_of(node.id).is_none_or(|page| {
+                                        backdrop_requires_cpu(doc, node.id, page) && !isolated_group_backdrop_supported(doc, node.id, page, view)
+                                    })
                             }
                             EffectKind::BackgroundBlur(_) => {
                                 !gpu_backdrop
@@ -7945,12 +7965,41 @@ impl GpuCanvas {
             let prefix_scene = self.make_scene_document_with_backdrops_and_outlines(&prefix_doc, page, view, Some(&backdrops), outlined, options);
             self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
             let source = self.snapshot_submit();
-            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-            let clip = backdrop_clip_rect(doc, id, page, view);
-            let blurred = blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip);
+            let glass = doc.node(id).and_then(|node| {
+                node.effects.iter().find_map(|effect| match &effect.kind {
+                    EffectKind::Glass(glass) if effect.visible => Some(glass),
+                    _ => None,
+                })
+            });
+            let progressive = doc.node(id).and_then(|node| {
+                node.effects.iter().find_map(|effect| match &effect.kind {
+                    EffectKind::BackgroundBlur(blur) if effect.visible && blur.is_progressive() => Some((node, blur)),
+                    _ => None,
+                })
+            });
+            let (blurred, region) = if let Some(effect) = glass {
+                let region = gpu_glass_region(doc, id, view, effect).ok_or("glass region unavailable")?;
+                let cropped = self.crop_texture(&source, region);
+                let mask = self.render_glass_mask(doc, id, view, region)?;
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
+                (glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale), Some(region))
+            } else if let Some((node, effect)) = progressive {
+                let screen = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1)) * doc.world_transform(id);
+                let safe = effect.sanitized();
+                let start = screen * Point::new(safe.start.0 * node.width, safe.start.1 * node.height);
+                let end = screen * Point::new(safe.end.0 * node.width, safe.end.1 * node.height);
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let mix = self.gpu_progressive_blur.get_or_insert_with(|| GpuProgressiveBlur::new(&self.device));
+                (mix.submit(&self.device, &self.queue, blur, &source, effect, view.scale, start, end), None)
+            } else {
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                let clip = backdrop_clip_rect(doc, id, page, view);
+                (blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip), None)
+            };
             let (width, height) = (u16::try_from(blurred.width())?, u16::try_from(blurred.height())?);
             let blur_id = self.register_external_texture(blurred);
-            backdrops.insert(id, ImageInfo { id: blur_id, width, height, region: None });
+            backdrops.insert(id, ImageInfo { id: blur_id, width, height, region });
         }
 
         let mut group_doc = doc.clone();
