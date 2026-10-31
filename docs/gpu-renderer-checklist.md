@@ -122,8 +122,10 @@ the migration concerns rasterization and pixel effects.
   - [ ] Check Display P3 conversion in the browser presentation path.
   - [x] Render the Vello-supported blend modes on simple nodes, effect-free groups, and individual paints.
   - [x] Isolate the content of an opaque shadowed leaf before applying paint blend modes; all
-    Vello-supported modes match the CPU reference with a Drop Shadow. Partial-opacity shadow
-    stacks remain guarded.
+    Vello-supported modes match the CPU reference with a Drop Shadow.
+  - [x] Keep all 16 supported paint blends with a Drop Shadow on GPU at 65% node opacity.
+    Full-pixel comparison and fill, shadow, and background samples passed; the older test's
+    partial-opacity fallback assertion was stale after the shadow cache migration.
   - [x] Apply node blend modes to opaque leaf content after drawing its Drop Shadow; all
     Vello-supported modes match CPU samples at the fill, shadow, and background.
   - [x] Keep all 16 Vello-supported node blends with a single Drop Shadow on GPU at 25%, 50%,

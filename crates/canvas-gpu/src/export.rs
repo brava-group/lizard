@@ -1423,13 +1423,23 @@ mod tests {
                 let node = doc.node_mut(top).ok_or("top missing for blend")?;
                 node.opacity = opacity;
                 node.fills[0].blend = blend;
-                if opacity < 1.0 {
-                    assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "partial-opacity shadow should stay guarded");
-                    continue;
-                }
                 assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} opacity={opacity} rejected");
                 let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU blend and shadow unavailable")?;
                 let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU blend and shadow unavailable")?;
+                let changed = gpu
+                    .data()
+                    .chunks_exact(4)
+                    .zip(cpu.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                    .count();
+                let severe = gpu
+                    .data()
+                    .chunks_exact(4)
+                    .zip(cpu.data().chunks_exact(4))
+                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                    .count();
+                assert!(changed * 100 < view.width as usize * view.height as usize * 10, "{blend:?} opacity={opacity}: {changed} changed pixels");
+                assert!(severe * 100 < view.width as usize * view.height as usize, "{blend:?} opacity={opacity}: {severe} severe pixels");
                 for (x, y) in [(30, 30), (62, 40), (15, 15)] {
                     let actual = gpu.pixel(x, y).ok_or("GPU blend/shadow sample missing")?;
                     let expected = cpu.pixel(x, y).ok_or("CPU blend/shadow sample missing")?;
