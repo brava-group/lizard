@@ -339,6 +339,10 @@ the migration concerns rasterization and pixel effects.
 
 ## Evidence log
 
+- 2026-10-31: A manual 3440 × 1440 glass-pane probe temporarily raised the GPU glass ROI
+  cap from 2 million to 6 million pixels. The actual 3108 × 1308 region rendered on GPU,
+  but the first frame took 116 ms and the warm frame 81 ms including readback. The cap was
+  restored; large glass needs tiled or reusable GPU surfaces before enabling it in the editor.
 - 2026-10-30: 128 GPU/reference comparisons covered two paints on one leaf, all 16 Vello
   paint blends for the second paint, a uniform Layer Blur, four node opacities, and 1×/2×.
   Every pixel matched. The paint blend now sees earlier paints of its leaf inside an isolated
