@@ -168,9 +168,11 @@ impl GpuCanvasExperiment {
             self.direct_proof = proof_srgb;
             return Ok(self.direct_texture_id);
         }
-        if !doc.shaders.is_empty() && (changed_doc || self.direct_camera.is_none_or(|previous| previous.2 != view.scale)) {
-            let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during shader zoom")?;
-            canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+        if !changed_doc && self.direct_camera.is_none_or(|previous| previous.2 != view.scale) {
+            let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during zoom")?;
+            if canvas.has_scale_dependent_paints() {
+                canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+            }
         }
         let finish_preview = self.direct_provisional_effects && !gesture_active;
         let page_backdrops = BackdropIndex::new(&doc, page);

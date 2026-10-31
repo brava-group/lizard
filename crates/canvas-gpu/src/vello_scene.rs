@@ -109,7 +109,11 @@ mod shader_cache_tests {
             figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true },
             figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
         ];
-        let child = doc.create(frame, NodeKind::Rectangle, "Child", 20.0, 20.0, 40.0, 40.0)?;
+        let nested = doc.create(frame, NodeKind::Frame, "Nested frame", 15.0, 15.0, 60.0, 60.0)?;
+        let nested_node = doc.node_mut(nested).ok_or("nested frame missing")?;
+        nested_node.clip = true;
+        nested_node.corners.radii = [8.0; 4];
+        let child = doc.create(nested, NodeKind::Rectangle, "Child", 5.0, 5.0, 40.0, 40.0)?;
         doc.node_mut(child).ok_or("child missing")?.fills = vec![Paint::solid(Color::BLACK)];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
         assert!(gpu_stacked_blur_noise_supported(&doc, doc.node(frame).ok_or("frame missing")?));
@@ -6628,18 +6632,27 @@ fn gpu_simple_group_shadow_supported(doc: &Document, node: &Node, shadow: &Shado
 }
 
 fn gpu_simple_group_child_supported(doc: &Document, child: &Node, depth: usize) -> bool {
-    if depth >= 8 || !child.visible || child.clip || !child.effects.is_empty() {
+    if depth >= 64 || !child.visible || !child.effects.is_empty() {
         return false;
     }
     if matches!(child.kind, NodeKind::Group) {
         return (!child.is_mask || matches!(child.mask_type, MaskType::Alpha | MaskType::Vector))
+            && !child.clip
             && matches!(child.blend, BlendMode::Normal | BlendMode::PassThrough)
             && child.fills.is_empty()
             && child.strokes.is_empty()
             && !child.children.is_empty()
             && child.children.iter().all(|id| doc.node(*id).is_some_and(|node| gpu_simple_group_child_supported(doc, node, depth + 1)));
     }
+    if matches!(child.kind, NodeKind::Frame) && !child.children.is_empty() {
+        return (!child.is_mask || matches!(child.mask_type, MaskType::Alpha | MaskType::Vector))
+            && matches!(child.blend, BlendMode::Normal | BlendMode::PassThrough)
+            && child.fills.iter().chain(&child.strokes).all(|paint| !paint.visible || gpu_cached_source_paint_supported(doc, paint))
+            && draw::node_outline(doc, child).is_some()
+            && child.children.iter().all(|id| doc.node(*id).is_some_and(|node| gpu_simple_group_child_supported(doc, node, depth + 1)));
+    }
     child.children.is_empty()
+        && !child.clip
         && (!child.is_mask || matches!(child.mask_type, MaskType::Alpha | MaskType::Vector))
         && (child.strokes.is_empty() || draw::stroke_fill(doc, child).is_some())
         && child.blend == BlendMode::Normal
@@ -8066,6 +8079,10 @@ impl GpuCanvas {
 
     pub fn image_info(&self) -> &HashMap<String, ImageInfo> {
         &self.image_info
+    }
+
+    pub fn has_scale_dependent_paints(&self) -> bool {
+        !self.shader_info.is_empty() || !self.pattern_info.is_empty()
     }
 
     pub fn register_external_texture(&mut self, texture: wgpu::Texture) -> TextureId {
