@@ -150,6 +150,10 @@ the migration concerns rasterization and pixel effects.
     Blur and one Noise effect on rotated leaves: Darken, Multiply, Screen, Overlay, Soft Light,
     Exclusion, Hue, Saturation, Color, and Luminosity. Color Burn and Plus Lighter remain guarded
     at partial opacity; tested 25%, 50%, and 75% at 1× and 2×.
+  - [x] Keep the same 12 opaque and ten half-opaque node blends on GPU for both Texture/Blur
+    orders, with and without an ordered Drop Shadow on a rotated leaf. The 176 supported
+    GPU/reference comparisons at 1× and 2× passed the visual gates; Color Burn and Plus
+    Lighter at half opacity remain guarded.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Keep an alpha mask around a nested luminance mask on GPU, including a rotated parent

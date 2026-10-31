@@ -2094,6 +2094,99 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn textured_effect_stack_node_blends_keep_gpu_composition() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU textured node blends");
+        let page = doc.current_page.ok_or("page missing")?;
+        let backdrop = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 220.0)?;
+        doc.node_mut(backdrop).ok_or("backdrop missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.65, 0.8, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Textured blend", 0.0, 0.0, 120.0, 96.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
+        let texture = || figcraft_doc::Effect {
+            kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
+            visible: true,
+        };
+        let blur = || figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+        let shadow = || {
+            let mut effect = figcraft_doc::Effect::drop_shadow();
+            if let EffectKind::DropShadow(value) = &mut effect.kind {
+                value.radius = 8.0;
+                value.offset = (4.0, 6.0);
+                value.color = Color::new(0.1, 0.2, 0.3, 0.4);
+            }
+            effect
+        };
+        let mut failures = Vec::new();
+        for blend in [
+            BlendMode::Darken,
+            BlendMode::Multiply,
+            BlendMode::ColorBurn,
+            BlendMode::Screen,
+            BlendMode::PlusLighter,
+            BlendMode::Overlay,
+            BlendMode::SoftLight,
+            BlendMode::Exclusion,
+            BlendMode::Hue,
+            BlendMode::Saturation,
+            BlendMode::Color,
+            BlendMode::Luminosity,
+        ] {
+            for opacity in [1.0, 0.5] {
+                for texture_first in [true, false] {
+                    for with_shadow in [false, true] {
+                        let node = doc.node_mut(id).ok_or("shape missing")?;
+                        node.blend = blend;
+                        node.opacity = opacity;
+                        node.effects = match (texture_first, with_shadow) {
+                            (true, true) => vec![texture(), blur(), shadow()],
+                            (false, true) => vec![shadow(), blur(), texture()],
+                            (true, false) => vec![texture(), blur()],
+                            (false, false) => vec![blur(), texture()],
+                        };
+                        for scale in [1.0, 2.0] {
+                            let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
+                            if opacity < 0.999 && matches!(blend, BlendMode::ColorBurn | BlendMode::PlusLighter) {
+                                assert!(
+                                    has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true),
+                                    "{blend:?} partial opacity stays guarded"
+                                );
+                                continue;
+                            }
+                            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} opacity={opacity} capability");
+                            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                            assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                            gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                            let actual = gpu.pixels()?;
+                            let changed = actual
+                                .chunks_exact(4)
+                                .zip(reference.data().chunks_exact(4))
+                                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                                .count();
+                            let severe = actual
+                                .chunks_exact(4)
+                                .zip(reference.data().chunks_exact(4))
+                                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                                .count();
+                            println!(
+                                "{blend:?} opacity={opacity} texture_first={texture_first} shadow={with_shadow} scale={scale}: changed={changed} severe={severe}"
+                            );
+                            if changed * 100 >= view.width as usize * view.height as usize * 10
+                                || severe * 100 >= view.width as usize * view.height as usize
+                            {
+                                failures.push(format!("{blend:?} opacity={opacity} texture_first={texture_first} shadow={with_shadow} scale={scale}: changed={changed} severe={severe}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
+    #[test]
     fn partially_opaque_blended_blur_noise_cache_keeps_alpha() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU partial-opacity cached blend");
         let page = doc.current_page.ok_or("page missing")?;
@@ -4693,6 +4786,15 @@ fn gpu_uniform_blur_node_blend_supported(node: &Node) -> bool {
 
 fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+    let blur_noise_pair = visible.len() == 2
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1;
+    let texture_stack = visible.len() >= 2
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
+        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 2
+        && visible.iter().all(|effect| {
+            matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
+        });
     node.children.is_empty()
         && (node.opacity >= 0.999 || (0.0..=1.0).contains(&node.opacity) && !matches!(node.blend, BlendMode::ColorBurn | BlendMode::PlusLighter))
         && matches!(
@@ -4710,9 +4812,7 @@ fn gpu_cached_node_blend_supported(node: &Node) -> bool {
                 | BlendMode::Color
                 | BlendMode::Luminosity
         )
-        && visible.len() == 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Noise(_))).count() == 1
+        && (blur_noise_pair || texture_stack)
         && node.fills.iter().chain(&node.strokes).all(|paint| !paint.visible || paint.blend == BlendMode::Normal)
 }
 
@@ -5338,10 +5438,7 @@ mod page_capability_tests {
             vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true }];
         let hidden_texture = doc.create(hidden_group, NodeKind::Rectangle, "Hidden texture", 20.0, 20.0, 40.0, 40.0)?;
         doc.node_mut(hidden_texture).ok_or("texture node missing")?.effects = vec![
-            figcraft_doc::Effect {
-                kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }),
-                visible: true,
-            },
+            figcraft_doc::Effect { kind: EffectKind::Texture(Texture { size: 2.0, size_y: None, radius: 3.0, clip_to_shape: false }), visible: true },
             figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true },
         ];
         let hidden_scatter = doc.create(hidden_group, NodeKind::Rectangle, "Hidden scatter", 5.0, 5.0, 30.0, 30.0)?;
@@ -5536,8 +5633,18 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             _ => false,
         })
         && (0.0..=1.0).contains(&node.opacity)
-        && (node.blend == BlendMode::Normal || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough)
-        && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. } | NodeKind::Group)
+        && (node.blend == BlendMode::Normal
+            || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
+            || gpu_cached_node_blend_supported(node))
+        && matches!(
+            node.kind,
+            NodeKind::Rectangle
+                | NodeKind::Ellipse { .. }
+                | NodeKind::Polygon { .. }
+                | NodeKind::Star { .. }
+                | NodeKind::Vector { .. }
+                | NodeKind::Group
+        )
         && gpu_isolated_grain_supported(doc, node)
 }
 
