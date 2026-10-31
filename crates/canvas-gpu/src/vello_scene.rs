@@ -4078,6 +4078,35 @@ mod page_capability_tests {
         assert!(!has_unhandled_effects_except_outlined_on_page_in_view(&doc, first, &view, true, &[visible]));
         Ok(())
     }
+
+    #[test]
+    fn hidden_ancestor_does_not_force_cpu_for_unsupported_descendants() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("hidden unsupported subtree");
+        let page = doc.current_page.ok_or("page missing")?;
+        let group = doc.create(page, NodeKind::Group, "Hidden group", 0.0, 0.0, 64.0, 64.0)?;
+        let child = doc.create(group, NodeKind::Rectangle, "Unsupported child", 0.0, 0.0, 64.0, 64.0)?;
+        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::PlusDarker;
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 64 };
+        assert!(has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
+        doc.node_mut(group).ok_or("group missing")?.visible = false;
+        assert!(!has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+        let actual = gpu.pixels()?;
+        let center = ((32 * view.width + 32) * 4) as usize;
+        assert!(actual[center..center + 3].iter().zip(&reference.data()[center..center + 3]).all(|(a, b)| a.abs_diff(*b) <= 8));
+        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::Normal;
+        let mut shadow = figcraft_doc::Effect::drop_shadow();
+        if let EffectKind::DropShadow(value) = &mut shadow.kind {
+            value.blend = BlendMode::PlusDarker;
+        }
+        doc.node_mut(child).ok_or("child missing")?.effects = vec![shadow];
+        assert!(!has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
+        doc.node_mut(group).ok_or("group missing")?.visible = true;
+        assert!(has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
+        Ok(())
+    }
 }
 
 /// Selected outline roots replace their entire subtrees, so those paints and effects cannot
@@ -4152,6 +4181,7 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
             || matches!(&node.kind, NodeKind::Vector { network }
                 if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(unsupported_paint));
         unsupported
+            && !has_hidden_ancestor(doc, node)
             && (if node.is_mask {
                 node.parent.and_then(|parent| doc.world_render_bounds(parent))
             } else {
@@ -4159,6 +4189,19 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
             })
             .is_none_or(|bounds| bounds.intersect(rect).area() > 0.0)
     })
+}
+
+fn has_hidden_ancestor(doc: &Document, node: &Node) -> bool {
+    let mut parent = node.parent;
+    for _ in 0..128 {
+        let Some(id) = parent else { return false };
+        let Some(ancestor) = doc.node(id) else { return true };
+        if !ancestor.visible {
+            return true;
+        }
+        parent = ancestor.parent;
+    }
+    true
 }
 
 /// The isolated GPU grain pass samples in the node's local space, including rotations.
@@ -4624,6 +4667,7 @@ fn has_matching_effects_excluding_in_view(
                             }
                         })
             })
+            && !has_hidden_ancestor(doc, node)
             && figcraft_render::raster_bounds(doc, node.id).is_some_and(|bounds| bounds.intersect(rect).area() > 0.0)
     })
 }

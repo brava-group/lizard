@@ -57,6 +57,8 @@ the migration concerns rasterization and pixel effects.
     compositor; sibling layers outside the focused subtree no longer force its CPU fallback.
   - [x] Scope the normal native/browser GPU capability check to the displayed page. An
     unsupported blend at the same coordinates on another page no longer forces CPU rendering.
+  - [x] Ignore unsupported paints and effects under hidden ancestors when choosing the GPU
+    canvas; those descendants do not contribute pixels to the visible scene.
   - [x] Combine selected outlines with supported sibling backdrop blur or glass on native and
     browser WebGPU, preserving paint order even when the selected contour is behind the pane.
   - [x] Combine Focus with selected outlines on native and browser WebGPU, with optional Pixel
@@ -558,3 +560,7 @@ the migration concerns rasterization and pixel effects.
   Screen at 2×; no pixel differed above 48/255. I inspected the GPU and CPU images for that
   case: the backdrop color, rotated contour, blur, and grain are intact. This does not yet cover
   other blend modes or partial opacity with cached effect stacks.
+- 2026-10-30: the canvas capability scan now skips unsupported descendants of hidden groups.
+  An isolated test toggled the parent visibility for both a Plus Darker child and a child with
+  an unsupported shadow blend, and compared the hidden scene's center pixel against the CPU
+  reference. Visible unsupported descendants still require the guarded fallback.
