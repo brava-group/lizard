@@ -10,8 +10,8 @@ pub enum BlendMode {
     #[default]
     Normal,
     Darken,
+    #[serde(alias = "plusDarker")]
     Multiply,
-    PlusDarker,
     ColorBurn,
     Lighten,
     Screen,
@@ -30,12 +30,11 @@ pub enum BlendMode {
 
 impl BlendMode {
     /// Every mode in menu order, with separators implied between groups.
-    pub const ALL: [BlendMode; 19] = [
+    pub const ALL: [BlendMode; 18] = [
         BlendMode::PassThrough,
         BlendMode::Normal,
         BlendMode::Darken,
         BlendMode::Multiply,
-        BlendMode::PlusDarker,
         BlendMode::ColorBurn,
         BlendMode::Lighten,
         BlendMode::Screen,
@@ -58,7 +57,6 @@ impl BlendMode {
             BlendMode::Normal => "Normal",
             BlendMode::Darken => "Darken",
             BlendMode::Multiply => "Multiply",
-            BlendMode::PlusDarker => "Plus darker",
             BlendMode::ColorBurn => "Color burn",
             BlendMode::Lighten => "Lighten",
             BlendMode::Screen => "Screen",
@@ -82,7 +80,6 @@ impl BlendMode {
             BlendMode::PassThrough | BlendMode::Normal => "normal",
             BlendMode::Darken => "darken",
             BlendMode::Multiply => "multiply",
-            BlendMode::PlusDarker => "plus-darker",
             BlendMode::ColorBurn => "color-burn",
             BlendMode::Lighten => "lighten",
             BlendMode::Screen => "screen",
@@ -108,5 +105,16 @@ impl BlendMode {
             .into_iter()
             .find(|m| m.label().replace(' ', "").to_ascii_lowercase() == key)
             .or_else(|| Self::ALL.into_iter().find(|m| m.css().replace('-', "") == key))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BlendMode;
+
+    #[test]
+    fn removed_plus_darker_is_not_selectable_and_old_files_still_open() {
+        assert_eq!(BlendMode::from_name("plusDarker"), None);
+        assert_eq!(serde_json::from_str::<BlendMode>("\"plusDarker\"").ok(), Some(BlendMode::Multiply));
     }
 }

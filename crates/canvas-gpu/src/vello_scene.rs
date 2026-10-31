@@ -13,7 +13,9 @@ use figcraft_color::{
 };
 use figcraft_doc::{Blur, Document, EffectKind, Glass, MaskType, Node, NodeId, NodeKind, Noise, Shadow, Texture};
 use figcraft_geom::{Affine, BezPath, Point, Rect, Shape};
-use figcraft_render::{FillRule, Options, View, draw, render_view};
+use figcraft_render::{FillRule, View, draw};
+#[cfg(test)]
+use figcraft_render::{Options, render_view};
 use vello_common::TextureId;
 use vello_common::filter_effects::{EdgeMode, Filter, FilterFunction, FilterPrimitive};
 use vello_common::geometry::RectU16;
@@ -36,6 +38,15 @@ use crate::gpu_texture::GpuTexture;
 
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 600;
+
+#[cfg(test)]
+fn unsupported_test_shadow() -> figcraft_doc::Effect {
+    let mut effect = figcraft_doc::Effect::drop_shadow();
+    if let EffectKind::DropShadow(shadow) = &mut effect.kind {
+        shadow.blend = BlendMode::PassThrough;
+    }
+    effect
+}
 
 fn color(c: Color, opacity: f32) -> peniko::Color {
     peniko::Color::new([c.r, c.g, c.b, c.a * opacity])
@@ -81,6 +92,7 @@ mod shader_cache_tests {
         frame_node.clip = true;
         frame_node.corners.radii = [12.0; 4];
         frame_node.opacity = 0.7;
+        frame_node.strokes = vec![Paint::solid(Color::WHITE)];
         let pane = doc.create(frame, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
         let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
         pane_node.fills.clear();
@@ -122,6 +134,124 @@ mod shader_cache_tests {
         gpu.prepare_static_effects(&doc)?;
         assert!(gpu.layer_blurs.contains_key(&frame));
         gpu.render_submit_document(&doc, page, &view, [1.0; 3])?;
+        Ok(())
+    }
+
+    #[test]
+    fn translucent_backdrop_pane_stays_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("translucent backdrop pane");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 120.0, 120.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 80.0, 80.0)?;
+        let pane_node = doc.node_mut(pane).ok_or("pane missing")?;
+        pane_node.opacity = 0.5;
+        pane_node.fills.clear();
+        pane_node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(!backdrop_requires_cpu(&doc, pane, page));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &BackdropIndex::new(&doc, page))?;
+        Ok(())
+    }
+
+    #[test]
+    fn translucent_glass_pane_stays_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("translucent glass pane");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 120.0, 120.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Rectangle, "Glass", 20.0, 20.0, 80.0, 80.0)?;
+        let node = doc.node_mut(pane).ok_or("pane missing")?;
+        node.opacity = 0.5;
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(backdrop_requires_cpu(&doc, pane, page));
+        assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((pane, 0.5)));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &BackdropIndex::new(&doc, page))?;
+        Ok(())
+    }
+
+    #[test]
+    fn masked_backdrop_group_stays_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("masked backdrop group");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 120.0, 120.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let pane = doc.create(page, NodeKind::Group, "Blur group", 20.0, 20.0, 80.0, 80.0)?;
+        doc.node_mut(pane).ok_or("pane missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        let mask = doc.create(pane, NodeKind::Rectangle, "Mask", 0.0, 0.0, 80.0, 80.0)?;
+        doc.node_mut(mask).ok_or("mask missing")?.is_mask = true;
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(backdrop_requires_cpu(&doc, pane, page));
+        assert_eq!(isolated_group_for_backdrop(&doc, pane, page), Some((pane, 1.0)));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &BackdropIndex::new(&doc, page))?;
+        Ok(())
+    }
+
+    #[test]
+    fn backdrop_inside_effect_group_uses_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("backdrop inside effect group");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 120.0, 120.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        let group = doc.create(page, NodeKind::Frame, "Effect frame", 10.0, 10.0, 100.0, 100.0)?;
+        doc.node_mut(group).ok_or("group missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(2.0)), visible: true }];
+        let pane = doc.create(group, NodeKind::Rectangle, "Blur pane", 20.0, 20.0, 60.0, 60.0)?;
+        doc.node_mut(pane).ok_or("pane missing")?.effects =
+            vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 };
+        assert!(isolated_group_for_backdrop(&doc, pane, page).is_none());
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &BackdropIndex::new(&doc, page))?;
+        Ok(())
+    }
+
+    #[test]
+    fn separate_translucent_backdrop_groups_stay_on_gpu() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("independent backdrop groups");
+        let page = doc.current_page.ok_or("page missing")?;
+        let background = doc.create(page, NodeKind::Rectangle, "Background", 0.0, 0.0, 240.0, 140.0)?;
+        doc.node_mut(background).ok_or("background missing")?.fills = vec![Paint::solid(Color::BLACK)];
+        for index in 0..2 {
+            let group = doc.create(page, NodeKind::Frame, "Backdrop frame", 10.0 + f64::from(index) * 110.0, 15.0, 100.0, 100.0)?;
+            let node = doc.node_mut(group).ok_or("frame missing")?;
+            node.opacity = 0.6;
+            node.clip = true;
+            node.corners.radii = [10.0; 4];
+            let pane = doc.create(group, NodeKind::Rectangle, "Backdrop pane", 20.0, 20.0, 60.0, 60.0)?;
+            let node = doc.node_mut(pane).ok_or("pane missing")?;
+            node.fills.clear();
+            node.effects = vec![figcraft_doc::Effect {
+                kind: if index == 0 { EffectKind::BackgroundBlur(Blur::uniform(8.0)) } else { EffectKind::Glass(Glass::default()) },
+                visible: true,
+            }];
+            if index == 0 {
+                let middle = doc.create(page, NodeKind::Rectangle, "Between groups", 95.0, 35.0, 30.0, 30.0)?;
+                doc.node_mut(middle).ok_or("middle missing")?.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
+            }
+        }
+        let standalone = doc.create(page, NodeKind::Rectangle, "Standalone backdrop", 200.0, 20.0, 30.0, 30.0)?;
+        let node = doc.node_mut(standalone).ok_or("standalone missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(4.0)), visible: true }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 240, height: 140 };
+        let index = BackdropIndex::new(&doc, page);
+        assert_eq!(independent_backdrop_groups(&doc, page, &view, &index).map(|groups| groups.len()), Some(3));
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+        let Ok(mut gpu) = GpuCanvas::new(view.width, view.height) else { return Ok(()) };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [1.0; 3], &index)?;
+        let pixels = gpu.pixels()?;
+        let between = ((50 * view.width + 115) * 4) as usize;
+        assert!(pixels[between] > 200 && pixels[between + 1] < 50);
         Ok(())
     }
 
@@ -1071,7 +1201,7 @@ mod effect_capability_tests {
         }
         node.effects = vec![effect];
         let mut failures = Vec::new();
-        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             doc.node_mut(id).ok_or("shape missing")?.blend = blend;
             for opacity in [0.25, 0.5, 0.75] {
                 doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
@@ -1117,7 +1247,7 @@ mod effect_capability_tests {
         node.corners.radii = [12.0; 4];
         node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
-        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             for opacity in [1.0, 0.25, 0.5, 0.75] {
                 let node = doc.node_mut(id).ok_or("shape missing")?;
                 node.blend = blend;
@@ -1164,7 +1294,7 @@ mod effect_capability_tests {
         node.corners.radii = [12.0; 4];
         node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
-        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             for opacity in [1.0, 0.25, 0.5, 0.75] {
                 let node = doc.node_mut(id).ok_or("shape missing")?;
                 node.fills[1].blend = blend;
@@ -1211,10 +1341,7 @@ mod effect_capability_tests {
         node.corners.radii = [12.0; 4];
         node.effects = vec![figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(8.0)), visible: true }];
         let mut failures = Vec::new();
-        let blends = BlendMode::ALL
-            .into_iter()
-            .filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker))
-            .collect::<Vec<_>>();
+        let blends = BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)).collect::<Vec<_>>();
         for (index, node_blend) in blends.iter().copied().enumerate() {
             let paint_blend = blends[(index + 5) % blends.len()];
             for opacity in [1.0, 0.5] {
@@ -1274,10 +1401,11 @@ mod effect_capability_tests {
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Multiply;
         assert!(!has_unhandled_effects_in_view(&doc, &view));
 
-        doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(content).ok_or("content missing")?.effects = vec![unsupported_test_shadow()];
         assert!(has_unhandled_effects_in_view(&doc, &view));
 
         doc.node_mut(content).ok_or("content missing")?.blend = BlendMode::Normal;
+        doc.node_mut(content).ok_or("content missing")?.effects.clear();
         doc.node_mut(content).ok_or("content missing")?.fills =
             vec![Paint::gradient(figcraft_color::Gradient::default_for(GradientKind::Diamond, Color::new(1.0, 0.0, 0.0, 1.0)))];
         assert!(!has_unhandled_effects_in_view(&doc, &view));
@@ -2196,7 +2324,7 @@ mod effect_capability_tests {
             effect
         };
         let mut failures = Vec::new();
-        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker)) {
+        for blend in BlendMode::ALL.into_iter().filter(|blend| !matches!(blend, BlendMode::PassThrough | BlendMode::Normal)) {
             for opacity in [1.0, 0.5] {
                 for texture_first in [true, false] {
                     for with_shadow in [false, true] {
@@ -3381,7 +3509,7 @@ mod effect_capability_tests {
         let mut text = figcraft_doc::TextData::new("Lizard");
         text.style.font_size = 48.0;
         let mut paint = Paint::solid(Color::new(0.1, 0.3, 0.9, 1.0));
-        paint.blend = BlendMode::PlusDarker;
+        paint.blend = BlendMode::PassThrough;
         let mut style = text.style.clone();
         style.fills = Some(vec![paint]);
         text.runs.push(figcraft_doc::StyleRun { start: 0, end: 6, style });
@@ -3712,7 +3840,7 @@ mod effect_capability_tests {
         let outside = doc.create(page, NodeKind::Rectangle, "Outside focus", 0.0, 0.0, 120.0, 120.0)?;
         let outside_node = doc.node_mut(outside).ok_or("outside missing")?;
         outside_node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
-        outside_node.blend = BlendMode::PlusDarker;
+        outside_node.effects = vec![unsupported_test_shadow()];
         let section = doc.create(page, NodeKind::Section { contents_hidden: false }, "Section", 20.0, 0.0, 120.0, 120.0)?;
         let group = doc.create(section, NodeKind::Group, "Focused group", 5.0, 0.0, 100.0, 100.0)?;
         let dark = doc.create(group, NodeKind::Rectangle, "Dark half", 0.0, 0.0, 50.0, 100.0)?;
@@ -4754,7 +4882,10 @@ fn backdrop_requires_cpu(doc: &Document, id: NodeId, page: NodeId) -> bool {
     while current != page {
         let Some(node) = doc.node(current) else { return true };
         let xf = doc.world_transform(current).as_coeffs();
-        if node.opacity < 0.999
+        let translucent_glass =
+            current == id && node.opacity < 0.999 && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_)));
+        if (current != id && node.opacity < 0.999)
+            || translucent_glass
             || node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask))
             || (node.clip && (xf[1].abs() > 1e-6 || xf[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0)))
         {
@@ -4778,18 +4909,19 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
         let isolated_group_candidate = current != id
             && matches!(node.kind, NodeKind::Group | NodeKind::Frame)
             && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough);
-        if (has_mask || complex_clip) && !isolated_group_candidate {
+        let isolated_self_candidate = current == id && matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough);
+        if (has_mask || complex_clip) && !isolated_group_candidate && !isolated_self_candidate {
             return None;
         }
-        if current != id && (!node.strokes.is_empty() || !node.effects.is_empty()) {
+        if current != id && !node.effects.is_empty() {
             return None;
         }
         if node.opacity < 0.999 {
-            if !isolated_group_candidate {
+            if !isolated_group_candidate && !isolated_self_candidate {
                 return None;
             }
             group = Some((current, node.opacity));
-        } else if isolated_group_candidate && (has_mask || complex_clip) {
+        } else if (isolated_group_candidate || isolated_self_candidate) && (has_mask || complex_clip) {
             group = Some((current, 1.0));
         }
         current = node.parent?;
@@ -4805,20 +4937,64 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
     visible.contains(&id)
         && visible.iter().all(|candidate| {
             isolated_group_for_backdrop(doc, *candidate, page) == Some((group, opacity))
-                && doc.node(*candidate).is_some_and(|node| {
-                    let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-                    matches!(effects.as_slice(), [effect] if match &effect.kind {
-                        EffectKind::BackgroundBlur(_) => true,
-                        EffectKind::Glass(glass) => gpu_glass_supported(doc, node, view, glass),
-                        _ => false,
-                    }) || effects.split_first().is_some_and(|(glass, extras)| {
-                        !extras.is_empty()
-                            && matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
-                            && gpu_glass_stack_supported(doc, node)
-                            && extras.iter().all(|effect| matches!(&effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-                    })
-                })
+                && doc.node(*candidate).is_some_and(|node| isolated_backdrop_effects_supported(doc, node, view))
         })
+}
+
+fn isolated_backdrop_effects_supported(doc: &Document, node: &Node, view: &View) -> bool {
+    let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+    matches!(effects.as_slice(), [effect] if match &effect.kind {
+        EffectKind::BackgroundBlur(_) => true,
+        EffectKind::Glass(glass) => gpu_glass_supported(doc, node, view, glass),
+        _ => false,
+    }) || effects.split_first().is_some_and(|(glass, extras)| {
+        !extras.is_empty()
+            && matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
+            && gpu_glass_stack_supported(doc, node)
+            && extras.iter().all(|effect| matches!(&effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+    })
+}
+
+type BackdropGroupBatch = (NodeId, f32, Vec<(NodeId, f64)>);
+
+fn independent_backdrop_groups(doc: &Document, page: NodeId, view: &View, index: &BackdropIndex) -> Option<Vec<BackdropGroupBatch>> {
+    let world = Rect::new(
+        view.origin.0,
+        view.origin.1,
+        view.origin.0 + f64::from(view.width) / view.scale,
+        view.origin.1 + f64::from(view.height) / view.scale,
+    );
+    let mut batches: Vec<BackdropGroupBatch> = Vec::new();
+    for &(id, radius, bounds, _) in &index.candidates {
+        if bounds.intersect(world).area() <= 0.0 {
+            continue;
+        }
+        let isolated = isolated_group_for_backdrop(doc, id, page);
+        if backdrop_requires_cpu(doc, id, page) && isolated.is_none() {
+            return None;
+        }
+        let mut group = isolated.map_or(id, |(group, _)| group);
+        while doc.node(group)?.parent != Some(page) {
+            group = doc.node(group)?.parent?;
+        }
+        let root = doc.node(group)?;
+        if (group != id && !matches!(root.kind, NodeKind::Group | NodeKind::Frame))
+            || !matches!(root.blend, BlendMode::Normal | BlendMode::PassThrough)
+            || group != id && !root.effects.is_empty()
+            || !isolated_backdrop_effects_supported(doc, doc.node(id)?, view)
+        {
+            return None;
+        }
+        let opacity = root.opacity;
+        if let Some((last, _, candidates)) = batches.last_mut()
+            && *last == group
+        {
+            candidates.push((id, radius));
+        } else {
+            batches.push((group, opacity, vec![(id, radius)]));
+        }
+    }
+    (!batches.is_empty()).then_some(batches)
 }
 
 fn backdrop_clip_rect(doc: &Document, id: NodeId, page: NodeId, view: &View) -> Option<[u32; 4]> {
@@ -5527,7 +5703,7 @@ fn gpu_node_blend(node: &Node) -> Option<peniko::BlendMode> {
 fn gpu_blend_mode(mode: BlendMode) -> Option<peniko::BlendMode> {
     use peniko::{Compose, Mix};
     let mix = match mode {
-        BlendMode::PassThrough | BlendMode::Normal | BlendMode::PlusDarker => return None,
+        BlendMode::PassThrough | BlendMode::Normal => return None,
         BlendMode::Darken => Mix::Darken,
         BlendMode::Multiply => Mix::Multiply,
         BlendMode::ColorBurn => Mix::ColorBurn,
@@ -5953,11 +6129,11 @@ mod selected_outline_gpu_tests {
         let group = doc.create(page, NodeKind::Group, "selected group", 5.0, 5.0, 40.0, 40.0)?;
         let child = doc.create(group, NodeKind::Rectangle, "unsupported child", 0.0, 0.0, 30.0, 30.0)?;
         let sibling = doc.create(page, NodeKind::Rectangle, "sibling", 60.0, 5.0, 30.0, 30.0)?;
-        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(child).ok_or("child missing")?.effects = vec![unsupported_test_shadow()];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 80 };
         assert!(has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
         assert!(!has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[group]));
-        doc.node_mut(sibling).ok_or("sibling missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(sibling).ok_or("sibling missing")?.effects = vec![unsupported_test_shadow()];
         assert!(has_unhandled_effects_except_outlined_in_view(&doc, &view, true, &[group]));
         Ok(())
     }
@@ -6045,12 +6221,12 @@ mod focused_selected_outline_tests {
         let outside = doc.create(page, NodeKind::Rectangle, "outside", 0.0, 0.0, 110.0, 60.0)?;
         let outer = doc.node_mut(outside).ok_or("outside missing")?;
         outer.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
-        outer.blend = BlendMode::PlusDarker;
+        outer.effects = vec![unsupported_test_shadow()];
         let focus = doc.create(page, NodeKind::Group, "focus", 5.0, 5.0, 90.0, 50.0)?;
         let selected = doc.create(focus, NodeKind::Rectangle, "selected", 10.0, 10.0, 25.0, 25.0)?;
         let selected_node = doc.node_mut(selected).ok_or("selected missing")?;
         selected_node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
-        selected_node.blend = BlendMode::PlusDarker;
+        selected_node.effects = vec![unsupported_test_shadow()];
         let sibling = doc.create(focus, NodeKind::Rectangle, "sibling", 50.0, 10.0, 25.0, 25.0)?;
         doc.node_mut(sibling).ok_or("sibling missing")?.fills = vec![Paint::solid(Color::new(0.0, 0.0, 1.0, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 110, height: 60 };
@@ -6081,7 +6257,7 @@ mod focused_selected_outline_tests {
         let mut doc = Document::new("GPU focused selected backdrop");
         let page = doc.current_page.ok_or("page missing")?;
         let outside = doc.create(page, NodeKind::Rectangle, "outside", 0.0, 0.0, 110.0, 80.0)?;
-        doc.node_mut(outside).ok_or("outside missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(outside).ok_or("outside missing")?.effects = vec![unsupported_test_shadow()];
         let focus = doc.create(page, NodeKind::Group, "focus", 5.0, 0.0, 100.0, 80.0)?;
         let base = doc.create(focus, NodeKind::Rectangle, "dark base", 0.0, 0.0, 50.0, 80.0)?;
         doc.node_mut(base).ok_or("base missing")?.fills = vec![Paint::solid(Color::BLACK)];
@@ -6176,7 +6352,7 @@ mod page_capability_tests {
         let first = doc.current_page.ok_or("first page missing")?;
         let second = doc.add_page("Other page");
         let unsupported = doc.create(second, NodeKind::Rectangle, "Unsupported blend", 0.0, 0.0, 64.0, 64.0)?;
-        doc.node_mut(unsupported).ok_or("blend node missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(unsupported).ok_or("blend node missing")?.effects = vec![unsupported_test_shadow()];
         let visible = doc.create(first, NodeKind::Rectangle, "Visible GPU shape", 0.0, 0.0, 64.0, 64.0)?;
         doc.node_mut(visible).ok_or("visible shape missing")?.fills = vec![Paint::solid(Color::new(0.1, 0.7, 0.3, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 64 };
@@ -6193,7 +6369,7 @@ mod page_capability_tests {
         let page = doc.current_page.ok_or("page missing")?;
         let group = doc.create(page, NodeKind::Group, "Hidden group", 0.0, 0.0, 64.0, 64.0)?;
         let child = doc.create(group, NodeKind::Rectangle, "Unsupported child", 0.0, 0.0, 64.0, 64.0)?;
-        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::PlusDarker;
+        doc.node_mut(child).ok_or("child missing")?.effects = vec![unsupported_test_shadow()];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 64 };
         assert!(has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
         doc.node_mut(group).ok_or("group missing")?.visible = false;
@@ -6204,10 +6380,10 @@ mod page_capability_tests {
         let actual = gpu.pixels()?;
         let center = ((32 * view.width + 32) * 4) as usize;
         assert!(actual[center..center + 3].iter().zip(&reference.data()[center..center + 3]).all(|(a, b)| a.abs_diff(*b) <= 8));
-        doc.node_mut(child).ok_or("child missing")?.blend = BlendMode::Normal;
+        doc.node_mut(child).ok_or("child missing")?.effects.clear();
         let mut shadow = figcraft_doc::Effect::drop_shadow();
         if let EffectKind::DropShadow(value) = &mut shadow.kind {
-            value.blend = BlendMode::PlusDarker;
+            value.blend = BlendMode::PassThrough;
         }
         doc.node_mut(child).ok_or("child missing")?.effects = vec![shadow];
         assert!(!has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
@@ -6784,7 +6960,6 @@ fn gpu_glass_supported(doc: &Document, node: &Node, view: &View, glass: &Glass) 
         || (node.effects.iter().filter(|effect| effect.visible).count() != 1
             && !gpu_glass_stack_supported(doc, node)
             && !gpu_glass_shadow_supported(doc, node))
-        || node.opacity < 0.999
         || (node.blend != BlendMode::Normal && !(gpu_glass_stack_supported(doc, node) && gpu_node_blend(node).is_some()))
         || draw::node_outline(doc, node).is_none()
     {
@@ -6901,19 +7076,8 @@ fn has_matching_effects_excluding_in_view(
                                 !cached_noise
                                     || !(gpu_texture_view_supported(doc, node, view, texture) || gpu_stacked_blur_texture_supported(doc, node))
                             }
-                            EffectKind::Glass(glass) => {
-                                !gpu_backdrop
-                                    || !gpu_glass_supported(doc, node, view, glass)
-                                    || doc.page_of(node.id).is_none_or(|page| {
-                                        backdrop_requires_cpu(doc, node.id, page) && !isolated_group_backdrop_supported(doc, node.id, page, view)
-                                    })
-                            }
-                            EffectKind::BackgroundBlur(_) => {
-                                !gpu_backdrop
-                                    || doc.page_of(node.id).is_none_or(|page| {
-                                        backdrop_requires_cpu(doc, node.id, page) && !isolated_group_backdrop_supported(doc, node.id, page, view)
-                                    })
-                            }
+                            EffectKind::Glass(glass) => !gpu_backdrop || !gpu_glass_supported(doc, node, view, glass),
+                            EffectKind::BackgroundBlur(_) => !gpu_backdrop,
                             EffectKind::LayerBlur(blur) => {
                                 blur.is_progressive() && (!cached_noise || !gpu_progressive_layer_blur_supported(doc, node, blur))
                             }
@@ -8413,18 +8577,16 @@ impl GpuCanvas {
         if let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
         {
-            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options);
+            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options, None, true);
             self.release_temporary_textures();
             return result;
         }
-        if matching.iter().any(|(_, _, _, requires_cpu)| *requires_cpu) {
-            if !outlined.is_empty() {
-                return Err("selected outline contains an unsupported backdrop".into());
-            }
-            let tile = render_view(doc, page, view, &Options { lod: true, ..Default::default() }).ok_or("CPU effect fallback failed")?;
-            self.upload_premul(tile.data())?;
+        if matching.iter().any(|(_, _, _, requires_cpu)| *requires_cpu)
+            && let Some(groups) = independent_backdrop_groups(doc, page, view, index)
+        {
+            let result = self.render_independent_group_backdrops(doc, page, view, clear, &groups, outlined, options);
             self.release_temporary_textures();
-            return Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()));
+            return result;
         }
         if outlined.is_empty() && std::env::var_os("LIZARD_GPU_SEGMENT").is_some() && !has_custom_backdrop && !candidates.is_empty() {
             let result = self.render_segmented_backdrops(doc, page, view, clear, &candidates);
@@ -8689,6 +8851,90 @@ impl GpuCanvas {
         Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()))
     }
 
+    fn render_texture_as_base(&mut self, texture: &wgpu::Texture, view: &View) -> Result<(), Box<dyn Error>> {
+        let id = self.register_external_texture(texture.clone());
+        let mut scene = Scene::new(view.width as u16, view.height as u16);
+        scene.set_transform(Affine::IDENTITY);
+        scene.set_paint(Image {
+            image: ImageSource::external_texture(id, RectU16::new(0, 0, view.width as u16, view.height as u16), true),
+            sampler: peniko::ImageSampler::default(),
+        });
+        scene.fill_rect(&Rect::new(0.0, 0.0, f64::from(view.width), f64::from(view.height)));
+        self.render_submit_with_clear_rgba(&scene, [0.0; 4])?;
+        Ok(())
+    }
+
+    fn render_root_segment(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        roots: &[NodeId],
+        range: std::ops::Range<usize>,
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Result<(), Box<dyn Error>> {
+        if range.is_empty() {
+            return Ok(());
+        }
+        let mut segment = doc.clone();
+        for (index, id) in roots.iter().enumerate() {
+            if !range.contains(&index)
+                && let Some(node) = segment.node_mut(*id)
+            {
+                node.visible = false;
+            }
+        }
+        let scene = self.make_scene_document_with_backdrops_and_outlines(&segment, page, view, None, outlined, options);
+        self.render_with_load(&scene)?;
+        Ok(())
+    }
+
+    fn render_independent_group_backdrops(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        clear: [f32; 4],
+        groups: &[BackdropGroupBatch],
+        outlined: &[NodeId],
+        options: figcraft_render::Outline,
+    ) -> Result<(f64, usize), Box<dyn Error>> {
+        let started = Instant::now();
+        let roots = doc.node(page).map(|node| node.children.clone()).ok_or("page missing")?;
+        let mut previous: Option<wgpu::Texture> = None;
+        let mut last_index = None;
+        let mut count = 0;
+        for (group, opacity, candidates) in groups {
+            let index = roots.iter().position(|id| id == group).ok_or("backdrop group missing from page")?;
+            if let (Some(last), Some(prior)) = (last_index, previous.as_ref()) {
+                self.render_texture_as_base(prior, view)?;
+                self.render_root_segment(doc, page, view, &roots, last + 1..index, outlined, options)?;
+                previous = Some(self.snapshot_submit());
+            }
+            let (_, rendered) = self.render_isolated_group_backdrop(
+                doc,
+                page,
+                view,
+                clear,
+                candidates,
+                *group,
+                *opacity,
+                outlined,
+                options,
+                previous.as_ref(),
+                false,
+            )?;
+            count += rendered;
+            previous = Some(self.snapshot_submit());
+            last_index = Some(index);
+        }
+        if let Some(last) = last_index {
+            self.render_root_segment(doc, page, view, &roots, last + 1..roots.len(), outlined, options)?;
+        }
+        Ok((started.elapsed().as_secs_f64() * 1000.0, count))
+    }
+
     fn render_isolated_group_backdrop(
         &mut self,
         doc: &Document,
@@ -8700,15 +8946,21 @@ impl GpuCanvas {
         opacity: f32,
         outlined: &[NodeId],
         options: figcraft_render::Outline,
+        previous: Option<&wgpu::Texture>,
+        render_suffix: bool,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
         let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing")?;
 
-        let mut base_doc = doc.clone();
-        figcraft_render::backdrop::hide_above(&mut base_doc, group, roots);
-        let base_scene = self.make_scene_document_with_backdrops_and_outlines(&base_doc, page, view, None, outlined, options);
-        self.render_submit_with_clear_rgba(&base_scene, clear)?;
-        let base = self.snapshot_submit();
+        let base = if let Some(previous) = previous {
+            previous.clone()
+        } else {
+            let mut base_doc = doc.clone();
+            figcraft_render::backdrop::hide_above(&mut base_doc, group, roots);
+            let base_scene = self.make_scene_document_with_backdrops_and_outlines(&base_doc, page, view, None, outlined, options);
+            self.render_submit_with_clear_rgba(&base_scene, clear)?;
+            self.snapshot_submit()
+        };
 
         let scale = std::env::var("LIZARD_GPU_BLUR_SCALE").ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(4).clamp(1, 4);
         let mut backdrops = HashMap::new();
@@ -8716,8 +8968,16 @@ impl GpuCanvas {
         for &(id, radius) in candidates {
             let mut prefix_doc = doc.clone();
             figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
+            if previous.is_some() {
+                hide_below(doc, &mut prefix_doc, group, page);
+            }
             let prefix_scene = self.make_scene_document_with_backdrops_and_outlines(&prefix_doc, page, view, Some(&backdrops), outlined, options);
-            self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
+            if let Some(previous) = previous {
+                self.render_texture_as_base(previous, view)?;
+                self.render_with_load(&prefix_scene)?;
+            } else {
+                self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
+            }
             let source = self.snapshot_submit();
             let glass = doc.node(id).and_then(|node| {
                 node.effects.iter().find_map(|effect| match &effect.kind {
@@ -8822,6 +9082,13 @@ impl GpuCanvas {
             blend.fill_rect(&Rect::new(0.0, 0.0, f64::from(view.width), f64::from(view.height)));
         }
         self.render_submit_with_clear_rgba(&blend, clear)?;
+
+        if !render_suffix {
+            for id in composited_glass_layers {
+                self.layer_blurs.remove(&id);
+            }
+            return Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()));
+        }
 
         let mut after_doc = doc.clone();
         hide_below(doc, &mut after_doc, group, page);

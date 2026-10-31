@@ -17,8 +17,6 @@ pub fn ts_blend(b: BlendMode) -> tiny_skia::BlendMode {
         BlendMode::PassThrough | BlendMode::Normal => T::SourceOver,
         BlendMode::Darken => T::Darken,
         BlendMode::Multiply => T::Multiply,
-        // Plus darker has no tiny-skia mode: `composite` draws it; elsewhere the nearest one.
-        BlendMode::PlusDarker => T::Multiply,
         BlendMode::ColorBurn => T::ColorBurn,
         BlendMode::Lighten => T::Lighten,
         BlendMode::Screen => T::Screen,
@@ -38,12 +36,8 @@ pub fn ts_blend(b: BlendMode) -> tiny_skia::BlendMode {
 
 /// Draw `src` (top-left at `at`) onto `dst` at `opacity`, blended by `blend`.
 pub fn composite(dst: &mut Pixmap, at: (i32, i32), src: &Pixmap, opacity: f32, blend: BlendMode) {
-    if blend == BlendMode::PlusDarker {
-        crate::fx::plus_darker(dst, at, src, opacity);
-    } else {
-        let paint = tiny_skia::PixmapPaint { opacity, blend_mode: ts_blend(blend), ..Default::default() };
-        dst.draw_pixmap(at.0, at.1, src.as_ref(), &paint, Transform::identity(), None);
-    }
+    let paint = tiny_skia::PixmapPaint { opacity, blend_mode: ts_blend(blend), ..Default::default() };
+    dst.draw_pixmap(at.0, at.1, src.as_ref(), &paint, Transform::identity(), None);
 }
 
 fn stops(g: &Gradient, opacity: f32) -> Vec<GradientStop> {

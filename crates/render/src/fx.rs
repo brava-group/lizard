@@ -346,9 +346,7 @@ pub fn mask_by(p: &mut Pixmap, m: &Pixmap, invert: bool) {
     }
 }
 
-/// Call `f(dst_row, src_row, row, first_col)` for each row where `src`, with its top-left at `at`
-/// on `dst`, overlaps it (premultiplied RGBA bytes of the overlapping columns; `row` and
-/// `first_col` in `src`'s pixels). Nothing past either edge is visited.
+/// Visit overlapping rows of premultiplied RGBA pixmaps.
 pub(crate) fn overlap_rows(dst: &mut Pixmap, at: (i32, i32), src: &Pixmap, mut f: impl FnMut(&mut [u8], &[u8], i64, i64)) {
     let (dw, dh) = (i64::from(dst.width()), i64::from(dst.height()));
     let (sw, sh) = (i64::from(src.width()), i64::from(src.height()));
@@ -367,29 +365,6 @@ pub(crate) fn overlap_rows(dst: &mut Pixmap, at: (i32, i32), src: &Pixmap, mut f
             f(dp, sp, r, c0);
         }
     }
-}
-
-/// Composite `src` at `opacity` onto `dst` (top-left at `at`) with plus-darker (linear burn:
-/// `max(0, backdrop + source - 1)`, through the W3C general compositing formula), which
-/// tiny-skia lacks.
-pub fn plus_darker(dst: &mut Pixmap, at: (i32, i32), src: &Pixmap, opacity: f32) {
-    let o = if opacity.is_finite() { opacity.clamp(0.0, 1.0) } else { 0.0 };
-    overlap_rows(dst, at, src, |dp, sp, _, _| {
-        for (d, s) in dp.chunks_exact_mut(4).zip(sp.chunks_exact(4)) {
-            let f = |v: u8| f32::from(v) / 255.0;
-            let sa = f(s[3]) * o;
-            if sa <= 0.0 {
-                continue;
-            }
-            let da = f(d[3]);
-            for c in 0..3 {
-                let (sc, dc) = (f(s[c]) * o, f(d[c]));
-                let v = sc * (1.0 - da) + dc * (1.0 - sa) + (sa * dc + da * sc - sa * da).max(0.0);
-                d[c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            }
-            d[3] = ((sa + da - sa * da).clamp(0.0, 1.0) * 255.0).round() as u8;
-        }
-    });
 }
 
 #[cfg(test)]

@@ -124,19 +124,6 @@ fn fill_with(pix: &mut Pixmap, path: &tiny_skia::Path, paints: &[Paint], w: f64,
     for p in paints {
         let Some(prep) = prepare_at(p, w, h, scale, ctx.doc, ctx.time) else { continue };
         let paint = tiny_skia::Paint { shader: prep.shader(), anti_alias: true, blend_mode: ts_blend(p.blend), ..Default::default() };
-        if p.blend == BlendMode::PlusDarker {
-            // No tiny-skia mode: the paint alone over its pixels, then blended in.
-            let area = path
-                .bounds()
-                .transform(ts_transform(xf))
-                .and_then(|b| int_rect(Rect::new(b.left().into(), b.top().into(), b.right().into(), b.bottom().into()), (pix.width(), pix.height())));
-            let Some(mut alone) = area.and_then(|r| Pixmap::new(r.width(), r.height())) else { continue };
-            let Some(r) = area else { continue };
-            let t = ts_transform(Affine::translate((-f64::from(r.x()), -f64::from(r.y()))) * xf);
-            alone.fill_path(path, &tiny_skia::Paint { blend_mode: tiny_skia::BlendMode::SourceOver, ..paint }, rule, t, None);
-            crate::paint::composite(pix, (r.x(), r.y()), &alone, 1.0, p.blend);
-            continue;
-        }
         pix.fill_path(path, &paint, rule, ts_transform(xf), mask);
     }
 }

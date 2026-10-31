@@ -197,12 +197,12 @@ Or in a project's `.mcp.json`:
   the engine reads them as its paint JSON, so `run_command`, `figcraft-cli run` and the control
   channel take them too. Effects passed through the MCP tools may use hex `color` strings as well.
 - **Blend modes**: `blend` on a layer (`node.set`) or a paint (`fill.set` / `stroke.set`) is a
-  menu label or CSS keyword (`"Normal"`, `"pass through"`, `"multiply"`, `"plusDarker"`, ...;
+  menu label or CSS keyword (`"Normal"`, `"pass through"`, `"multiply"`, ...;
   `normal` is Normal). Groups and frames start as pass-through: their children blend with what is
   behind them, through clipping too (SVG exports put a clipping frame's clip on what it holds, since
   a clipped group would isolate it); Normal blends the children among themselves first (SVG
-  `isolation:isolate`, a PDF isolated group). Plus darker is exact in renders and pixel exports;
-  PDF has no such mode (multiply) and SVG writes the CSS `plus-darker` keyword. Inspecting a layer
+  `isolation:isolate`, a PDF isolated group). Older files using `plusDarker` load as Multiply.
+  Inspecting a layer
   reports a paint's `blend` when it isn't normal.
 - **Drop shadows** hide behind what their layer covers, its fills (translucent and 0% ones too)
   and strokes, unless the effect has `showBehind: true`; groups, and layers whose pixels a layer

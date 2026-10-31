@@ -148,7 +148,7 @@ fn paint_opacity_and_layer_opacity_differ() {
 // ---- blend modes ----
 
 /// The separable and non-separable blend functions of the W3C compositing spec (which the
-/// documented blend modes are), plus plus-darker / plus-lighter (linear burn / dodge), for
+/// documented blend modes are), plus plus-lighter (linear dodge), for
 /// opaque colours in 0..1.
 fn blend_ref(mode: BlendMode, cb: [f64; 3], cs: [f64; 3]) -> [f64; 3] {
     let sep = |f: &dyn Fn(f64, f64) -> f64| [f(cb[0], cs[0]), f(cb[1], cs[1]), f(cb[2], cs[2])];
@@ -211,7 +211,6 @@ fn blend_ref(mode: BlendMode, cb: [f64; 3], cs: [f64; 3]) -> [f64; 3] {
         }),
         BlendMode::Difference => sep(&|b, s| (b - s).abs()),
         BlendMode::Exclusion => sep(&|b, s| b + s - 2.0 * b * s),
-        BlendMode::PlusDarker => sep(&|b, s| (b + s - 1.0).max(0.0)),
         BlendMode::PlusLighter => sep(&|b, s| (b + s).min(1.0)),
         BlendMode::Hue => set_lum(set_sat(cs, sat(cb)), lum(cb)),
         BlendMode::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),

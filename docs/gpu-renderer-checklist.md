@@ -239,7 +239,7 @@ the migration concerns rasterization and pixel effects.
     Visual inspection found the glass content intact with a modest tint difference, so Color
     uses a separate visual gate. A top-level Glass/Noise/Blur fixture matched the CPU at
     every pixel for all 16 modes.
-  - [ ] Implement Plus Darker and blends combined with effect stacks.
+  - [x] Remove Plus Darker from the editor and keep legacy files readable by mapping its stored value to Multiply.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Keep an alpha mask around a nested luminance mask on GPU, including a rotated parent
     group. Full-frame CPU comparisons at 1× and 2× found only 3 and 6 changed pixels.
@@ -394,6 +394,12 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-31: removed Plus Darker from the blend enum, menus, import mapping, and CPU/GPU
+  dispatch. Legacy documents with `plusDarker` deserialize as Multiply. Large Glass regions now
+  render in GPU tiles after one shared frost pass; isolated translucent, clipped, and masked
+  backdrops, plus independent backdrop groups, use ordered GPU composition. Isolated smoke tests
+  passed; the full visual/export/CI gate remains open.
 
 - 2026-10-31: A manual 3440 × 1440 glass-pane probe temporarily raised the GPU glass ROI
   cap from 2 million to 6 million pixels. The actual 3108 × 1308 region rendered on GPU,

@@ -76,7 +76,7 @@ pub(crate) fn blend_mode(s: &str) -> Option<BlendMode> {
         "NORMAL" => BlendMode::Normal,
         "DARKEN" => BlendMode::Darken,
         "MULTIPLY" => BlendMode::Multiply,
-        "LINEAR_BURN" => BlendMode::PlusDarker,
+        "LINEAR_BURN" => BlendMode::Multiply,
         "COLOR_BURN" => BlendMode::ColorBurn,
         "LIGHTEN" => BlendMode::Lighten,
         "SCREEN" => BlendMode::Screen,

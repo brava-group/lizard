@@ -89,8 +89,7 @@ pub(crate) fn blend(b: BlendMode) -> Option<krilla::blend::BlendMode> {
         BlendMode::PassThrough | BlendMode::Normal => return None,
         BlendMode::Darken => K::Darken,
         BlendMode::Multiply => K::Multiply,
-        // PDF has no plus-darker/plus-lighter: the nearest separable modes.
-        BlendMode::PlusDarker => K::Multiply,
+        // PDF has no plus-lighter: use the nearest separable mode.
         BlendMode::ColorBurn => K::ColorBurn,
         BlendMode::Lighten => K::Lighten,
         BlendMode::Screen => K::Screen,

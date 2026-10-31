@@ -85,7 +85,6 @@ const DATA_LABELS: &[&str] = &[
     "Pass through",
     "Phone",
     "Pinch",
-    "Plus darker",
     "Plus lighter",
     "Polygons",
     "Presentation",

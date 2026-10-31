@@ -1519,7 +1519,11 @@ mod tests {
         let outside = doc.create(page, NodeKind::Rectangle, "Outside selection", 0.0, 0.0, 100.0, 100.0)?;
         let node = doc.node_mut(outside).ok_or("outside missing")?;
         node.fills = vec![Paint::solid(Color::new(1.0, 0.0, 0.0, 1.0))];
-        node.blend = BlendMode::PlusDarker;
+        let mut unsupported = Effect::drop_shadow();
+        if let EffectKind::DropShadow(shadow) = &mut unsupported.kind {
+            shadow.blend = BlendMode::PassThrough;
+        }
+        node.effects = vec![unsupported];
         let dark = doc.create(page, NodeKind::Rectangle, "Selected backdrop", 0.0, 0.0, 50.0, 100.0)?;
         doc.node_mut(dark).ok_or("dark missing")?.fills = vec![Paint::solid(Color::BLACK)];
         let pane = doc.create(page, NodeKind::Rectangle, "Selected blur", 20.0, 20.0, 60.0, 60.0)?;
@@ -1637,7 +1641,7 @@ mod tests {
         doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing")?.blend = blend;
@@ -1666,7 +1670,7 @@ mod tests {
         doc.node_mut(top).ok_or("top missing")?.fills = vec![Paint::solid(Color::new(0.8, 0.4, 0.2, 1.0))];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing")?.fills[0].blend = blend;
@@ -1699,8 +1703,7 @@ mod tests {
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for opacity in [1.0, 0.65] {
             for blend in figcraft_color::BlendMode::ALL {
-                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker)
-                {
+                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
                     continue;
                 }
                 let node = doc.node_mut(top).ok_or("top missing for blend")?;
@@ -1757,8 +1760,7 @@ mod tests {
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for opacity in [1.0, 0.65] {
             for blend in figcraft_color::BlendMode::ALL {
-                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker)
-                {
+                if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
                     continue;
                 }
                 let node = doc.node_mut(group).ok_or("group missing")?;
@@ -1794,7 +1796,7 @@ mod tests {
         node.effects = vec![Effect { kind: EffectKind::DropShadow(Shadow { radius: 4.0, offset: (5.0, 0.0), ..Shadow::default() }), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 80, height: 80 };
         for blend in figcraft_color::BlendMode::ALL {
-            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal | figcraft_color::BlendMode::PlusDarker) {
+            if matches!(blend, figcraft_color::BlendMode::PassThrough | figcraft_color::BlendMode::Normal) {
                 continue;
             }
             doc.node_mut(top).ok_or("top missing for blend")?.blend = blend;
