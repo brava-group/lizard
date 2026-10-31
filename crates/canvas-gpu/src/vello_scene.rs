@@ -1418,6 +1418,67 @@ mod effect_capability_tests {
     }
 
     #[test]
+    fn partially_opaque_blended_blur_noise_cache_keeps_alpha() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("GPU partial-opacity cached blend");
+        let page = doc.current_page.ok_or("page missing")?;
+        let back = doc.create(page, NodeKind::Rectangle, "Backdrop", 0.0, 0.0, 260.0, 220.0)?;
+        doc.node_mut(back).ok_or("back missing")?.fills = vec![Paint::solid(Color::new(0.25, 0.65, 0.8, 1.0))];
+        let id = doc.create(page, NodeKind::Rectangle, "Blended", 0.0, 0.0, 120.0, 96.0)?;
+        let node = doc.node_mut(id).ok_or("shape missing")?;
+        node.transform = Affine::translate((85.0, 65.0)) * Affine::rotate(0.35);
+        node.fills = vec![Paint::solid(Color::new(0.9, 0.35, 0.2, 1.0))];
+        let mut failures = Vec::new();
+        for blend in [BlendMode::Multiply, BlendMode::Screen] {
+            for opacity in [0.25, 0.5, 0.75] {
+                for blur_first in [true, false] {
+                    let node = doc.node_mut(id).ok_or("shape missing")?;
+                    node.blend = blend;
+                    node.opacity = opacity;
+                    let blur = figcraft_doc::Effect { kind: EffectKind::LayerBlur(Blur::uniform(6.0)), visible: true };
+                    let noise = figcraft_doc::Effect { kind: EffectKind::Noise(Noise::default()), visible: true };
+                    node.effects = if blur_first { vec![blur, noise] } else { vec![noise, blur] };
+                    for scale in [1.0, 2.0] {
+                        let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (220.0 * scale) as u32 };
+                        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{blend:?} opacity={opacity} capability");
+                        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                        assert_eq!(gpu.prepare_static_effects(&doc)?.0, 1);
+                        gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                        let actual = gpu.pixels()?;
+                        if let Ok(prefix) = std::env::var("LIZARD_GPU_PARTIAL_BLEND_SCREENSHOT")
+                            && blend == BlendMode::Screen
+                            && (opacity - 0.5).abs() < 1e-6
+                            && blur_first
+                            && scale == 2.0
+                        {
+                            image::save_buffer(format!("{prefix}-gpu.png"), &actual, view.width, view.height, image::ColorType::Rgba8)?;
+                            image::save_buffer(format!("{prefix}-cpu.png"), reference.data(), view.width, view.height, image::ColorType::Rgba8)?;
+                        }
+                        let changed = actual
+                            .chunks_exact(4)
+                            .zip(reference.data().chunks_exact(4))
+                            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                            .count();
+                        let severe = actual
+                            .chunks_exact(4)
+                            .zip(reference.data().chunks_exact(4))
+                            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                            .count();
+                        println!("{blend:?} opacity={opacity} blur_first={blur_first} {scale}x: changed={changed} severe={severe}");
+                        if changed * 100 >= view.width as usize * view.height as usize * 10
+                            || severe * 100 >= view.width as usize * view.height as usize
+                        {
+                            failures.push(format!("{blend:?} opacity={opacity} blur_first={blur_first} {scale}x changed={changed} severe={severe}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+        Ok(())
+    }
+
+    #[test]
     fn group_blur_noise_stack_matches_reference() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("GPU group effect graph");
         let page = doc.current_page.ok_or("new document has no page")?;
@@ -3549,7 +3610,7 @@ fn gpu_simple_node_blend_supported(node: &Node) -> bool {
 fn gpu_cached_node_blend_supported(node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
     node.children.is_empty()
-        && node.opacity >= 0.999
+        && (node.opacity >= 0.999 || matches!(node.blend, BlendMode::Multiply | BlendMode::Screen) && (0.0..=1.0).contains(&node.opacity))
         && matches!(
             node.blend,
             BlendMode::Darken
@@ -4533,7 +4594,7 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
         && (node.children.is_empty()
             || matches!(node.kind, NodeKind::Group)
                 && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_simple_group_child_supported(doc, child, 0))))
-        && node.opacity >= 0.999
+        && (node.opacity >= 0.999 || gpu_cached_node_blend_supported(node))
         && (node.blend == BlendMode::Normal
             || matches!(node.kind, NodeKind::Group) && node.blend == BlendMode::PassThrough
             || gpu_cached_node_blend_supported(node))

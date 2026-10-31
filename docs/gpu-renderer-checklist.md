@@ -119,6 +119,8 @@ the migration concerns rasterization and pixel effects.
     Exclusion, Hue, Saturation, Color, and Luminosity. The cached source is rendered without its
     node blend, then blended over the page. Lighten, Color Dodge, Hard Light, and Difference remain
     guarded for this effect stack after a pixel probe found larger differences.
+  - [x] Keep Multiply and Screen with partial node opacity on GPU for both orders of one Layer
+    Blur and one Noise effect on rotated leaves; tested 25%, 50%, and 75% opacity at 1× and 2×.
   - [ ] Implement Plus Darker and blends combined with effect stacks.
 - [ ] Support alpha and luminance masks, nested masks, clipped groups, and their effect stacks.
   - [x] Compose translucent luminance gradient masks with the GPU destination-in pass;
@@ -200,6 +202,13 @@ the migration concerns rasterization and pixel effects.
   zoom, edit, and export before treating this checklist as complete.
 
 ## Evidence log
+
+- 2026-10-30: partial-opacity Multiply and Screen on rotated leaves with cached Blur/Noise
+  passed 24 isolated GPU/reference comparisons at 1× and 2×. The largest difference above
+  8/255 was 21,383/228,800 pixels (Screen at 50% opacity with Blur before Noise, 2×); no
+  pixel differed above 48/255. I inspected both rendered images: the rotated contour,
+  transparency, blur, and noise remain present. Other cached blend modes and partial-opacity
+  shadow stacks remain guarded.
 
 - 2026-10-30: native and browser selected-outline capability checks now exclude only the roots
   replaced by outlines and their descendants. A selected group containing a Plus Darker child
