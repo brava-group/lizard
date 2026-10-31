@@ -17,6 +17,7 @@
 //! nested clip paths) is left out and reported in the import notes. Linked files are never read: only data URIs.
 
 mod budget;
+mod css_color;
 mod fx;
 mod paint;
 mod shape;
@@ -24,6 +25,8 @@ mod text;
 
 #[cfg(test)]
 mod budget_tests;
+#[cfg(test)]
+mod css_color_tests;
 #[cfg(test)]
 mod fx_tests;
 #[cfg(test)]
@@ -654,6 +657,11 @@ fn import_within(
     if nesting(&data, MAX_NESTING) > MAX_NESTING {
         return Err(ImportError(format!("elements nested more than {MAX_NESTING} deep")));
     }
+    // Resolve CSS Color 4/5 functions before usvg parses fills and strokes.
+    let (data, color_notes) = match css_color::resolve(&data, doc.color_profile) {
+        Some(resolved) => resolved,
+        None => (data, Vec::new()),
+    };
     let tree = usvg::Tree::from_data(&data, &options(&data, limits)).map_err(|e| ImportError(e.to_string()))?;
     let size = tree.size();
     let frame =
@@ -662,6 +670,9 @@ fn import_within(
         f.fills.clear();
     }
     let mut cx = Ctx::new(doc);
+    for note in color_notes {
+        cx.note(note);
+    }
     children(&mut cx, tree.root(), frame, Affine::IDENTITY, 0);
     Ok(Imported { frame, notes: cx.notes.into_iter().collect() })
 }
