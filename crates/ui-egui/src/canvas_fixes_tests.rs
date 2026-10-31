@@ -118,6 +118,19 @@ fn open_vector_hover_and_selection_show_the_path_and_selection_box() {
     assert!(outlined(&shapes, box_corners), "selection draws all four sides of the vector's box");
 }
 
+#[test]
+fn selected_curved_and_polygonal_shapes_show_their_transform_box() {
+    for kind in ["shape.ellipse", "shape.polygon", "shape.star"] {
+        let mut session = Session::new();
+        let shape = id(&session.execute(kind, &json!({"x": 80, "y": 80, "width": 120, "height": 100})).unwrap());
+        session.execute("select.set", &json!({"ids": [shape]})).unwrap();
+        let mut ui = Ui::new(session);
+        let shapes = flat(&ui.frame_output(vec![]).shapes);
+        let corners = crate::canvas::node_quad(&ui.app, ui.app.session.doc().unwrap(), shape).unwrap();
+        assert!(outlined(&shapes, corners), "{kind} needs a visible four-sided selection box");
+    }
+}
+
 /// A job a few hundred milliseconds of rendering big.
 fn big_job(doc: &Arc<figcraft_doc::Document>, page: figcraft_doc::NodeId, scale: f64) -> crate::render_worker::Job {
     crate::render_worker::Job {

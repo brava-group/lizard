@@ -2216,13 +2216,15 @@ fn outline_colour(doc: &Document, id: NodeId, green: Color32) -> Color32 {
     if set || owning_component(doc, id).is_some() || owning_instance(doc, id).is_some() { COMPONENT } else { green }
 }
 
+/// Shapes whose visible outline differs from their rectangular transform box.
+fn has_path_outline(kind: &NodeKind) -> bool {
+    matches!(kind, NodeKind::Ellipse { .. } | NodeKind::Vector { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::BooleanOp { .. })
+}
+
 /// The outline path of shapes (ellipses, vectors) for hover/selection outlines.
 fn outline_shape(app: &FigApp, doc: &Document, id: NodeId) -> Option<Vec<Vec<Pos2>>> {
     let n = doc.node(id)?;
-    if !matches!(
-        n.kind,
-        NodeKind::Ellipse { .. } | NodeKind::Vector { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::BooleanOp { .. }
-    ) {
+    if !has_path_outline(&n.kind) {
         return None;
     }
     // A vector's fill path contains only closed regions. Open pen and pencil strokes must
@@ -2458,13 +2460,13 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
             } else {
                 4
             };
-            let is_vector = sel.len() == 1 && sel.first().and_then(|id| doc.node(*id)).is_some_and(|n| matches!(n.kind, NodeKind::Vector { .. }));
+            let has_shape_outline = sel.len() == 1 && sel.first().and_then(|id| doc.node(*id)).is_some_and(|n| has_path_outline(&n.kind));
             size_label = transform_box(
                 app,
                 painter,
                 b.map(|p| app.to_screen(p.x, p.y)),
                 col,
-                sel.len() > 1 || is_vector,
+                sel.len() > 1 || has_shape_outline,
                 handles,
                 (!measuring).then_some(label),
             );
