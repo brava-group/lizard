@@ -107,6 +107,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Render two ordered Glass panes inside the same rotated, rounded, clipped translucent
     group. The second pane samples the first pane's Glass → Noise → Layer Blur result on GPU;
     the full-frame comparison passed the 5% visual gate.
+  - [x] Composite a partially transparent painted Glass pane before its Noise → Layer Blur
+    passes inside the same group. The following Glass pane samples that result on GPU, and
+    the full-frame comparison passed the 5% visual gate.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

@@ -3939,6 +3939,19 @@ mod effect_capability_tests {
             .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
             .count();
         assert!(changed < (view.width * view.height / 20) as usize, "two ordered glass panes: {changed} changed pixels");
+        doc.node_mut(pane).ok_or("pane missing")?.fills = vec![Paint::solid(Color::new(0.9, 0.8, 1.0, 0.35))];
+        let index = BackdropIndex::new(&doc, page);
+        assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "painted glass stack rejected");
+        let reference = render_view(&doc, page, &view, &Options::default()).ok_or("painted glass stack reference failed")?;
+        let mut gpu = GpuCanvas::new(view.width, view.height)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+        let actual = gpu.pixels()?;
+        let changed = actual
+            .chunks_exact(4)
+            .zip(reference.data().chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+            .count();
+        assert!(changed < (view.width * view.height / 20) as usize, "painted glass stack: {changed} changed pixels");
         Ok(())
     }
 
@@ -4406,7 +4419,6 @@ fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, v
                             && matches!(&glass.kind, EffectKind::Glass(effect) if gpu_glass_supported(doc, node, view, effect))
                             && gpu_glass_stack_supported(doc, node)
                             && extras.iter().all(|effect| matches!(&effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-                            && node.fills.iter().all(|paint| !paint.visible)
                     })
                 })
         })
@@ -8121,6 +8133,7 @@ impl GpuCanvas {
 
         let scale = std::env::var("LIZARD_GPU_BLUR_SCALE").ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(4).clamp(1, 4);
         let mut backdrops = HashMap::new();
+        let mut composited_glass_layers = Vec::new();
         for &(id, radius) in candidates {
             let mut prefix_doc = doc.clone();
             figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
@@ -8146,6 +8159,14 @@ impl GpuCanvas {
                 let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                 let glass_pass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
                 let mut result = glass_pass.submit(&self.device, &self.queue, blur, &cropped, &mask, effect, view.scale);
+                let composited = doc.node(id).is_some_and(|node| {
+                    gpu_glass_stack_supported(doc, node)
+                        && node.fills.iter().any(|paint| paint.visible)
+                        && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+                });
+                if composited {
+                    result = self.compose_glass_content(doc, id, view, region, result)?;
+                }
                 if let Some(node) = doc.node(id) {
                     for layer_effect in node.effects.iter().filter(|effect| effect.visible).skip(1) {
                         match &layer_effect.kind {
@@ -8166,6 +8187,23 @@ impl GpuCanvas {
                             _ => {}
                         }
                     }
+                }
+                if composited {
+                    let texture_id = self.register_external_texture(result.clone());
+                    let (x, y, width, height) = region;
+                    let x0 = view.origin.0 + f64::from(x) / view.scale;
+                    let y0 = view.origin.1 + f64::from(y) / view.scale;
+                    self.layer_blurs.insert(
+                        id,
+                        CachedLayerBlur {
+                            id: texture_id,
+                            width,
+                            height,
+                            bounds: Rect::new(x0, y0, x0 + f64::from(width) / view.scale, y0 + f64::from(height) / view.scale),
+                            placement: Affine::IDENTITY,
+                        },
+                    );
+                    composited_glass_layers.push(id);
                 }
                 (result, Some(region))
             } else if let Some((node, effect)) = progressive {
@@ -8216,7 +8254,11 @@ impl GpuCanvas {
             node.visible = false;
         }
         let after_scene = self.make_scene_document_with_backdrops_and_outlines(&after_doc, page, view, None, outlined, options);
-        self.render_with_load(&after_scene)?;
+        let after_result = self.render_with_load(&after_scene);
+        for id in composited_glass_layers {
+            self.layer_blurs.remove(&id);
+        }
+        after_result?;
         Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()))
     }
 
