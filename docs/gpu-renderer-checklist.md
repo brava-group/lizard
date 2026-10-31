@@ -88,6 +88,7 @@ the migration concerns rasterization and pixel effects.
   - [x] Combine a glass pane followed by a uniform background blur inside the same
     translucent group. The glass mask, cropped prefix, and refraction run on GPU; the
     isolated full-frame comparison stayed below 5% pixels differing by more than 20/255.
+    Six transparent page-export RGBA samples stayed within 20/255 of the CPU reference.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction

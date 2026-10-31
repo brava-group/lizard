@@ -437,6 +437,21 @@ mod tests {
                 assert!(a.abs_diff(b) <= 20, "at ({x},{y}): GPU={actual:?} CPU={expected:?}");
             }
         }
+        doc.node_mut(pane).ok_or("pane missing")?.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU glass group export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU glass group export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU glass sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU glass sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 20, "glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
         Ok(())
     }
 
