@@ -3704,6 +3704,27 @@ mod effect_capability_tests {
                 assert!(changed < (view.width * view.height / 100) as usize, "opacity={opacity} scale={scale}: {changed} changed pixels");
             }
         }
+        let second = doc.create(group, NodeKind::Rectangle, "Second blur pane", 55.0, 30.0, 60.0, 50.0)?;
+        let node = doc.node_mut(second).ok_or("second pane missing")?;
+        node.fills.clear();
+        node.effects = vec![figcraft_doc::Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
+        doc.node_mut(group).ok_or("group missing")?.opacity = 0.5;
+        for scale in [1.0, 2.0] {
+            let view = View { origin: (0.0, 0.0), scale, width: (160.0 * scale) as u32, height: (120.0 * scale) as u32 };
+            let index = BackdropIndex::new(&doc, page);
+            assert_eq!(index.visible_ids(&view), vec![pane, second]);
+            assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true));
+            let reference = render_view(&doc, page, &view, &Options::default()).ok_or("two-pane reference failed")?;
+            let mut gpu = GpuCanvas::new(view.width, view.height)?;
+            gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [245.0 / 255.0; 3], &index)?;
+            let actual = gpu.pixels()?;
+            let changed = actual
+                .chunks_exact(4)
+                .zip(reference.data().chunks_exact(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
+                .count();
+            assert!(changed < (view.width * view.height / 100) as usize, "two panes scale={scale}: {changed} changed pixels");
+        }
         Ok(())
     }
 
@@ -4151,16 +4172,18 @@ fn isolated_group_for_backdrop(doc: &Document, id: NodeId, page: NodeId) -> Opti
 }
 
 fn isolated_group_backdrop_supported(doc: &Document, id: NodeId, page: NodeId, view: &View) -> bool {
-    if isolated_group_for_backdrop(doc, id, page).is_none() {
+    let Some((group, opacity)) = isolated_group_for_backdrop(doc, id, page) else {
         return false;
-    }
-    if doc.node(id).is_none_or(|node| {
-        let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-        !matches!(visible.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
-    }) {
-        return false;
-    }
-    BackdropIndex::new(doc, page).visible_ids(view) == [id]
+    };
+    let visible = BackdropIndex::new(doc, page).visible_ids(view);
+    visible.contains(&id)
+        && visible.iter().all(|candidate| {
+            isolated_group_for_backdrop(doc, *candidate, page) == Some((group, opacity))
+                && doc.node(*candidate).is_some_and(|node| {
+                    let effects = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
+                    matches!(effects.as_slice(), [effect] if matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
+                })
+        })
 }
 
 fn backdrop_clip_rect(doc: &Document, id: NodeId, page: NodeId, view: &View) -> Option<[u32; 4]> {
@@ -7567,10 +7590,10 @@ impl GpuCanvas {
         }
         if outlined.is_empty()
             && !has_custom_backdrop
-            && candidates.len() == 1
             && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
+            && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
         {
-            let result = self.render_isolated_group_backdrop(doc, page, view, clear, candidates[0], group, opacity);
+            let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity);
             self.release_temporary_textures();
             return result;
         }
@@ -7840,12 +7863,11 @@ impl GpuCanvas {
         page: NodeId,
         view: &View,
         clear: [f32; 4],
-        candidate: (NodeId, f64),
+        candidates: &[(NodeId, f64)],
         group: NodeId,
         opacity: f32,
     ) -> Result<(f64, usize), Box<dyn Error>> {
         let started = Instant::now();
-        let (id, radius) = candidate;
         let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing")?;
 
         let mut base_doc = doc.clone();
@@ -7854,18 +7876,21 @@ impl GpuCanvas {
         self.render_submit_with_clear_rgba(&base_scene, clear)?;
         let base = self.snapshot_submit();
 
-        let mut prefix_doc = doc.clone();
-        figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
-        let prefix_scene = make_scene_with_images(&prefix_doc, page, view, Some(&self.image_info));
-        self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
-        let source = self.snapshot_submit();
         let scale = std::env::var("LIZARD_GPU_BLUR_SCALE").ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(4).clamp(1, 4);
-        let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-        let clip = backdrop_clip_rect(doc, id, page, view);
-        let blurred = blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip);
-        let (width, height) = (u16::try_from(blurred.width())?, u16::try_from(blurred.height())?);
-        let blur_id = self.register_external_texture(blurred);
-        let backdrops = HashMap::from([(id, ImageInfo { id: blur_id, width, height, region: None })]);
+        let mut backdrops = HashMap::new();
+        for &(id, radius) in candidates {
+            let mut prefix_doc = doc.clone();
+            figcraft_render::backdrop::hide_above(&mut prefix_doc, id, roots);
+            let prefix_scene = make_scene_with_backdrops(&prefix_doc, page, view, Some(&self.image_info), Some(&backdrops));
+            self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
+            let source = self.snapshot_submit();
+            let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+            let clip = backdrop_clip_rect(doc, id, page, view);
+            let blurred = blur.submit(&self.device, &self.queue, &source, (radius * view.scale / 2.0) as f32, scale, clip);
+            let (width, height) = (u16::try_from(blurred.width())?, u16::try_from(blurred.height())?);
+            let blur_id = self.register_external_texture(blurred);
+            backdrops.insert(id, ImageInfo { id: blur_id, width, height, region: None });
+        }
 
         let mut group_doc = doc.clone();
         hide_below(doc, &mut group_doc, group, page);
@@ -7898,7 +7923,7 @@ impl GpuCanvas {
         }
         let after_scene = make_scene_with_images(&after_doc, page, view, Some(&self.image_info));
         self.render_with_load(&after_scene)?;
-        Ok((started.elapsed().as_secs_f64() * 1000.0, 1))
+        Ok((started.elapsed().as_secs_f64() * 1000.0, candidates.len()))
     }
 
     pub fn register_images(&mut self, doc: &Document) -> Result<usize, Box<dyn Error>> {

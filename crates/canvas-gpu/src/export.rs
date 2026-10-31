@@ -392,6 +392,10 @@ mod tests {
         let node = doc.node_mut(pane).ok_or("pane missing")?;
         node.fills.clear();
         node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(12.0)), visible: true }];
+        let second = doc.create(group, NodeKind::Rectangle, "Second pane", 55.0, 30.0, 60.0, 50.0)?;
+        let node = doc.node_mut(second).ok_or("second pane missing")?;
+        node.fills.clear();
+        node.effects = vec![Effect { kind: EffectKind::BackgroundBlur(Blur::uniform(8.0)), visible: true }];
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU page export unavailable")?;
         let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU page export unavailable")?;
