@@ -563,6 +563,22 @@ mod tests {
                 assert!(a.abs_diff(b) <= 32, "opaque masked glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
             }
         }
+        doc.node_mut(group).ok_or("group missing")?.children.retain(|child| *child != mask);
+        doc.node_mut(mask).ok_or("mask missing")?.visible = false;
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU opaque clipped glass export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU opaque clipped glass export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU opaque clipped glass sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU opaque clipped glass sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 32, "opaque clipped glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
         Ok(())
     }
 

@@ -127,6 +127,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Use the same isolated GPU path for an opaque masked and rotated Glass group. The
     full-frame 1×/2× comparisons differed in 27 and 54 pixels above 20/255, with no severe
     pixels; transparent export RGBA samples stayed within 32/255.
+  - [x] Use that path for an opaque rotated, rounded, clipped Glass group without a mask. The
+    full-frame 1×/2× comparisons differed in 29 and 59 pixels above 20/255, with no severe
+    pixels; transparent export RGBA samples stayed within 32/255.
   - [ ] Replace `render_worker`'s CPU `render_view` path for outline and unsupported previews
     with a GPU scene or explicit GPU-free fallback.
 - [ ] Keep pan, zoom, frame drag, scale, rotate, clone, and creation GPU-resident at interaction
