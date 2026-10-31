@@ -2455,6 +2455,12 @@ mod effect_capability_tests {
             ("texture-blur", vec![texture(), blur()]),
             ("noise-texture", vec![noise(), texture()]),
             ("texture-noise", vec![texture(), noise()]),
+            ("blur-noise-texture", vec![blur(), noise(), texture()]),
+            ("blur-texture-noise", vec![blur(), texture(), noise()]),
+            ("noise-blur-texture", vec![noise(), blur(), texture()]),
+            ("noise-texture-blur", vec![noise(), texture(), blur()]),
+            ("texture-blur-noise", vec![texture(), blur(), noise()]),
+            ("texture-noise-blur", vec![texture(), noise(), blur()]),
         ] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
             for opacity in [1.0, 0.25, 0.5, 0.75] {
@@ -2463,6 +2469,16 @@ mod effect_capability_tests {
                     let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
                     assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected at {scale}x");
                     let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut plain_doc = doc.clone();
+                    plain_doc.node_mut(id).ok_or("plain shape missing")?.effects.clear();
+                    let plain = render_view(&plain_doc, page, &view, &Options::default()).ok_or("plain reference render failed")?;
+                    let effect_pixels = reference
+                        .data()
+                        .chunks_exact(4)
+                        .zip(plain.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 4))
+                        .count();
+                    assert!(effect_pixels > 100, "{name} at {scale}x must visibly change the shape");
                     let mut gpu = GpuCanvas::new(view.width, view.height)?;
                     gpu.prepare_static_effects(&doc)?;
                     assert_eq!(gpu.layer_blurs.len(), 1);
@@ -5298,8 +5314,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
 
 fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-    visible.len() == 2
-        && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_))).count() == 1
+    (2..=4).contains(&visible.len())
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
         && visible.iter().all(|effect| match &effect.kind {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
@@ -5567,14 +5582,13 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
-            || visible_effect_count == 2
+            || (2..=4).contains(&visible_effect_count)
+                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1
                 && node
                     .effects
                     .iter()
-                    .filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
-                    .count()
-                    == 1
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1);
+                    .filter(|effect| effect.visible)
+                    .all(|effect| matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_))));
     let paint_supported = |paint: &Paint| {
         !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
     };

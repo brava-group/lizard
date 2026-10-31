@@ -197,6 +197,9 @@ the migration concerns rasterization and pixel effects.
   - [x] Keep Texture ↔ Noise in both orders on GPU at those four opacities. A document-scale
     1× cache avoids resampling the 2× scatter during zoom; 32 ordered comparisons across
     Blur/Texture and Noise/Texture now differ by at most 40 pixels, with no severe differences.
+  - [x] Compose all six orders of one Layer Blur, one Noise, and one Texture on GPU at 100%,
+    25%, 50%, and 75% opacity. Each effect visibly changes the reference image; all 48
+    comparisons at 1× and 2× matched the CPU pixels within the 8/255 threshold.
 - [ ] Remove shape, spread, stroke, size, zoom, and region-of-interest limits in GPU effect passes
   without exceeding device texture limits; tile large surfaces instead.
 - [ ] Measure visual correctness and latency on the icon, a complex multi-frame document, UltraWide/Retina,
