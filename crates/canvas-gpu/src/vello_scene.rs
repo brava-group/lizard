@@ -2451,28 +2451,31 @@ mod effect_capability_tests {
         };
         for (name, effects) in [("blur-texture", vec![blur(), texture()]), ("texture-blur", vec![texture(), blur()])] {
             doc.node_mut(id).ok_or("shape missing")?.effects = effects;
-            for scale in [1.0, 2.0] {
-                let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
-                assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected at {scale}x");
-                let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
-                let mut gpu = GpuCanvas::new(view.width, view.height)?;
-                gpu.prepare_static_effects(&doc)?;
-                assert_eq!(gpu.layer_blurs.len(), 1);
-                gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
-                let actual = gpu.pixels()?;
-                let changed = actual
-                    .chunks_exact(4)
-                    .zip(reference.data().chunks_exact(4))
-                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
-                    .count();
-                let severe = actual
-                    .chunks_exact(4)
-                    .zip(reference.data().chunks_exact(4))
-                    .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
-                    .count();
-                println!("{name} at {scale}x: changed={changed} severe={severe}");
-                assert!(changed * 100 < view.width as usize * view.height as usize * 10);
-                assert!(severe * 100 < view.width as usize * view.height as usize);
+            for opacity in [1.0, 0.25, 0.5, 0.75] {
+                doc.node_mut(id).ok_or("shape missing")?.opacity = opacity;
+                for scale in [1.0, 2.0] {
+                    let view = View { origin: (0.0, 0.0), scale, width: (260.0 * scale) as u32, height: (240.0 * scale) as u32 };
+                    assert!(!has_unhandled_effects_with_cached_noise_in_view(&doc, &view, true), "{name} rejected at {scale}x");
+                    let reference = render_view(&doc, page, &view, &Options::default()).ok_or("reference render failed")?;
+                    let mut gpu = GpuCanvas::new(view.width, view.height)?;
+                    gpu.prepare_static_effects(&doc)?;
+                    assert_eq!(gpu.layer_blurs.len(), 1);
+                    gpu.render_submit_document(&doc, page, &view, [245.0 / 255.0; 3])?;
+                    let actual = gpu.pixels()?;
+                    let changed = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count();
+                    let severe = actual
+                        .chunks_exact(4)
+                        .zip(reference.data().chunks_exact(4))
+                        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(x, y)| x.abs_diff(*y) > 48))
+                        .count();
+                    println!("{name} opacity={opacity} at {scale}x: changed={changed} severe={severe}");
+                    assert!(changed * 100 < view.width as usize * view.height as usize * 10);
+                    assert!(severe * 100 < view.width as usize * view.height as usize);
+                }
             }
         }
         Ok(())
@@ -5294,7 +5297,7 @@ fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::Texture(texture) => texture.radius.is_finite() && (0.5..=16.0).contains(&texture.radius),
             _ => false,
         })
-        && node.opacity >= 0.999
+        && (0.0..=1.0).contains(&node.opacity)
         && node.blend == BlendMode::Normal
         && matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. })
         && gpu_isolated_grain_supported(doc, node)
@@ -5553,7 +5556,10 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
             || visible_effect_count == 3
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_))).count() == 1
-                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1);
+                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
+            || visible_effect_count == 2
+                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
+                && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1);
     let paint_supported = |paint: &Paint| {
         !paint.visible || (paint.blend == BlendMode::Normal && matches!(&paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_)))
     };
