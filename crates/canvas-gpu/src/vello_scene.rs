@@ -4792,7 +4792,7 @@ fn gpu_pattern_source<'a>(doc: &'a Document, fill: &PatternPaint) -> Option<&'a 
 
 fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> bool {
     if depth > 64
-        || !gpu_styled_text_paints_supported(node)
+        || !gpu_styled_text_paints_supported(doc, node)
         || node.effects.iter().filter(|effect| effect.visible).count() > 3
         || node.effects.iter().any(|effect| {
             effect.visible
@@ -4819,15 +4819,21 @@ fn gpu_pattern_subtree_supported(doc: &Document, node: &Node, depth: usize) -> b
         && node.children.iter().all(|id| doc.node(*id).is_some_and(|child| gpu_pattern_subtree_supported(doc, child, depth + 1)))
 }
 
-fn gpu_styled_text_paints_supported(node: &Node) -> bool {
+fn gpu_styled_text_paints_supported(doc: &Document, node: &Node) -> bool {
     let NodeKind::Text(text) = &node.kind else { return true };
     std::iter::once(&text.style).chain(text.runs.iter().map(|run| &run.style)).all(|style| {
         style.fills.as_ref().is_none_or(|fills| {
             fills.iter().all(|paint| {
-                !paint.visible || paint.blend == BlendMode::Normal && matches!(paint.kind, PaintKind::Solid { .. } | PaintKind::Gradient(_))
+                !paint.visible
+                    || (paint.blend == BlendMode::Normal || gpu_blend_mode(paint.blend).is_some()) && gpu_cached_source_paint_supported(doc, paint)
             })
         })
     })
+}
+
+fn text_style_paints(node: &Node) -> Vec<&Paint> {
+    let NodeKind::Text(text) = &node.kind else { return Vec::new() };
+    std::iter::once(&text.style).chain(text.runs.iter().map(|run| &run.style)).flat_map(|style| style.fills.iter().flatten()).collect()
 }
 
 fn pattern_source_state(doc: &Document, id: NodeId, state: &mut String) {
@@ -6233,7 +6239,7 @@ fn has_unhandled_effects_excluding_in_view(doc: &Document, view: &View, cached_n
                         PaintKind::Solid { .. } => false,
                     })
         };
-        let unsupported = !gpu_styled_text_paints_supported(node)
+        let unsupported = !gpu_styled_text_paints_supported(doc, node)
             || (node.is_mask && node.mask_type == MaskType::Luminance && !gpu_luminance_mask_supported(node))
             || (!matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
                 && !gpu_simple_node_blend_supported(node)
@@ -8615,7 +8621,7 @@ impl GpuCanvas {
                 NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
                 _ => Vec::new(),
             };
-            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints) {
+            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints).chain(text_style_paints(node)) {
                 if let PaintKind::Shader(fill) = &paint.kind {
                     let Some(definition) = doc.shaders.get(&fill.shader_id) else { continue };
                     let key = shader_key(node, fill);
@@ -8711,7 +8717,7 @@ impl GpuCanvas {
                 NodeKind::Vector { network } => network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().collect::<Vec<_>>(),
                 _ => Vec::new(),
             };
-            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints) {
+            for paint in node.fills.iter().chain(&node.strokes).chain(region_paints).chain(text_style_paints(node)) {
                 let PaintKind::Pattern(fill) = &paint.kind else { continue };
                 let Some(source) = gpu_pattern_source(doc, fill) else { continue };
                 let Some(cell) = fill.cell(source.width, source.height, node.width, node.height) else { continue };
