@@ -3727,7 +3727,7 @@ mod effect_capability_tests {
         }
         let view = View { origin: (0.0, 0.0), scale: 1.0, width: 160, height: 120 };
         let index = BackdropIndex::new(&doc, page);
-        for outlined in [vec![above]] {
+        for outlined in [vec![above], vec![dark]] {
             let reference = render_view(&doc, page, &view, &Options { outlined: outlined.clone(), ..Default::default() })
                 .ok_or("outlined two-pane reference failed")?;
             let mut gpu = GpuCanvas::new(view.width, view.height)?;
@@ -3746,21 +3746,9 @@ mod effect_capability_tests {
                 .zip(reference.data().chunks_exact(4))
                 .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 20))
                 .count();
-            assert!(changed < (view.width * view.height / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
+            let limit = if outlined == [dark] { 2 } else { 1 };
+            assert!(changed < (view.width * view.height * limit / 100) as usize, "outlined={outlined:?}: {changed} changed pixels");
         }
-        let mut gpu = GpuCanvas::new(view.width, view.height)?;
-        assert!(
-            gpu.render_with_backdrop_blurs_indexed_outlined(
-                &doc,
-                page,
-                &view,
-                [245.0 / 255.0; 3],
-                &index,
-                &[dark],
-                figcraft_render::Outline::default(),
-            )
-            .is_err()
-        );
         Ok(())
     }
 
@@ -6283,10 +6271,7 @@ fn has_matching_effects_excluding_in_view(
                             EffectKind::BackgroundBlur(_) => {
                                 !gpu_backdrop
                                     || doc.page_of(node.id).is_none_or(|page| {
-                                        backdrop_requires_cpu(doc, node.id, page)
-                                            && (!isolated_group_backdrop_supported(doc, node.id, page, view)
-                                                || isolated_group_for_backdrop(doc, node.id, page)
-                                                    .is_some_and(|(group, _)| excluded.iter().any(|id| *id == group || doc.is_ancestor(group, *id))))
+                                        backdrop_requires_cpu(doc, node.id, page) && !isolated_group_backdrop_supported(doc, node.id, page, view)
                                     })
                             }
                             EffectKind::LayerBlur(blur) => {
@@ -7629,7 +7614,6 @@ impl GpuCanvas {
         if !has_custom_backdrop
             && let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
-            && outlined.iter().all(|id| *id != group && !doc.is_ancestor(group, *id))
         {
             let result = self.render_isolated_group_backdrop(doc, page, view, clear, &candidates, group, opacity, outlined, options);
             self.release_temporary_textures();
