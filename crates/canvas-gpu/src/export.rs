@@ -579,6 +579,30 @@ mod tests {
                 assert!(a.abs_diff(b) <= 32, "opaque clipped glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
             }
         }
+        doc.node_mut(pane).ok_or("pane missing")?.visible = false;
+        doc.node_mut(second).ok_or("second pane missing")?.visible = false;
+        let nested = doc.create(group, NodeKind::Group, "Nested clip", 8.0, 10.0, 100.0, 80.0)?;
+        let nested_node = doc.node_mut(nested).ok_or("nested group missing")?;
+        nested_node.clip = true;
+        nested_node.corners.radii = [8.0; 4];
+        let nested_pane = doc.create(nested, NodeKind::Rectangle, "Nested Glass", 20.0, 12.0, 65.0, 50.0)?;
+        let nested_node = doc.node_mut(nested_pane).ok_or("nested pane missing")?;
+        nested_node.fills.clear();
+        nested_node.effects = vec![Effect { kind: EffectKind::Glass(Glass::default()), visible: true }];
+        let gpu = render_page_gpu(&doc, page, &view).ok_or("GPU nested clipped glass export unavailable")?;
+        let cpu = figcraft_render::render_view(&doc, page, &view, &Default::default()).ok_or("CPU nested clipped glass export unavailable")?;
+        for (x, y) in [(5, 5), (20, 50), (52, 50), (78, 50), (115, 50), (145, 50)] {
+            let actual = gpu.pixel(x, y).ok_or("GPU nested clipped glass sample missing")?;
+            let expected = cpu.pixel(x, y).ok_or("CPU nested clipped glass sample missing")?;
+            for (a, b) in [actual.red(), actual.green(), actual.blue(), actual.alpha()].into_iter().zip([
+                expected.red(),
+                expected.green(),
+                expected.blue(),
+                expected.alpha(),
+            ]) {
+                assert!(a.abs_diff(b) <= 32, "nested clipped glass at ({x},{y}): GPU={actual:?} CPU={expected:?}");
+            }
+        }
         Ok(())
     }
 
