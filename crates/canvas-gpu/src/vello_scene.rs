@@ -2484,6 +2484,9 @@ mod effect_capability_tests {
             ("noise-texture-blur", vec![noise(), texture(), blur()]),
             ("texture-blur-noise", vec![texture(), blur(), noise()]),
             ("texture-noise-blur", vec![texture(), noise(), blur()]),
+            ("blur-noise-texture-shadow-blur", vec![blur(), noise(), texture(), shadow(), blur()]),
+            ("shadow-texture-noise-blur-noise", vec![shadow(), texture(), noise(), blur(), noise()]),
+            ("blur-shadow-noise-texture-blur-noise", vec![blur(), shadow(), noise(), texture(), blur(), noise()]),
         ]
         .into_iter()
         .map(|(name, effects)| (name.to_owned(), effects))
@@ -5364,7 +5367,7 @@ fn gpu_stacked_blur_noise_supported(doc: &Document, node: &Node) -> bool {
 
 fn gpu_stacked_blur_texture_supported(doc: &Document, node: &Node) -> bool {
     let visible = node.effects.iter().filter(|effect| effect.visible).collect::<Vec<_>>();
-    (2..=4).contains(&visible.len())
+    visible.len() >= 2
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::Texture(_))).count() == 1
         && visible.iter().filter(|effect| matches!(effect.kind, EffectKind::DropShadow(_))).count() <= 1
         && visible.iter().all(|effect| match &effect.kind {
@@ -5642,7 +5645,7 @@ fn gpu_isolated_grain_supported(doc: &Document, node: &Node) -> bool {
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Noise(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::DropShadow(_))).count() == 1
-            || (2..=4).contains(&visible_effect_count)
+            || visible_effect_count >= 2
                 && node.effects.iter().filter(|effect| effect.visible && matches!(effect.kind, EffectKind::Texture(_))).count() == 1
                 && node.effects.iter().filter(|effect| effect.visible).all(|effect| {
                     matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_) | EffectKind::Texture(_) | EffectKind::DropShadow(_))
