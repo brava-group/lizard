@@ -390,6 +390,8 @@ fn dimensions(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], 
                 }
             }
         }
+        // Keep the field grid intact; place the trailing action in the same column as section actions.
+        ui.add_space(8.0);
         if is_text {
             let locked = common(doc, sel, |n| n.constrain_proportions).unwrap_or(false);
             let toggle = Button::layout_icon(LayoutIcon::TextAspectRatio, tr("Constrain proportions"))

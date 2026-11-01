@@ -1044,6 +1044,7 @@ fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
             }
             let open = ui.data(|d| d.get_temp::<bool>(Id::new("indep_corners"))).unwrap_or(false);
             if indep_ok {
+                ui.add_space(8.0);
                 let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), Sense::click());
                 let response = response.tip(tr("Individual corners"));
                 crate::a11y::toggle(&response, tr("Individual corners"), open);

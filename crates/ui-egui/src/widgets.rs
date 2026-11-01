@@ -1008,7 +1008,7 @@ pub fn disclosure(ui: &mut Ui, label: &str, open: bool) -> bool {
 
 /// The shared right-aligned action columns of a property section heading.
 pub fn section_action_rect(header: Rect, column: usize) -> Rect {
-    Rect::from_center_size(pos2(header.max.x - PAD - 12.0 - column as f32 * 24.0, header.center().y), vec2(24.0, 24.0))
+    Rect::from_center_size(pos2(header.max.x - 20.0 - column as f32 * 28.0, header.center().y), vec2(24.0, 24.0))
 }
 
 /// A section header ("Fill", "Stroke"…) with optional right-side icon buttons; returns which
