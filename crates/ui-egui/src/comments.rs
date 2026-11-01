@@ -800,7 +800,7 @@ fn popover_pos(anchor: Pos2, bounds: Rect) -> Pos2 {
 
 fn popover_frame(t: &Tokens) -> egui::Frame {
     egui::Frame::NONE
-        .fill(t.panel)
+        .fill(crate::primitives::FloatingPanel::surface(*t))
         .stroke(Stroke::new(1.0, t.border))
         .corner_radius(CornerRadius::same(12))
         .shadow(egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(40) })

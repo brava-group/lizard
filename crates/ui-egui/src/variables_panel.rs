@@ -953,7 +953,7 @@ fn details(app: &mut LizardApp, ctx: &Context, vars: &Variables, st: &mut Editor
         .collapsible(false)
         .resizable(false)
         .default_width(280.0)
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.panel).inner_margin(egui::Margin::same(16)))
+        .frame(egui::Frame::window(&ctx.global_style()).fill(crate::primitives::FloatingPanel::surface(t)).inner_margin(egui::Margin::same(16)))
         .show(ctx, |ui| {
             ui.set_width(260.0);
             widgets::label(ui, tr("Name"), t.text_secondary);

@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) const WIDTH: f32 = 240.0;
 const HEIGHT: f32 = 513.0;
-pub(super) const PANEL: Color32 = Color32::from_rgb(44, 44, 44);
-pub(super) const FIELD: Color32 = Color32::from_rgb(56, 56, 56);
+pub(super) const PANEL: Color32 = crate::primitives::FloatingPanel::DARK_SURFACE;
+pub(super) const FIELD: Color32 = crate::primitives::FloatingPanel::DARK_FIELD;
 pub(super) const BORDER: Color32 = Color32::from_rgb(68, 68, 68);
 pub(super) const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
 const PAINT_KIND_HINTS: [&str; 6] = ["Solid", "Gradient", "Pattern", "Image", "Video", "Shader"];

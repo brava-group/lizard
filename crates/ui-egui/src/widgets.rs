@@ -1080,7 +1080,7 @@ pub fn canvas_banner<R>(ctx: &egui::Context, id: Id, canvas: Rect, add: impl FnO
 pub fn bar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
-        .fill(t.panel)
+        .fill(crate::primitives::FloatingPanel::surface(t))
         .stroke(Stroke::new(1.0, t.border))
         .corner_radius(CornerRadius::same(8))
         .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 12, spread: 0, color: t.shadow })

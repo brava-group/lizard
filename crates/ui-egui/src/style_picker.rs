@@ -572,6 +572,7 @@ fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &m
         let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
         if let Some(index) = Tabs::new(Id::new("color_style_picker_tabs"), &tabs, Some(usize::from(p.libraries_tab)))
             .width(ControlWidth::Fixed(168.0))
+            .selected_fill(if t.dark { crate::primitives::FloatingPanel::DARK_FIELD } else { t.field })
             .show(&mut tabs_ui)
         {
             p.libraries_tab = index == 1;
@@ -1741,7 +1742,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
         }
         return;
     }
-    let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
     // Left of the Design panel. The style editors stay put while their colour picker opens beside them.
     let text_editor = p.slot == StyleSlot::Text && p.edit.is_some();
@@ -1765,7 +1765,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
         crate::primitives::FloatingPanel::new(Id::new("text_style_editor_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Regular)
             .height(crate::primitives::FloatingPanelHeight::Fixed(390.0))
-            .fill(if t.dark { Color32::from_rgb(38, 38, 38) } else { t.panel })
             .corner_radius(12)
             .header_height(40.0)
             .show_with_header(ctx, |ui, header| {
@@ -1775,7 +1774,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else if color_editor {
         crate::primitives::FloatingPanel::new(Id::new("color_style_editor_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Regular)
-            .fill(if t.dark { Color32::from_rgb(38, 38, 38) } else { t.panel })
             .corner_radius(12)
             .header_height(40.0)
             .show_with_header(ctx, |ui, header| {
@@ -1785,7 +1783,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else if effect_editor {
         crate::primitives::FloatingPanel::new(Id::new("effect_style_editor_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Regular)
-            .fill(if t.dark { Color32::from_rgb(38, 38, 38) } else { t.panel })
             .corner_radius(12)
             .header_height(40.0)
             .show_with_header(ctx, |ui, header| {
@@ -1795,7 +1792,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else if grid_editor {
         crate::primitives::FloatingPanel::new(Id::new("grid_style_editor_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Regular)
-            .fill(if t.dark { Color32::from_rgb(38, 38, 38) } else { t.panel })
             .corner_radius(12)
             .header_height(40.0)
             .show_with_header(ctx, |ui, header| {
@@ -1807,7 +1803,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
         crate::primitives::FloatingPanel::new(Id::new("style_picker_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Compact)
             .height(crate::primitives::FloatingPanelHeight::Fixed(height))
-            .fill(if t.dark { Color32::from_rgb(38, 38, 38) } else { t.panel })
             .corner_radius(12)
             .header_height(40.0)
             .show_with_header(ctx, |ui, header| {
@@ -1817,7 +1812,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else {
         crate::primitives::FloatingPanel::new(Id::new("style_picker_area"), pos2(x, y))
             .width(crate::primitives::FloatingPanelWidth::Fixed(W + 16.0))
-            .fill(t.menu)
             .corner_radius(10)
             .header_height(32.0)
             .show(ctx, |ui| {

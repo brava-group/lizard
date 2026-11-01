@@ -41,6 +41,7 @@ pub struct Tabs<'a> {
     id: Id,
     tabs: &'a [Tab<'a>],
     selected: Option<usize>,
+    selected_fill: Option<egui::Color32>,
     width: ControlWidth,
     overflow: TabOverflow,
     disabled: bool,
@@ -49,11 +50,24 @@ pub struct Tabs<'a> {
 
 impl<'a> Tabs<'a> {
     pub fn new(id: Id, tabs: &'a [Tab<'a>], selected: Option<usize>) -> Self {
-        Self { id, tabs, selected, width: ControlWidth::Fill, overflow: TabOverflow::Buttons, disabled: false, allow_empty: false }
+        Self {
+            id,
+            tabs,
+            selected,
+            selected_fill: None,
+            width: ControlWidth::Fill,
+            overflow: TabOverflow::Buttons,
+            disabled: false,
+            allow_empty: false,
+        }
     }
 
     pub fn width(mut self, width: ControlWidth) -> Self {
         self.width = width;
+        self
+    }
+    pub fn selected_fill(mut self, color: egui::Color32) -> Self {
+        self.selected_fill = Some(color);
         self
     }
     pub fn overflow(mut self, overflow: TabOverflow) -> Self {
@@ -159,7 +173,8 @@ impl<'a> Tabs<'a> {
             let selected = active == Some(index);
             let hover = response.as_ref().is_some_and(|response| response.hovered()) && enabled;
             if self.tabs.len() > 1 && (selected || hover) {
-                painter.rect_filled(tab_rect, CornerRadius::same(5), t.field.gamma_multiply(if enabled { 1.0 } else { 0.4 }));
+                let fill = if selected { self.selected_fill.unwrap_or(t.field) } else { t.field };
+                painter.rect_filled(tab_rect, CornerRadius::same(5), fill.gamma_multiply(if enabled { 1.0 } else { 0.4 }));
             }
             let color = if selected { t.text } else { t.text_secondary }.gamma_multiply(if enabled { 1.0 } else { 0.4 });
             let font = if selected { semibold(11.0) } else { regular(11.0) };

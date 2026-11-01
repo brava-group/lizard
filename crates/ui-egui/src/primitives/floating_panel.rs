@@ -53,6 +53,14 @@ pub struct FloatingPanel<'a> {
 }
 
 impl<'a> FloatingPanel<'a> {
+    /// Shared dark surface for every floating property panel.
+    pub const DARK_SURFACE: Color32 = Color32::from_rgb(44, 44, 44);
+    pub const DARK_FIELD: Color32 = Color32::from_rgb(56, 56, 56);
+
+    pub fn surface(t: Tokens) -> Color32 {
+        if t.dark { Self::DARK_SURFACE } else { t.panel }
+    }
+
     /// Toggle a property panel from its trigger without coupling the trigger to
     /// egui's selection-menu popup state.
     pub fn toggle(ctx: &Context, id: Id, clicked: bool) -> bool {
@@ -185,7 +193,7 @@ impl<'a> FloatingPanel<'a> {
         let shadow =
             self.shadow.unwrap_or(Shadow { offset: [0, 10], blur: 14, spread: 0, color: Color32::from_black_alpha(if t.dark { 89 } else { 45 }) });
         let frame = egui::Frame::window(&ctx.global_style())
-            .fill(self.fill.unwrap_or(if t.dark { Color32::from_rgb(0x2c, 0x2c, 0x2c) } else { t.panel }))
+            .fill(self.fill.unwrap_or(Self::surface(t)))
             .corner_radius(CornerRadius::same(self.radius))
             .stroke(Stroke::new(1.0, t.border))
             .shadow(shadow)

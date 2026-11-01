@@ -633,7 +633,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let mut close_now = false;
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
         .height(crate::primitives::FloatingPanelHeight::Hug)
-        .fill(t.panel)
         .open(&mut open)
         .show_with_header(ctx, |ui, hr| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
