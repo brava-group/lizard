@@ -23,7 +23,7 @@ use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trn};
 use crate::icons::{self, Icon};
 use crate::list_drag::ListDrag;
-use crate::primitives::{Button, ButtonVariant, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyController, PropertyControllerKind, Select, Switch};
+use crate::primitives::{Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyController, PropertyControllerKind, Select, Switch, TextFieldWithPresets};
 use crate::right::{menu_item, menu_popup, row, row_rect};
 use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
@@ -47,7 +47,11 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
             properties_ui(app, ui, doc, n.id);
         }
         NodeKind::Component { .. } => {
-            properties_ui(app, ui, doc, variant_set(doc, n.id).unwrap_or(n.id));
+            if let Some(set) = variant_set(doc, n.id) {
+                variant_ui(app, ui, doc, n, set);
+            } else {
+                properties_ui(app, ui, doc, n.id);
+            }
         }
         _ => {}
     }
@@ -65,6 +69,36 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
     {
         bind_ui(app, ui, doc, n);
     }
+}
+
+/// Values of the selected variant. The component set owns the property definitions, so its
+/// editable property list stays on the set itself.
+fn variant_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, variant: &Node, set: NodeId) {
+    widgets::separator(ui);
+    if widgets::section_header(ui, tr("Current variant"), &[(Icon::GoToComponentSet, tr("Go to component set"))], true).is_some() {
+        app.run("select.set", json!({"ids": [set]}));
+    }
+    let current = variant_props(&variant.name);
+    for (property, values) in variant_options(doc, set) {
+        let value = current.get(&property).cloned().unwrap_or_default();
+        row(ui, 32.0, |ui| {
+            let width = (ui.available_width() - 8.0).max(0.0) / 2.0;
+            let (name_rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
+            let name_id = Id::new(("current_variant_name", variant.id, property.as_str()));
+            if let Some(name) = widgets::text_field_inline(ui, name_id, &property, name_rect.shrink2(vec2(2.0, 1.0)), crate::theme::regular(11.0))
+                && name.trim() != property
+            {
+                app.run("component.editProperty", json!({"id": set, "name": property, "newName": name}));
+            }
+            ui.add_space(8.0);
+            let value_id = Id::new(("current_variant_value", variant.id, property.as_str()));
+            let options: Vec<&str> = values.iter().map(String::as_str).collect();
+            if let Some(next) = TextFieldWithPresets::new(value_id, &value, &options).rename_action().show(ui, ControlWidth::Fill) {
+                app.run("component.setVariantValue", json!({"id": variant.id, "property": property, "value": next}));
+            }
+        });
+    }
+    ui.add_space(8.0);
 }
 
 /// Two or more main components selected: a button combines them into a component set.

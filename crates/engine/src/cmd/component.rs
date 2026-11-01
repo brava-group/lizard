@@ -70,6 +70,13 @@ pub fn specs() -> Vec<CommandSpec> {
             true,
             add_variant
         ),
+        spec!(
+            "component.setVariantValue",
+            "Set variant value",
+            "{id (variant), property, value}  (changes only this variant's value for the named property)",
+            true,
+            set_variant_value
+        ),
         spec!("instance.create", "Create instance", "{component (component or set: its default variant), x?, y?, parent?}", true, |s, p| {
             let cmd = "instance.create";
             let c = req_id(cmd, p, "component")?;
@@ -518,6 +525,29 @@ fn add_variant(s: &mut Session, p: &Value) -> Result<Value> {
     fit_set(doc, set);
     s.set_selection(vec![dup]);
     Ok(json!({"id": dup}))
+}
+
+fn set_variant_value(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.setVariantValue";
+    let id = req_id(cmd, p, "id")?;
+    let property = req_string(cmd, p, "property")?;
+    let value = req_string(cmd, p, "value")?.trim().to_string();
+    if value.is_empty() || value.contains([',', '=']) {
+        return Err(bad(cmd, "`value` must be non-empty without ',' or '='"));
+    }
+    let doc = s.doc_mut()?;
+    if doc.is_remote(id) || inside_instance(doc, id) {
+        return Err(bad(cmd, "the variant is read-only"));
+    }
+    let set = variant_set(doc, id).ok_or_else(|| bad(cmd, "`id` must be a variant in a component set"))?;
+    let order: Vec<String> = variant_options(doc, set).into_iter().map(|(name, _)| name).collect();
+    if !order.contains(&property) {
+        return Err(bad(cmd, format!("unknown variant property `{property}`")));
+    }
+    let mut pairs = variant_props(&doc.get(id)?.name);
+    pairs.insert(property, value);
+    doc.get_mut(id)?.name = variant_name(&pairs, &order);
+    Ok(json!({"id": id}))
 }
 
 fn detach(s: &mut Session, p: &Value) -> Result<Value> {

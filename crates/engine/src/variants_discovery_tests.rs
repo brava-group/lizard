@@ -26,6 +26,22 @@ fn sets(s: &Session) -> usize {
 }
 
 #[test]
+fn editing_one_variant_value_keeps_other_variants_and_is_undoable() {
+    let mut s = Session::new();
+    let first = component(&mut s, "Button", 0.0);
+    let second = idv(&ex(&mut s, "component.addVariant", json!({"id": first})));
+    let before_first = node(&s, first).name.clone();
+    let before_second = node(&s, second).name.clone();
+    ex(&mut s, "component.setVariantValue", json!({"id": second, "property": "Property 1", "value": "Hover"}));
+    assert_eq!(node(&s, second).name, "Property 1=Hover");
+    assert_eq!(node(&s, first).name, before_first);
+    assert!(s.execute("component.setVariantValue", &json!({"id": second, "property": "Property 1", "value": "Bad,Name"})).is_err());
+    assert_eq!(node(&s, second).name, "Property 1=Hover");
+    s.undo().unwrap();
+    assert_eq!(node(&s, second).name, before_second);
+}
+
+#[test]
 fn combine_is_offered_for_two_or_more_main_components_only() {
     let mut s = Session::new();
     let a = component(&mut s, "A", 0.0);

@@ -8,7 +8,7 @@ use lizard_ui_egui::icons::{self, AgentIcon, AppearanceIcon, HeaderIcon, Icon, L
 use lizard_ui_egui::theme::{self, ALL_COLOR_ROLES, ColorRole, Tokens};
 use lizard_ui_egui::widgets::{self, Empty, FieldEdit, Lead};
 use lizard_ui_egui::{LeftTab, LizardApp, RightTab};
-use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField};
+use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField, TextFieldWithPresets};
 use serde_json::json;
 
 #[path = "cursor_playground.rs"]
@@ -110,7 +110,7 @@ enum Page {
 const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::Buttons, "Primitives", "Buttons", "primitives::Button · widgets::button · icon_button"),
     (Page::Numeric, "Primitives", "Number fields", "primitives::NumberField · sizing · binding · width"),
-    (Page::Text, "Primitives", "Text fields", "text_field · combo · rename · multiline"),
+    (Page::Text, "Primitives", "Text fields", "text_field · TextFieldWithPresets · rename · multiline"),
     (Page::Select, "Primitives", "Select", "primitives::Select · overlay / popup · width · ghost"),
     (Page::FloatingPanel, "Primitives", "Floating panel", "primitives::FloatingPanel · draggable · width / height"),
     (Page::Segmented, "Primitives", "Segmented", "segmented · segmented_text"),
@@ -218,6 +218,7 @@ pub struct State {
     draft: String,
     multiline: String,
     combo: String,
+    text_presets: String,
     select_choice: usize,
     sizing_choice: usize,
     floating_open: [bool; 3],
@@ -270,6 +271,7 @@ impl Default for State {
             draft: String::new(),
             multiline: "A note with more than one line.".into(),
             combo: "1x".into(),
+            text_presets: "Hover".into(),
             select_choice: 1,
             sizing_choice: 0,
             floating_open: [true, false, false],
@@ -1223,6 +1225,14 @@ fn text_fields(ui: &mut Ui, state: &mut State) {
         let presets = ["1x".to_owned(), "2x".to_owned(), "3x".to_owned()];
         if let Some(next) = widgets::combo_field(ui, Id::new("library_combo"), &state.combo, 140.0, &presets) {
             state.combo = next;
+        }
+    });
+    example(ui, "Text input with presets", "Edit the text directly or open the joined chevron to choose a variant value.", |ui| {
+        let values = ["Default", "Hover", "Active"];
+        if let Some(next) =
+            TextFieldWithPresets::new(Id::new("library_text_presets"), &state.text_presets, &values).rename_action().show(ui, ControlWidth::Fixed(160.0))
+        {
+            state.text_presets = next;
         }
     });
     example(ui, "Multiline", "The draft commits when the editor loses focus.", |ui| {

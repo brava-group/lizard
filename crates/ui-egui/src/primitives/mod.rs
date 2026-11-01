@@ -17,6 +17,7 @@ mod slider;
 mod surface;
 mod switch;
 mod tabs;
+mod text_field_with_presets;
 
 pub use alias_value::AliasValue;
 pub use button::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant};
@@ -34,6 +35,7 @@ pub use slider::{Slider, SliderKind, SliderResponse, SliderVariant};
 pub use surface::{Surface, SurfaceVariant};
 pub use switch::Switch;
 pub use tabs::{Tab, TabOverflow, Tabs};
+pub use text_field_with_presets::TextFieldWithPresets;
 
 /// Icon box shared by Select and Button menu chevrons.
 pub(crate) const CONTROL_CHEVRON_SIZE: f32 = 10.0;

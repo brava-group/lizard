@@ -89,6 +89,23 @@ fn the_design_panel_adds_a_variant_to_a_lone_component() {
 }
 
 #[test]
+fn selecting_a_variant_shows_its_values_and_the_set_shows_property_definitions() {
+    let (mut s, [a, ..], _) = doc();
+    let second = id(&s.execute("component.addVariant", &json!({"id": a})).unwrap());
+    let mut u = Ui::new(s);
+    let set = set_of(&u, a).unwrap();
+
+    select(&mut u, &[second]);
+    assert!(shows(&mut u, "Current variant").is_some());
+    assert!(shows(&mut u, "Property 1").is_some());
+    assert!(shows(&mut u, "Properties").is_none());
+
+    select(&mut u, &[set]);
+    assert!(shows(&mut u, "Properties").is_some());
+    assert!(shows(&mut u, "Current variant").is_none());
+}
+
+#[test]
 fn the_context_menu_lists_combine_for_two_selected_components() {
     let (s, [a, b, _], _) = doc();
     let mut u = Ui::new(s);

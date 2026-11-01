@@ -220,6 +220,7 @@ icons! {
     Instance,
     ComponentSet,
     AddVariant,
+    GoToComponentSet,
     Group,
     Vector,
     Bend,
@@ -947,6 +948,12 @@ fn draw(p: &P, icon: Icon) {
             );
             p.line(8.0 - 3.0 * scale, 8.0, 8.0 + 3.0 * scale, 8.0);
             p.line(8.0, 8.0 - 3.0 * scale, 8.0, 8.0 + 3.0 * scale);
+        }
+        GoToComponentSet => {
+            // The supplied 24 × 24 diamond and upward arrow on the shared 16-unit grid.
+            p.path(&[(8.0, 0.95), (15.05, 8.0), (8.0, 15.05), (0.95, 8.0)], true);
+            p.path(&[(5.33, 7.44), (8.0, 4.67), (10.67, 7.33)], false);
+            p.line(8.0, 4.67, 8.0, 10.67);
         }
         Instance => p.path(&[(8.0, 2.0), (14.0, 8.0), (8.0, 14.0), (2.0, 8.0)], true),
         Group => {
