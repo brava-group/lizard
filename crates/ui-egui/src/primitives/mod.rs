@@ -25,7 +25,7 @@ pub use floating_panel::{FloatingPanel, FloatingPanelHeight, FloatingPanelWidth}
 pub use inline_field::InlineField;
 pub use menu::{Menu, MenuItem, MenuPopup};
 pub use number_field::{NumberField, NumberFieldResponse};
-pub use property_controller::{PropertyController, PropertyControllerKind};
+pub use property_controller::{PropertyController, PropertyControllerKind, PropertyControllerResponse};
 pub use search_field::SearchField;
 pub use segmented::{Segment, SegmentContent, SegmentSize, SegmentSizing, SegmentedControl};
 pub use select::{Select, SelectLead, SelectPosition, SelectVariant};

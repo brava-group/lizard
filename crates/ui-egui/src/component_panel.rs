@@ -139,13 +139,13 @@ fn header_with_plus(ui: &mut Ui, title: &str, tip: &str) -> egui::Response {
         .show_at(ui, ui.id().with(("component_properties_add", title)), button)
 }
 
-fn type_icon(d: &PropDef) -> Icon {
+fn type_kind(d: &PropDef) -> PropertyControllerKind {
     match d {
-        PropDef::Boolean { .. } => Icon::Eye,
-        PropDef::Text { .. } => Icon::Text,
-        PropDef::InstanceSwap { .. } => Icon::Instance,
-        PropDef::Variant { .. } => Icon::ComponentSet,
-        PropDef::Slot { .. } => Icon::Slot,
+        PropDef::Boolean { .. } => PropertyControllerKind::Boolean,
+        PropDef::Text { .. } => PropertyControllerKind::Text,
+        PropDef::InstanceSwap { .. } => PropertyControllerKind::InstanceSwap,
+        PropDef::Variant { .. } => PropertyControllerKind::Variant,
+        PropDef::Slot { .. } => PropertyControllerKind::Slot,
     }
 }
 
@@ -158,7 +158,7 @@ fn slot_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, 
         ui.label(egui::RichText::new(tr("Slot")).font(semibold(11.0)).color(t.text));
     });
     row(ui, 32.0, |ui| {
-        prop_label(ui, name, Icon::Slot);
+        prop_label(ui, name, PropertyControllerKind::Slot);
         let w = ui.available_width().max(60.0);
         slot_fill(app, ui, doc, slot, preferred, &comps, w);
     });
@@ -496,7 +496,14 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
         let expanded_id = Id::new(("variant_property_expanded", owner, k.as_str()));
         let mut expanded = ui.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(false);
         let summary = PropertyController::new(PropertyControllerKind::Variant, k).value(&def).selected(expanded).show(ui);
-        if summary.clicked() {
+        if let Some(name) = summary.renamed.as_deref() {
+            app.run("component.editProperty", json!({"id": owner, "name": k, "newName": name}));
+        }
+        if summary.delete_clicked {
+            app.run("component.deleteProperty", json!({"id": owner, "name": k}));
+            expanded = false;
+        }
+        if summary.settings_clicked {
             expanded = !expanded;
             ui.data_mut(|data| data.insert_temp(expanded_id, expanded));
         }
@@ -542,7 +549,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                 vi += 3;
             }
         }
-        drag.row_by(&summary, i, summary.rect.with_max_y(ui.cursor().min.y.max(summary.rect.max.y)), || k.clone());
+        drag.row_by(&summary.row, i, summary.row.rect.with_max_y(ui.cursor().min.y.max(summary.row.rect.max.y)), || k.clone());
     }
     if let Some((from, to)) = drag.finish(ui)
         && let Some((k, _)) = variants.get(from)
@@ -562,13 +569,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
         (order, *name)
     });
     for (k, d) in shared {
-        let kind = match d {
-            PropDef::Text { .. } => PropertyControllerKind::Text,
-            PropDef::Boolean { .. } => PropertyControllerKind::Boolean,
-            PropDef::InstanceSwap { .. } => PropertyControllerKind::InstanceSwap,
-            PropDef::Slot { .. } => PropertyControllerKind::Slot,
-            PropDef::Variant { .. } => PropertyControllerKind::Variant,
-        };
+        let kind = type_kind(d);
         let value = match d {
             PropDef::Text { default } => Some(default.clone()),
             PropDef::Boolean { default } => Some(tr(if *default { "True" } else { "False" }).to_string()),
@@ -581,7 +582,15 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
         if let Some(value) = value.as_deref() {
             controller = controller.value(value);
         }
-        if controller.show(ui).clicked() {
+        let summary = controller.show(ui);
+        if let Some(name) = summary.renamed.as_deref() {
+            app.run("component.editProperty", json!({"id": owner, "name": k, "newName": name}));
+        }
+        if summary.delete_clicked {
+            app.run("component.deleteProperty", json!({"id": owner, "name": k}));
+            continue;
+        }
+        if summary.settings_clicked {
             expanded = !expanded;
             ui.data_mut(|data| data.insert_temp(expanded_id, expanded));
         }
@@ -590,7 +599,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
         }
         row(ui, 32.0, |ui| {
             let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-            icons::paint(ui.painter(), ir, type_icon(d), COMPONENT);
+            type_kind(d).paint(ui.painter(), ir, COMPONENT);
             if let Some(nn) = widgets::text_field(ui, Id::new(("prop_name", owner, k.as_str())), k, 96.0, tr("Name")) {
                 app.run("component.editProperty", json!({"id": owner, "name": k, "newName": nn}));
             }
@@ -926,7 +935,7 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
         for (k, vals) in variant_options(doc, set) {
             let cur = current.get(&k).cloned().unwrap_or_default();
             row(ui, 32.0, |ui| {
-                prop_label(ui, &k, Icon::ComponentSet);
+                prop_label(ui, &k, PropertyControllerKind::Variant);
                 let w = ui.available_width().max(60.0);
                 // A string variable naming one of the values can choose it.
                 crate::variable_ui::bindable(app, ui, &[id], &format!("{PROP_BINDING}{k}"), VariableType::String, w, |app, ui| {
@@ -947,7 +956,7 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
     for (k, d) in prop_defs(doc, *component) {
         let v = props.get(&k).cloned().unwrap_or_else(|| lizard_engine::components::prop_default_value(&d));
         row(ui, 32.0, |ui| {
-            prop_label(ui, &k, type_icon(&d));
+            prop_label(ui, &k, type_kind(&d));
             let w = ui.available_width().max(60.0);
             // Boolean and text values can come from a boolean or string variable.
             let bind_field = format!("{PROP_BINDING}{k}");
@@ -1012,10 +1021,10 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
     }
 }
 
-fn prop_label(ui: &mut Ui, name: &str, icon: Icon) {
+fn prop_label(ui: &mut Ui, name: &str, icon: PropertyControllerKind) {
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(84.0, 20.0), Sense::hover());
-    icons::paint(ui.painter(), egui::Rect::from_min_size(egui::pos2(r.min.x, r.center().y - 6.0), vec2(12.0, 12.0)), icon, t.icon_secondary);
+    icon.paint(ui.painter(), egui::Rect::from_min_size(egui::pos2(r.min.x, r.center().y - 6.0), vec2(12.0, 12.0)), t.icon_secondary);
     let g = ui.painter().layout(name.to_string(), crate::theme::regular(11.0), t.text_secondary, r.width() - 18.0);
     ui.painter().galley(egui::pos2(r.min.x + 18.0, r.center().y - g.size().y / 2.0), g, t.text_secondary);
 }

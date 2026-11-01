@@ -240,6 +240,8 @@ pub struct State {
     disclosure: bool,
     menu_choice: usize,
     property_selection: Option<usize>,
+    property_names: [String; 7],
+    property_visible: [bool; 7],
     cursor_playground: cursor_playground::State,
 }
 
@@ -290,6 +292,8 @@ impl Default for State {
             disclosure: true,
             menu_choice: 0,
             property_selection: None,
+            property_names: ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()],
+            property_visible: [true; 7],
             cursor_playground: cursor_playground::State::default(),
         }
     }
@@ -1431,33 +1435,68 @@ fn floating_panels(ui: &mut Ui, state: &mut State) {
 fn property_controllers(ui: &mut Ui, state: &mut State) {
     use lizard_ui_egui::primitives::{PropertyController, PropertyControllerKind as Kind};
 
-    example(ui, "Component properties", "Click a row to inspect its selected state. The warning appears only when a property is unused.", |ui| {
+    example(ui, "Component properties", "Hover for settings and delete. Click a row to rename it; Enter saves and Escape cancels.", |ui| {
         ui.allocate_ui_with_layout(vec2(320.0, 200.0), Layout::top_down(egui::Align::Min), |ui| {
             ui.label(egui::RichText::new("Properties").font(theme::property_section_title()).color(Tokens::get(ui.ctx()).text));
             let rows = [
-                (Kind::Variant, "Property 1", Some("Default"), false),
-                (Kind::Text, "Text", Some("value"), true),
-                (Kind::Boolean, "Boolean", Some("True"), true),
-                (Kind::InstanceSwap, "Instance", Some("Button"), true),
-                (Kind::Slot, "Slot", None, true),
+                (Kind::Variant, Some("Default"), false),
+                (Kind::Text, Some("value"), true),
+                (Kind::Boolean, Some("True"), true),
+                (Kind::InstanceSwap, Some("Button"), true),
+                (Kind::Slot, None, true),
             ];
-            for (index, (kind, name, value, unused)) in rows.into_iter().enumerate() {
-                let mut controller = PropertyController::new(kind, name).unused(unused).selected(state.property_selection == Some(index));
+            for (index, (kind, value, unused)) in rows.into_iter().enumerate() {
+                if !state.property_visible[index] {
+                    continue;
+                }
+                let name = state.property_names[index].clone();
+                let mut controller = PropertyController::new(kind, &name).unused(unused).selected(state.property_selection == Some(index));
                 if let Some(value) = value {
                     controller = controller.value(value);
                 }
-                if controller.show(ui).clicked() {
+                let response = controller.show(ui);
+                if let Some(name) = response.renamed {
+                    state.property_names[index] = name;
+                }
+                if response.settings_clicked {
                     state.property_selection = (state.property_selection != Some(index)).then_some(index);
                 }
+                if response.delete_clicked {
+                    state.property_visible[index] = false;
+                    state.property_selection = None;
+                }
+            }
+            if let Some(index) = state.property_selection {
+                ui.label(format!("Settings for {}", state.property_names[index]));
             }
         });
     });
     example(ui, "Bound properties", "A property linked to a component layer has no warning icon.", |ui| {
         ui.allocate_ui_with_layout(vec2(320.0, 72.0), Layout::top_down(egui::Align::Min), |ui| {
-            PropertyController::new(Kind::Text, "Label").value("Button").show(ui);
-            PropertyController::new(Kind::Slot, "Content").show(ui);
+            for (index, kind, value) in [(5, Kind::Text, Some("Button")), (6, Kind::Slot, None)] {
+                if !state.property_visible[index] {
+                    continue;
+                }
+                let name = state.property_names[index].clone();
+                let mut controller = PropertyController::new(kind, &name);
+                if let Some(value) = value {
+                    controller = controller.value(value);
+                }
+                let response = controller.show(ui);
+                if let Some(name) = response.renamed {
+                    state.property_names[index] = name;
+                }
+                if response.delete_clicked {
+                    state.property_visible[index] = false;
+                }
+            }
         });
     });
+    if Button::new("Reset examples").variant(ButtonVariant::Secondary).show(ui).clicked() {
+        state.property_names = ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()];
+        state.property_visible = [true; 7];
+        state.property_selection = None;
+    }
 }
 
 fn segmented(ui: &mut Ui, state: &mut State) {
