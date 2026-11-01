@@ -1206,6 +1206,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
             _ => None,
         })
         .unwrap_or(t.canvas);
+    crate::theme::set_canvas_background(&ctx, bg);
     // The GPU backend can satisfy the view without calling `request_render`. Keep its camera and
     // texture dimensions current when the window resizes, even if the CPU worker stays idle.
     app.canvas.visible_view = app.session.ds().ok().map(|ds| visible_view_for(&ds.view, rect, ppp));
@@ -2516,7 +2517,12 @@ fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId
         let (a, b) = (te.caret.min(te.anchor), te.caret.max(te.anchor));
         if a != b && preedit.is_none() {
             for q in text.selection(app, a, b) {
-                painter.add(Shape::convex_polygon(q.to_vec(), accent(painter).gamma_multiply(0.3), Stroke::NONE));
+                let selection = t.text_selection_bg;
+                painter.add(Shape::convex_polygon(
+                    q.to_vec(),
+                    Color32::from_rgba_unmultiplied(selection.r(), selection.g(), selection.b(), 128),
+                    Stroke::NONE,
+                ));
             }
         }
         if preedit.is_none() && app.ui.figma_text_review.node == Some(te.id) {
@@ -2983,7 +2989,7 @@ pub fn fmt(v: f64) -> String {
 #[path = "zoom_preview_tests.rs"]
 mod zoom_preview_tests;
 
-/// The branch's blue canvas overlay color.
+/// The canvas overlay color, adjusted for the active page background.
 fn accent(p: &egui::Painter) -> Color32 {
     crate::theme::canvas_accent(p.ctx())
 }

@@ -21,8 +21,9 @@ pub(super) fn paint_blend_icon(ui: &Ui, button: Rect) {
 
 pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: usize, selected: bool, hint: &str) -> egui::Response {
     let response = ui.interact(rect, Id::new(id), Sense::click()).tip(hint);
+    let t = Tokens::get(ui.ctx());
     let bg = if selected {
-        Tokens::get(ui.ctx()).selected_row
+        t.accent
     } else if response.hovered() {
         Color32::from_rgb(64, 64, 64)
     } else {
@@ -41,7 +42,7 @@ pub(super) fn vector_button(ui: &mut Ui, rect: Rect, id: &'static str, index: us
     let color = if !ui.is_enabled() {
         MUTED
     } else if selected {
-        Tokens::get(ui.ctx()).accent_text
+        t.accent_on
     } else {
         Color32::WHITE
     };

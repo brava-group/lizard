@@ -98,9 +98,7 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
         let response = ui
             .interact(marker, Id::new(("cp_gradient_marker", index)), Sense::click_and_drag())
             .on_hover_text(format!("{}%", (stop.position * 100.0).round()));
-        ui.painter().rect_filled(marker, CornerRadius::same(5), if index == *selected { Tokens::get(ui.ctx()).accent } else { FIELD });
-        let swatch = Rect::from_center_size(marker.center(), vec2(14.0, 14.0));
-        widgets::paint_swatch(ui.painter(), swatch, &Paint::solid(stop.color));
+        draw_stop_marker(ui, marker, stop.color, index == *selected);
         if response.clicked() || response.drag_started() {
             *selected = index;
         }
@@ -116,10 +114,9 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
             *done = true;
         }
     }
-    if let Some(stop) = stop_snapshot.get(*selected) {
+    if let Some(stop) = gradient.stops.get(*selected) {
         let marker = Rect::from_center_size(pos2(bar.left() + stop.position.clamp(0.0, 1.0) * bar.width(), origin.y + 140.0), vec2(24.0, 24.0));
-        ui.painter().rect_filled(marker, CornerRadius::same(5), Tokens::get(ui.ctx()).accent);
-        widgets::paint_swatch(ui.painter(), Rect::from_center_size(marker.center(), vec2(14.0, 14.0)), &Paint::solid(stop.color));
+        draw_stop_marker(ui, marker, stop.color, true);
     }
     if bar_response.clicked()
         && let Some(pointer) = bar_response.interact_pointer_pos()
@@ -128,6 +125,20 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
         *changed |= add_stop(gradient, selected, Some((pointer.x - bar.left()) / bar.width()));
         *done = true;
     }
+}
+
+fn draw_stop_marker(ui: &Ui, marker: Rect, color: Color, selected: bool) {
+    let fill = if selected { Color32::WHITE } else { FIELD };
+    let border = if selected { Color32::from_gray(0x59) } else { PANEL };
+    let center = marker.center().x;
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![pos2(center - 5.0, marker.bottom() - 1.0), pos2(center + 5.0, marker.bottom() - 1.0), pos2(center, marker.bottom() + 7.0)],
+        fill,
+        Stroke::new(1.0, border),
+    ));
+    ui.painter().rect_filled(marker, CornerRadius::same(5), fill);
+    ui.painter().rect_stroke(marker, CornerRadius::same(5), Stroke::new(1.0, border), StrokeKind::Inside);
+    widgets::paint_swatch(ui.painter(), Rect::from_center_size(marker.center(), vec2(14.0, 14.0)), &Paint::solid(color));
 }
 
 fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut usize, changed: &mut bool, done: &mut bool) {

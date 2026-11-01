@@ -60,9 +60,53 @@ pub const ACCENT: Color32 = Color32::from_rgb(0x0D, 0x99, 0xFF);
 pub const ACCENT_ON: Color32 = Color32::WHITE;
 /// Text selection in every editor and input, including the component catalog.
 pub const TEXT_SELECTION_BG: Color32 = Color32::from_rgb(0x25, 0x56, 0x81);
-/// The blue overlay color used by the branch's canvas.
+/// Canvas selection colour adjusted to the visible page background, when one is painted.
 pub fn canvas_accent(ctx: &Context) -> Color32 {
-    Tokens::get(ctx).canvas_accent
+    ctx.data(|data| data.get_temp(canvas_accent_id())).unwrap_or_else(|| Tokens::get(ctx).canvas_accent)
+}
+
+fn canvas_accent_id() -> egui::Id {
+    egui::Id::new("lizard_canvas_accent")
+}
+
+/// Keep selection outlines readable on custom page backgrounds without changing the theme hue.
+pub fn set_canvas_background(ctx: &Context, background: Color32) {
+    let base = Tokens::get(ctx).canvas_accent;
+    ctx.data_mut(|data| data.insert_temp(canvas_accent_id(), contrasted_canvas_accent(base, background)));
+}
+
+fn contrasted_canvas_accent(base: Color32, background: Color32) -> Color32 {
+    let bg = lizard_color::Color::from_rgb8_const(background.r(), background.g(), background.b());
+    let contrast = |color: Color32| lizard_color::Color::from_rgb8_const(color.r(), color.g(), color.b()).contrast(bg);
+    const MIN_CONTRAST: f32 = 4.0;
+    if contrast(base) >= MIN_CONTRAST {
+        return base;
+    }
+    let blend = |toward: Color32, amount: f32| {
+        let channel = |a: u8, b: u8| (f32::from(a) * (1.0 - amount) + f32::from(b) * amount).round() as u8;
+        Color32::from_rgb(channel(base.r(), toward.r()), channel(base.g(), toward.g()), channel(base.b(), toward.b()))
+    };
+    let fit = |toward: Color32| {
+        if contrast(toward) < MIN_CONTRAST {
+            return None;
+        }
+        let (mut low, mut high) = (0.0, 1.0);
+        for _ in 0..10 {
+            let middle = (low + high) / 2.0;
+            if contrast(blend(toward, middle)) >= MIN_CONTRAST {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        Some((blend(toward, high), high))
+    };
+    match (fit(Color32::WHITE), fit(Color32::BLACK)) {
+        (Some(light), Some(dark)) => if light.1 < dark.1 { light.0 } else { dark.0 },
+        (Some(light), None) => light.0,
+        (None, Some(dark)) => dark.0,
+        (None, None) => base,
+    }
 }
 
 /// Preserve the branch's blue fill under white text.
@@ -203,7 +247,7 @@ impl Tokens {
             t.accent_on = shades.on_primary;
             t.accent_text = shades.text;
             t.canvas_accent = shades.base;
-            t.text_selection_bg = shades.selected;
+            t.text_selection_bg = shades.base;
             t.selected_row = shades.selected;
             t.selected_row_child = shades.selected_child;
             t.menu_hover = shades.base;
@@ -276,7 +320,10 @@ pub fn apply(ctx: &Context, t: Tokens) {
 /// [`apply`], with egui's own animations (hover fades, openings, smooth scrolling to a target) off
 /// when the system or the preferences ask for reduced motion. Prototype transitions still play.
 pub fn apply_with(ctx: &Context, t: Tokens, reduce_motion: bool) {
-    ctx.data_mut(|d| d.insert_temp(tokens_id(), t));
+    ctx.data_mut(|d| {
+        d.insert_temp(tokens_id(), t);
+        d.remove::<Color32>(canvas_accent_id());
+    });
     ctx.set_visuals(visuals(t));
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
@@ -310,7 +357,7 @@ fn visuals(t: Tokens) -> Visuals {
     v.window_corner_radius = egui::CornerRadius::same(13);
     v.menu_corner_radius = egui::CornerRadius::same(13);
     v.selection.bg_fill = t.text_selection_bg;
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.selection.stroke = Stroke::new(1.0, t.accent_on);
     v.hyperlink_color = t.accent_text;
     for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open, &mut v.widgets.noninteractive] {
         w.corner_radius = egui::CornerRadius::same(5);
