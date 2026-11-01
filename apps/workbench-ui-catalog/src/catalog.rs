@@ -8,6 +8,7 @@ use lizard_ui_egui::icons::{self, AgentIcon, AppearanceIcon, HeaderIcon, Icon, L
 use lizard_ui_egui::theme::{self, ALL_COLOR_ROLES, ColorRole, Tokens};
 use lizard_ui_egui::widgets::{self, Empty, FieldEdit, Lead};
 use lizard_ui_egui::{LeftTab, LizardApp, RightTab};
+use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField};
 use serde_json::json;
 
 #[path = "cursor_playground.rs"]
@@ -666,55 +667,66 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
     fig.canvas.rect = ui.max_rect();
     ui.painter().rect_filled(ui.max_rect(), 0.0, t.bg);
     let total = ui.available_size();
+    let sidebar_width = 256.0;
     ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(vec2(238.0, total.y), Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_width(238.0);
-            ui.add_space(14.0);
-            ui.label(egui::RichText::new("Workbench UI").size(16.0).strong().color(t.text));
-            ui.label(egui::RichText::new(format!("{} component pages · local only", PAGES.len())).size(11.0).color(t.text_secondary));
-            ui.add_space(10.0);
-            if ui.button(if state.dark { "Light mode" } else { "Dark mode" }).clicked() {
-                state.dark = !state.dark;
-                state.applied_theme = None;
-            }
-            ui.add_space(10.0);
-            ui.add(egui::TextEdit::singleline(&mut state.query).hint_text("Filter components").desired_width(215.0));
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical().id_salt("catalog_nav").show(ui, |ui| {
-                let mut last_group = "";
-                for &(page, group, name, _) in PAGES {
-                    if !state.query.is_empty()
-                        && !name.to_lowercase().contains(&state.query.to_lowercase())
-                        && !group.to_lowercase().contains(&state.query.to_lowercase())
-                    {
-                        continue;
-                    }
-                    if group != last_group {
-                        last_group = group;
-                        ui.add_space(11.0);
-                        ui.label(egui::RichText::new(group.to_uppercase()).size(10.0).strong().color(t.text_tertiary));
-                        ui.add_space(3.0);
-                    }
-                    let selected = state.page == page;
-                    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::click());
-                    if selected || response.hovered() {
-                        ui.painter().rect_filled(rect, CornerRadius::same(6), if selected { t.selected_row } else { t.hover });
-                    }
-                    ui.painter().text(
-                        pos2(rect.min.x + 10.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        name,
-                        theme::regular(12.0),
-                        if selected { t.text } else { t.text_secondary },
-                    );
-                    if response.clicked() {
-                        state.page = page;
-                    }
+        ui.allocate_ui_with_layout(vec2(sidebar_width, total.y), Layout::top_down(egui::Align::Min), |ui| {
+            egui::Frame::NONE.inner_margin(egui::Margin::same(16)).show(ui, |ui| {
+                ui.set_width(sidebar_width - 32.0);
+                ui.set_min_height((total.y - 32.0).max(0.0));
+                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.label(egui::RichText::new("Workbench UI").font(theme::semibold(16.0)).color(t.text));
+                ui.label(egui::RichText::new(format!("{} component pages · local only", PAGES.len())).font(theme::regular(11.0)).color(t.text_secondary));
+                ui.add_space(8.0);
+                if Button::new(if state.dark { "Light mode" } else { "Dark mode" })
+                    .variant(ButtonVariant::Ghost)
+                    .leading(if state.dark { Icon::Sun } else { Icon::Moon })
+                    .align(ButtonAlign::Start)
+                    .size(ButtonSize::Large)
+                    .width(ControlWidth::Fill)
+                    .show(ui)
+                    .clicked()
+                {
+                    state.dark = !state.dark;
+                    state.applied_theme = None;
                 }
+                ui.add_space(8.0);
+                SearchField::new(Id::new("catalog_filter"), "Filter components").clearable().show(ui, &mut state.query);
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().id_salt("catalog_nav").auto_shrink([false, false]).show(ui, |ui| {
+                    let mut last_group = "";
+                    for &(page, group, name, _) in PAGES {
+                        if !state.query.is_empty()
+                            && !name.to_lowercase().contains(&state.query.to_lowercase())
+                            && !group.to_lowercase().contains(&state.query.to_lowercase())
+                        {
+                            continue;
+                        }
+                        if group != last_group {
+                            last_group = group;
+                            ui.add_space(11.0);
+                            ui.label(egui::RichText::new(group.to_uppercase()).font(theme::semibold(10.0)).color(t.text_tertiary));
+                            ui.add_space(3.0);
+                        }
+                        let selected = state.page == page;
+                        let response = Button::new(name)
+                            .variant(ButtonVariant::Navigation)
+                            .behavior(ButtonBehavior::Toggle { selected })
+                            .align(ButtonAlign::Start)
+                            .size(ButtonSize::Large)
+                            .width(ControlWidth::Fill)
+                            .show(ui);
+                        if selected && state.last_page != Some(page) {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if response.clicked() {
+                            state.page = page;
+                        }
+                    }
+                });
             });
         });
         ui.separator();
-        ui.allocate_ui_with_layout(vec2((total.x - 265.0).max(400.0), total.y), Layout::top_down(egui::Align::Min), |ui| {
+        ui.allocate_ui_with_layout(vec2((total.x - sidebar_width - 27.0).max(400.0), total.y), Layout::top_down(egui::Align::Min), |ui| {
             enter_page(state, fig, fixture, ui.ctx());
             let (name, source) =
                 PAGES.iter().find(|(page, ..)| *page == state.page).map_or(("Components", ""), |(_, _, name, source)| (*name, *source));
