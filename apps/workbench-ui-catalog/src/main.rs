@@ -5,7 +5,7 @@
 mod catalog;
 
 use lizard_engine::Session;
-use lizard_ui_egui::{LizardApp, NoServices, theme};
+use lizard_ui_egui::{LizardApp, NoServices, primitives, theme};
 
 struct CatalogApp {
     fig: LizardApp,
@@ -15,6 +15,7 @@ struct CatalogApp {
 
 impl eframe::App for CatalogApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        primitives::FloatingPanel::begin_visibility_tracking(ui.ctx());
         catalog::show(ui, &mut self.state, &mut self.fig, &self.fixture);
     }
 }

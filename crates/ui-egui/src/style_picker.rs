@@ -174,9 +174,9 @@ impl Picker {
     }
 }
 
-/// Open the picker for `slot` of `ids`, level with the pointer.
+/// Open the picker for `slot` of `ids`, centred on the trigger when space permits.
 pub fn open(app: &mut LizardApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
-    let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y - 12.0);
+    let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y);
     ui.data_mut(|d| d.insert_temp(Id::new("style_picker_just_opened"), true));
     app.ui.style_picker = Some(Picker {
         slot,
@@ -1766,11 +1766,10 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else {
         W + 16.0
     };
-    let mut x = screen.max.x - app.ui.right_width - panel_width - 16.0;
-    if app.ui.picker.is_some() && !text_editor && !color_editor && !effect_editor && !grid_editor {
-        x -= 260.0;
-    }
-    let y = p.y.clamp(screen.min.y + 48.0, (screen.max.y - 460.0).max(screen.min.y + 48.0));
+    let x = screen.max.x - app.ui.right_width - panel_width - 14.0;
+    let list_height = if p.slot.paints() { 427.0 } else { 380.0 };
+    let top = if p.edit.is_none() { p.y - list_height * 0.5 } else { p.y };
+    let y = top.clamp(screen.min.y + 8.0, (screen.max.y - list_height - 8.0).max(screen.min.y + 8.0));
     let mut out = Frame { act: None, hover: None, budget: 4 };
     let area = if text_editor {
         crate::primitives::FloatingPanel::new(Id::new("text_style_editor_area"), pos2(x, y))
@@ -1812,6 +1811,7 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     } else if p.edit.is_none() {
         let height = if p.slot.paints() { 427.0 } else { 380.0 };
         crate::primitives::FloatingPanel::new(Id::new("style_picker_area"), pos2(x, y))
+            .anchor_to_properties()
             .width(crate::primitives::FloatingPanelWidth::Compact)
             .height(crate::primitives::FloatingPanelHeight::Fixed(height))
             .corner_radius(12)

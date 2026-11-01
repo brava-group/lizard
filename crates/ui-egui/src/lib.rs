@@ -1747,7 +1747,13 @@ impl LizardApp {
             });
         }
         if !hidden {
-            edges.push(("right", ui.available_rect_before_wrap().max.x - right_w, right_w, -1.0));
+            let right_edge = ui.available_rect_before_wrap().max.x - right_w;
+            edges.push(("right", right_edge, right_w, -1.0));
+            primitives::FloatingPanel::properties_edge(&ctx, right_edge);
+            primitives::FloatingPanel::workspace_bounds(
+                &ctx,
+                egui::Rect::from_min_max(egui::pos2(ui.available_rect_before_wrap().min.x, rows.min), egui::pos2(right_edge, rows.max)),
+            );
             egui::Panel::right("right_panel").resizable(false).exact_size(right_w).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
                 let label = match self.ui.right_tab {
                     RightTab::Design => i18n::tr("Design"),
