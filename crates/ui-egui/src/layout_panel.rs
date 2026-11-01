@@ -13,7 +13,7 @@ use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon, LayoutIcon, SizingIcon};
 use crate::primitives::{Button, ButtonBehavior, ControlWidth, Segment, SegmentedControl};
-use crate::right::{block, common, menu_item, menu_popup, row};
+use crate::right::{block, common, menu_item, menu_popup, row, row_rect};
 use crate::theme::{Tokens, regular};
 use crate::widgets::{self, FIELD_H, Lead};
 
@@ -143,8 +143,24 @@ fn layout_header(ui: &mut Ui, title: &str, action: Option<(LayoutIcon, &str)>, s
 }
 
 fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+    paint_layout_button(ui, rect, response, icon, selected, tip)
+}
+
+fn layout_button_at(ui: &mut Ui, rect: Rect, icon: LayoutIcon, selected: bool, tip: &str) -> egui::Response {
+    let response = ui.interact(rect, ui.id().with(("layout_action", tip)), Sense::click());
+    paint_layout_button(ui, rect, response, icon, selected, tip)
+}
+
+fn paint_layout_button(
+    ui: &Ui,
+    rect: Rect,
+    response: egui::Response,
+    icon: LayoutIcon,
+    selected: bool,
+    tip: &str,
+) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
     let response = response.tip(tip);
     if selected || response.hovered() {
         let fill = if selected && icon == LayoutIcon::PaddingIndividual {
@@ -171,7 +187,7 @@ fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> eg
 }
 
 fn direction(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
-    row(ui, 24.0, |ui| {
+    let direction_row = row_rect(ui, 24.0, |ui| {
         let segments = [
             Segment::layout_icon(LayoutIcon::Free, tr("Free")),
             Segment::layout_icon(LayoutIcon::Vertical, tr("Vertical")),
@@ -192,14 +208,20 @@ fn direction(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                 app.set_props(ids, json!({"layout": mode}));
             }
         }
-        if l.mode != LayoutMode::Grid {
-            let resp = layout_button(ui, LayoutIcon::Wrap, l.wrap, tr("Wrap"));
-            crate::a11y::toggle(&resp, tr("Wrap"), l.wrap);
-            if resp.clicked() {
-                app.set_props(ids, json!({"wrap": !l.wrap}));
-            }
-        }
     });
+    if l.mode != LayoutMode::Grid {
+        let resp = layout_button_at(
+            ui,
+            widgets::section_action_rect(direction_row, 0),
+            LayoutIcon::Wrap,
+            l.wrap,
+            tr("Wrap"),
+        );
+        crate::a11y::toggle(&resp, tr("Wrap"), l.wrap);
+        if resp.clicked() {
+            app.set_props(ids, json!({"wrap": !l.wrap}));
+        }
+    }
     ui.add_space(8.0);
 }
 
@@ -466,9 +488,8 @@ fn add_slot(ui: &mut Ui, label: &str, tip: &str, width: f32) -> egui::Response {
 fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     let t = Tokens::get(ui.ctx());
     let grid_mode = l.mode == LayoutMode::Grid;
-    block(ui, 64.0, 0.0, |ui| {
-        // Both controls fill the two property columns. `block` already reserves the action slot
-        // on the right, where the settings button sits after the controls.
+    let alignment_block = block(ui, 64.0, 0.0, |ui| {
+        // Both controls fill the two property columns. `block` reserves the action slot.
         let column_width = (ui.available_width() - 8.0).max(0.0) / 2.0;
         let (grid, _) = ui.allocate_exact_size(vec2(column_width, 64.0), Sense::hover());
         ui.painter().rect_filled(grid, CornerRadius::same(5), t.field);
@@ -553,40 +574,36 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
             let e = crate::variable_ui::number_field_or(app, ui, ids, "gap", Id::new("al_gap"), shown, column_width, tr("Auto"), lead, "");
             app.field(ids, "gap", e, |v| json!(v));
         });
-        let (settings_slot, _) = ui.allocate_exact_size(vec2(24.0, 64.0), Sense::hover());
-        let settings_rect = Rect::from_min_size(settings_slot.min, vec2(24.0, 24.0));
-        let settings = ui.interact(settings_rect, ui.id().with("auto_layout_settings"), Sense::click()).tip(tr("Auto layout settings"));
-        if settings.hovered() {
-            ui.painter().rect_filled(settings_rect, CornerRadius::same(5), t.hover);
-        }
-        icons::paint_layout(ui.painter(), Rect::from_center_size(settings_rect.center(), vec2(18.0, 18.0)), LayoutIcon::Settings, t.icon_secondary);
-        menu_popup(&settings).width(210.0).show(|ui| {
-            if !grid_mode {
-                for (label, mode) in [
-                    (tr("Fixed"), "min"),
-                    (tr("Auto (space between)"), "spaceBetween"),
-                    (tr("Auto (space evenly)"), "spaceEvenly"),
-                    (tr("Auto (space around)"), "spaceAround"),
-                ] {
-                    if menu_item(ui, label, "") {
-                        app.set_props(ids, json!({"mainAlign": mode}));
-                        ui.close();
-                    }
-                }
-                ui.separator();
-            }
-            for (label, key, value) in [
-                (tr("Included in layout"), "strokesIncluded", true),
-                (tr("Excluded from layout"), "strokesIncluded", false),
-                (tr("Last on top"), "reverseZ", false),
-                (tr("First on top"), "reverseZ", true),
+    });
+    let action = widgets::section_action_rect(alignment_block, 0);
+    let settings_rect = Rect::from_min_size(pos2(action.left(), alignment_block.top()), vec2(24.0, 24.0));
+    let settings = layout_button_at(ui, settings_rect, LayoutIcon::Settings, false, tr("Auto layout settings"));
+    menu_popup(&settings).width(210.0).show(|ui| {
+        if !grid_mode {
+            for (label, mode) in [
+                (tr("Fixed"), "min"),
+                (tr("Auto (space between)"), "spaceBetween"),
+                (tr("Auto (space evenly)"), "spaceEvenly"),
+                (tr("Auto (space around)"), "spaceAround"),
             ] {
                 if menu_item(ui, label, "") {
-                    app.set_props(ids, json!({key: value}));
+                    app.set_props(ids, json!({"mainAlign": mode}));
                     ui.close();
                 }
             }
-        });
+            ui.separator();
+        }
+        for (label, key, value) in [
+            (tr("Included in layout"), "strokesIncluded", true),
+            (tr("Excluded from layout"), "strokesIncluded", false),
+            (tr("Last on top"), "reverseZ", false),
+            (tr("First on top"), "reverseZ", true),
+        ] {
+            if menu_item(ui, label, "") {
+                app.set_props(ids, json!({key: value}));
+                ui.close();
+            }
+        }
     });
     // Text baselines: horizontal stacks only.
     if l.mode == LayoutMode::Horizontal {
@@ -608,7 +625,7 @@ fn spacing(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     let individual_id = Id::new(("individual_padding", ids));
     let mut individual = ui.data(|d| d.get_temp::<bool>(individual_id)).unwrap_or(false);
     ui.add_space(8.0);
-    row(ui, 24.0, |ui| {
+    let padding_row = row_rect(ui, 24.0, |ui| {
         if individual {
             padding_side_field(app, ui, ids, "paddingLeft", LayoutIcon::PaddingLeft, tr("Left padding"), pl, col);
             padding_side_field(app, ui, ids, "paddingTop", LayoutIcon::PaddingTop, tr("Top padding"), pt, col);
@@ -638,13 +655,19 @@ fn spacing(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
             );
             app.field(ids, "paddingVertical", e, |v| json!(v.max(0.0)));
         }
-        let toggle = layout_button(ui, LayoutIcon::PaddingIndividual, individual, tr("Individual padding"));
-        crate::a11y::toggle(&toggle, tr("Individual padding"), individual);
-        if toggle.clicked() {
-            individual = !individual;
-            ui.data_mut(|d| d.insert_temp(individual_id, individual));
-        }
     });
+    let toggle = layout_button_at(
+        ui,
+        widgets::section_action_rect(padding_row, 0),
+        LayoutIcon::PaddingIndividual,
+        individual,
+        tr("Individual padding"),
+    );
+    crate::a11y::toggle(&toggle, tr("Individual padding"), individual);
+    if toggle.clicked() {
+        individual = !individual;
+        ui.data_mut(|d| d.insert_temp(individual_id, individual));
+    }
     if individual {
         ui.add_space(8.0);
         row(ui, 24.0, |ui| {
