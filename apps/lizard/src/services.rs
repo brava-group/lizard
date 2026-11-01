@@ -29,6 +29,7 @@ pub struct Desktop {
     agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
     agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
     agent_login_kind: Option<AgentKind>,
+    agent_login_attempt: Option<crate::agent::LoginAttempt>,
     agent_signed_in: [bool; 4],
     agent_auth_checked: [Option<bool>; 4],
     agent_auth_probe_started: [bool; 4],
@@ -98,6 +99,7 @@ impl Desktop {
             agent_bridges: Vec::new(),
             agent_login_events: None,
             agent_login_kind: None,
+            agent_login_attempt: None,
             agent_signed_in: [false; 4],
             agent_auth_checked: [None; 4],
             agent_auth_probe_started: [false; 4],
@@ -474,11 +476,24 @@ impl Services for Desktop {
     }
 
     fn agent_login(&mut self, kind: AgentKind) -> Result<(), String> {
+        if let Some(previous) = self.agent_login_attempt.take() {
+            previous.cancel();
+        }
         let (send, receive) = std::sync::mpsc::channel();
-        crate::agent::login_provider(kind, send)?;
+        let attempt = crate::agent::LoginAttempt::default();
+        crate::agent::login_provider(kind, send, attempt.clone())?;
         self.agent_login_events = Some(receive);
         self.agent_login_kind = Some(kind);
+        self.agent_login_attempt = Some(attempt);
         Ok(())
+    }
+
+    fn agent_cancel_login(&mut self) {
+        if let Some(attempt) = self.agent_login_attempt.take() {
+            attempt.cancel();
+        }
+        self.agent_login_events = None;
+        self.agent_login_kind = None;
     }
 
     fn agent_refresh_connection(&mut self, kind: AgentKind) {

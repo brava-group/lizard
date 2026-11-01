@@ -956,6 +956,15 @@ fn reset_chat(app: &mut LizardApp) {
     app.ui.agent.new_chat();
 }
 
+pub(crate) fn cancel_login(app: &mut LizardApp) {
+    app.services.agent_cancel_login();
+    app.ui.agent.login_pending = false;
+    app.ui.agent.login_kind = None;
+    app.ui.agent.login_error = None;
+    app.ui.agent.login_instruction = None;
+    app.ui.agent.connection = None;
+}
+
 pub(crate) fn select_agent(app: &mut LizardApp, kind: AgentKind) {
     if app.ui.agent.agent == kind {
         return;
@@ -1539,7 +1548,12 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             regular(11.0),
             secondary,
         );
-        if hit(ui, "agent_setup", setup, setup_title).clicked() && !app.ui.agent.login_pending {
+        let setup_hit = if app.ui.agent.login_pending {
+            Rect::from_min_max(setup.min, pos2(setup.right() - 100.0, setup.bottom()))
+        } else {
+            setup
+        };
+        if hit(ui, "agent_setup", setup_hit, setup_title).clicked() && !app.ui.agent.login_pending {
             if !connection.authenticated {
                 match app.services.agent_login(app.ui.agent.agent) {
                     Ok(()) => {
@@ -1550,6 +1564,14 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                     }
                     Err(error) => app.toast(error),
                 }
+            }
+        }
+        if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {
+            let cancel = Rect::from_min_size(pos2(setup.right() - 92.0, setup.top() + 10.0), vec2(80.0, 34.0));
+            painter.rect(cancel, CornerRadius::same(6), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+            painter.text(cancel.center(), Align2::CENTER_CENTER, "Cancelar", regular(12.0), text);
+            if hit(ui, "agent_login_cancel", cancel, "Cancelar login").clicked() {
+                cancel_login(app);
             }
         }
     }

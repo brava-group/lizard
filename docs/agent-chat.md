@@ -26,7 +26,8 @@ Lizard installs its official npm package under the user's Lizard application-sup
 before opening sign-in. The macOS app bundle includes a signed Node.js/npm runtime, so no
 terminal or separate Node installation is required there. Other desktop platforms use an
 existing Node.js/npm installation for this automatic setup. The manual setup guide is under
-**Advanced setup**. The model selector in the composer
+**Advanced setup**. **Cancel** stops an in-progress sign-in or helper installation and returns
+the connection card to its initial state. The model selector in the composer
 footer lists models returned by Codex, plus its default model. The adjacent lightning control
 selects one to six agents, and the grid control selects one to six variants. The composer uses
 24 px footer controls with brief hover fades; the model field uses the property-panel field

@@ -588,7 +588,6 @@ fn provider_row(
     t: &Tokens,
     kind: AgentKind,
     connection: &AgentConnection,
-    selected: bool,
     pending: bool,
     login_error: bool,
 ) -> bool {
@@ -601,10 +600,6 @@ fn provider_row(
     let title_x = emblem.right() + 14.0;
     ui.painter().text(pos2(title_x, rect.top() + 23.0), Align2::LEFT_CENTER, tr(provider_title(kind)), semibold(13.0), t.text);
     ui.painter().text(pos2(title_x, rect.top() + 51.0), Align2::LEFT_CENTER, tr(provider_description(kind)), regular(11.0), t.text_secondary);
-    if selected {
-        let dot = pos2(rect.right() - 18.0, rect.top() + 21.0);
-        ui.painter().circle_filled(dot, 4.0, t.accent);
-    }
     if width >= 470.0 {
         let label = tr(provider_status(connection, pending, login_error));
         let text_width = ui.painter().layout_no_wrap(label.to_owned(), semibold(11.0), t.text).size().x;
@@ -669,7 +664,6 @@ fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &m
                 t,
                 kind,
                 connection,
-                app.ui.agent.agent == kind,
                 app.ui.agent.login_pending && app.ui.agent.login_kind == Some(kind),
                 app.ui.agent.login_error.is_some() && app.ui.agent.login_kind == Some(kind),
             )
@@ -767,6 +761,13 @@ fn settings_agent_detail(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, sta
                 .clicked()
             {
                 start_provider_login(app, state, kind);
+            }
+            if pending && Button::new(tr("Cancel")).variant(ButtonVariant::Secondary).show(ui).clicked() {
+                crate::agent_panel::cancel_login(app);
+                app.services.agent_refresh_connection(kind);
+                state.connections[index] = None;
+                state.login_was_pending = false;
+                ui.ctx().request_repaint();
             }
         } else {
             if Button::new(tr("Use in chat")).show(ui).clicked() {

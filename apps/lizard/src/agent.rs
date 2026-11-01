@@ -4,12 +4,71 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use lizard_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
 use serde_json::{Value, json};
 
 const MAX_LINE: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Default)]
+pub struct LoginAttempt {
+    canceled: Arc<AtomicBool>,
+    process: Arc<Mutex<Option<Child>>>,
+}
+
+impl LoginAttempt {
+    pub fn cancel(&self) {
+        self.canceled.store(true, Ordering::Release);
+        if let Ok(mut process) = self.process.lock()
+            && let Some(child) = process.as_mut()
+        {
+            let _ = child.kill();
+        }
+    }
+
+    fn canceled(&self) -> bool {
+        self.canceled.load(Ordering::Acquire)
+    }
+
+    fn attach(&self, mut child: Child) -> Result<(), String> {
+        let mut process = self.process.lock().map_err(|error| error.to_string())?;
+        if self.canceled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Sign-in was canceled".into());
+        }
+        *process = Some(child);
+        Ok(())
+    }
+
+    fn wait(&self) -> Result<std::process::ExitStatus, String> {
+        loop {
+            let status = {
+                let mut process = self.process.lock().map_err(|error| error.to_string())?;
+                process.as_mut().ok_or("Sign-in process ended unexpectedly")?.try_wait().map_err(|error| error.to_string())?
+            };
+            if let Some(status) = status {
+                return if self.canceled() { Err("Sign-in was canceled".into()) } else { Ok(status) };
+            }
+            if self.canceled() {
+                return Err("Sign-in was canceled".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn finish(&self) {
+        if let Ok(mut process) = self.process.lock()
+            && let Some(mut child) = process.take()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 
 enum Input {
     Message(Value),
@@ -435,7 +494,10 @@ fn command_with_runtime(program: &std::ffi::OsStr) -> Command {
     command
 }
 
-fn ensure_provider(kind: AgentKind) -> Result<(), String> {
+fn ensure_provider(kind: AgentKind, attempt: &LoginAttempt) -> Result<(), String> {
+    if attempt.canceled() {
+        return Err("Sign-in was canceled".into());
+    }
     let needs_install = !login_available(kind) || (kind == AgentKind::Claude && program(kind).is_none());
     if !needs_install {
         return Ok(());
@@ -457,7 +519,7 @@ fn ensure_provider(kind: AgentKind) -> Result<(), String> {
         AgentKind::Kimi => &["@moonshot-ai/kimi-code"],
     };
     let mut command = command_with_runtime(npm.as_os_str());
-    let status = command
+    let child = command
         .arg("install")
         .arg("--prefix")
         .arg(&root)
@@ -466,8 +528,12 @@ fn ensure_provider(kind: AgentKind) -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .map_err(|error| error.to_string())?;
+    attempt.attach(child)?;
+    let status = attempt.wait();
+    attempt.finish();
+    let status = status?;
     if status.success() && login_available(kind) && (kind != AgentKind::Claude || program(kind).is_some()) {
         Ok(())
     } else {
@@ -475,33 +541,39 @@ fn ensure_provider(kind: AgentKind) -> Result<(), String> {
     }
 }
 
-pub fn login_provider(kind: AgentKind, events: Sender<AgentEvent>) -> Result<(), String> {
+pub fn login_provider(kind: AgentKind, events: Sender<AgentEvent>, attempt: LoginAttempt) -> Result<(), String> {
     if kind == AgentKind::Codex && login_available(kind) {
-        return login_codex(events);
+        return login_codex(events, attempt);
     }
     std::thread::Builder::new()
         .name("lizard-provider-login".into())
         .spawn(move || {
-            if let Err(error) = ensure_provider(kind) {
-                let _ = events.send(AgentEvent::LoginError(error));
+            if let Err(error) = ensure_provider(kind, &attempt) {
+                if !attempt.canceled() {
+                    let _ = events.send(AgentEvent::LoginError(error));
+                }
                 return;
             }
             if kind == AgentKind::Codex {
-                if let Err(error) = login_codex(events.clone()) {
+                if let Err(error) = login_codex(events.clone(), attempt.clone())
+                    && !attempt.canceled()
+                {
                     let _ = events.send(AgentEvent::LoginError(error));
                 }
                 return;
             }
             let result = match kind {
-                AgentKind::Claude => login_claude(&events),
-                AgentKind::Gemini => login_gemini(&events),
-                AgentKind::Kimi => login_kimi(&events),
+                AgentKind::Claude => login_claude(&events, &attempt),
+                AgentKind::Gemini => login_gemini(&events, &attempt),
+                AgentKind::Kimi => login_kimi(&events, &attempt),
                 AgentKind::Codex => Ok(()),
             };
-            let _ = events.send(match result {
-                Ok(()) => AgentEvent::LoginComplete,
-                Err(error) => AgentEvent::LoginError(error),
-            });
+            if !attempt.canceled() {
+                let _ = events.send(match result {
+                    Ok(()) => AgentEvent::LoginComplete,
+                    Err(error) => AgentEvent::LoginError(error),
+                });
+            }
         })
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -524,7 +596,7 @@ fn forward_auth_links<R: Read>(stream: R, events: &Sender<AgentEvent>, allowed_p
     }
 }
 
-fn login_claude(events: &Sender<AgentEvent>) -> Result<(), String> {
+fn login_claude(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
     let program = named_program("claude").ok_or("Claude Code is not installed")?;
     let mut child = command_with_runtime(program.as_os_str())
         .args(["auth", "login", "--claudeai"])
@@ -543,18 +615,21 @@ fn login_claude(events: &Sender<AgentEvent>) -> Result<(), String> {
     let err = std::thread::spawn(move || {
         forward_auth_links(stderr, &err_events, &["https://claude.ai/", "https://www.claude.ai/", "https://console.anthropic.com/"])
     });
-    let status = child.wait().map_err(|error| error.to_string())?;
+    attempt.attach(child)?;
+    let status = attempt.wait();
+    attempt.finish();
     let _ = out.join();
     let _ = err.join();
+    let status = status?;
     if status.success() { Ok(()) } else { Err("Claude sign-in did not complete".into()) }
 }
 
-fn login_gemini(events: &Sender<AgentEvent>) -> Result<(), String> {
+fn login_gemini(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
     let program = program(AgentKind::Gemini).ok_or("Gemini is not installed")?;
-    login_gemini_with_program(program.as_os_str(), events)
+    login_gemini_with_program(program.as_os_str(), events, attempt)
 }
 
-fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEvent>) -> Result<(), String> {
+fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
     let mut child = command_with_runtime(program)
         .arg("--acp")
         .stdin(Stdio::piped())
@@ -564,10 +639,16 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
         .map_err(|error| error.to_string())?;
     let stderr = child.stderr.take().ok_or("Gemini did not return sign-in instructions")?;
     let link_events = events.clone();
-    let links = std::thread::spawn(move || forward_auth_links(stderr, &link_events, &["https://accounts.google.com/", "https://auth.cloud.google/"]));
+    let link_attempt = attempt.clone();
+    let links = std::thread::spawn(move || {
+        if !link_attempt.canceled() {
+            forward_auth_links(stderr, &link_events, &["https://accounts.google.com/", "https://auth.cloud.google/"]);
+        }
+    });
+    let mut stdin = child.stdin.take().ok_or("Gemini did not open the authentication channel")?;
+    let stdout = child.stdout.take().ok_or("Gemini did not return an authentication channel")?;
+    attempt.attach(child)?;
     let outcome = (|| -> Result<(), String> {
-        let mut stdin = child.stdin.take().ok_or("Gemini did not open the authentication channel")?;
-        let stdout = child.stdout.take().ok_or("Gemini did not return an authentication channel")?;
         let mut reader = BufReader::new(stdout);
         send(
             &mut stdin,
@@ -602,13 +683,12 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
             }
         }
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    attempt.finish();
     let _ = links.join();
     outcome
 }
 
-fn login_kimi(events: &Sender<AgentEvent>) -> Result<(), String> {
+fn login_kimi(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
     let program = program(AgentKind::Kimi).ok_or("Kimi Code is not installed")?;
     let mut child = command_with_runtime(program.as_os_str())
         .arg("login")
@@ -618,6 +698,7 @@ fn login_kimi(events: &Sender<AgentEvent>) -> Result<(), String> {
         .spawn()
         .map_err(|error| error.to_string())?;
     let stderr = child.stderr.take().ok_or("Kimi did not return sign-in instructions")?;
+    attempt.attach(child)?;
     let mut reader = BufReader::new(stderr);
     let mut line = String::new();
     while reader.read_line(&mut line).map_err(|error| error.to_string())? > 0 {
@@ -649,7 +730,9 @@ fn login_kimi(events: &Sender<AgentEvent>) -> Result<(), String> {
         }
         line.clear();
     }
-    let status = child.wait().map_err(|error| error.to_string())?;
+    let status = attempt.wait();
+    attempt.finish();
+    let status = status?;
     if status.success() { Ok(()) } else { Err("Kimi sign-in did not complete".into()) }
 }
 
@@ -908,12 +991,12 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
 
 /// Start the Codex CLI's supported ChatGPT OAuth flow and keep its callback server alive until
 /// completion. The browser is opened by the UI after receiving `LoginUrl`.
-pub fn login_codex(events: Sender<AgentEvent>) -> Result<(), String> {
+pub fn login_codex(events: Sender<AgentEvent>, attempt: LoginAttempt) -> Result<(), String> {
     let program = program(AgentKind::Codex).ok_or("Instale o Codex CLI antes de conectar sua conta ChatGPT")?;
-    login_codex_with_program(program.as_os_str(), events)
+    login_codex_with_program(program.as_os_str(), events, attempt)
 }
 
-fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent>) -> Result<(), String> {
+fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent>, attempt: LoginAttempt) -> Result<(), String> {
     let program = program.to_os_string();
     std::thread::Builder::new()
         .name("lizard-codex-login".into())
@@ -928,6 +1011,7 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                     .map_err(|error| error.to_string())?;
                 let mut stdin = child.stdin.take().ok_or("O Codex não abriu a entrada de login")?;
                 let stdout = child.stdout.take().ok_or("O Codex não abriu a saída de login")?;
+                attempt.attach(child)?;
                 let mut reader = BufReader::new(stdout);
                 let outcome = (|| -> Result<(), String> {
                     send(
@@ -957,25 +1041,32 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                             if !url.starts_with("https://") && !url.starts_with("http://127.0.0.1:") {
                                 return Err("O Codex forneceu um endereço de login inválido".into());
                             }
-                            let _ = events.send(AgentEvent::LoginUrl(url.to_string()));
+                            if !attempt.canceled() {
+                                let _ = events.send(AgentEvent::LoginUrl(url.to_string()));
+                            }
                             url_sent = true;
                         } else if message["method"] == "account/login/completed" {
                             if message["params"]["success"].as_bool() == Some(true) {
-                                let _ = events.send(AgentEvent::LoginComplete);
+                                if !attempt.canceled() {
+                                    let _ = events.send(AgentEvent::LoginComplete);
+                                }
                                 return Ok(());
                             }
                             return Err(message["params"]["error"].as_str().unwrap_or("O login do Codex não foi concluído").to_string());
                         } else if message["method"] == "account/updated" && url_sent && message["params"]["account"].is_object() {
-                            let _ = events.send(AgentEvent::LoginComplete);
+                            if !attempt.canceled() {
+                                let _ = events.send(AgentEvent::LoginComplete);
+                            }
                             return Ok(());
                         }
                     }
                 })();
-                let _ = child.kill();
-                let _ = child.wait();
+                attempt.finish();
                 outcome
             })();
-            if let Err(error) = result {
+            if let Err(error) = result
+                && !attempt.canceled()
+            {
                 let _ = events.send(AgentEvent::LoginError(error));
             }
         })
@@ -1012,7 +1103,7 @@ for line in sys.stdin:
         perms.set_mode(0o700);
         std::fs::set_permissions(&script, perms).unwrap();
         let (send, events) = mpsc::channel();
-        login_gemini_with_program(script.as_os_str(), &send).unwrap();
+        login_gemini_with_program(script.as_os_str(), &send, &LoginAttempt::default()).unwrap();
         assert!(events.try_recv().is_err());
         let _ = std::fs::remove_dir_all(folder);
     }
@@ -1051,9 +1142,45 @@ for line in sys.stdin:
         perms.set_mode(0o700);
         std::fs::set_permissions(&script, perms).unwrap();
         let (send, events) = mpsc::channel();
-        login_codex_with_program(script.as_os_str(), send).unwrap();
+        login_codex_with_program(script.as_os_str(), send, LoginAttempt::default()).unwrap();
         assert!(matches!(events.recv_timeout(Duration::from_secs(4)), Ok(AgentEvent::LoginUrl(url)) if url == "https://example.com/login"));
         assert!(matches!(events.recv_timeout(Duration::from_secs(4)), Ok(AgentEvent::LoginComplete)));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn cancel_codex_login_stops_waiting_without_late_completion() {
+        let folder = std::env::temp_dir().join(format!("lizard-codex-cancel-test-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let script = folder.join("mock-login");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys, time
+for line in sys.stdin:
+ msg=json.loads(line)
+ if msg.get('method')=='initialize':
+  print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{}}),flush=True)
+ elif msg.get('method')=='account/login/start':
+  print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'authUrl':'https://example.com/login'}}),flush=True)
+  time.sleep(30)
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let (send, events) = mpsc::channel();
+        let attempt = LoginAttempt::default();
+        login_codex_with_program(script.as_os_str(), send, attempt.clone()).unwrap();
+        assert!(matches!(events.recv_timeout(Duration::from_secs(4)), Ok(AgentEvent::LoginUrl(_))));
+        attempt.cancel();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while attempt.process.lock().unwrap().is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(attempt.process.lock().unwrap().is_none());
+        assert!(events.try_recv().is_err());
         let _ = std::fs::remove_dir_all(folder);
     }
 

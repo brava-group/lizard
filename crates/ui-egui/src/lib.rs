@@ -278,6 +278,7 @@ pub trait Services {
     fn agent_login(&mut self, _agent: agent_panel::AgentKind) -> Result<(), String> {
         Err("O login dos agentes está disponível apenas no aplicativo desktop".into())
     }
+    fn agent_cancel_login(&mut self) {}
     fn agent_request_models(&mut self, _agent: agent_panel::AgentKind) {}
     fn agent_history_load(&mut self) -> serde_json::Value {
         serde_json::Value::Null
