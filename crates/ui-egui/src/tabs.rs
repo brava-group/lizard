@@ -17,6 +17,7 @@ const TAB_INSET: f32 = 4.0;
 const TAB_RADIUS: u8 = 6;
 const TAB_CLOSE_GLYPH: f32 = 8.5;
 const TAB_CLOSE_RIGHT_PADDING: f32 = 3.0;
+const TAB_DIRTY_DOT_GAP: f32 = 14.0;
 const MIN_TAB_WIDTH: f32 = 96.0;
 const OVERFLOW_WIDTH: f32 = 32.0;
 const OPEN_TIME: f64 = 0.18;
@@ -229,14 +230,14 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 name,
                 regular(12.0),
                 t.text.linear_multiply(progress),
-                (w - mark_w - if dirty { 72.0 } else { 60.0 }).max(0.0),
+                (w - mark_w - if dirty { 65.0 + TAB_DIRTY_DOT_GAP } else { 60.0 }).max(0.0),
             );
             if let Some(shared) = live {
                 let at = Rect::from_center_size(pos2(paint_r.max.x - 38.0, paint_r.center().y), vec2(14.0, 14.0));
                 icons::paint(&painter, at, crate::online::mark(shared), if shared { t.success } else { t.icon_secondary }.linear_multiply(progress));
             }
             if dirty {
-                ui.painter().circle_filled(pos2(shown.max.x + 7.0, r.center().y), 3.0, t.accent_text);
+                ui.painter().circle_filled(pos2(shown.max.x + TAB_DIRTY_DOT_GAP, r.center().y), 3.0, t.accent_text);
             }
             let cr = Rect::from_center_size(close_r.center() + vec2(slide_x - TAB_CLOSE_RIGHT_PADDING, 0.0), vec2(18.0, 18.0));
             // The close target never overlaps the draggable body, including on inactive tabs.
