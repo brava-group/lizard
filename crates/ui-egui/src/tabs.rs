@@ -105,6 +105,9 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
     egui::Panel::top("tab_bar").exact_size(HEIGHT).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
         let rect = ui.max_rect();
         let buttons_w = if app.ui.title_bar == TitleBar::Custom { window_buttons(app, ui, rect) } else { 0.0 };
+        let settings_label = tr("Settings");
+        let settings_text = ui.painter().layout_no_wrap(settings_label.to_owned(), regular(12.0), t.text);
+        let settings_width = (settings_text.size().x + 48.0).max(96.0);
         let mut x = rect.min.x + if app.ui.title_bar == TitleBar::Inset { 76.0 } else { 8.0 };
         // Home.
         let home_label = tr("Home");
@@ -148,9 +151,9 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 (regular(12.0).size * 0.6 * d.doc.name.chars().count() as f32 + 64.0 + mark_w + dot_w).clamp(120.0, 220.0)
             })
             .collect();
-        // Leave the new-tab button, theme toggle, window controls and a draggable gap free.
+        // Leave the new-tab button, settings, window controls and a draggable gap free.
         let present_w = if app.ui.present.is_some() || app.ui.paused_present.is_some() { 128.0 } else { 0.0 };
-        let available = (rect.max.x - buttons_w - 70.0 - x - 34.0 - present_w).max(0.0);
+        let available = (rect.max.x - buttons_w - settings_width - 74.0 - x - present_w).max(0.0);
         let active_tab = document_tabs.iter().position(|&i| i == app.session.active);
         let layout = tab_layout(&preferred, available, active_tab);
         let mut tab_rects = Vec::with_capacity(layout.widths.len());
@@ -333,20 +336,24 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             app.run("file.new", json!({}));
             app.ui.home = false;
         }
-        // Right side: theme toggle (left of the window buttons).
-        let theme_r = Rect::from_center_size(pos2(rect.max.x - buttons_w - 24.0, rect.center().y), vec2(28.0, 28.0));
-        let tresp = ui.interact(theme_r, ui.id().with("theme"), Sense::click()).tip(tr("Toggle light/dark theme"));
-        if tresp.hovered() {
-            ui.painter().rect_filled(theme_r, CornerRadius::same(5), t.hover);
+        // Right side: settings (left of the window buttons).
+        let settings_r = Rect::from_min_size(pos2(rect.max.x - buttons_w - settings_width - 8.0, rect.min.y), vec2(settings_width, HEIGHT));
+        let settings_resp = ui.interact(settings_r, ui.id().with("settings"), Sense::click()).tip(crate::shortcuts::tip(settings_label, "app.preferences"));
+        if settings_resp.hovered() {
+            ui.painter().rect_filled(settings_r.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
         }
-        icons::paint(ui.painter(), theme_r.shrink(7.0), if app.ui.dark { Icon::Sun } else { Icon::Moon }, t.icon);
-        if tresp.clicked() {
-            let cmd = if app.ui.dark { "view.themeLight" } else { "view.themeDark" };
-            app.run(cmd, json!({}));
+        ui.painter().galley(pos2(settings_r.min.x + 12.0, settings_r.center().y - settings_text.size().y * 0.5), settings_text, t.text);
+        icons::paint_settings_tab(
+            ui.painter(),
+            Rect::from_center_size(pos2(settings_r.max.x - 18.0, settings_r.center().y), vec2(16.0, 16.0)),
+            t.icon,
+        );
+        if settings_resp.clicked() {
+            app.run("app.preferences", json!({}));
         }
         // Only the free space drags the window. A full-bar drag target steals tab drags.
-        if app.ui.title_bar != TitleBar::Native && x + 34.0 < theme_r.min.x {
-            let free = Rect::from_min_max(pos2(x + 34.0, rect.min.y), pos2(theme_r.min.x, rect.max.y));
+        if app.ui.title_bar != TitleBar::Native && x + 34.0 < settings_r.min.x {
+            let free = Rect::from_min_max(pos2(x + 34.0, rect.min.y), pos2(settings_r.min.x, rect.max.y));
             let drag = ui.interact(free, ui.id().with("titlebar_drag"), Sense::click_and_drag());
             if drag.drag_started() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
