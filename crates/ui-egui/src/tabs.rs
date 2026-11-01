@@ -13,6 +13,8 @@ use crate::{LizardApp, TitleBar};
 
 pub const HEIGHT: f32 = 40.0;
 
+const TAB_INSET: f32 = 4.0;
+const TAB_RADIUS: u8 = 6;
 const MIN_TAB_WIDTH: f32 = 96.0;
 const OVERFLOW_WIDTH: f32 = 32.0;
 const OPEN_TIME: f64 = 0.18;
@@ -108,9 +110,9 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
         let home_active = (app.ui.home || !app.has_files()) && app.ui.present.is_none();
         crate::a11y::tab(&hresp, tr("Home"), home_active);
         if home_active {
-            ui.painter().rect_filled(hr, CornerRadius::ZERO, t.tab_active);
+            ui.painter().rect_filled(hr.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.tab_active);
         } else if hresp.hovered() {
-            ui.painter().rect_filled(hr, CornerRadius::ZERO, t.hover);
+            ui.painter().rect_filled(hr.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
         }
         icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(16.0, 16.0)), Icon::Home, t.icon);
         if hresp.clicked() {
@@ -120,7 +122,6 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             app.ui.home = true;
         }
         x += 44.0;
-        ui.painter().line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, t.border));
         let document_tabs: Vec<usize> = app.session.docs.iter().enumerate().filter_map(|(i, d)| app.shows(d.uid).then_some(i)).collect();
         let now = ui.input(|input| input.time);
         let motion_id = ui.id().with("tab_motion");
@@ -203,12 +204,12 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let resp = if live.is_some() { resp.on_hover_text(&label) } else { resp };
             crate::a11y::tab(&resp, &label, active);
             let progress = open_progress(&opening, d.uid, now);
-            let paint_r = r.translate(vec2(-28.0 * (1.0 - progress).powi(2), 0.0));
+            let paint_r = r.shrink(TAB_INSET).translate(vec2(-28.0 * (1.0 - progress).powi(2), 0.0));
             let painter = ui.painter().with_clip_rect(r);
             if active {
-                painter.rect_filled(paint_r, CornerRadius::ZERO, t.tab_active.linear_multiply(progress));
+                painter.rect_filled(paint_r, CornerRadius::same(TAB_RADIUS), t.tab_active.linear_multiply(progress));
             } else if resp.hovered() || cresp.hovered() {
-                painter.rect_filled(paint_r, CornerRadius::ZERO, t.hover.linear_multiply(progress));
+                painter.rect_filled(paint_r, CornerRadius::same(TAB_RADIUS), t.hover.linear_multiply(progress));
             }
             icons::paint_tab_document(ui.painter(), Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(14.0, 14.0)), t.accent_text);
             // The unsaved-changes dot follows the name on screen, whichever way the name reads.
@@ -249,7 +250,6 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 close = Some(i);
             }
             x += w;
-            ui.painter().line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, t.border));
         }
         let visible: Vec<(usize, Rect)> = tab_rects.iter().copied().enumerate().map(|(slot, r)| (document_tabs[layout.first + slot], r)).collect();
         if let Some((from, p)) = dragging
@@ -264,7 +264,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let resp = ui.interact(r, ui.id().with("tab_overflow"), Sense::click()).tip(tr("Open files"));
             crate::a11y::menu_button(&resp, tr("Open files"), crate::a11y::menu_open(&resp));
             if resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
+                ui.painter().rect_filled(r.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
             }
             icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(14.0, 14.0)), Icon::Chevron, t.icon);
             crate::right::menu_popup(&resp).show(|ui| {
@@ -294,9 +294,9 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let active = app.ui.present.is_some();
             crate::a11y::tab(&resp, tr("Present"), active);
             if active {
-                ui.painter().rect_filled(r, CornerRadius::ZERO, t.tab_active);
+                ui.painter().rect_filled(r.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.tab_active);
             } else if resp.hovered() || close_resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
+                ui.painter().rect_filled(r.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
             }
             icons::paint(ui.painter(), Rect::from_center_size(pos2(x + 19.0, r.center().y), vec2(14.0, 14.0)), Icon::Play, t.icon);
             ui.painter().text(pos2(x + 34.0, r.center().y), Align2::LEFT_CENTER, tr("Present"), regular(12.0), t.text);
@@ -315,7 +315,6 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 resume_presentation(app);
             }
             x += w;
-            ui.painter().line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, t.border));
         }
         // New tab.
         let nr = Rect::from_center_size(pos2(x + 20.0, rect.center().y), vec2(28.0, 28.0));
