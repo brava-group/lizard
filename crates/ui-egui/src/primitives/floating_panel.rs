@@ -59,7 +59,7 @@ impl<'a> FloatingPanel<'a> {
     pub const DARK_FIELD: Color32 = Color32::from_rgb(56, 56, 56);
 
     pub fn surface(t: Tokens) -> Color32 {
-        if t.dark { Self::DARK_SURFACE } else { t.panel }
+        if t.dark { t.picker_surface } else { t.panel }
     }
 
     fn open_panels_id() -> Id {

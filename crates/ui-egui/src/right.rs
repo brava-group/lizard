@@ -765,7 +765,7 @@ fn component_header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId
         app.run("instance.create", json!({"component": id}));
     }
     let owner = lizard_engine::components::variant_set(doc, id).unwrap_or(id);
-    menu_popup(&settings).width(180.0).show(|ui| crate::component_panel::add_property_menu(app, ui, doc, owner));
+    menu_popup(&settings).width(220.0).show(|ui| crate::component_panel::add_property_menu(app, ui, doc, owner));
     menu_popup(&more).width(180.0).show(|ui| {
         if lizard_engine::cmd::component::can_add_variant(doc, owner) && menu_item(ui, tr("Add variant"), "") {
             app.run("component.addVariant", json!({"id": owner}));

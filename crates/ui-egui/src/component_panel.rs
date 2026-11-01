@@ -10,7 +10,7 @@
 //! - A slot inside an instance (and an instance's slot properties): fill it with components
 //!   (preferred ones first), select it, reset it to the main's default content.
 
-use egui::{Id, Sense, Ui, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
@@ -23,6 +23,7 @@ use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trn};
 use crate::icons::{self, Icon};
 use crate::list_drag::ListDrag;
+use crate::primitives::{Button, ButtonVariant, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, Select, Switch};
 use crate::right::{menu_item, menu_popup, row, row_rect};
 use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
@@ -30,9 +31,15 @@ use crate::widgets;
 /// Entry point (called from the Design panel header for every selection).
 pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let [id] = sel else {
+        ui.data_mut(|data| data.remove::<PropertyDraft>(property_draft_id()));
         combine_ui(app, ui, doc, sel);
         return;
     };
+    if let Some(draft) = ui.data(|data| data.get_temp::<PropertyDraft>(property_draft_id()))
+        && variant_set(doc, *id).unwrap_or(*id) != draft.owner
+    {
+        ui.data_mut(|data| data.remove::<PropertyDraft>(property_draft_id()));
+    }
     let Some(n) = doc.node(*id) else { return };
     match &n.kind {
         NodeKind::Instance { .. } => instance_ui(app, ui, doc, n),
@@ -209,35 +216,264 @@ fn prop_defs(doc: &Document, c: NodeId) -> std::collections::BTreeMap<String, Pr
     }
 }
 
+/// The five menu glyphs in mask-example, drawn in the menu's ink colour.
+fn property_menu_icon(painter: &Painter, rect: Rect, kind: &str, ink: Color32) {
+    let center = rect.center();
+    let at = |x: f32, y: f32| -> Pos2 { pos2(center.x + x, center.y + y) };
+    let stroke = Stroke::new(1.3, ink);
+    match kind {
+        "variant" | "instanceSwap" => {
+            painter.add(egui::Shape::line(
+                vec![at(0.0, -6.0), at(0.7, -5.7), at(5.7, -0.7), at(6.0, 0.0), at(5.7, 0.7), at(0.7, 5.7), at(0.0, 6.0), at(-0.7, 5.7), at(-5.7, 0.7), at(-6.0, 0.0), at(-5.7, -0.7), at(-0.7, -5.7), at(0.0, -6.0)],
+                stroke,
+            ));
+        }
+        "text" => {
+            painter.rect_stroke(Rect::from_center_size(center, vec2(10.0, 10.0)), CornerRadius::same(1), stroke, StrokeKind::Inside);
+            painter.line_segment([at(-2.5, -1.8), at(2.5, -1.8)], stroke);
+            painter.line_segment([at(0.0, -1.8), at(0.0, 2.5)], stroke);
+        }
+        "boolean" => {
+            painter.add(egui::Shape::line(
+                vec![at(-6.0, 0.0), at(-4.8, -2.5), at(-2.5, -3.7), at(2.5, -3.7), at(4.8, -2.5), at(6.0, 0.0), at(4.8, 2.5), at(2.5, 3.7), at(-2.5, 3.7), at(-4.8, 2.5), at(-6.0, 0.0)],
+                stroke,
+            ));
+            painter.circle_stroke(center, 1.5, stroke);
+        }
+        "slot" => {
+            painter.rect_stroke(Rect::from_center_size(center, vec2(10.0, 10.0)), CornerRadius::same(1), stroke, StrokeKind::Inside);
+            painter.line_segment([at(-2.0, 0.0), at(2.0, 0.0)], stroke);
+            painter.line_segment([at(0.0, -2.0), at(0.0, 2.0)], stroke);
+        }
+        _ => {}
+    }
+}
+
+fn property_menu_row(ui: &mut Ui, label: &str, kind: &str, enabled: bool) -> egui::Response {
+    MenuItem::new(label).enabled(enabled).show_with_parts(
+        ui,
+        20.0,
+        |painter, rect, ink| property_menu_icon(painter, rect, kind, ink),
+        0.0,
+        |_, _, _| {},
+    )
+}
+
+#[derive(Clone)]
+struct PropertyDraft {
+    owner: NodeId,
+    kind: &'static str,
+    name: String,
+    text: String,
+    boolean: bool,
+    instance: Option<NodeId>,
+    preferred: Vec<NodeId>,
+}
+
+fn property_draft_id() -> Id {
+    Id::new("component_property_create_draft")
+}
+
 /// Menu shared by the Properties add button and the component header settings action.
 pub(crate) fn add_property_menu(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
-    let t = Tokens::get(ui.ctx());
     let first = if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) {
         doc.node(owner).and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|n| &n.kind), Some(NodeKind::Component { .. }))))
     } else {
         Some(owner)
     };
     let defs = first.map(|id| prop_defs(doc, id)).unwrap_or_default();
-    let variants = variant_options(doc, owner);
+    let variants = if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) {
+        variant_options(doc, owner)
+    } else {
+        Vec::new()
+    };
     let existing: Vec<String> = defs.keys().cloned().chain(variants.iter().map(|(key, _)| key.clone())).collect();
     let fresh = (1..).map(|index| format!("Property {index}")).find(|name| !existing.contains(name)).unwrap_or_else(|| "Property".into());
     let comps = local_components(app, ui, doc);
     let swap_default = comps.iter().map(|(id, _)| *id).find(|id| *id != owner && first != Some(*id));
+    ui.add_space(4.0);
+    crate::primitives::Menu::status(ui, tr("Create property"));
     let items: [(&str, &str, Value); 4] = [
         (tr("Variant"), "variant", json!("Default")),
-        (tr("Boolean"), "boolean", json!(true)),
         (tr("Text"), "text", json!("Text")),
+        (tr("Boolean"), "boolean", json!(true)),
         (tr("Instance swap"), "instanceSwap", swap_default.map(|id| json!(id.0)).unwrap_or(Value::Null)),
     ];
     for (label, ty, default) in items {
-        if ty == "instanceSwap" && default.is_null() {
-            ui.label(egui::RichText::new(tr("Instance swap (no other component)")).color(t.text_tertiary));
-            continue;
-        }
-        if menu_item(ui, label, "") {
-            app.run("component.addProperty", json!({"id": owner, "name": fresh, "type": ty, "default": default}));
+        if property_menu_row(ui, label, ty, true).clicked() {
+            if ty == "variant" {
+                app.run("component.addProperty", json!({"id": owner, "name": fresh, "type": ty, "default": default}));
+            } else {
+                let base = match ty {
+                    "text" => tr("Text"),
+                    "boolean" => tr("Boolean"),
+                    _ => tr("Instance"),
+                };
+                let name = if existing.contains(&base.to_string()) { fresh.clone() } else { base.to_string() };
+                ui.data_mut(|data| {
+                    data.insert_temp(
+                        property_draft_id(),
+                        PropertyDraft { owner, kind: ty, name, text: String::new(), boolean: true, instance: None, preferred: Vec::new() },
+                    )
+                });
+            }
             ui.close();
         }
+    }
+    if property_menu_row(ui, tr("Slot"), "slot", first.is_some()).clicked() {
+        if let Some(component) = first {
+            app.run(
+                "command.batch",
+                json!({
+                    "label": "Create slot property",
+                    "commands": [
+                        {"command": "node.create", "as": "slot", "params": {"type": "frame", "parent": component, "name": fresh}},
+                        {"command": "component.makeSlot", "params": {"id": {"$ref": "slot"}, "name": fresh}},
+                        {"command": "select.set", "params": {"ids": [owner]}}
+                    ]
+                }),
+            );
+        }
+        ui.close();
+    }
+}
+
+fn property_form_label(ui: &mut Ui, label: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(110.0, 24.0), Sense::hover());
+    ui.painter().text(pos2(rect.left(), rect.center().y), Align2::LEFT_CENTER, label, crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+}
+
+fn property_form_field(ui: &mut Ui, id: Id, label: &str, value: &str) -> Option<String> {
+    let mut changed = None;
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        property_form_label(ui, label);
+        changed = widgets::text_field_named(ui, id, value, 178.0, label);
+        ui.add_space(16.0);
+    });
+    changed
+}
+
+fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
+    let ctx = ui.ctx().clone();
+    let Some(mut draft) = ctx.data(|data| data.get_temp::<PropertyDraft>(property_draft_id())) else { return };
+    if draft.owner != owner {
+        ctx.data_mut(|data| data.remove::<PropertyDraft>(property_draft_id()));
+        return;
+    }
+    let first = if matches!(doc.node(owner).map(|node| &node.kind), Some(NodeKind::ComponentSet { .. })) {
+        doc.node(owner).and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))))
+    } else {
+        Some(owner)
+    };
+    let defs = first.map(|id| prop_defs(doc, id)).unwrap_or_default();
+    let variants = if first == Some(owner) { Vec::new() } else { variant_options(doc, owner) };
+    let comps = local_components(app, ui, doc);
+    let panel_id = Id::new(("component_property_create", owner));
+    let mut open = true;
+    let mut close = false;
+    let mut create = false;
+    FloatingPanel::new(panel_id, pos2(0.0, ui.cursor().min.y))
+        .width(FloatingPanelWidth::Fixed(320.0))
+        .height(FloatingPanelHeight::Fixed(if draft.kind == "instanceSwap" { 252.0 } else { 202.0 }))
+        .header_height(42.0)
+        .anchor_to_properties()
+        .open(&mut open)
+        .show_with_header(&ctx, |ui, header| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            close = FloatingPanel::title_header(ui, header, tr("Create property"), panel_id.with("close"));
+            ui.add_space(16.0);
+            if let Some(name) = property_form_field(ui, panel_id.with("name"), tr("Name"), &draft.name) {
+                draft.name = name;
+            }
+            ui.add_space(10.0);
+            match draft.kind {
+                "text" => {
+                    if let Some(value) = property_form_field(ui, panel_id.with("value"), tr("Value"), &draft.text) {
+                        draft.text = value;
+                    }
+                }
+                "boolean" => {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        property_form_label(ui, tr("Value"));
+                        let (rect, _) = ui.allocate_exact_size(vec2(178.0, 24.0), Sense::hover());
+                        if Switch::new(panel_id.with("boolean"), draft.boolean, if draft.boolean { tr("True") } else { tr("False") }).show_at(ui, rect).clicked() {
+                            draft.boolean = !draft.boolean;
+                        }
+                    });
+                }
+                "instanceSwap" => {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        property_form_label(ui, tr("Value"));
+                        let name = draft.instance.and_then(|id| doc.node(id).map(|node| node.name.as_str())).unwrap_or(tr("Choose instance"));
+                        let response = Select::trigger(ui, name, 178.0, Some(Icon::Instance));
+                        menu_popup(&response).width(220.0).show(|ui| {
+                            for (id, name) in comps.iter().filter(|(id, _)| *id != owner && first != Some(*id)) {
+                                if MenuItem::new(name).leading(Icon::Instance).show(ui).clicked() {
+                                    draft.instance = Some(*id);
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
+                    ui.add_space(16.0);
+                    widgets::separator(ui);
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        let (label, _) = ui.allocate_exact_size(vec2(264.0, 24.0), Sense::hover());
+                        ui.painter().text(label.left_center(), Align2::LEFT_CENTER, tr("Preferred instances"), crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+                        let plus = Button::icon(Icon::Plus, tr("Add preferred instance")).show(ui);
+                        menu_popup(&plus).width(220.0).show(|ui| {
+                            for (id, name) in comps.iter().filter(|(id, _)| *id != owner && first != Some(*id)) {
+                                if MenuItem::new(name).checked(draft.preferred.contains(id)).show(ui).clicked() {
+                                    if let Some(index) = draft.preferred.iter().position(|candidate| candidate == id) {
+                                        draft.preferred.remove(index);
+                                    } else {
+                                        draft.preferred.push(*id);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                }
+                _ => {}
+            }
+            ui.add_space(20.0);
+            widgets::separator(ui);
+            ui.add_space(14.0);
+            let valid_name = !draft.name.trim().is_empty()
+                && !defs.contains_key(draft.name.trim())
+                && !variants.iter().any(|(name, _)| name == draft.name.trim());
+            let enabled = valid_name && (draft.kind != "instanceSwap" || draft.instance.is_some());
+            let (footer, _) = ui.allocate_exact_size(vec2(320.0, 32.0), Sense::hover());
+            let button = Rect::from_min_size(pos2(footer.right() - 166.0, footer.top() + 4.0), vec2(150.0, 24.0));
+            create = Button::new(tr("Create property"))
+                .variant(ButtonVariant::Primary)
+                .enabled(enabled)
+                .show_at(ui, panel_id.with("create"), button)
+                .clicked();
+            ui.add_space(16.0);
+        });
+    if create {
+        let default = match draft.kind {
+            "text" => json!(draft.text),
+            "boolean" => json!(draft.boolean),
+            "instanceSwap" => draft.instance.map(|id| json!(id.0)).unwrap_or(Value::Null),
+            _ => Value::Null,
+        };
+        let preferred: Vec<u64> = draft.preferred.iter().map(|id| id.0).collect();
+        if app.run("component.addProperty", json!({"id": owner, "name": draft.name.trim(), "type": draft.kind, "default": default, "preferred": preferred})).is_some() {
+            close = true;
+        }
+    }
+    if close || !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        ctx.data_mut(|data| data.remove::<PropertyDraft>(property_draft_id()));
+        FloatingPanel::dismiss(&ctx, panel_id);
+    } else {
+        ctx.data_mut(|data| data.insert_temp(property_draft_id(), draft));
     }
 }
 
@@ -256,7 +492,8 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     let comps = local_components(app, ui, doc);
     widgets::separator(ui);
     let plus = header_with_plus(ui, tr("Properties"), tr("Create component property"));
-    menu_popup(&plus).width(180.0).show(|ui| add_property_menu(app, ui, doc, owner));
+    menu_popup(&plus).width(220.0).show(|ui| add_property_menu(app, ui, doc, owner));
+    property_create_dialog(app, ui, doc, owner);
     if is_set && !variant_conflicts(doc, owner).is_empty() {
         widgets::note(ui, tr("Some variants have the same property values: give each one a unique combination"), t.warning);
     }
