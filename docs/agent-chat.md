@@ -17,9 +17,16 @@ the prior remote session. Recent transcript text is supplied to ACP after a loca
 Codex relies on its saved thread instead.
 
 The menu in the chat header chooses **Codex**, **Claude Code**, **Gemini CLI** or **Kimi Code**.
-Codex uses the installed Codex CLI's [app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)
-and its ChatGPT subscription login. The Agent welcome screen shows the connection state;
-**Conectar com ChatGPT** starts browser sign-in when needed. The model selector in the composer
+Settings → Agents offers a provider card and a **Continue with** button for each account.
+Codex uses the official [app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)
+and ChatGPT subscription login; Claude starts its Claude subscription login; Gemini uses its
+ACP Google account flow; Kimi uses its device-code sign-in, with a copyable code in Lizard.
+The Agent welcome screen also offers account connection. If a provider helper is missing,
+Lizard installs its official npm package under the user's Lizard application-support folder
+before opening sign-in. The macOS app bundle includes a signed Node.js/npm runtime, so no
+terminal or separate Node installation is required there. Other desktop platforms use an
+existing Node.js/npm installation for this automatic setup. The manual setup guide is under
+**Advanced setup**. The model selector in the composer
 footer lists models returned by Codex, plus its default model. The adjacent lightning control
 selects one to six agents, and the grid control selects one to six variants. The composer uses
 24 px footer controls with brief hover fades; the model field uses the property-panel field
@@ -33,8 +40,8 @@ independent root frame, while split mode assigns each a distinct part of the sam
 run in successive rounds after all agents in the previous round finish. The variants control can
 request changes in layout or visual style. Parallel edits still share one canvas, so the agents'
 instructions coordinate their work without hard layer ownership. Lizard stores neither tokens
-nor API keys. Install the
-corresponding executable:
+nor API keys; each official provider helper keeps its own credentials outside the repository.
+The helpers started by the chat are:
 
 | Choice | Executable started by Lizard |
 |---|---|
@@ -43,9 +50,10 @@ corresponding executable:
 | Gemini CLI | `gemini --acp` |
 | Kimi Code | `kimi acp` |
 
-The other agents use [ACP](https://agentclientprotocol.com/) and their own CLI account
-configuration. The panel links to each provider's installation instructions when its executable
-is missing. Lizard starts `lizard-cli mcp --attach <private-port>` for the agent; installed builds
+The other agents use [ACP](https://agentclientprotocol.com/) and their own account
+configuration. Connection status is verified with the provider's status command or an ACP
+session check; finding a helper alone does not mean the account is connected. Lizard starts
+`lizard-cli mcp --attach <private-port>` for the agent; installed builds
 should keep `lizard-cli` beside `lizard`, or make it available on `PATH`. The private MCP
 bridge checks the active document before accepting an operation and is revoked when the chat
 session changes. ACP tool approvals appear in the chat before the adapter continues.

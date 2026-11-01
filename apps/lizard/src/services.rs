@@ -28,6 +28,12 @@ pub struct Desktop {
     agent_control: Option<(ControlQueue, ContextSlot)>,
     agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
     agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
+    agent_login_kind: Option<AgentKind>,
+    agent_signed_in: [bool; 4],
+    agent_auth_checked: [Option<bool>; 4],
+    agent_auth_probe_started: [bool; 4],
+    agent_auth_probe_tx: std::sync::mpsc::Sender<(AgentKind, bool)>,
+    agent_auth_probe_rx: std::sync::mpsc::Receiver<(AgentKind, bool)>,
     agent_model_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
 }
 
@@ -77,6 +83,7 @@ impl Desktop {
             p
         });
         let reduce_motion = Arc::new(AtomicBool::new(false));
+        let (agent_auth_probe_tx, agent_auth_probe_rx) = std::sync::mpsc::channel();
         let flag = reduce_motion.clone();
         std::thread::spawn(move || flag.store(system_reduce_motion(), Ordering::Relaxed));
         Self {
@@ -90,6 +97,12 @@ impl Desktop {
             agent_control: None,
             agent_bridges: Vec::new(),
             agent_login_events: None,
+            agent_login_kind: None,
+            agent_signed_in: [false; 4],
+            agent_auth_checked: [None; 4],
+            agent_auth_probe_started: [false; 4],
+            agent_auth_probe_tx,
+            agent_auth_probe_rx,
             agent_model_events: None,
         }
     }
@@ -390,7 +403,15 @@ impl Services for Desktop {
             }
         }
         if let Some(login) = &self.agent_login_events {
-            events.extend(login.try_iter().take(20));
+            for event in login.try_iter().take(20) {
+                if matches!(event, AgentEvent::LoginComplete) {
+                    if let Some(kind) = self.agent_login_kind {
+                        self.agent_signed_in[kind as usize] = true;
+                        self.agent_auth_checked[kind as usize] = Some(true);
+                    }
+                }
+                events.push(event);
+            }
         }
         if let Some(models) = &self.agent_model_events {
             events.extend(models.try_iter().take(20));
@@ -399,35 +420,72 @@ impl Services for Desktop {
     }
 
     fn agent_connection(&mut self, kind: AgentKind) -> lizard_ui_egui::agent_panel::AgentConnection {
-        let Some(program) = crate::agent::program(kind) else {
+        while let Ok((checked_kind, authenticated)) = self.agent_auth_probe_rx.try_recv() {
+            if !self.agent_signed_in[checked_kind as usize] {
+                self.agent_auth_checked[checked_kind as usize] = Some(authenticated);
+            }
+        }
+        if !crate::agent::login_available(kind) {
             return lizard_ui_egui::agent_panel::AgentConnection {
                 installed: false,
                 authenticated: false,
                 detail: format!("{} não está instalado neste computador", kind.label()),
             };
-        };
+        }
         if kind == AgentKind::Codex {
-            let status = std::process::Command::new(program).args(["login", "status"]).output();
-            let authenticated = status.as_ref().is_ok_and(|output| output.status.success());
+            let authenticated = crate::agent::codex_authenticated();
             lizard_ui_egui::agent_panel::AgentConnection {
                 installed: true,
                 authenticated,
                 detail: if authenticated { "ChatGPT conectado".into() } else { "Entre com sua conta ChatGPT".into() },
             }
         } else {
+            let authenticated = if kind == AgentKind::Claude {
+                crate::agent::claude_authenticated()
+            } else {
+                let index = kind as usize;
+                if !self.agent_auth_probe_started[index] {
+                    self.agent_auth_probe_started[index] = true;
+                    let sender = self.agent_auth_probe_tx.clone();
+                    if std::thread::Builder::new()
+                        .name("lizard-agent-auth-check".into())
+                        .spawn(move || {
+                            let _ = sender.send((kind, crate::agent::acp_authenticated(kind)));
+                        })
+                        .is_err()
+                    {
+                        self.agent_auth_checked[index] = Some(false);
+                    }
+                }
+                self.agent_signed_in[index] || self.agent_auth_checked[index].unwrap_or(false)
+            };
             lizard_ui_egui::agent_panel::AgentConnection {
                 installed: true,
-                authenticated: true,
-                detail: format!("{} disponível via ACP", kind.label()),
+                authenticated,
+                detail: if kind != AgentKind::Claude && self.agent_auth_checked[kind as usize].is_none() && !self.agent_signed_in[kind as usize] {
+                    "checking".into()
+                } else if authenticated {
+                    format!("{} conectado", kind.label())
+                } else {
+                    format!("{} pronto para conectar", kind.label())
+                },
             }
         }
     }
 
-    fn agent_login(&mut self) -> Result<(), String> {
+    fn agent_login(&mut self, kind: AgentKind) -> Result<(), String> {
         let (send, receive) = std::sync::mpsc::channel();
-        crate::agent::login_codex(send)?;
+        crate::agent::login_provider(kind, send)?;
         self.agent_login_events = Some(receive);
+        self.agent_login_kind = Some(kind);
         Ok(())
+    }
+
+    fn agent_refresh_connection(&mut self, kind: AgentKind) {
+        let index = kind as usize;
+        self.agent_auth_checked[index] = None;
+        self.agent_auth_probe_started[index] = false;
+        self.agent_signed_in[index] = false;
     }
 
     fn agent_request_models(&mut self, kind: AgentKind) {

@@ -83,6 +83,7 @@ pub enum AgentEvent {
     Ready,
     Session(String),
     LoginUrl(String),
+    LoginInstruction(String),
     LoginComplete,
     LoginError(String),
     Models(Vec<(String, String)>),
@@ -289,7 +290,9 @@ pub struct AgentUi {
     pub permission: Option<AgentPermission>,
     pub connection: Option<(AgentKind, AgentConnection)>,
     pub login_pending: bool,
+    pub login_kind: Option<AgentKind>,
     pub login_error: Option<String>,
+    pub login_instruction: Option<String>,
     pub model: Option<String>,
     pub models: Vec<(String, String)>,
     pub agent_count: u8,
@@ -385,14 +388,19 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
             AgentEvent::LoginUrl(url) => {
                 app.services.open_url(&url);
             }
+            AgentEvent::LoginInstruction(instruction) => {
+                app.ui.agent.login_instruction = Some(instruction);
+            }
             AgentEvent::LoginComplete => {
                 app.ui.agent.login_pending = false;
                 app.ui.agent.login_error = None;
+                app.ui.agent.login_instruction = None;
                 app.ui.agent.connection = None;
             }
             AgentEvent::LoginError(error) => {
                 app.ui.agent.login_pending = false;
                 app.ui.agent.login_error = Some(error.clone());
+                app.ui.agent.login_instruction = None;
                 app.toast(error);
             }
             AgentEvent::Models(models) => {
@@ -1181,9 +1189,12 @@ fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -
 }
 
 pub fn show(app: &mut LizardApp, ui: &mut Ui) {
-    if app.ui.agent.connection.as_ref().is_none_or(|(kind, _)| *kind != app.ui.agent.agent) {
+    if app.ui.agent.connection.as_ref().is_none_or(|(kind, connection)| *kind != app.ui.agent.agent || connection.detail == "checking") {
         let kind = app.ui.agent.agent;
         app.ui.agent.connection = Some((kind, app.services.agent_connection(kind)));
+        if app.ui.agent.connection.as_ref().is_some_and(|(_, connection)| connection.detail == "checking") {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
     }
     if app.ui.agent.models_requested != Some(app.ui.agent.agent) {
         app.ui.agent.models_requested = Some(app.ui.agent.agent);
@@ -1511,23 +1522,32 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let connection = app.ui.agent.connection.as_ref().map(|(_, state)| state.clone()).unwrap_or_default();
         let setup = Rect::from_min_size(pos2(full.min.x + 16.0, cards_top + 160.0), vec2((width - 32.0).max(0.0), 54.0));
         painter.rect(setup, CornerRadius::same(8), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        let setup_title = if app.ui.agent.login_pending {
+        let setup_title = if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {
             "Aguardando login no navegador…"
         } else if !connection.installed {
-            "Instalar agente"
+            "Conectar conta"
         } else if !connection.authenticated {
-            "Conectar com ChatGPT"
+            "Conectar conta"
         } else {
-            if app.ui.agent.agent == AgentKind::Codex { "Agente conectado" } else { "Agente disponível" }
+            "Conta conectada"
         };
         painter.text(pos2(setup.min.x + 12.0, setup.min.y + 9.0), Align2::LEFT_TOP, setup_title, semibold(12.0), text);
-        painter.text(pos2(setup.min.x + 12.0, setup.min.y + 29.0), Align2::LEFT_TOP, &connection.detail, regular(11.0), secondary);
+        painter.text(
+            pos2(setup.min.x + 12.0, setup.min.y + 29.0),
+            Align2::LEFT_TOP,
+            if connection.detail == "checking" { "Verificando conta…" } else { &connection.detail },
+            regular(11.0),
+            secondary,
+        );
         if hit(ui, "agent_setup", setup, setup_title).clicked() && !app.ui.agent.login_pending {
-            if !connection.installed {
-                app.services.open_url(setup_url(app.ui.agent.agent));
-            } else if !connection.authenticated && app.ui.agent.agent == AgentKind::Codex {
-                match app.services.agent_login() {
-                    Ok(()) => app.ui.agent.login_pending = true,
+            if !connection.authenticated {
+                match app.services.agent_login(app.ui.agent.agent) {
+                    Ok(()) => {
+                        app.ui.agent.login_pending = true;
+                        app.ui.agent.login_kind = Some(app.ui.agent.agent);
+                        app.ui.agent.login_error = None;
+                        app.ui.agent.login_instruction = None;
+                    }
                     Err(error) => app.toast(error),
                 }
             }
@@ -1783,17 +1803,20 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             }
         }
         Menu::separator(ui, None);
-        let setup_label = if app.ui.agent.agent == AgentKind::Codex { "Conexão ChatGPT" } else { "Configurar agente" };
+        let setup_label = "Conectar conta";
         if MenuItem::new(setup_label).show(ui).clicked() {
             let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
             app.ui.agent.connection = None;
-            if app.ui.agent.agent == AgentKind::Codex && !connected && !app.ui.agent.login_pending {
-                match app.services.agent_login() {
-                    Ok(()) => app.ui.agent.login_pending = true,
+            if !connected && !app.ui.agent.login_pending {
+                match app.services.agent_login(app.ui.agent.agent) {
+                    Ok(()) => {
+                        app.ui.agent.login_pending = true;
+                        app.ui.agent.login_kind = Some(app.ui.agent.agent);
+                        app.ui.agent.login_error = None;
+                        app.ui.agent.login_instruction = None;
+                    }
                     Err(error) => app.toast(error),
                 }
-            } else if app.ui.agent.agent != AgentKind::Codex {
-                app.services.open_url(setup_url(app.ui.agent.agent));
             }
             ui.close();
         }

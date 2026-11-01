@@ -47,17 +47,21 @@ impl Agent {
         }
         let (input, requests) = mpsc::channel();
         let (output, events) = mpsc::channel();
-        let (program, args): (&str, &[&str]) = match kind {
-            AgentKind::Codex => ("codex-acp", &[]),
-            AgentKind::Claude => ("claude-agent-acp", &[]),
-            AgentKind::Gemini => ("gemini", &["--acp"]),
-            AgentKind::Kimi => ("kimi", &["acp"]),
+        let args: &[&str] = match kind {
+            AgentKind::Codex | AgentKind::Claude => &[],
+            AgentKind::Gemini => &["--acp"],
+            AgentKind::Kimi => &["acp"],
         };
         // A single executable override lets protocol tests use a synthetic ACP process. No
         // shell is involved, so its value is never interpreted as shell code.
-        let program = override_command.unwrap_or_else(|| std::ffi::OsStr::new(program));
+        let resolved = if override_command.is_none() {
+            self::program(kind).ok_or_else(|| format!("{} is not available", kind.label()))?
+        } else {
+            PathBuf::new()
+        };
+        let program = override_command.unwrap_or_else(|| resolved.as_os_str());
         let args = if override_command.is_some() { &[][..] } else { args };
-        let mut child = Command::new(program)
+        let mut child = command_with_runtime(program)
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -295,8 +299,111 @@ pub fn program(kind: AgentKind) -> Option<PathBuf> {
         AgentKind::Gemini => "gemini",
         AgentKind::Kimi => "kimi",
     };
+    named_program(name)
+}
+
+pub fn login_available(kind: AgentKind) -> bool {
+    match kind {
+        AgentKind::Claude => named_program("claude").is_some(),
+        kind => program(kind).is_some(),
+    }
+}
+
+pub fn claude_authenticated() -> bool {
+    named_program("claude").is_some_and(|program| {
+        command_with_runtime(program.as_os_str())
+            .args(["auth", "status"])
+            .output()
+            .ok()
+            .and_then(|output| if output.status.success() { serde_json::from_slice::<Value>(&output.stdout).ok() } else { None })
+            .is_some_and(|status| {
+                status["loggedIn"].as_bool() == Some(true) && matches!(status["authMethod"].as_str(), Some("claude.ai" | "oauth_token"))
+            })
+    })
+}
+
+pub fn codex_authenticated() -> bool {
+    program(AgentKind::Codex).is_some_and(|program| {
+        command_with_runtime(program.as_os_str()).args(["login", "status"]).output().is_ok_and(|output| {
+            output.status.success()
+                && (String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("chatgpt")
+                    || String::from_utf8_lossy(&output.stderr).to_ascii_lowercase().contains("chatgpt"))
+        })
+    })
+}
+
+/// Ask the provider's ACP server whether it can create a session with its stored account.
+/// This runs only on a background thread; the UI never reads provider credential files.
+pub fn acp_authenticated(kind: AgentKind) -> bool {
+    let Some(program) = program(kind) else { return false };
+    let args: &[&str] = match kind {
+        AgentKind::Gemini => &["--acp"],
+        AgentKind::Kimi => &["acp"],
+        _ => return false,
+    };
+    let Ok(mut child) =
+        command_with_runtime(program.as_os_str()).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+    else {
+        return false;
+    };
+    let authenticated = (|| -> Option<bool> {
+        let mut stdin = child.stdin.take()?;
+        let stdout = child.stdout.take()?;
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("lizard-agent-auth-probe".into())
+            .spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                loop {
+                    let mut line = Vec::new();
+                    let Ok(size) = (&mut reader).take((MAX_LINE + 1) as u64).read_until(b'\n', &mut line) else { break };
+                    if size == 0 || size > MAX_LINE {
+                        break;
+                    }
+                    if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+                        let _ = sender.send(value);
+                    }
+                }
+            })
+            .ok()?;
+        send(
+            &mut stdin,
+            Some(1),
+            "initialize",
+            json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"lizard","title":"Lizard","version":env!("CARGO_PKG_VERSION")}}),
+        )
+        .ok()?;
+        let init = receiver.recv_timeout(std::time::Duration::from_secs(8)).ok()?;
+        if init["id"] != 1 || init["error"].is_object() {
+            return Some(false);
+        }
+        send(&mut stdin, Some(2), "session/new", json!({"cwd":std::env::temp_dir().to_string_lossy(),"mcpServers":[]})).ok()?;
+        loop {
+            let reply = receiver.recv_timeout(std::time::Duration::from_secs(8)).ok()?;
+            if reply["id"] == 2 {
+                return Some(reply["result"]["sessionId"].as_str().is_some());
+            }
+        }
+    })()
+    .unwrap_or(false);
+    let _ = child.kill();
+    let _ = child.wait();
+    authenticated
+}
+
+fn named_program(name: &str) -> Option<PathBuf> {
     let executable = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
-    let mut paths: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|dir| dir.join(&executable)).collect();
+    let mut paths: Vec<PathBuf> = Vec::new();
+    if let Some(contents) = std::env::current_exe().ok().and_then(|path| path.parent()?.parent().map(std::path::Path::to_path_buf)) {
+        paths.push(contents.join("Resources/Agents/runtime/bin").join(&executable));
+    }
+    if let Some(dir) = crate::services::config_dir() {
+        for provider in ["codex", "claude", "gemini", "kimi"] {
+            paths.push(dir.join("Agents").join(provider).join("node_modules/.bin").join(&executable));
+        }
+    }
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|dir| dir.join(&executable)));
+    paths.extend([PathBuf::from("/opt/homebrew/bin").join(&executable), PathBuf::from("/usr/local/bin").join(&executable)]);
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         paths.extend([
             home.join(".local/bin").join(&executable),
@@ -305,6 +412,245 @@ pub fn program(kind: AgentKind) -> Option<PathBuf> {
         ]);
     }
     paths.into_iter().find(|path| path.is_file())
+}
+
+fn command_with_runtime(program: &std::ffi::OsStr) -> Command {
+    let mut command = Command::new(program);
+    if let Some(node_dir) = named_program("node").and_then(|path| path.parent().map(std::path::Path::to_path_buf)) {
+        let mut paths = vec![node_dir];
+        if let Some(dir) = crate::services::config_dir() {
+            for provider in ["codex", "claude", "gemini", "kimi"] {
+                paths.push(dir.join("Agents").join(provider).join("node_modules/.bin"));
+            }
+        }
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            paths.extend([home.join(".local/bin"), home.join(".kimi-code/bin"), home.join(".hermes/node/bin")]);
+        }
+        paths.extend([PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        if let Ok(path) = std::env::join_paths(paths) {
+            command.env("PATH", path);
+        }
+    }
+    command
+}
+
+fn ensure_provider(kind: AgentKind) -> Result<(), String> {
+    let needs_install = !login_available(kind) || (kind == AgentKind::Claude && program(kind).is_none());
+    if !needs_install {
+        return Ok(());
+    }
+    let npm = named_program("npm").ok_or("Automatic provider setup needs Node.js on this computer")?;
+    let folder = match kind {
+        AgentKind::Codex => "codex",
+        AgentKind::Claude => "claude",
+        AgentKind::Gemini => "gemini",
+        AgentKind::Kimi => "kimi",
+    };
+    let root = crate::services::config_dir().ok_or("Lizard could not find its application support folder")?.join("Agents").join(folder);
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let packages: &[&str] = match kind {
+        AgentKind::Codex => &["@openai/codex"],
+        AgentKind::Claude if named_program("claude").is_some() => &["@agentclientprotocol/claude-agent-acp"],
+        AgentKind::Claude => &["@anthropic-ai/claude-code", "@agentclientprotocol/claude-agent-acp"],
+        AgentKind::Gemini => &["@google/gemini-cli"],
+        AgentKind::Kimi => &["@moonshot-ai/kimi-code"],
+    };
+    let mut command = command_with_runtime(npm.as_os_str());
+    let status = command
+        .arg("install")
+        .arg("--prefix")
+        .arg(&root)
+        .args(["--no-audit", "--no-fund", "--no-save"])
+        .args(packages)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() && login_available(kind) && (kind != AgentKind::Claude || program(kind).is_some()) {
+        Ok(())
+    } else {
+        Err(format!("Automatic setup for {} could not finish. Open the advanced setup guide for another method.", kind.label()))
+    }
+}
+
+pub fn login_provider(kind: AgentKind, events: Sender<AgentEvent>) -> Result<(), String> {
+    if kind == AgentKind::Codex && login_available(kind) {
+        return login_codex(events);
+    }
+    std::thread::Builder::new()
+        .name("lizard-provider-login".into())
+        .spawn(move || {
+            if let Err(error) = ensure_provider(kind) {
+                let _ = events.send(AgentEvent::LoginError(error));
+                return;
+            }
+            if kind == AgentKind::Codex {
+                if let Err(error) = login_codex(events.clone()) {
+                    let _ = events.send(AgentEvent::LoginError(error));
+                }
+                return;
+            }
+            let result = match kind {
+                AgentKind::Claude => login_claude(&events),
+                AgentKind::Gemini => login_gemini(&events),
+                AgentKind::Kimi => login_kimi(&events),
+                AgentKind::Codex => Ok(()),
+            };
+            let _ = events.send(match result {
+                Ok(()) => AgentEvent::LoginComplete,
+                Err(error) => AgentEvent::LoginError(error),
+            });
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn forward_auth_links<R: Read>(stream: R, events: &Sender<AgentEvent>, allowed_prefixes: &[&str]) {
+    let mut sent = None;
+    for line in BufReader::new(stream).lines() {
+        let Ok(line) = line else { break };
+        if let Some((position, _)) =
+            allowed_prefixes.iter().filter_map(|prefix| line.find(prefix).map(|position| (position, prefix))).min_by_key(|(position, _)| *position)
+        {
+            let url =
+                line[position..].split_whitespace().next().unwrap_or_default().trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '/');
+            if sent.as_deref() != Some(url) {
+                let _ = events.send(AgentEvent::LoginUrl(url.to_string()));
+                sent = Some(url.to_string());
+            }
+        }
+    }
+}
+
+fn login_claude(events: &Sender<AgentEvent>) -> Result<(), String> {
+    let program = named_program("claude").ok_or("Claude Code is not installed")?;
+    let mut child = command_with_runtime(program.as_os_str())
+        .args(["auth", "login", "--claudeai"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let stdout = child.stdout.take().ok_or("Claude did not return sign-in instructions")?;
+    let stderr = child.stderr.take().ok_or("Claude did not return sign-in status")?;
+    let out_events = events.clone();
+    let out = std::thread::spawn(move || {
+        forward_auth_links(stdout, &out_events, &["https://claude.ai/", "https://www.claude.ai/", "https://console.anthropic.com/"])
+    });
+    let err_events = events.clone();
+    let err = std::thread::spawn(move || {
+        forward_auth_links(stderr, &err_events, &["https://claude.ai/", "https://www.claude.ai/", "https://console.anthropic.com/"])
+    });
+    let status = child.wait().map_err(|error| error.to_string())?;
+    let _ = out.join();
+    let _ = err.join();
+    if status.success() { Ok(()) } else { Err("Claude sign-in did not complete".into()) }
+}
+
+fn login_gemini(events: &Sender<AgentEvent>) -> Result<(), String> {
+    let program = program(AgentKind::Gemini).ok_or("Gemini is not installed")?;
+    login_gemini_with_program(program.as_os_str(), events)
+}
+
+fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEvent>) -> Result<(), String> {
+    let mut child = command_with_runtime(program)
+        .arg("--acp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let stderr = child.stderr.take().ok_or("Gemini did not return sign-in instructions")?;
+    let link_events = events.clone();
+    let links = std::thread::spawn(move || forward_auth_links(stderr, &link_events, &["https://accounts.google.com/", "https://auth.cloud.google/"]));
+    let outcome = (|| -> Result<(), String> {
+        let mut stdin = child.stdin.take().ok_or("Gemini did not open the authentication channel")?;
+        let stdout = child.stdout.take().ok_or("Gemini did not return an authentication channel")?;
+        let mut reader = BufReader::new(stdout);
+        send(
+            &mut stdin,
+            Some(1),
+            "initialize",
+            json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"lizard","title":"Lizard","version":env!("CARGO_PKG_VERSION")}}),
+        )?;
+        let mut initialized = false;
+        loop {
+            let mut line = Vec::new();
+            let size = (&mut reader).take((MAX_LINE + 1) as u64).read_until(b'\n', &mut line).map_err(|error| error.to_string())?;
+            if size == 0 || size > MAX_LINE {
+                return Err("Gemini closed before sign-in completed".into());
+            }
+            let Ok(message) = serde_json::from_slice::<Value>(&line) else { continue };
+            if message["id"] == 1 && !initialized {
+                if let Some(error) = message["error"]["message"].as_str() {
+                    return Err(error.to_string());
+                }
+                let method = message["result"]["authMethods"]
+                    .as_array()
+                    .and_then(|items| items.iter().find(|item| item["id"] == "oauth-personal"))
+                    .and_then(|item| item["id"].as_str())
+                    .ok_or("Gemini did not offer Google account sign-in")?;
+                send(&mut stdin, Some(2), "authenticate", json!({"methodId":method}))?;
+                initialized = true;
+            } else if message["id"] == 2 {
+                if let Some(error) = message["error"]["message"].as_str() {
+                    return Err(error.to_string());
+                }
+                return Ok(());
+            }
+        }
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = links.join();
+    outcome
+}
+
+fn login_kimi(events: &Sender<AgentEvent>) -> Result<(), String> {
+    let program = program(AgentKind::Kimi).ok_or("Kimi Code is not installed")?;
+    let mut child = command_with_runtime(program.as_os_str())
+        .arg("login")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let stderr = child.stderr.take().ok_or("Kimi did not return sign-in instructions")?;
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    while reader.read_line(&mut line).map_err(|error| error.to_string())? > 0 {
+        let trimmed = line.trim();
+        if let Some(url) = trimmed.split_whitespace().find(|word| {
+            [
+                "https://kimi.com/",
+                "https://www.kimi.com/",
+                "https://auth.kimi.com/",
+                "https://kimi.ai/",
+                "https://www.kimi.ai/",
+                "https://auth.kimi.ai/",
+                "https://code.kimi.com/",
+            ]
+            .iter()
+            .any(|prefix| word.starts_with(prefix))
+        }) {
+            let url = url.trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '/');
+            let _ = events.send(AgentEvent::LoginUrl(url.to_string()));
+        }
+        if trimmed.to_ascii_lowercase().contains("code") {
+            let code = trimmed
+                .rsplit_once(':')
+                .map(|(_, tail)| tail.trim())
+                .filter(|tail| (4..=24).contains(&tail.len()) && tail.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'));
+            if let Some(code) = code {
+                let _ = events.send(AgentEvent::LoginInstruction(code.to_string()));
+            }
+        }
+        line.clear();
+    }
+    let status = child.wait().map_err(|error| error.to_string())?;
+    if status.success() { Ok(()) } else { Err("Kimi sign-in did not complete".into()) }
 }
 
 fn start_codex(document: u64, conversation: u64, port: u16, cwd: &str, cli: &str) -> Result<Agent, String> {
@@ -317,7 +663,7 @@ fn start_codex_with_program(program: &std::ffi::OsStr, document: u64, conversati
     let (output, events) = mpsc::channel();
     let mcp_command = format!("mcp_servers.lizard.command={}", serde_json::to_string(cli).map_err(|e| e.to_string())?);
     let mcp_args = format!("mcp_servers.lizard.args=[\"mcp\",\"--attach\",\"{port}\"]");
-    let mut child = Command::new(program)
+    let mut child = command_with_runtime(program)
         .args(["app-server", "--stdio", "-c", &mcp_command, "-c", &mcp_args])
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -513,7 +859,7 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
         .name("lizard-codex-models".into())
         .spawn(move || {
             let result = (|| -> Result<(), String> {
-                let mut child = Command::new(program)
+                let mut child = command_with_runtime(program.as_os_str())
                     .args(["app-server", "--stdio"])
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
@@ -573,7 +919,7 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
         .name("lizard-codex-login".into())
         .spawn(move || {
             let result = (|| -> Result<(), String> {
-                let mut child = Command::new(program)
+                let mut child = command_with_runtime(&program)
                     .args(["app-server", "--stdio"])
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
@@ -642,6 +988,43 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn gemini_login_uses_advertised_google_account_method() {
+        let folder = std::env::temp_dir().join(format!("lizard-gemini-login-test-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let script = folder.join("mock-gemini");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+ msg=json.loads(line)
+ if msg.get('method')=='initialize':
+  print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'protocolVersion':1,'authMethods':[{'id':'oauth-personal','name':'Log in with Google'}]}}),flush=True)
+ elif msg.get('method')=='authenticate':
+  assert msg['params']['methodId']=='oauth-personal'
+  print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{}}),flush=True)
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let (send, events) = mpsc::channel();
+        login_gemini_with_program(script.as_os_str(), &send).unwrap();
+        assert!(events.try_recv().is_err());
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn login_links_only_open_provider_domains() {
+        let output = b"Visit https://accounts.google.com.evil.test/login\nVisit https://accounts.google.com/o/oauth2/auth\n";
+        let (send, events) = mpsc::channel();
+        forward_auth_links(&output[..], &send, &["https://accounts.google.com/"]);
+        assert!(matches!(events.try_recv(), Ok(AgentEvent::LoginUrl(url)) if url == "https://accounts.google.com/o/oauth2/auth"));
+        assert!(events.try_recv().is_err());
+    }
 
     #[test]
     fn codex_login_opens_browser_url_and_reports_completion() {
@@ -822,6 +1205,7 @@ for line in sys.stdin:
                     AgentEvent::Ready
                     | AgentEvent::Session(_)
                     | AgentEvent::LoginUrl(_)
+                    | AgentEvent::LoginInstruction(_)
                     | AgentEvent::LoginComplete
                     | AgentEvent::LoginError(_)
                     | AgentEvent::Models(_)

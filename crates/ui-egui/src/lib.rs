@@ -274,8 +274,9 @@ pub trait Services {
     fn agent_connection(&mut self, _agent: agent_panel::AgentKind) -> agent_panel::AgentConnection {
         agent_panel::AgentConnection::default()
     }
-    fn agent_login(&mut self) -> Result<(), String> {
-        Err("O login do Codex está disponível apenas no aplicativo desktop".into())
+    fn agent_refresh_connection(&mut self, _agent: agent_panel::AgentKind) {}
+    fn agent_login(&mut self, _agent: agent_panel::AgentKind) -> Result<(), String> {
+        Err("O login dos agentes está disponível apenas no aplicativo desktop".into())
     }
     fn agent_request_models(&mut self, _agent: agent_panel::AgentKind) {}
     fn agent_history_load(&mut self) -> serde_json::Value {

@@ -43,6 +43,9 @@ WORK="$CARGO_TARGET_DIR/macos-package"
 APP="$WORK/Lizard.app"
 DMG="$DIST/lizard-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/lizard-cli-$VERSION-macos-$ARCH.zip"
+# The agent connection flow installs official provider helpers on first use. Bundle a pinned
+# Node.js/npm runtime so users of the signed app do not need a terminal or a system Node install.
+NODE_VERSION=22.23.4
 BINS=(lizard)
 [ "$HAS_CLI" = 1 ] && BINS+=(lizard-cli)
 
@@ -137,6 +140,32 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/lizard" "$APP/Contents/MacOS/Lizard"
 cp "$WORK/Lizard.icns" "$APP/Contents/Resources/Lizard.icns"
+NODE_RUNTIME="$APP/Contents/Resources/Agents/runtime"
+mkdir -p "$NODE_RUNTIME/bin" "$NODE_RUNTIME/lib/node_modules" "$APP/Contents/Resources/Licenses"
+NODE_BINS=()
+for t in "${TARGETS[@]}"; do
+  case "$t" in
+    aarch64-apple-darwin)
+      node_arch=arm64
+      node_sha=c9e1dbc748b33ed2d14f42445191ecaf14c56259c7a9a26d0042c49ec2b66428 ;;
+    x86_64-apple-darwin)
+      node_arch=x64
+      node_sha=efcc2b0db6f94bf53eddb038fe2b370277a042bd29e4f19b8f8e23598795b819 ;;
+  esac
+  node_name="node-v$NODE_VERSION-darwin-$node_arch"
+  node_archive="$WORK/$node_name.tar.gz"
+  curl -fsSL --retry 3 "https://nodejs.org/dist/v$NODE_VERSION/$node_name.tar.gz" -o "$node_archive"
+  printf '%s  %s\n' "$node_sha" "$node_archive" | shasum -a 256 -c -
+  mkdir -p "$WORK/$node_name"
+  tar -xzf "$node_archive" -C "$WORK/$node_name" --strip-components=1
+  NODE_BINS+=("$WORK/$node_name/bin/node")
+  if [ ! -f "$NODE_RUNTIME/lib/node_modules/npm/bin/npm-cli.js" ]; then
+    cp -R "$WORK/$node_name/lib/node_modules/npm" "$NODE_RUNTIME/lib/node_modules/npm"
+    cp "$WORK/$node_name/LICENSE" "$APP/Contents/Resources/Licenses/Node-LICENSE"
+  fi
+done
+lipo -create -output "$NODE_RUNTIME/bin/node" "${NODE_BINS[@]}"
+ln -s ../lib/node_modules/npm/bin/npm-cli.js "$NODE_RUNTIME/bin/npm"
 mkdir -p "$APP/Contents/Resources/Licenses"
 for notice in LICENSE-MIT LICENSE-APACHE NOTICE; do
   cp "$ROOT/$notice" "$APP/Contents/Resources/Licenses/$notice"
@@ -152,7 +181,7 @@ plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
-# Today the only nested code is the main executable; frameworks/helpers would be signed here too.
+sign --options runtime "$NODE_RUNTIME/bin/node"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/Lizard"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"

@@ -39,6 +39,13 @@ Rust crate dependencies keep their own licenses (MIT, Apache-2.0, BSD, ISC, Zlib
 default fonts, CDLA-Permissive-2.0 for the root certificate list webpki-roots compiles in, and
 similar permissive licenses); see each crate's metadata.
 
+macOS agent runtime
+-------------------
+The macOS app bundle includes Node.js 22.23.4 and npm from https://nodejs.org/dist/v22.23.4/
+to run provider-supplied agent helpers. Release packaging verifies the pinned SHA-256 digests
+before signing. The original Node.js and bundled dependency licences are included at
+Lizard.app/Contents/Resources/Licenses/Node-LICENSE and in the bundled npm package.
+
 Linux Wayland window decorations
 -------------------------------
 sctk-adwaita 0.10.1 (https://github.com/PolyMeilex/sctk-adwaita,

@@ -546,24 +546,35 @@ fn provider_title(kind: AgentKind) -> &'static str {
 
 fn provider_description(kind: AgentKind) -> &'static str {
     match kind {
-        AgentKind::Codex => tr_noop("Sign in with your ChatGPT account through Codex CLI."),
-        AgentKind::Claude => tr_noop("Use your local Claude Agent ACP installation."),
-        AgentKind::Gemini => tr_noop("Use your local Gemini CLI installation."),
-        AgentKind::Kimi => tr_noop("Use your local Kimi Code CLI installation."),
+        AgentKind::Codex => tr_noop("Connect your ChatGPT subscription."),
+        AgentKind::Claude => tr_noop("Connect your Claude Pro or Max subscription."),
+        AgentKind::Gemini => tr_noop("Connect your Google account."),
+        AgentKind::Kimi => tr_noop("Connect your Kimi Code subscription."),
     }
 }
 
-fn provider_status(kind: AgentKind, connection: &AgentConnection, pending: bool, login_error: bool) -> &'static str {
-    if kind == AgentKind::Codex && pending {
-        tr_noop("Signing in…")
+fn provider_login_label(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Codex => tr_noop("Continue with ChatGPT"),
+        AgentKind::Claude => tr_noop("Continue with Claude"),
+        AgentKind::Gemini => tr_noop("Continue with Google"),
+        AgentKind::Kimi => tr_noop("Continue with Kimi"),
+    }
+}
+
+fn provider_status(connection: &AgentConnection, pending: bool, login_error: bool) -> &'static str {
+    if pending {
+        tr_noop("Connecting…")
+    } else if connection.detail == "checking" {
+        tr_noop("Checking account…")
     } else if !connection.installed {
-        tr_noop("CLI not found")
-    } else if kind == AgentKind::Codex && login_error {
+        tr_noop("Setup needed")
+    } else if login_error {
         tr_noop("Sign-in failed")
-    } else if kind == AgentKind::Codex {
-        if connection.authenticated { tr_noop("Connected") } else { tr_noop("Sign-in required") }
+    } else if connection.authenticated {
+        tr_noop("Connected")
     } else {
-        tr_noop("CLI detected")
+        tr_noop("Sign-in required")
     }
 }
 
@@ -595,13 +606,13 @@ fn provider_row(
         ui.painter().circle_filled(dot, 4.0, t.accent);
     }
     if width >= 470.0 {
-        let label = tr(provider_status(kind, connection, pending, login_error));
+        let label = tr(provider_status(connection, pending, login_error));
         let text_width = ui.painter().layout_no_wrap(label.to_owned(), semibold(11.0), t.text).size().x;
         let badge_width = text_width + 34.0;
         let badge = Rect::from_min_size(pos2(rect.right() - 16.0 - badge_width, rect.center().y - 13.0), vec2(badge_width, 26.0));
-        let status_color = if login_error && kind == AgentKind::Codex && connection.installed && !pending {
+        let status_color = if login_error && connection.installed && !pending {
             t.danger
-        } else if kind == AgentKind::Codex && connection.authenticated {
+        } else if connection.authenticated {
             t.success
         } else {
             t.text_secondary
@@ -616,13 +627,16 @@ fn provider_row(
 
 fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &mut AgentSettingsState) {
     if state.login_was_pending && !app.ui.agent.login_pending {
-        state.connections[provider_index(AgentKind::Codex)] = None;
+        state.connections = Default::default();
         state.login_was_pending = false;
     }
     for kind in AGENT_PROVIDERS {
         let index = provider_index(kind);
-        if state.connections[index].is_none() {
+        if state.connections[index].as_ref().is_none_or(|connection| connection.detail == "checking") {
             state.connections[index] = Some(app.services.agent_connection(kind));
+            if state.connections[index].as_ref().is_some_and(|connection| connection.detail == "checking") {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            }
         }
     }
     if let Some(kind) = state.detail {
@@ -634,22 +648,14 @@ fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &m
     ui.add_space(6.0);
     crate::widgets::label(ui, tr("Connect an available provider, then choose it in the agent chat."), t.text_secondary);
     ui.add_space(18.0);
-    let codex = state.connections[provider_index(AgentKind::Codex)].as_ref();
-    if codex.is_some_and(|connection| connection.installed && !connection.authenticated) {
-        if Button::new(tr(if app.ui.agent.login_pending { "Waiting for browser sign-in…" } else { "Sign in with ChatGPT" }))
-            .enabled(!app.ui.agent.login_pending)
-            .show(ui)
-            .clicked()
-        {
-            start_codex_login(app, state);
-        }
-        ui.add_space(20.0);
-    }
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Available providers")).font(semibold(12.0)));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if Button::new(tr("Refresh connections")).variant(ButtonVariant::Ghost).show(ui).clicked() {
                 state.connections = Default::default();
+                for kind in AGENT_PROVIDERS {
+                    app.services.agent_refresh_connection(kind);
+                }
                 ui.ctx().request_repaint();
             }
         });
@@ -658,7 +664,15 @@ fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &m
     for kind in AGENT_PROVIDERS {
         let index = provider_index(kind);
         if let Some(connection) = &state.connections[index]
-            && provider_row(ui, t, kind, connection, app.ui.agent.agent == kind, app.ui.agent.login_pending, app.ui.agent.login_error.is_some())
+            && provider_row(
+                ui,
+                t,
+                kind,
+                connection,
+                app.ui.agent.agent == kind,
+                app.ui.agent.login_pending && app.ui.agent.login_kind == Some(kind),
+                app.ui.agent.login_error.is_some() && app.ui.agent.login_kind == Some(kind),
+            )
         {
             state.detail = Some(kind);
         }
@@ -666,14 +680,17 @@ fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &m
     }
 }
 
-fn start_codex_login(app: &mut LizardApp, state: &mut AgentSettingsState) {
-    match app.services.agent_login() {
+fn start_provider_login(app: &mut LizardApp, state: &mut AgentSettingsState, kind: AgentKind) {
+    match app.services.agent_login(kind) {
         Ok(()) => {
             app.ui.agent.login_pending = true;
+            app.ui.agent.login_kind = Some(kind);
             app.ui.agent.login_error = None;
+            app.ui.agent.login_instruction = None;
             state.login_was_pending = true;
         }
         Err(error) => {
+            app.ui.agent.login_kind = Some(kind);
             app.ui.agent.login_error = Some(error.clone());
             app.toast(error);
         }
@@ -701,7 +718,9 @@ fn settings_agent_detail(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, sta
 
     let index = provider_index(kind);
     let Some(connection) = state.connections[index].clone() else { return };
-    let status = tr(provider_status(kind, &connection, app.ui.agent.login_pending, app.ui.agent.login_error.is_some()));
+    let pending = app.ui.agent.login_pending && app.ui.agent.login_kind == Some(kind);
+    let login_error = app.ui.agent.login_error.is_some() && app.ui.agent.login_kind == Some(kind);
+    let status = tr(provider_status(&connection, pending, login_error));
     let card_width = ui.available_width();
     egui::Frame::NONE
         .fill(t.field)
@@ -712,43 +731,64 @@ fn settings_agent_detail(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, sta
             ui.set_min_width((card_width - 32.0).max(0.0));
             ui.label(RichText::new(status).font(semibold(13.0)));
             ui.add_space(6.0);
-            let description = if !connection.installed {
-                tr("Install the provider's CLI to use it in Lizard.")
-            } else if kind == AgentKind::Codex && connection.authenticated {
-                tr("Your ChatGPT account is connected. Codex models are available in the chat model picker.")
-            } else if kind == AgentKind::Codex {
-                tr("Sign in with ChatGPT in your browser to connect Codex.")
+            let description = if connection.detail == "checking" {
+                tr("Checking your saved account…")
+            } else if !connection.installed {
+                tr("Lizard will download the provider helper, then open sign-in.")
+            } else if connection.authenticated {
+                tr("Your account is connected. You can use this provider in the agent chat.")
+            } else if pending {
+                tr("Lizard is preparing sign-in. Continue in your browser when it opens.")
+            } else if login_error {
+                tr("Sign-in was not completed. Try again.")
             } else {
-                tr("The provider CLI manages its own sign-in. Complete it there before using this agent in Lizard.")
+                tr("Sign in with your provider account to use your subscription in Lizard.")
             };
             crate::widgets::label(ui, description, t.text_secondary);
         });
+    if pending && let Some(instruction) = &app.ui.agent.login_instruction {
+        ui.add_space(12.0);
+        crate::widgets::label(ui, tr("Enter this code on the provider's page:"), t.text_secondary);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(instruction).font(semibold(16.0)));
+            ui.add_space(12.0);
+            if Button::new(tr("Copy code")).variant(ButtonVariant::Secondary).show(ui).clicked() {
+                app.services.clipboard_set_text(instruction);
+            }
+        });
+    }
     ui.add_space(20.0);
 
     ui.horizontal(|ui| {
-        if kind == AgentKind::Codex && connection.installed && !connection.authenticated {
-            if Button::new(tr(if app.ui.agent.login_pending { "Waiting for browser sign-in…" } else { "Sign in with ChatGPT" }))
+        if !connection.authenticated {
+            if Button::new(tr(if pending { "Connecting…" } else { provider_login_label(kind) }))
                 .enabled(!app.ui.agent.login_pending)
                 .show(ui)
                 .clicked()
             {
-                start_codex_login(app, state);
+                start_provider_login(app, state, kind);
             }
-        } else if connection.installed {
+        } else {
             if Button::new(tr("Use in chat")).show(ui).clicked() {
                 crate::agent_panel::select_agent(app, kind);
                 app.select_left_tab(crate::LeftTab::Agent);
                 app.ui.preferences = false;
             }
         }
-        if Button::new(tr(if connection.installed { "Setup guide" } else { "Install CLI" })).variant(ButtonVariant::Secondary).show(ui).clicked() {
-            app.services.open_url(crate::agent_panel::setup_url(kind));
-        }
         if Button::new(tr("Check again")).variant(ButtonVariant::Ghost).show(ui).clicked() {
             state.connections[index] = None;
+            app.services.agent_refresh_connection(kind);
             ui.ctx().request_repaint();
         }
     });
+    ui.add_space(26.0);
+    ui.label(RichText::new(tr("Advanced setup")).font(semibold(12.0)));
+    ui.add_space(6.0);
+    crate::widgets::label(ui, tr("If you prefer to use a provider's command-line tool, you can set it up separately."), t.text_secondary);
+    ui.add_space(8.0);
+    if Button::new(tr("Open setup guide")).variant(ButtonVariant::Secondary).show(ui).clicked() {
+        app.services.open_url(crate::agent_panel::setup_url(kind));
+    }
 }
 
 fn settings_appearance(app: &mut LizardApp, ui: &mut egui::Ui) {
