@@ -126,9 +126,9 @@ pub fn layout_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[N
 fn layout_header(ui: &mut Ui, title: &str, action: Option<(LayoutIcon, &str)>, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().text(pos2(rect.min.x + widgets::PAD, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::semibold(11.0), t.text);
+    ui.painter().text(pos2(rect.min.x + widgets::PAD, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), t.text);
     let Some((icon, tip)) = action else { return false };
-    let button = Rect::from_center_size(pos2(rect.max.x - widgets::PAD - 12.0, rect.center().y), vec2(24.0, 24.0));
+    let button = widgets::section_action_rect(rect, 0);
     let response = ui.interact(button, ui.id().with("layout_header_action"), Sense::click()).tip(tip);
     if selected || response.hovered() {
         ui.painter().rect_filled(button, CornerRadius::same(5), if selected { t.selected_row } else { t.hover });

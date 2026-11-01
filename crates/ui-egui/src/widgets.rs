@@ -8,7 +8,7 @@ pub use crate::field_math::{Rel, Typed, eval, parse, stepped};
 use crate::i18n::tr;
 use crate::icons::{self, AppearanceIcon, Icon, LayoutIcon, PositionIcon};
 use crate::primitives::{Button, ButtonVariant};
-use crate::theme::{Tokens, medium, regular, semibold};
+use crate::theme::{Tokens, medium, regular};
 
 fn appearance_lead_size(icon: AppearanceIcon) -> f32 {
     match icon {
@@ -1006,6 +1006,11 @@ pub fn disclosure(ui: &mut Ui, label: &str, open: bool) -> bool {
     resp.clicked()
 }
 
+/// The shared right-aligned action columns of a property section heading.
+pub fn section_action_rect(header: Rect, column: usize) -> Rect {
+    Rect::from_center_size(pos2(header.max.x - PAD - 12.0 - column as f32 * 24.0, header.center().y), vec2(24.0, 24.0))
+}
+
 /// A section header ("Fill", "Stroke"…) with optional right-side icon buttons; returns which
 /// button was clicked. `dim` greys the title (empty sections).
 pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: bool) -> Option<usize> {
@@ -1018,7 +1023,7 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
         pos2(rect.min.x + PAD, rect.center().y),
         Align2::LEFT_CENTER,
         title,
-        semibold(11.0),
+        crate::theme::property_section_title(),
         if hovered {
             Color32::WHITE
         } else if dim {
@@ -1028,10 +1033,8 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
         },
     );
     let mut out = None;
-    let mut x = rect.max.x - 8.0;
     for (i, (icon, tip)) in buttons.iter().enumerate().rev() {
-        let r = Rect::from_min_size(pos2(x - 24.0, rect.center().y - 12.0), vec2(24.0, 24.0));
-        x -= 28.0;
+        let r = section_action_rect(rect, buttons.len() - 1 - i);
         if *icon == Icon::Styles && dim && !hovered {
             continue;
         }

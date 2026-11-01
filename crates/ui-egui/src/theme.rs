@@ -525,6 +525,11 @@ pub fn medium(size: f32) -> FontId {
     FontId::new(ui_font_size(size), FontFamily::Name("medium".into()))
 }
 
+/// Shared typography for property-panel section headings.
+pub fn property_section_title() -> FontId {
+    medium(10.5)
+}
+
 pub fn regular(size: f32) -> FontId {
     FontId::new(ui_font_size(size), FontFamily::Proportional)
 }

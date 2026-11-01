@@ -599,12 +599,11 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         menu_popup(&resp).width(260.0).show(|ui| {
             egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                 kind_items(app, ui, true);
-                crate::primitives::Menu::separator(ui, None);
                 let mut cat = "";
                 for (c, name, pw, ph) in lizard_engine::cmd::create::FRAME_PRESETS {
                     if *c != cat {
                         cat = c;
-                        ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
+                        crate::primitives::Menu::separator(ui, Some(tr(c)));
                     }
                     if menu_item(ui, name, &format!("{}×{}", pw, ph)) {
                         app.set_props(&ids, json!({"width": pw, "height": ph}));
@@ -955,14 +954,11 @@ fn pretty(s: &str) -> String {
 fn appearance_header(ui: &mut Ui, visible: bool) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().text(pos2(rect.min.x + PAD, rect.center().y), Align2::LEFT_CENTER, tr("Appearance"), semibold(11.0), t.text);
-    let buttons = [
-        (0, rect.max.x - PAD - 36.0, crate::shortcuts::tip(tr("Show/Hide"), "object.toggleVisible")),
-        (1, rect.max.x - PAD - 12.0, tr("Blend mode")),
-    ];
+    ui.painter().text(pos2(rect.min.x + PAD, rect.center().y), Align2::LEFT_CENTER, tr("Appearance"), crate::theme::property_section_title(), t.text);
+    let buttons = [(0, 1, crate::shortcuts::tip(tr("Show/Hide"), "object.toggleVisible")), (1, 0, tr("Blend mode"))];
     let mut clicked = None;
-    for (index, x, tip) in buttons {
-        let button = Rect::from_center_size(pos2(x, rect.center().y), vec2(24.0, 24.0));
+    for (index, column, tip) in buttons {
+        let button = widgets::section_action_rect(rect, column);
         let response = ui.interact(button, ui.id().with(("appearance_header", index)), Sense::click()).tip(tip);
         if response.hovered() {
             ui.painter().rect_filled(button, CornerRadius::same(5), t.hover);
@@ -3456,7 +3452,7 @@ pub(crate) fn inspect_section(app: &mut LizardApp, ui: &mut Ui, s: &lizard_engin
     let t = Tokens::get(ui.ctx());
     widgets::separator(ui);
     let (hr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    ui.painter().text(pos2(hr.min.x + PAD, hr.center().y), Align2::LEFT_CENTER, tr(s.title), semibold(11.0), t.text);
+    ui.painter().text(pos2(hr.min.x + PAD, hr.center().y), Align2::LEFT_CENTER, tr(s.title), crate::theme::property_section_title(), t.text);
     for p in &s.rows {
         prop_row(app, ui, p);
     }

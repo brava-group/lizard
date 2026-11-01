@@ -499,8 +499,34 @@ pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
     widgets::sublabels(ui, tr("Status"), None);
     let w = widgets::property_body_width(ui.available_width());
     row(ui, 32.0, |ui| crate::section_panel::status_dropdown(app, ui, doc, sel, w));
+    let changed = sel.iter().any(|id| doc.node(*id).is_some_and(|node| node.dev_status == DevStatus::ReadyForDev && node.dev_changed));
+    if changed {
+        row(ui, 32.0, |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let id = Id::new(("dev_reason", sel.first().copied()));
+            let draft_id = id.with("draft");
+            let mut draft: String = ui.data(|data| data.get_temp(draft_id)).unwrap_or_default();
+            let committed = widgets::text_field(ui, id, &draft, w - 72.0, tr("Why it changed"));
+            let enter = committed.is_some() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if let Some(text) = committed {
+                draft = text;
+                ui.data_mut(|data| data.insert_temp(draft_id, draft.clone()));
+            }
+            let resolve = widgets::button(ui, tr("Resolve"), true, true).on_hover_text(tr("Back to Ready for dev"));
+            if enter || resolve.clicked() {
+                let reason = draft.trim();
+                let params = if reason.is_empty() { json!({"ids": sel}) } else { json!({"ids": sel, "reason": reason}) };
+                app.run("dev.resolveChange", params);
+                ui.data_mut(|data| data.remove::<String>(draft_id));
+            }
+        });
+    } else if let Some(note) = crate::right::common(doc, sel, |node| node.dev_note.clone()).filter(|note| !note.is_empty()) {
+        row(ui, 24.0, |ui| {
+            let note = widgets::elide(ui, &trf("Last change: {note}", &[("note", &note)]), w);
+            widgets::label(ui, &note, Tokens::get(ui.ctx()).text_secondary);
+        });
+    }
     if let [id] = sel {
-        let changed = doc.node(*id).is_some_and(|n| n.dev_status == DevStatus::ReadyForDev && n.dev_changed);
         let focused = app.session.ds().ok().and_then(lizard_engine::DocState::focused) == Some(*id);
         row(ui, 32.0, |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
