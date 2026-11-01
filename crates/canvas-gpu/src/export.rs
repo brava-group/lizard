@@ -260,7 +260,7 @@ mod tests {
     use lizard_color::{
         BlendMode, Color, ColorProfile, ColorStop, Gradient, GradientKind, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternPaint, PatternTile,
     };
-    use lizard_doc::{Blur, BlurType, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
+    use lizard_doc::{Blur, BlurType, BoolOp, Effect, EffectKind, Glass, ImageData, NodeKind, Noise, Shadow, Texture};
     use std::sync::Arc;
 
     #[test]
@@ -1179,6 +1179,33 @@ mod tests {
         for (a, b) in [found.red(), found.green(), found.blue()].into_iter().zip([expected.red(), expected.green(), expected.blue()]) {
             assert!(a.abs_diff(b) <= 2);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn gpu_subtract_renders_only_the_boolean_result() -> Result<(), Box<dyn std::error::Error>> {
+        if GpuCanvas::new(1, 1).is_err() {
+            return Ok(());
+        }
+        let mut doc = Document::new("subtract render");
+        let page = doc.current_page.ok_or("page missing")?;
+        if let Some(NodeKind::Page { background_visible, .. }) = doc.node_mut(page).map(|node| &mut node.kind) {
+            *background_visible = false;
+        }
+        let group = doc.create(page, NodeKind::BooleanOp { op: BoolOp::Subtract }, "Subtract", 0.0, 0.0, 142.0, 137.0)?;
+        doc.node_mut(group).ok_or("boolean group missing")?.fills = vec![Paint::solid(Color::DEFAULT_SHAPE)];
+        doc.create(group, NodeKind::Rectangle, "Bottom", 0.0, 37.0, 100.0, 100.0)?;
+        doc.create(group, NodeKind::Rectangle, "Top", 42.0, 0.0, 100.0, 100.0)?;
+        let area = Rect::new(0.0, 0.0, 142.0, 137.0);
+        let gpu = render_area_gpu(&doc, &[group], area, 1.0).ok_or("GPU subtract export unavailable")?;
+        let cpu = lizard_render::render_area(&doc, &[group], area, 1.0).ok_or("CPU subtract export unavailable")?;
+        for (x, y) in [(20, 50), (80, 20), (80, 50), (80, 120)] {
+            assert_eq!(gpu.pixel(x, y), cpu.pixel(x, y), "subtract differs at ({x}, {y})");
+        }
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 142, height: 137 };
+        let page_gpu = render_page_gpu(&doc, page, &view).ok_or("GPU subtract page unavailable")?;
+        assert_eq!(page_gpu.pixel(80, 20).ok_or("upper pixel missing")?.alpha(), 0);
+        assert_eq!(page_gpu.pixel(80, 50).ok_or("overlap pixel missing")?.alpha(), 0);
         Ok(())
     }
 

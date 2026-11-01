@@ -5679,7 +5679,10 @@ fn draw_node(
     } else {
         false
     };
-    draw_paint_runs(scene, doc, node, camera, view, depth + 1, images, backdrops, cached, size);
+    // A boolean group paints its computed outline; its operands only define that outline.
+    if !matches!(node.kind, NodeKind::BooleanOp { .. }) {
+        draw_paint_runs(scene, doc, node, camera, view, depth + 1, images, backdrops, cached, size);
+    }
     if clipped {
         scene.pop_clip();
     }
