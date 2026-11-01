@@ -74,6 +74,20 @@ pub(super) fn label_tab(ui: &mut Ui, rect: Rect, id: &'static str, text: &str, a
     response.clicked()
 }
 
+pub(super) fn header_tabs(ui: &mut Ui, origin: Pos2, id: &'static str, selected: usize) -> Option<usize> {
+    use crate::primitives::{ControlWidth, Tab, Tabs};
+
+    let tabs = [Tab::new(tr("Custom")), Tab::new(tr("Libraries"))];
+    let rect = Rect::from_min_size(origin + vec2(8.0, 4.0), vec2(168.0, 32.0));
+    let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    Tabs::new(Id::new(id), &tabs, Some(selected))
+        .width(ControlWidth::Fixed(168.0))
+        .selected_fill(FIELD)
+        .hover_fill(FIELD)
+        .text_colors(Color32::WHITE, MUTED)
+        .show(&mut tabs_ui)
+}
+
 pub(super) fn field(ui: &Ui, rect: Rect, corners: CornerRadius, border: bool) {
     ui.painter().rect_filled(rect, corners, if border { PANEL } else { FIELD });
     if border {
@@ -306,20 +320,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
             );
 
             // 40 pt header: tabs, new style, close.
-            label_tab(
-                ui,
-                at(header_origin, 8.0, 8.0, 91.609, 24.0),
-                if stop.is_some() { "cp_stop_custom_tab" } else { "cp_custom_tab" },
-                "Custom",
-                true,
-            );
-            if label_tab(
-                ui,
-                at(header_origin, 103.609, 8.0, 74.914, 24.0),
-                if stop.is_some() { "cp_stop_libraries_tab" } else { "cp_libraries_tab" },
-                "Libraries",
-                false,
-            ) {
+            if header_tabs(ui, header_origin, if stop.is_some() { "cp_stop_tabs" } else { "cp_tabs" }, 0) == Some(1) {
                 library_tab::activate(ctx);
             }
             if stop.is_none() && vector_button(ui, at(header_origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, tr("New style")).clicked() {

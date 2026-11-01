@@ -1,6 +1,6 @@
 //! Compact content tabs with roving keyboard selection and horizontal overflow.
 
-use egui::{Align2, CornerRadius, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::ControlWidth;
 use crate::a11y;
@@ -41,7 +41,9 @@ pub struct Tabs<'a> {
     id: Id,
     tabs: &'a [Tab<'a>],
     selected: Option<usize>,
-    selected_fill: Option<egui::Color32>,
+    selected_fill: Option<Color32>,
+    hover_fill: Option<Color32>,
+    text_colors: Option<(Color32, Color32)>,
     width: ControlWidth,
     overflow: TabOverflow,
     disabled: bool,
@@ -55,6 +57,8 @@ impl<'a> Tabs<'a> {
             tabs,
             selected,
             selected_fill: None,
+            hover_fill: None,
+            text_colors: None,
             width: ControlWidth::Fill,
             overflow: TabOverflow::Buttons,
             disabled: false,
@@ -66,8 +70,16 @@ impl<'a> Tabs<'a> {
         self.width = width;
         self
     }
-    pub fn selected_fill(mut self, color: egui::Color32) -> Self {
+    pub fn selected_fill(mut self, color: Color32) -> Self {
         self.selected_fill = Some(color);
+        self
+    }
+    pub fn hover_fill(mut self, color: Color32) -> Self {
+        self.hover_fill = Some(color);
+        self
+    }
+    pub fn text_colors(mut self, selected: Color32, unselected: Color32) -> Self {
+        self.text_colors = Some((selected, unselected));
         self
     }
     pub fn overflow(mut self, overflow: TabOverflow) -> Self {
@@ -173,10 +185,11 @@ impl<'a> Tabs<'a> {
             let selected = active == Some(index);
             let hover = response.as_ref().is_some_and(|response| response.hovered()) && enabled;
             if self.tabs.len() > 1 && (selected || hover) {
-                let fill = if selected { self.selected_fill.unwrap_or(t.field) } else { t.field };
+                let fill = if selected { self.selected_fill.unwrap_or(t.field) } else { self.hover_fill.unwrap_or(t.field) };
                 painter.rect_filled(tab_rect, CornerRadius::same(5), fill.gamma_multiply(if enabled { 1.0 } else { 0.4 }));
             }
-            let color = if selected { t.text } else { t.text_secondary }.gamma_multiply(if enabled { 1.0 } else { 0.4 });
+            let (selected_text, unselected_text) = self.text_colors.unwrap_or((t.text, t.text_secondary));
+            let color = if selected { selected_text } else { unselected_text }.gamma_multiply(if enabled { 1.0 } else { 0.4 });
             let font = if selected { semibold(11.0) } else { regular(11.0) };
             painter.text(tab_rect.center(), Align2::CENTER_CENTER, tab.label, font, color);
             if response.as_ref().is_some_and(|response| response.has_focus()) {

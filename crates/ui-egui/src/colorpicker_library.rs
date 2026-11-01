@@ -224,10 +224,9 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
             ui.allocate_exact_size(vec2(240.0, 387.0), Sense::hover());
             ui.painter().rect_filled(panel, CornerRadius::same(8), custom::PANEL);
             let o = panel.min;
-            if custom::label_tab(ui, custom::at(o, 8.0, 8.0, 91.609, 24.0), "cpl_custom", "Custom", false) {
+            if custom::header_tabs(ui, o, "cpl_tabs", 1) == Some(0) {
                 custom = true;
             }
-            custom::label_tab(ui, custom::at(o, 103.609, 8.0, 74.914, 24.0), "cpl_libraries", "Libraries", true);
             if icon_button(ui, custom::at(o, 180.0, 8.0, 28.0, 24.0), "cpl_add", 39, vec2(12.0, 12.0), tr("Create style or variable")) {
                 s.create = Some(CreateKind::Style);
                 s.color = paint.preview_color().to_css_hex();
@@ -296,10 +295,10 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                 s.grid = !s.grid;
             }
             ui.painter().hline(o.x..=o.x + 240.0, o.y + 123.5, Stroke::new(1.0, custom::BORDER));
-            let list_rect = custom::at(o, 0.0, 124.0, 240.0, 303.0);
+            let list_rect = custom::at(o, 12.0, 124.0, 216.0, 303.0);
             ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
                 egui::ScrollArea::vertical().id_salt("color_library_scroll").max_height(303.0).show(ui, |ui| {
-                    ui.set_width(240.0);
+                    ui.set_width(216.0);
                     if rows.is_empty() {
                         ui.label(tr("No matching colors"));
                     }
@@ -332,16 +331,16 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                                     ui.label(egui::RichText::new(folder).size(11.0).color(custom::MUTED));
                                     previous_folder = folder.to_string();
                                 }
-                                let (r, response) = ui.allocate_exact_size(vec2(240.0, 28.0), Sense::click());
+                                let (r, response) = ui.allocate_exact_size(vec2(216.0, 28.0), Sense::click());
                                 if response.hovered() {
                                     ui.painter().rect_filled(r, CornerRadius::same(5), custom::FIELD);
                                 }
                                 ui.painter().rect_filled(
-                                    Rect::from_min_size(r.min + vec2(12.0, 5.0), vec2(18.0, 18.0)),
+                                    Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(18.0, 18.0)),
                                     CornerRadius::same(4),
                                     doc_c32(ctx, swatch.color),
                                 );
-                                ui.painter().text(r.min + vec2(39.0, 14.0), Align2::LEFT_CENTER, label, regular(11.0), Color32::WHITE);
+                                ui.painter().text(r.min + vec2(27.0, 14.0), Align2::LEFT_CENTER, label, regular(11.0), Color32::WHITE);
                                 if response.clicked() {
                                     picked = Some(swatch.clone());
                                 }
