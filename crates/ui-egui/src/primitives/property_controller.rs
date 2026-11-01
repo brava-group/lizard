@@ -3,6 +3,7 @@
 use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::a11y;
+use crate::icons::{self, Icon};
 use crate::theme::{Tokens, regular};
 use crate::widgets;
 
@@ -33,29 +34,8 @@ impl PropertyControllerKind {
         let at = |x: f32, y: f32| -> Pos2 { pos2(center.x + x, center.y + y) };
         match self {
             Self::Variant => {
-                // The supplied 24×24 add-variant SVG: rounded diamond with a centered plus.
-                let scale = 0.65;
-                let line = Stroke::new(1.5 * scale, ink);
-                painter.add(egui::Shape::line(
-                    vec![
-                        at(0.0, -10.25 * scale),
-                        at(1.48 * scale, -9.37 * scale),
-                        at(8.78 * scale, -1.35 * scale),
-                        at(9.47 * scale, 0.0),
-                        at(8.78 * scale, 1.35 * scale),
-                        at(1.48 * scale, 9.37 * scale),
-                        at(0.0, 10.25 * scale),
-                        at(-1.48 * scale, 9.37 * scale),
-                        at(-8.78 * scale, 1.35 * scale),
-                        at(-9.47 * scale, 0.0),
-                        at(-8.78 * scale, -1.35 * scale),
-                        at(-1.48 * scale, -9.37 * scale),
-                        at(0.0, -10.25 * scale),
-                    ],
-                    line,
-                ));
-                painter.line_segment([at(-3.0 * scale, 0.0), at(3.0 * scale, 0.0)], line);
-                painter.line_segment([at(0.0, -3.0 * scale), at(0.0, 3.0 * scale)], line);
+                let size = rect.width().min(rect.height()).min(14.0);
+                icons::paint(painter, Rect::from_center_size(center, vec2(size, size)), Icon::AddVariant, ink);
             }
             Self::InstanceSwap => {
                 // The supplied 24×24 swap SVG: arrow feeding a circular instance.
@@ -238,7 +218,7 @@ impl<'a> PropertyController<'a> {
             );
         }
         if self.unused {
-            let icon = Rect::from_center_size(pos2(outer.right() - widgets::PAD - 12.0, card.center().y), vec2(18.0, 18.0));
+            let icon = Rect::from_center_size(widgets::section_action_rect(outer, 0).center(), vec2(18.0, 18.0));
             let warning = ui.interact(icon, ui.id().with(("property_unused", self.name)), Sense::hover());
             warning.on_hover_text(crate::i18n::tr("This property is not used in the component"));
             let center = icon.center();

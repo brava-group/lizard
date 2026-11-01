@@ -754,17 +754,17 @@ fn component_header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId
     let label = widgets::elide_font(ui, name, (rect.width() - 120.0).max(40.0), regular(12.0));
     ui.painter().text(pos2(rect.min.x + 16.0, rect.center().y), Align2::LEFT_CENTER, label, regular(12.0), t.text);
 
-    let action = |ui: &mut Ui, index: usize, icon: Icon, size: f32, tip: &str| {
+    let action = |ui: &mut Ui, index: usize, icon: Icon, size: f32, tip: &str, enabled: bool| {
         let cell = Rect::from_center_size(pos2(rect.max.x - 20.0 - index as f32 * 28.0, rect.center().y), vec2(24.0, 24.0));
-        Button::icon(icon, tip).icon_size(size).show_at(ui, ui.id().with(("component_header", id, index)), cell)
+        Button::icon(icon, tip).icon_size(size).enabled(enabled).show_at(ui, ui.id().with(("component_header", id, index)), cell)
     };
-    let more = action(ui, 0, Icon::Dots, 14.0, tr("More actions"));
-    let settings = action(ui, 1, Icon::TypeSettings, 20.0, tr("Component properties"));
-    let create = action(ui, 2, Icon::Instance, 14.0, tr("Create instance"));
-    if create.clicked() {
-        app.run("instance.create", json!({"component": id}));
-    }
     let owner = lizard_engine::components::variant_set(doc, id).unwrap_or(id);
+    let more = action(ui, 0, Icon::Dots, 14.0, tr("More actions"), true);
+    let settings = action(ui, 1, Icon::TypeSettings, 20.0, tr("Component properties"), true);
+    let create = action(ui, 2, Icon::AddVariant, 16.0, tr("Add variant"), lizard_engine::cmd::component::can_add_variant(doc, id));
+    if create.clicked() {
+        app.run("component.addVariant", json!({"id": id}));
+    }
     menu_popup(&settings).width(220.0).show(|ui| crate::component_panel::add_property_menu(app, ui, doc, owner));
     menu_popup(&more).width(180.0).show(|ui| {
         if lizard_engine::cmd::component::can_add_variant(doc, owner) && menu_item(ui, tr("Add variant"), "") {

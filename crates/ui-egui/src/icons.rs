@@ -219,6 +219,7 @@ icons! {
     Component,
     Instance,
     ComponentSet,
+    AddVariant,
     Group,
     Vector,
     Bend,
@@ -922,6 +923,30 @@ fn draw(p: &P, icon: Icon) {
             for (cx, cy) in [(8.0, 4.3), (11.7, 8.0), (8.0, 11.7), (4.3, 8.0)] {
                 p.path(&[(cx, cy - 2.2), (cx + 2.2, cy), (cx, cy + 2.2), (cx - 2.2, cy)], true);
             }
+        }
+        AddVariant => {
+            // The 24 × 24 property SVG, fitted to the shared 16-unit icon grid.
+            let scale = 0.72;
+            let at = |x: f32, y: f32| (8.0 + x * scale, 8.0 + y * scale);
+            p.path(
+                &[
+                    at(0.0, -10.25),
+                    at(1.48, -9.37),
+                    at(8.78, -1.35),
+                    at(9.47, 0.0),
+                    at(8.78, 1.35),
+                    at(1.48, 9.37),
+                    at(0.0, 10.25),
+                    at(-1.48, 9.37),
+                    at(-8.78, 1.35),
+                    at(-9.47, 0.0),
+                    at(-8.78, -1.35),
+                    at(-1.48, -9.37),
+                ],
+                true,
+            );
+            p.line(8.0 - 3.0 * scale, 8.0, 8.0 + 3.0 * scale, 8.0);
+            p.line(8.0, 8.0 - 3.0 * scale, 8.0, 8.0 + 3.0 * scale);
         }
         Instance => p.path(&[(8.0, 2.0), (14.0, 8.0), (8.0, 14.0), (2.0, 8.0)], true),
         Group => {

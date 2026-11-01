@@ -558,6 +558,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     }
     // Shared properties follow the same type order as the creation menu.
     let mut shared: Vec<_> = defs.iter().filter(|(_, def)| !matches!(def, PropDef::Variant { .. })).collect();
+    let has_properties = !variants.is_empty() || !shared.is_empty();
     shared.sort_by_key(|(name, def)| {
         let order = match def {
             PropDef::Text { .. } => 0,
@@ -662,6 +663,9 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                 });
             });
         }
+    }
+    if has_properties {
+        ui.add_space(12.0);
     }
 }
 

@@ -206,6 +206,7 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         | super::super::Icon::ImageRemoveBackground | super::super::Icon::ImageEditPrompt
         | super::super::Icon::ImageExpand | super::super::Icon::ImageEnhance
         | super::super::Icon::ImageVectorize
+        | super::super::Icon::AddVariant
         | super::super::Icon::SelectionSpacingH | super::super::Icon::SelectionSpacingV => None,
     }
 }

@@ -2208,7 +2208,7 @@ fn swap_highlight(app: &LizardApp, painter: &egui::Painter, doc: &Document, id: 
     painter.galley(pos2(pill.min.x + 20.0, pill.center().y - galley.size().y / 2.0), galley, ink);
 }
 
-/// The outline colour for a layer: purple for components, sets and instances and every layer in
+/// The outline colour for a layer: pink for components, sets and instances and every layer in
 /// them, the page's overlay `green` otherwise.
 fn outline_colour(doc: &Document, id: NodeId, green: Color32) -> Color32 {
     use lizard_engine::components::{owning_component, owning_instance};

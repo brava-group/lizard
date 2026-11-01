@@ -359,6 +359,8 @@ fn wrap_in_set(cmd: &str, doc: &mut Document, ids: &[NodeId]) -> Result<NodeId> 
     let mut n = Node::new(set, NodeKind::ComponentSet { description: String::new() }, base, local.width(), local.height());
     n.transform = lizard_geom::Affine::translate((local.x0, local.y0));
     n.fills.clear();
+    n.strokes = vec![lizard_color::Paint::solid(lizard_color::Color::from_rgba8(0xF7, 0x25, 0x85, 0xFF))];
+    n.stroke.dashes = vec![12.0, 6.0];
     doc.insert(n, parent, doc.index_in_parent(top).map(|i| i + 1))?;
     for i in ids {
         doc.reparent(*i, set, None)?;

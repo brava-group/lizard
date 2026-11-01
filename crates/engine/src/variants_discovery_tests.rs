@@ -122,7 +122,7 @@ fn combining_refuses_nested_components_and_components_inside_instances() {
 #[test]
 fn add_variant_on_a_lone_component_makes_it_a_set_in_one_step() {
     let mut s = Session::new();
-    let c = component(&mut s, "Button", 0.0);
+    let c = component(&mut s, "Button", 250.0);
     let inst = idv(&ex(&mut s, "instance.create", json!({"component": c, "x": 0, "y": 300})));
     let before = s.doc().unwrap().clone();
     let steps = undo_len(&s);
@@ -132,10 +132,16 @@ fn add_variant_on_a_lone_component_makes_it_a_set_in_one_step() {
     let set_node = node(&s, set);
     assert!(matches!(set_node.kind, NodeKind::ComponentSet { .. }));
     assert_eq!(set_node.name, "Button", "the set takes the component's name");
+    assert_eq!(set_node.strokes.first().and_then(|paint| paint.solid_color()), Some(lizard_color::Color::from_rgba8(0xF7, 0x25, 0x85, 0xFF)));
+    assert_eq!(set_node.stroke.dashes, vec![12.0, 6.0]);
     assert_eq!(kids(&s, set), vec![c, v]);
     assert_eq!(node(&s, c).name, "Property 1=Default");
     assert_eq!(node(&s, v).name, "Property 1=Variant2");
     assert_eq!(s.selection(), vec![v]);
+    let first = lizard_geom::transform_rect_bbox(node(&s, c).transform, node(&s, c).local_rect());
+    let second = lizard_geom::transform_rect_bbox(node(&s, v).transform, node(&s, v).local_rect());
+    assert_eq!(first.x0, second.x0, "the new variant aligns with the original");
+    assert_eq!(second.y0 - first.y1, 20.0, "the variants have a visible gap");
     assert!(set_node.height >= 40.0 * 2.0 + 20.0, "the set wraps both variants: {}", set_node.height);
     assert!(matches!(node(&s, inst).kind, NodeKind::Instance { component, .. } if component == c), "instances keep their main");
     assert_eq!(undo_len(&s), steps + 1, "wrapping and adding are one undo step");
