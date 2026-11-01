@@ -73,6 +73,34 @@ fn a_guide_moved_off_the_canvas_doesnt_follow_a_later_click() {
 }
 
 #[test]
+fn a_guide_released_past_its_own_ruler_is_removed() {
+    for left in [false, true] {
+        let mut u = rulers();
+        let r = u.app.canvas.rect;
+        let start = if left { Pos2::new(r.min.x + 5.0, r.min.y + 60.0) } else { Pos2::new(r.min.x + 60.0, r.min.y + 5.0) };
+        drag(&mut u, start, r.center());
+        assert_eq!(offsets(&u).len(), 1, "left ruler: {left}");
+        let outside = if left { Pos2::new(r.min.x - 100.0, r.center().y) } else { Pos2::new(r.center().x, r.min.y - 100.0) };
+        drag(&mut u, r.center(), outside);
+        assert!(offsets(&u).is_empty(), "left ruler: {left}");
+    }
+}
+
+#[test]
+fn a_guide_released_past_another_canvas_edge_stays_in_place() {
+    for left in [false, true] {
+        let mut u = rulers();
+        let r = u.app.canvas.rect;
+        let start = if left { Pos2::new(r.min.x + 5.0, r.min.y + 60.0) } else { Pos2::new(r.min.x + 60.0, r.min.y + 5.0) };
+        drag(&mut u, start, r.center());
+        assert_eq!(offsets(&u).len(), 1, "left ruler: {left}");
+        let outside = if left { Pos2::new(r.max.x + 100.0, r.center().y) } else { Pos2::new(r.center().x, r.max.y + 100.0) };
+        drag(&mut u, r.center(), outside);
+        assert_eq!(offsets(&u).len(), 1, "left ruler: {left}");
+    }
+}
+
+#[test]
 fn a_ruler_drag_released_on_the_canvas_adds_one_guide() {
     let mut u = rulers();
     let r = u.app.canvas.rect;

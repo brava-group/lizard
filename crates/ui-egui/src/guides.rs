@@ -175,6 +175,19 @@ fn cursor_across(app: &LizardApp, g: &Placed, r: Rect) -> egui::CursorIcon {
     }
 }
 
+/// A guide is discarded on the ruler it came from, including beyond the canvas edge.
+fn on_own_ruler_side(app: &LizardApp, drag: GuideDrag, at: Option<Placed>, pos: Pos2) -> bool {
+    let vertical = match drag {
+        GuideDrag::New { vertical, .. } | GuideDrag::Move { vertical, .. } => vertical,
+    };
+    let r = app.canvas.rect;
+    let down = at.map_or(vertical, |g| {
+        let [a, b] = segment(app, &g, r);
+        (b.y - a.y).abs() >= (b.x - a.x).abs()
+    });
+    if down { pos.x < r.min.x + RULER } else { pos.y < r.min.y + RULER }
+}
+
 /// Pointer handling; returns true when the event belongs to a ruler or guide.
 pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Pos2) -> bool {
     if !rulers_on(app) {
@@ -214,11 +227,7 @@ pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Pos2) -> bool {
             });
             // Released over its own ruler (the left one for a guide running down the screen): no
             // guide (a moved one is removed).
-            let down = at.map_or(vertical, |g| {
-                let [a, b] = segment(app, &g, r);
-                (b.y - a.y).abs() >= (b.x - a.x).abs()
-            });
-            let on_ruler = if down { pos.x < r.min.x + RULER } else { pos.y < r.min.y + RULER };
+            let on_ruler = on_own_ruler_side(app, drag, at, pos);
             let page = app.session.ds().map(|d| d.page).ok();
             let before = app.session.doc().ok().and_then(|d| match drag {
                 GuideDrag::Move { owner, index, .. } => d.node(owner).and_then(|n| n.guides().get(index)).map(|g| g.offset),
@@ -279,12 +288,25 @@ pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Pos2) -> bool {
     false
 }
 
-/// Ends a guide drag whose button is up by the end of the frame without [`input`] taking the
-/// release (released off the canvas, or over something on it): the gesture is dropped, so a later
-/// click doesn't add or move a guide.
-pub fn end_released(ctx: &egui::Context) {
-    if ctx.input(|i| i.pointer.primary_down()) {
+/// Finish a guide drag released outside the canvas. Crossing the guide's own ruler edge removes
+/// a moved guide; releases through the other edges cancel the gesture.
+pub fn end_released(app: &mut LizardApp, ctx: &egui::Context) {
+    let (down, released, pos) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.button_released(egui::PointerButton::Primary), i.pointer.latest_pos()));
+    if down {
         return;
+    }
+    let drag = ctx.data(|d| d.get_temp::<GuideDrag>(drag_id()));
+    let preview = ctx.data(|d| d.get_temp::<Placed>(preview_id()));
+    if released
+        && let Some(drag @ GuideDrag::Move { owner, index, copy: false, .. }) = drag
+        && let Some(pos) = pos.filter(|p| !app.canvas.rect.contains(*p))
+        && on_own_ruler_side(app, drag, preview, pos)
+    {
+        let page = app.session.ds().map(|d| d.page).ok();
+        app.run("guide.remove", owned(owner, page, json!({"index": index})));
+    }
+    if drag.is_some() {
+        app.session.tool.overlay.guides.clear();
     }
     ctx.data_mut(|d| {
         d.remove::<GuideDrag>(drag_id());

@@ -1164,7 +1164,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     // A browser names no dragged file until the drop, so documents there still say "import".
     let documents = ctx.input(|i| i.raw.hovered_files.iter().all(|f| f.path.as_deref().is_some_and(crate::is_document)));
     crate::drop_overlay(&ctx, ctx.content_rect(), if documents { tr("Drop to open") } else { tr("Drop to import") });
-    crate::guides::end_released(&ctx);
+    crate::guides::end_released(app, &ctx);
     crate::live::track_pointer(app, &ctx);
     app.sync_preedit();
     // Retained rendering snaps the view outward and adds one pixel on each axis.
@@ -2944,40 +2944,115 @@ fn rulers(app: &LizardApp, painter: &egui::Painter, t: &Tokens, doc: &Document, 
     let size = 20.0;
     painter.rect_filled(Rect::from_min_size(r.min, vec2(r.width(), size)), CornerRadius::ZERO, t.panel);
     painter.rect_filled(Rect::from_min_size(r.min, vec2(size, r.height())), CornerRadius::ZERO, t.panel);
-    let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
-    let step = lizard_engine::guides::ruler_step(zoom);
+    let top = Rect::from_min_max(pos2(r.min.x + size, r.min.y), pos2(r.max.x, r.min.y + size));
+    let side = Rect::from_min_max(pos2(r.min.x, r.min.y + size), pos2(r.min.x + size, r.max.y));
+    let top_painter = painter.with_clip_rect(top);
+    let side_painter = painter.with_clip_rect(side);
+    let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0).max(1e-6);
+    let major_step = ruler_major_step(zoom);
+    let minor_step = major_step / 5.0;
     let p0 = app.to_page(r.min);
-    let p1 = app.to_page(r.max);
-    // Highlight the selection's span.
-    if let Some(b) = doc.bounds_of(sel) {
-        let (a, bb) = (app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1));
-        painter.rect_filled(
-            Rect::from_min_max(pos2(a.x, r.min.y), pos2(bb.x, r.min.y + size)),
-            CornerRadius::ZERO,
-            accent(painter).gamma_multiply(0.15),
-        );
-        painter.rect_filled(
-            Rect::from_min_max(pos2(r.min.x, a.y), pos2(r.min.x + size, bb.y)),
-            CornerRadius::ZERO,
-            accent(painter).gamma_multiply(0.15),
-        );
+    let selected = doc.bounds_of(sel).map(|b| ((b.x0, b.y0), (b.x1, b.y1), app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1)));
+    let selection_color = accent(painter);
+    let selected_label_color = selection_color.gamma_multiply(0.9);
+    let number_color = t.text_secondary.gamma_multiply(0.82);
+    let muted_number_color = t.text_tertiary.gamma_multiply(0.85);
+    let tick_color = t.text_tertiary.gamma_multiply(0.8);
+    let mut top_edges = Vec::new();
+    let mut side_edges = Vec::new();
+    if let Some(((x0, y0), (x1, y1), a, b)) = selected {
+        let fill = selection_color.gamma_multiply(0.15);
+        top_painter.rect_filled(Rect::from_min_max(pos2(a.x, top.top()), pos2(b.x, top.bottom())), CornerRadius::ZERO, fill);
+        side_painter.rect_filled(Rect::from_min_max(pos2(side.left(), a.y), pos2(side.right(), b.y)), CornerRadius::ZERO, fill);
+        for (value, at, before) in [(x0, a.x, true), (x1, b.x, false)] {
+            let galley = top_painter.layout_no_wrap(fmt(value), regular(9.0), selected_label_color);
+            let x = if before { at - 5.0 - galley.size().x } else { at + 5.0 };
+            let rect = Rect::from_min_size(pos2(x, top.top() + 2.0), galley.size());
+            top_edges.push((rect, galley));
+            top_painter.line_segment([pos2(at, top.bottom() - 7.0), pos2(at, top.bottom())], stroke(selected_label_color, 1.0));
+        }
+        for (value, at, before) in [(y0, a.y, true), (y1, b.y, false)] {
+            let galley = side_painter.layout_no_wrap(fmt(value), regular(9.0), selected_label_color);
+            let length = galley.size().x;
+            let center_y = if before { at - 5.0 - length / 2.0 } else { at + 5.0 + length / 2.0 };
+            let shape = vertical_ruler_label(pos2(side.left() + 7.5, center_y), galley, selected_label_color);
+            side_painter.line_segment([pos2(side.right() - 7.0, at), pos2(side.right(), at)], stroke(selected_label_color, 1.0));
+            side_edges.push(shape);
+        }
     }
-    let mut x = (p0.x / step).floor() * step;
-    while x <= p1.x {
-        let s = app.to_screen(x, 0.0).x;
-        painter.line_segment([pos2(s, r.min.y + size - 6.0), pos2(s, r.min.y + size)], stroke(t.text_tertiary, 1.0));
-        painter.text(pos2(s + 2.0, r.min.y + 3.0), Align2::LEFT_TOP, fmt(x), regular(9.0), t.text_secondary);
-        x += step;
+    let horizontal_ticks = ((f64::from(top.width()) / (minor_step * zoom)).ceil() as usize + 2).min(10_000);
+    let first_x = (p0.x / minor_step).floor() as i64;
+    for offset in 0..horizontal_ticks {
+        let index = first_x.saturating_add(offset as i64);
+        let value = index as f64 * minor_step;
+        let x = app.to_screen(value, 0.0).x;
+        if x > top.right() + 1.0 {
+            break;
+        }
+        let major = index.rem_euclid(5) == 0;
+        let tick = if major { 6.0 } else { 3.0 };
+        top_painter.line_segment([pos2(x, top.bottom() - tick), pos2(x, top.bottom())], stroke(tick_color, 1.0));
+        if major {
+            let color = if selected.is_some_and(|(_, _, a, b)| (a.x..b.x).contains(&x)) { muted_number_color } else { number_color };
+            let galley = top_painter.layout_no_wrap(fmt(value), regular(9.0), color);
+            let rect = Rect::from_min_size(pos2(x - galley.size().x / 2.0, top.top() + 2.0), galley.size());
+            if rect.left() >= top.left() + 2.0
+                && rect.right() <= top.right() - 2.0
+                && !top_edges.iter().any(|(edge, _)| edge.expand(3.0).intersects(rect))
+            {
+                top_painter.galley(rect.min, galley, color);
+            }
+        }
     }
-    let mut y = (p0.y / step).floor() * step;
-    while y <= p1.y {
-        let s = app.to_screen(0.0, y).y;
-        painter.line_segment([pos2(r.min.x + size - 6.0, s), pos2(r.min.x + size, s)], stroke(t.text_tertiary, 1.0));
-        painter.text(pos2(r.min.x + 3.0, s + 2.0), Align2::LEFT_TOP, fmt(y), regular(9.0), t.text_secondary);
-        y += step;
+    let vertical_ticks = ((f64::from(side.height()) / (minor_step * zoom)).ceil() as usize + 2).min(10_000);
+    let first_y = (p0.y / minor_step).floor() as i64;
+    for offset in 0..vertical_ticks {
+        let index = first_y.saturating_add(offset as i64);
+        let value = index as f64 * minor_step;
+        let y = app.to_screen(0.0, value).y;
+        if y > side.bottom() + 1.0 {
+            break;
+        }
+        let major = index.rem_euclid(5) == 0;
+        let tick = if major { 6.0 } else { 3.0 };
+        side_painter.line_segment([pos2(side.right() - tick, y), pos2(side.right(), y)], stroke(tick_color, 1.0));
+        if major {
+            let color = if selected.is_some_and(|(_, _, a, b)| (a.y..b.y).contains(&y)) { muted_number_color } else { number_color };
+            let galley = side_painter.layout_no_wrap(fmt(value), regular(9.0), color);
+            let shape = vertical_ruler_label(pos2(side.left() + 7.5, y), galley, color);
+            let bounds = shape.visual_bounding_rect();
+            if bounds.top() >= side.top() + 2.0
+                && bounds.bottom() <= side.bottom() - 2.0
+                && !side_edges.iter().any(|edge: &egui::epaint::TextShape| edge.visual_bounding_rect().expand(3.0).intersects(bounds))
+            {
+                side_painter.add(Shape::Text(shape));
+            }
+        }
+    }
+    for (rect, galley) in top_edges {
+        top_painter.galley(rect.min, galley, selected_label_color);
+    }
+    for shape in side_edges {
+        side_painter.add(Shape::Text(shape));
     }
     painter.line_segment([pos2(r.min.x, r.min.y + size), pos2(r.max.x, r.min.y + size)], stroke(t.border, 1.0));
     painter.line_segment([pos2(r.min.x + size, r.min.y), pos2(r.min.x + size, r.max.y)], stroke(t.border, 1.0));
+}
+
+/// Keep labelled marks far enough apart for coordinates with four or five digits.
+fn ruler_major_step(zoom: f64) -> f64 {
+    let mut step = lizard_engine::guides::ruler_step(zoom);
+    while step * zoom < 85.0 {
+        let base = 10.0_f64.powf(step.log10().floor());
+        let part = step / base;
+        step = if part < 1.5 { 2.0 * base } else if part < 3.5 { 5.0 * base } else { 10.0 * base };
+    }
+    step
+}
+
+fn vertical_ruler_label(center: Pos2, galley: Arc<egui::Galley>, color: Color32) -> egui::epaint::TextShape {
+    egui::epaint::TextShape::new(pos2(center.x - galley.size().x / 2.0, center.y - galley.size().y / 2.0), galley, color)
+        .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, Align2::CENTER_CENTER)
 }
 
 pub fn fmt(v: f64) -> String {
