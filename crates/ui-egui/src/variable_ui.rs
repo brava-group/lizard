@@ -427,6 +427,12 @@ fn kind_fits(want: Option<VariableType>, field: Option<&str>, have: VariableType
 /// The picker popover (call once per frame).
 pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(p) = ctx.data(|d| d.get_temp::<Picker>(picker_id())) else { return };
+    if let Target::Bind { ids, .. } = &p.target
+        && *ids != app.session.selection()
+    {
+        ctx.data_mut(|data| data.remove::<Picker>(picker_id()));
+        return;
+    }
     let Ok(doc) = app.session.ds().map(|d| d.doc.clone()) else { return };
     let libs = libraries(app, &doc);
     let t = Tokens::get(ctx);
@@ -509,7 +515,11 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
         Stroke::new(1.0, Color32::from_black_alpha(40)),
         egui::StrokeKind::Inside,
     );
-    let clicked_outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|pos| !rect.contains(pos)));
+    let clicked_outside = !matches!(&p.target, Target::Bind { .. })
+        && ctx.input(|i| {
+            (i.pointer.button_pressed(egui::PointerButton::Primary) || i.pointer.button_pressed(egui::PointerButton::Secondary))
+                && i.pointer.interact_pos().is_some_and(|pos| !rect.contains(pos))
+        });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) || clicked_outside {
         close = true;
     }

@@ -40,6 +40,34 @@ pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
     library_tab::create_variable(ctx, color);
 }
 
+fn eyedrop_params(target: &PickerTarget, stop: Option<usize>) -> serde_json::Value {
+    use lizard_engine::selection_colors::PaintTarget;
+    let targets = match target {
+        PickerTarget::Paint { fills, index, ids } => {
+            ids.iter().map(|id| PaintTarget { id: *id, fills: *fills, index: *index, range: None }).collect()
+        }
+        PickerTarget::SelectionColor { targets, .. } => targets.clone(),
+        PickerTarget::TextRange { id, start, end } => vec![PaintTarget { id: *id, fills: true, index: 0, range: Some((*start, *end)) }],
+        PickerTarget::PageBackground => return json!({"pageBackground": true}),
+        _ => return json!({}),
+    };
+    json!({"targets": targets, "stop": stop})
+}
+
+#[cfg(test)]
+mod eyedrop_params_tests {
+    use super::{PickerTarget, eyedrop_params};
+    use lizard_doc::NodeId;
+    use serde_json::json;
+
+    #[test]
+    fn stroke_picker_passes_stroke_target_to_eyedropper() {
+        let target = PickerTarget::Paint { fills: false, index: 2, ids: vec![NodeId(7)] };
+        let params = eyedrop_params(&target, None);
+        assert_eq!(params["targets"], json!([{"id": 7, "fills": false, "index": 2, "range": null}]));
+    }
+}
+
 pub(crate) fn show_standalone_creation(app: &mut LizardApp, ctx: &egui::Context) {
     library_tab::show_standalone(app, ctx);
 }

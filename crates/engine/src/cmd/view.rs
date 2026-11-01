@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
 use crate::params::*;
-use crate::tools::{ToolId, selection_bounds};
+use crate::tools::{EyedropTarget, ToolId, selection_bounds};
 use crate::{EngineError, Result, Session, ViewState, bad, spec};
 
 fn view(s: &mut Session) -> Result<&mut ViewState> {
@@ -545,7 +545,28 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("tool.text", "Text", "{}", false, |s, _| tool(s, ToolId::Text)),
         spec!("tool.comment", "Comment", "{}", false, |s, _| tool(s, ToolId::Comment)),
         spec!("tool.shapeBuilder", "Shape builder", "{}", false, |s, _| tool(s, ToolId::ShapeBuilder)),
-        spec!("edit.pickColor", "Pick color", "{}", false, |s, _| tool(s, ToolId::Eyedropper)),
+        spec!("edit.pickColor", "Pick color", "{targets?, stop?, pageBackground?}", false, |s, p| {
+            let owner = s.ds()?.uid;
+            let destination = if boolean(p, "pageBackground") == Some(true) {
+                Some(EyedropTarget::PageBackground { document: owner })
+            } else if let Some(targets) = parse::<Vec<crate::selection_colors::PaintTarget>>("edit.pickColor", p, "targets")? {
+                let doc = s.doc()?;
+                if targets.is_empty() || targets.iter().any(|target| target.paint(doc).is_none()) {
+                    return Err(bad("edit.pickColor", "the paint target no longer exists"));
+                }
+                Some(EyedropTarget::Paint {
+                    document: owner,
+                    selection: s.selection(),
+                    targets,
+                    stop: p.get("stop").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()),
+                })
+            } else {
+                None
+            };
+            let result = tool(s, ToolId::Eyedropper)?;
+            s.tool.eyedrop_target = destination;
+            Ok(result)
+        }),
     ]
 }
 

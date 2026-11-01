@@ -1766,7 +1766,7 @@ impl LizardApp {
                 right::right_panel(self, ui)
             });
         }
-        let canvas_area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             let worker = self.worker.take();
             let mut worker = worker.unwrap_or_else(|| render_worker::Worker::new(ctx.clone()));
             canvas::show(self, ui, &mut worker);
@@ -1805,8 +1805,6 @@ impl LizardApp {
         variable_ui::picker(self, &ctx);
         style_picker::show(self, &ctx);
         colorpicker::show_standalone_creation(self, &ctx);
-        let workspace = egui::Rect::from_min_max(ctx.content_rect().min, egui::pos2(canvas_area.response.rect.right(), ctx.content_rect().max.y));
-        self.dismiss_panels_on_workspace_press(&ctx, workspace);
         self.end_unwanted_text_preview(&ctx);
         self.end_pen_outside_design();
         dialogs::show(self, &ctx);
@@ -1826,6 +1824,7 @@ impl LizardApp {
     }
 
     fn sync_selection_panels(&mut self, ctx: &egui::Context) {
+        // Panels follow the selection, so dragging its layer or panning the canvas keeps them open.
         let owner = (self.windows.current, self.session.selection());
         if self.ui.selection_panels_owner.as_ref() == Some(&owner) {
             return;
@@ -1834,21 +1833,9 @@ impl LizardApp {
             primitives::FloatingPanel::dismiss_selection_panels(ctx);
             right::dismiss_selection_panels(ctx);
             proto_panel::open_editor(ctx, None);
-        }
-        self.ui.selection_panels_owner = Some(owner);
-    }
-
-    fn dismiss_panels_on_workspace_press(&mut self, ctx: &egui::Context, workspace: egui::Rect) {
-        let outside = ctx.input(|input| input.pointer.any_pressed().then(|| input.pointer.interact_pos()).flatten())
-            .filter(|position| workspace.contains(*position))
-            .and_then(|position| primitives::FloatingPanel::visible_panel_contains(ctx, position))
-            == Some(false);
-        if outside && !egui::Popup::is_any_open(ctx) {
-            primitives::FloatingPanel::dismiss_selection_panels(ctx);
-            right::dismiss_selection_panels(ctx);
-            proto_panel::open_editor(ctx, None);
             colorpicker::dismiss(self, ctx);
         }
+        self.ui.selection_panels_owner = Some(owner);
     }
 
     fn toast_ui(&mut self, ctx: &egui::Context) {

@@ -14,6 +14,7 @@ use crate::arc_handles::{ArcHandle, ArcHint};
 use crate::cmd::arrange::move_world;
 use crate::cmd::create::frame_at;
 use crate::cmd::edit::roots;
+use crate::selection_colors::PaintTarget;
 use crate::shape_handles::{ShapeHandle, ShapeHint};
 use crate::snap::{Guide, Targets};
 use crate::{Result, Session, textedit};
@@ -451,6 +452,7 @@ pub struct PenPath {
 #[derive(Clone, Debug, Default)]
 pub struct ToolState {
     pub tool: ToolId,
+    pub(crate) eyedrop_target: Option<EyedropTarget>,
     pub(crate) gesture: Gesture,
     pub overlay: Overlay,
     pub pen: Option<PenPath>,
@@ -477,6 +479,12 @@ pub struct ToolState {
     pub labels: Vec<(NodeId, [Point; 4])>,
     /// The brush the Pencil draws with (`tool.pencilBrush`; `None`: a plain stroke).
     pub pencil_brush: Option<lizard_doc::Brush>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum EyedropTarget {
+    PageBackground { document: u64 },
+    Paint { document: u64, selection: Vec<NodeId>, targets: Vec<PaintTarget>, stop: Option<usize> },
 }
 
 /// Pen pressure along drawn samples as width profile points `[t, scale]`: `t` by length, at most
@@ -968,6 +976,7 @@ impl Session {
             let _ = crate::vectoredit::end(self);
         }
         self.tool.tool = t;
+        self.tool.eyedrop_target = None;
         self.tool.gesture = Gesture::None;
         // The tool's cursor shows before the pointer moves.
         self.tool.overlay =
@@ -2113,6 +2122,7 @@ impl Session {
 
     fn eyedrop(&mut self, ev: &PointerEvent) -> Result<()> {
         let ds = self.ds()?;
+        let document = ds.uid;
         let doc = ds.doc.clone();
         let view = lizard_render::View { origin: (ev.x, ev.y), scale: ev.zoom.max(0.01), width: 1, height: 1 };
         let Some(pix) = crate::cmd::file::render_page_pixels(&doc, ds.page, &view) else { return Ok(()) };
@@ -2124,8 +2134,30 @@ impl Session {
             255,
         );
         let sel = ds.selection.clone();
-        if !sel.is_empty() {
-            self.execute("node.set", &json!({"ids": sel, "props": {"fill": c.to_css_hex()}}))?;
+        let destination = self.tool.eyedrop_target.clone();
+        match destination {
+            Some(EyedropTarget::PageBackground { document: owner }) if document == owner => {
+                self.execute("page.setBackground", &json!({"color": c.to_css_hex()}))?;
+            }
+            Some(EyedropTarget::Paint { document: owner, selection, targets, stop }) if document == owner && sel == selection => {
+                if let Some(mut paint) = targets.first().and_then(|target| target.paint(&doc)) {
+                    if let Some(index) = stop {
+                        if let lizard_color::PaintKind::Gradient(gradient) = &mut paint.kind
+                            && let Some(color_stop) = gradient.stops.get_mut(index)
+                        {
+                            color_stop.color = c;
+                            self.execute("selection.setPaint", &json!({"targets": targets, "paint": paint}))?;
+                        }
+                    } else {
+                        paint.kind = lizard_color::PaintKind::Solid { color: c };
+                        self.execute("selection.setPaint", &json!({"targets": targets, "paint": paint}))?;
+                    }
+                }
+            }
+            None if !sel.is_empty() => {
+                self.execute("node.set", &json!({"ids": sel, "props": {"fill": c.to_css_hex()}}))?;
+            }
+            _ => {}
         }
         self.recent_colors.retain(|x| *x != c);
         self.recent_colors.insert(0, c);

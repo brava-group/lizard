@@ -348,7 +348,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
             let eye = at(origin, 16.0, 326.0, 24.0, 24.0);
             if vector_button(ui, eye, "cp_eye", 10, false, tr("Pick color (I)")).clicked() {
                 close_now = true;
-                app.run("edit.pickColor", json!({}));
+                app.run("edit.pickColor", eyedrop_params(target, stop.map(|(index, _)| index)));
             }
             if let Some((next, done)) = edit_solid_controls(ui, origin, color, true) {
                 if let Some((index, _)) = stop {

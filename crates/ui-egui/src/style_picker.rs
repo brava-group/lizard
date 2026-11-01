@@ -177,7 +177,6 @@ impl Picker {
 /// Open the picker for `slot` of `ids`, centred on the trigger when space permits.
 pub fn open(app: &mut LizardApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y);
-    ui.data_mut(|d| d.insert_temp(Id::new("style_picker_just_opened"), true));
     app.ui.style_picker = Some(Picker {
         slot,
         ids: ids.to_vec(),
@@ -1857,45 +1856,17 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
             crate::right::grid_style_popup(app, ctx, &style.id, grids, index, grid, pos2(rect.left() - 248.0, rect.top()));
         }
     }
-    // Clicks in the colour picker editing this picker's style, or in a menu the editor opened,
-    // keep it open.
-    let picker_rect = app
-        .ui
-        .picker
-        .as_ref()
-        .filter(|t| matches!(t, PickerTarget::Style { .. } | PickerTarget::StyleEffect { .. }))
-        .and(ctx.memory(|m| m.area_rect(Id::new("color_picker"))));
-    let effect_settings_rect =
-        ctx.memory(|memory| memory.area_rect(Id::new(("effect_style_settings", p.edit.as_ref().map(|edit| edit.id.as_str()).unwrap_or("")))));
-    let grid_settings_rect =
-        ctx.memory(|memory| memory.area_rect(Id::new(("grid_style_settings", p.edit.as_ref().map(|edit| edit.id.as_str()).unwrap_or("")))));
-    // So do clicks in the variable picker binding one of its fields (Escape closes that first).
+    // Escape closes the innermost picker first.
     let variables = crate::variable_ui::picker_rect(ctx);
     let font_panel_id = Id::new("text_style_font_panel");
     let font_panel_open = crate::primitives::FloatingPanel::toggle(ctx, font_panel_id, false);
-    let font_panel_rect = font_panel_open.then(|| ctx.memory(|m| m.area_rect(font_panel_id))).flatten();
     let font_panel_interacted = ctx.data_mut(|data| data.remove_temp::<bool>(Id::new("text_style_font_panel_interacted"))).unwrap_or(false);
     let settings_id = Id::new("text_style_settings_panel");
     let settings_open = crate::primitives::FloatingPanel::toggle(ctx, settings_id, false);
-    let settings_rect = settings_open.then(|| ctx.memory(|m| m.area_rect(settings_id))).flatten();
     let settings_interacted = ctx.data_mut(|data| data.remove_temp::<bool>(Id::new("text_style_subpanel_interacted"))).unwrap_or(false);
     let in_popup =
         egui::Popup::is_any_open(ctx) || variables.is_some() || font_panel_open || font_panel_interacted || settings_open || settings_interacted;
-    let just_opened = ctx.data_mut(|d| d.remove_temp::<bool>(Id::new("style_picker_just_opened"))).unwrap_or(false);
-    let outside = !just_opened
-        && ctx.input(|i| {
-            i.pointer.any_pressed()
-                && i.pointer.interact_pos().is_some_and(|pos| {
-                    !rect.contains(pos)
-                        && !picker_rect.is_some_and(|r| r.contains(pos))
-                        && !font_panel_rect.is_some_and(|r| r.contains(pos))
-                        && !settings_rect.is_some_and(|r| r.contains(pos))
-                        && !effect_settings_rect.is_some_and(|r| r.contains(pos))
-                        && !grid_settings_rect.is_some_and(|r| r.contains(pos))
-                })
-        })
-        && !in_popup;
-    let mut close = outside || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !in_popup);
+    let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !in_popup;
     let ids = p.ids.clone();
     let slot = p.slot;
     // The canvas shows the text style under the pointer on the selected text.
@@ -2018,7 +1989,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
 fn edit_local(app: &mut LizardApp, ui: &Ui, slot: StyleSlot, id: &str) {
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y - 12.0);
     let edit = app.session.doc().ok().and_then(|d| d.style(id).map(editing));
-    ui.data_mut(|d| d.insert_temp(Id::new("style_picker_just_opened"), true));
     app.ui.style_picker = Some(Picker {
         slot,
         ids: app.session.selection(),

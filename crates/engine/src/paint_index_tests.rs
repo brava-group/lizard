@@ -1,10 +1,12 @@
 //! `fill.set` / `stroke.set` reject a negative, fractional or non-finite `index` instead of
 //! clamping or truncating it onto another paint (like `fill.remove` / `stroke.remove`).
 
+use lizard_color::{Color, Gradient, GradientKind, Paint, PaintKind};
 use lizard_doc::NodeId;
 use serde_json::{Value, json};
 
 use crate::Session;
+use crate::tools::{PointerEvent, PointerKind};
 
 fn ex(s: &mut Session, cmd: &str, p: Value) -> Value {
     s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd} {p}: {e}"))
@@ -36,4 +38,41 @@ fn paint_set_rejects_bad_index_and_leaves_the_paints_alone() {
         ex(&mut s, "edit.undo", json!({}));
         assert_eq!(paints(&s, r), before);
     }
+}
+
+#[test]
+fn eyedropper_from_stroke_picker_changes_stroke_without_changing_fill() {
+    let mut s = Session::new();
+    let source = NodeId(ex(&mut s, "shape.rectangle", json!({"x": 0, "y": 0, "width": 40, "height": 40}))["id"].as_u64().unwrap());
+    ex(&mut s, "fill.set", json!({"ids": [source], "index": 0, "color": "#FF0000"}));
+    let target = NodeId(ex(&mut s, "shape.rectangle", json!({"x": 100, "y": 0, "width": 40, "height": 40}))["id"].as_u64().unwrap());
+    ex(&mut s, "fill.set", json!({"ids": [target], "index": 0, "color": "#00FF00"}));
+    ex(&mut s, "stroke.add", json!({"ids": [target], "color": "#000000"}));
+    ex(&mut s, "select.set", json!({"ids": [target]}));
+
+    ex(&mut s, "edit.pickColor", json!({"targets": [{"id": target, "fills": false, "index": 0, "range": null}]}));
+    s.pointer(&PointerEvent::at(PointerKind::Down, 20.0, 20.0, 1.0)).unwrap();
+
+    let node = s.doc().unwrap().node(target).unwrap();
+    assert_eq!(node.fills[0].solid_color().unwrap().to_hex(), "00FF00");
+    assert_eq!(node.strokes[0].solid_color().unwrap().to_hex(), "FF0000");
+    ex(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc().unwrap().node(target).unwrap().strokes[0].solid_color().unwrap().to_hex(), "000000");
+}
+
+#[test]
+fn eyedropper_from_gradient_stop_preserves_the_gradient() {
+    let mut s = Session::new();
+    let source = NodeId(ex(&mut s, "shape.rectangle", json!({"x": 0, "y": 0, "width": 40, "height": 40}))["id"].as_u64().unwrap());
+    ex(&mut s, "fill.set", json!({"ids": [source], "index": 0, "color": "#FF0000"}));
+    let target = NodeId(ex(&mut s, "shape.rectangle", json!({"x": 100, "y": 0, "width": 40, "height": 40}))["id"].as_u64().unwrap());
+    let paint = Paint::gradient(Gradient::default_for(GradientKind::Linear, Color::BLACK));
+    ex(&mut s, "node.set", json!({"ids": [target], "props": {"fills": [paint]}}));
+    ex(&mut s, "select.set", json!({"ids": [target]}));
+
+    ex(&mut s, "edit.pickColor", json!({"targets": [{"id": target, "fills": true, "index": 0, "range": null}], "stop": 1}));
+    s.pointer(&PointerEvent::at(PointerKind::Down, 20.0, 20.0, 1.0)).unwrap();
+
+    let PaintKind::Gradient(gradient) = &s.doc().unwrap().node(target).unwrap().fills[0].kind else { panic!("eyedropper replaced the gradient") };
+    assert_eq!(gradient.stops[1].color.to_hex(), "FF0000");
 }
