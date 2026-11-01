@@ -18,7 +18,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "edit.duplicate",
             "Duplicate",
-            "{ids?, dx?, dy? (page offset; default: the offset of the last duplicate when ids are its copies, still selected; else top-level frames to the right with a 100 gap, everything else in place)}  a main component's copy is an instance of it (a variant stays a new variant in its set)",
+            "{ids?, dx?, dy? (page offset; default: the offset of the last duplicate when ids are its copies, still selected; else top-level frames to the right with a 100 gap, everything else in place)}  a lone main component becomes a variant set; a variant duplicates as an instance of that variant",
             true,
             duplicate
         ),
@@ -463,17 +463,37 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     let explicit = num(p, "dx").is_some() || num(p, "dy").is_some();
     let ds = s.ds()?;
     let roots_now = z_sorted(&ds.doc, &roots(&ds.doc, &ids));
+    if let [id] = roots_now.as_slice()
+        && ds.doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Component { .. }))
+        && crate::components::variant_set(&ds.doc, *id).is_none()
+        && crate::cmd::component::can_add_variant(&ds.doc, *id)
+    {
+        let result = super::component::add_variant(s, &json!({"id": id}))?;
+        let variant = id_of(&result["id"]).ok_or_else(|| bad("edit.duplicate", "Add variant returned no variant"))?;
+        return Ok(json!({"ids": [variant]}));
+    }
     let repeat = ds.last_duplicate.as_ref().filter(|d| !explicit && d.is_selection(&roots_now)).and_then(|d| d.offset(&ds.doc));
     let doc = s.doc_mut()?;
     let ids = roots_now;
     let mut out = Vec::new();
     for i in ids.iter().copied() {
         let n = doc.get(i)?;
-        let parent = n.parent.ok_or_else(|| bad("edit.duplicate", "pages are duplicated with page.duplicate"))?;
+        let set = crate::components::variant_set(doc, i);
+        let parent = match set {
+            Some(set) => doc.get(set)?.parent.ok_or_else(|| bad("edit.duplicate", "component set has no parent"))?,
+            None => n.parent.ok_or_else(|| bad("edit.duplicate", "pages are duplicated with page.duplicate"))?,
+        };
         let top_frame = doc.node(parent).is_some_and(Node::is_page) && n.kind.is_frame_like();
-        let idx = doc.index_in_parent(i).map(|x| x + 1);
+        let idx = doc.index_in_parent(set.unwrap_or(i)).map(|x| x + 1);
         let w = n.width;
-        let nid = crate::components::copy_in_file(doc, i, parent, idx)?;
+        let nid = if set.is_some() {
+            let transform = doc.world_transform(parent).inverse() * doc.world_transform(i);
+            let instance = crate::components::create_instance_at(doc, i, parent, 0.0, 0.0, idx)?;
+            doc.get_mut(instance)?.transform = transform;
+            instance
+        } else {
+            crate::components::copy_in_file(doc, i, parent, idx)?
+        };
         let (dx, dy) = match (num(p, "dx"), num(p, "dy")) {
             (Some(dx), dy) => (dx, dy.unwrap_or(0.0)),
             (None, Some(dy)) => (0.0, dy),

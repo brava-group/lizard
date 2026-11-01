@@ -461,7 +461,7 @@ fn fit_set(doc: &mut Document, set: NodeId) {
     }
 }
 
-fn add_variant(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn add_variant(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.addVariant";
     let t = targets(s, p).first().copied().ok_or_else(|| bad(cmd, "select a component set or component"))?;
     let doc = s.doc_mut()?;

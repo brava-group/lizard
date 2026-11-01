@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::Session;
 use crate::cmd::component::{can_add_variant, can_combine_variants};
 use crate::components::tests::{ex, healthy, idv, kids, node};
+use crate::params::id_of;
 use lizard_doc::*;
 
 /// A main component named `name` at `x`, made from a 120×40 frame with a "Bg" rectangle.
@@ -165,6 +166,52 @@ fn add_variant_on_a_lone_component_makes_it_a_set_in_one_step() {
 
     s.undo().unwrap();
     assert_eq!(*s.doc().unwrap(), before, "undo puts the lone component back");
+}
+
+#[test]
+fn duplicate_of_a_lone_component_adds_a_variant_in_one_undo_step() {
+    let mut s = Session::new();
+    let main = component(&mut s, "Button", 250.0);
+    let before = s.doc().unwrap().clone();
+    let steps = undo_len(&s);
+
+    let copy = id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [main]}))["ids"][0]).unwrap();
+    let set = node(&s, main).parent.unwrap();
+    assert!(matches!(node(&s, set).kind, NodeKind::ComponentSet { .. }));
+    assert_eq!(kids(&s, set), vec![main, copy]);
+    assert!(matches!(node(&s, copy).kind, NodeKind::Component { .. }));
+    assert_eq!(node(&s, main).name, "Property 1=Default");
+    assert_eq!(node(&s, copy).name, "Property 1=Variant2");
+    assert_eq!(s.selection(), vec![copy]);
+    assert_eq!(undo_len(&s), steps + 1);
+    healthy(&s);
+
+    s.undo().unwrap();
+    assert_eq!(*s.doc().unwrap(), before);
+}
+
+#[test]
+fn duplicate_of_a_variant_creates_an_instance_of_that_variant_outside_the_set() {
+    let mut s = Session::new();
+    let main = component(&mut s, "Button", 250.0);
+    let second = idv(&ex(&mut s, "component.addVariant", json!({"id": main})));
+    let set = node(&s, main).parent.unwrap();
+    let parent = node(&s, set).parent;
+    let steps = undo_len(&s);
+
+    let copy = id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [second]}))["ids"][0]).unwrap();
+    assert_eq!(kids(&s, set), vec![main, second], "duplicating a variant does not add a main component");
+    assert_eq!(node(&s, copy).parent, parent);
+    assert_eq!(node(&s, copy).name, "Button");
+    assert!(matches!(node(&s, copy).kind, NodeKind::Instance { component, .. } if component == second));
+    assert_eq!(s.selection(), vec![copy]);
+    assert_eq!(undo_len(&s), steps + 1);
+    healthy(&s);
+
+    s.undo().unwrap();
+    assert!(!s.doc().unwrap().contains(copy));
+    assert_eq!(kids(&s, set), vec![main, second]);
+    healthy(&s);
 }
 
 #[test]
