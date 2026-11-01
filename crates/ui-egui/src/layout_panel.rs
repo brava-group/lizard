@@ -503,10 +503,10 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     let t = Tokens::get(ui.ctx());
     let grid_mode = l.mode == LayoutMode::Grid;
     block(ui, 64.0, 0.0, |ui| {
-        // Split the width left by the two 8 pt gaps and the 24 pt settings button
-        // equally between the alignment matrix and the gap input.
-        let column_width = (ui.available_width() - 40.0).max(0.0) / 2.0;
-        let (grid, _) = ui.allocate_exact_size(vec2(column_width, 64.0), Sense::hover());
+        // The gap field has a compact fixed width; the alignment matrix fills the rest.
+        let gap_width = 72.0_f32.min((ui.available_width() - 40.0).max(0.0));
+        let grid_width = (ui.available_width() - gap_width - 40.0).max(0.0);
+        let (grid, _) = ui.allocate_exact_size(vec2(grid_width, 64.0), Sense::hover());
         ui.painter().rect_filled(grid, CornerRadius::same(5), t.field);
         let horizontal = l.mode != LayoutMode::Vertical;
         let cur_main = match l.main_align {
@@ -554,7 +554,7 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                 }
             }
         }
-        ui.allocate_ui_with_layout(vec2(column_width, 64.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.allocate_ui_with_layout(vec2(gap_width, 64.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             if grid_mode {
                 // Grid: gap between columns and between rows.
                 let e = crate::variable_ui::number_field(
@@ -566,7 +566,7 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                     Lead::LayoutIcon(LayoutIcon::GapVertical, tr("Column gap")),
                     Some(l.gap),
                     "",
-                    column_width,
+                    gap_width,
                 );
                 app.field(ids, "columnGap", e, |v| json!(v.max(0.0)));
                 ui.add_space(8.0);
@@ -579,14 +579,14 @@ fn alignment(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
                     Lead::LayoutIcon(LayoutIcon::GapVertical, tr("Row gap")),
                     Some(l.cross_gap),
                     "",
-                    column_width,
+                    gap_width,
                 );
                 app.field(ids, "rowGap", e, |v| json!(v.max(0.0)));
                 return;
             }
             let auto = l.main_align.is_auto_gap();
             let (shown, lead) = ((!auto).then_some(l.gap), Lead::LayoutIcon(LayoutIcon::GapVertical, tr("Gap between items")));
-            let e = crate::variable_ui::number_field_or(app, ui, ids, "gap", Id::new("al_gap"), shown, column_width, tr("Auto"), lead, "");
+            let e = crate::variable_ui::number_field_or(app, ui, ids, "gap", Id::new("al_gap"), shown, gap_width, tr("Auto"), lead, "");
             app.field(ids, "gap", e, |v| json!(v));
         });
         let (settings_slot, _) = ui.allocate_exact_size(vec2(24.0, 64.0), Sense::hover());
