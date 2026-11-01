@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use egui::{Align2, Context, CornerRadius, RichText, Sense, Stroke, vec2};
+use egui::{Align, Align2, Color32, Context, CornerRadius, Id, Layout, Rect, RichText, Sense, Stroke, UiBuilder, pos2, vec2};
 use lizard_color::ColorProfile;
 use lizard_doc::{ExportFormat, ExportSetting, ExportSize, NodeId};
 use lizard_engine::cmd::file::{export_jobs, exportable_layers};
@@ -13,6 +13,7 @@ use crate::LizardApp;
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
+use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth};
 use crate::theme::{Tokens, regular, semibold};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -71,6 +72,30 @@ pub enum AboutTab {
     About,
     Contributors,
     Models,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SettingsSection {
+    #[default]
+    General,
+    Agents,
+    Appearance,
+    Language,
+    Sharing,
+}
+
+impl SettingsSection {
+    const ALL: [Self; 5] = [Self::General, Self::Agents, Self::Appearance, Self::Language, Self::Sharing];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::General => tr_noop("General"),
+            Self::Agents => tr_noop("Agents"),
+            Self::Appearance => tr_noop("Appearance"),
+            Self::Language => tr_noop("Language"),
+            Self::Sharing => tr_noop("Sharing"),
+        }
+    }
 }
 
 /// Values collected by a menu or Actions command before dispatching it to the engine.
@@ -194,123 +219,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         }
     }
     if app.ui.preferences {
-        let mut open = true;
-        window(tr("Preferences"), ctx).open(&mut open).show(ctx, |ui| {
-            ui.set_width(360.0);
-            let prefs = app.session.prefs.clone();
-            let mut toggles = vec![];
-            for (label, val, cmd) in [
-                (tr("Keep tool selected after use"), prefs.keep_tool, "pref.keepTool"),
-                (tr("Highlight layers on hover"), prefs.highlight_on_hover, "pref.highlightHover"),
-                (tr("Rename duplicated layers"), prefs.rename_duplicates, "pref.renameDuplicates"),
-                (tr("Show dimensions on objects"), prefs.show_dimensions, "pref.showDimensions"),
-                (tr("Use number keys for opacity"), prefs.number_keys_opacity, "pref.numberKeysOpacity"),
-                (tr("Reduce motion"), prefs.reduce_motion, "pref.reduceMotion"),
-            ] {
-                if crate::widgets::checkbox(ui, val, label) {
-                    toggles.push(cmd);
-                }
-            }
-            if app.services.reduce_motion() {
-                crate::widgets::label(ui, tr("Your system asks for reduced motion: animations stay off."), t.text_secondary);
-            }
-            // The browser has no files to save to.
-            if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.auto_save, tr("Save files automatically")) {
-                toggles.push("pref.autoSave");
-            }
-            if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.start_on_home, tr("Start on the Home screen")) {
-                toggles.push("pref.startOnHome");
-            }
-            for c in toggles {
-                app.run(c, json!({}));
-            }
-            // Where the app registers itself as the opener of invite links (Windows).
-            if let Some(on) = app.session.invite_links_on() {
-                if crate::widgets::checkbox(ui, on, tr("Open invite links in Lizard")) {
-                    app.run("collab.registerLinks", json!({"on": !on}));
-                }
-                crate::widgets::label(ui, tr("lizard:// links from a browser, chat or email open this app and join the session."), t.text_secondary);
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Your name in comments"));
-                if let Some(name) = crate::widgets::text_field(ui, egui::Id::new("pref_user_name"), &prefs.user_name, 160.0, tr("You")) {
-                    app.run("pref.userName", json!({"name": name}));
-                }
-            });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Server for online sharing"));
-                // Where Share ▸ Online keeps files and join codes are asked; no key here
-                // (preferences are saved as text).
-                let name = tr("Server for online sharing");
-                if let Some(url) = crate::widgets::text_field_named(ui, egui::Id::new("pref_publish_server"), &prefs.publish_server, 220.0, name) {
-                    app.run("pref.publishServer", json!({"url": url}));
-                }
-                let usual = prefs.publish_server == lizard_engine::live::DEFAULT_SERVER;
-                if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Clear saved server")).clicked() {
-                    app.run("pref.publishServer", json!({}));
-                }
-            });
-            if prefs.publish_server.is_empty() {
-                crate::widgets::label(ui, tr("Online sharing is off: files are shared on the local network only."), t.text_secondary);
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Nudge amount"));
-                let mut small = prefs.nudge_small;
-                let mut big = prefs.nudge_big;
-                let a = ui.add(egui::DragValue::new(&mut small).range(0.1..=100.0));
-                let b = ui.add(egui::DragValue::new(&mut big).range(1.0..=1000.0));
-                if a.changed() || b.changed() {
-                    app.run("pref.nudge", json!({"small": small, "big": big}));
-                }
-            });
-            ui.add_space(8.0);
-            interface_size(app, ui, prefs.ui_scale);
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Theme"));
-                for (l, c) in [(tr_noop("Light"), "view.themeLight"), (tr_noop("Dark"), "view.themeDark"), (tr_noop("System"), "view.themeSystem")] {
-                    if ui.selectable_label(app.session.prefs.theme.eq_ignore_ascii_case(l), tr(l)).clicked() {
-                        app.run(c, json!({}));
-                    }
-                }
-            });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Language"));
-                // Each language by its own name; System follows the OS (the browser on the web).
-                let langs = || {
-                    [("system", tr("System"))]
-                        .into_iter()
-                        .chain(i18n::languages().iter().filter(|l| crate::cjk::can_show(l.code)).map(|l| (l.code, l.name)))
-                };
-                let on = |code: &str| app.session.prefs.language.eq_ignore_ascii_case(code);
-                let selected = langs().find(|(code, _)| on(code)).map_or(tr("System"), |(_, name)| name);
-                let resp = crate::primitives::Select::trigger(ui, selected, 220.0, None);
-                let mut pick = None;
-                crate::right::menu_popup(&resp).show(|ui| {
-                    for (code, name) in langs() {
-                        if crate::right::menu_check(ui, on(code), name, "") {
-                            pick = Some(code);
-                            ui.close();
-                        }
-                    }
-                });
-                if let Some(code) = pick {
-                    app.run("pref.language", json!({"language": code}));
-                    ui.ctx().request_repaint();
-                }
-            });
-            if let Some(lang) = i18n::current().filter(|l| l.draft) {
-                let note = trf("{language}: draft translation, waiting for a native speaker's review.", &[("language", &lang.name)]);
-                crate::widgets::label(ui, &note, t.text_secondary);
-            }
-        });
-        if !open {
-            app.ui.preferences = false;
-        }
+        settings_modal(app, ctx, &t);
     }
     crate::shortcuts_panel::show(app, ctx);
     if let Some((mut find, mut replace)) = app.ui.find.clone() {
@@ -467,6 +376,246 @@ pub(crate) fn batch_rename_params(b: &BatchRenameUi) -> serde_json::Value {
         p["replace"] = json!(b.to);
     }
     p
+}
+
+fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
+    let screen = ctx.content_rect();
+    let width = (screen.width() - 32.0).min(820.0).max(320.0);
+    let height = (screen.height() - 32.0).min(560.0).max(320.0);
+    let sidebar_width = if width < 600.0 { 150.0 } else { 188.0 };
+    let id = Id::new("settings_modal");
+    let section_id = id.with("section");
+    let mut section = ctx.data(|data| data.get_temp::<SettingsSection>(section_id)).unwrap_or_default();
+    let mut close = false;
+
+    let response = egui::Modal::new(id)
+        .area(egui::Modal::default_area(id).constrain_to(screen))
+        .backdrop_color(Color32::from_black_alpha(if t.dark { 120 } else { 75 }))
+        .frame(egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).corner_radius(CornerRadius::same(14)).shadow(egui::Shadow {
+            offset: [0, 12],
+            blur: 24,
+            spread: 0,
+            color: t.shadow,
+        }))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let (header, _) = ui.allocate_exact_size(vec2(width, 56.0), Sense::hover());
+            ui.painter().text(pos2(header.left() + 20.0, header.center().y), Align2::LEFT_CENTER, tr("Settings"), semibold(18.0), t.text);
+            let close_rect = Rect::from_center_size(pos2(header.right() - 28.0, header.center().y), vec2(32.0, 32.0));
+            if Button::icon(Icon::Close, tr("Close")).show_at(ui, id.with("close"), close_rect).clicked() {
+                close = true;
+            }
+            ui.painter().line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
+
+            let (body, _) = ui.allocate_exact_size(vec2(width, height - 56.0), Sense::hover());
+            let sidebar = Rect::from_min_max(body.min, pos2(body.left() + sidebar_width, body.bottom()));
+            ui.painter().rect_filled(sidebar, CornerRadius { nw: 0, ne: 0, sw: 13, se: 0 }, t.field);
+            ui.painter().line_segment([sidebar.right_top(), sidebar.right_bottom()], Stroke::new(1.0, t.border));
+            let nav_rect = sidebar.shrink2(vec2(12.0, 14.0));
+            ui.scope_builder(UiBuilder::new().max_rect(nav_rect).layout(Layout::top_down(Align::Min)), |ui| {
+                ui.set_width(nav_rect.width());
+                ui.spacing_mut().item_spacing.y = 4.0;
+                for choice in SettingsSection::ALL {
+                    if Button::new(tr(choice.label()))
+                        .variant(ButtonVariant::Ghost)
+                        .behavior(ButtonBehavior::Toggle { selected: section == choice })
+                        .align(ButtonAlign::Start)
+                        .size(ButtonSize::Large)
+                        .width(ControlWidth::Fill)
+                        .show(ui)
+                        .clicked()
+                    {
+                        section = choice;
+                    }
+                }
+            });
+
+            let content_rect = Rect::from_min_max(pos2(sidebar.right() + 24.0, body.top() + 22.0), pos2(body.right() - 24.0, body.bottom() - 18.0));
+            ui.scope_builder(UiBuilder::new().max_rect(content_rect).layout(Layout::top_down(Align::Min)), |ui| {
+                ui.set_width(content_rect.width());
+                egui::ScrollArea::vertical().id_salt("settings_content").auto_shrink([false, false]).max_height(content_rect.height()).show(
+                    ui,
+                    |ui| {
+                        ui.set_width(content_rect.width() - 12.0);
+                        ui.label(RichText::new(tr(section.label())).font(semibold(18.0)));
+                        ui.add_space(16.0);
+                        match section {
+                            SettingsSection::General => settings_general(app, ui, t),
+                            SettingsSection::Agents => settings_agents(app, ui, t),
+                            SettingsSection::Appearance => settings_appearance(app, ui),
+                            SettingsSection::Language => settings_language(app, ui, t),
+                            SettingsSection::Sharing => settings_sharing(app, ui, t),
+                        }
+                    },
+                );
+            });
+        });
+    ctx.data_mut(|data| data.insert_temp(section_id, section));
+    if close || response.should_close() {
+        app.ui.preferences = false;
+    }
+}
+
+fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
+    let prefs = app.session.prefs.clone();
+    let mut toggles = vec![];
+    for (label, val, cmd) in [
+        (tr("Keep tool selected after use"), prefs.keep_tool, "pref.keepTool"),
+        (tr("Highlight layers on hover"), prefs.highlight_on_hover, "pref.highlightHover"),
+        (tr("Rename duplicated layers"), prefs.rename_duplicates, "pref.renameDuplicates"),
+        (tr("Show dimensions on objects"), prefs.show_dimensions, "pref.showDimensions"),
+        (tr("Use number keys for opacity"), prefs.number_keys_opacity, "pref.numberKeysOpacity"),
+        (tr("Reduce motion"), prefs.reduce_motion, "pref.reduceMotion"),
+    ] {
+        if crate::widgets::checkbox(ui, val, label) {
+            toggles.push(cmd);
+        }
+    }
+    if app.services.reduce_motion() {
+        crate::widgets::label(ui, tr("Your system asks for reduced motion: animations stay off."), t.text_secondary);
+    }
+    if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.auto_save, tr("Save files automatically")) {
+        toggles.push("pref.autoSave");
+    }
+    if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.start_on_home, tr("Start on the Home screen")) {
+        toggles.push("pref.startOnHome");
+    }
+    for cmd in toggles {
+        app.run(cmd, json!({}));
+    }
+    ui.add_space(18.0);
+    ui.label(RichText::new(tr("Nudge amount")).font(semibold(12.0)));
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let mut small = prefs.nudge_small;
+        let mut big = prefs.nudge_big;
+        ui.label(tr("Small"));
+        let a = ui.add(egui::DragValue::new(&mut small).range(0.1..=100.0));
+        ui.add_space(20.0);
+        ui.label(tr("Large"));
+        let b = ui.add(egui::DragValue::new(&mut big).range(1.0..=1000.0));
+        if a.changed() || b.changed() {
+            app.run("pref.nudge", json!({"small": small, "big": big}));
+        }
+    });
+}
+
+fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
+    crate::widgets::label(ui, tr("Choose the agent used in the chat panel."), t.text_secondary);
+    ui.add_space(16.0);
+    for kind in [
+        crate::agent_panel::AgentKind::Codex,
+        crate::agent_panel::AgentKind::Claude,
+        crate::agent_panel::AgentKind::Gemini,
+        crate::agent_panel::AgentKind::Kimi,
+    ] {
+        if Button::new(kind.label())
+            .variant(ButtonVariant::Ghost)
+            .behavior(ButtonBehavior::Toggle { selected: app.ui.agent.agent == kind })
+            .align(ButtonAlign::Start)
+            .size(ButtonSize::Large)
+            .width(ControlWidth::Fill)
+            .show(ui)
+            .clicked()
+        {
+            crate::agent_panel::select_agent(app, kind);
+        }
+        ui.add_space(4.0);
+    }
+    ui.add_space(16.0);
+    if Button::new(tr("Open agent panel")).variant(ButtonVariant::Secondary).show(ui).clicked() {
+        app.ui.left_tab = crate::LeftTab::Agent;
+        app.ui.left_collapsed = false;
+        app.ui.preferences = false;
+    }
+}
+
+fn settings_appearance(app: &mut LizardApp, ui: &mut egui::Ui) {
+    let prefs = app.session.prefs.clone();
+    ui.label(RichText::new(tr("Theme")).font(semibold(12.0)));
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        for (label, value, cmd) in [
+            (tr_noop("Light"), "light", "view.themeLight"),
+            (tr_noop("Dark"), "dark", "view.themeDark"),
+            (tr_noop("System"), "system", "view.themeSystem"),
+        ] {
+            if Button::new(tr(label))
+                .variant(ButtonVariant::Ghost)
+                .behavior(ButtonBehavior::Toggle { selected: prefs.theme.eq_ignore_ascii_case(value) })
+                .show(ui)
+                .clicked()
+            {
+                app.run(cmd, json!({}));
+            }
+            ui.add_space(8.0);
+        }
+    });
+    ui.add_space(20.0);
+    interface_size(app, ui, prefs.ui_scale);
+}
+
+fn settings_language(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
+    crate::widgets::label(ui, tr("Choose the language used throughout Lizard."), t.text_secondary);
+    ui.add_space(12.0);
+    let langs =
+        || [("system", tr("System"))].into_iter().chain(i18n::languages().iter().filter(|l| crate::cjk::can_show(l.code)).map(|l| (l.code, l.name)));
+    let on = |code: &str| app.session.prefs.language.eq_ignore_ascii_case(code);
+    let selected = langs().find(|(code, _)| on(code)).map_or(tr("System"), |(_, name)| name);
+    let resp = crate::primitives::Select::trigger(ui, selected, ui.available_width().min(280.0), None);
+    let mut pick = None;
+    crate::right::menu_popup(&resp).show(|ui| {
+        for (code, name) in langs() {
+            if crate::right::menu_check(ui, on(code), name, "") {
+                pick = Some(code);
+                ui.close();
+            }
+        }
+    });
+    if let Some(code) = pick {
+        app.run("pref.language", json!({"language": code}));
+        ui.ctx().request_repaint();
+    }
+    if let Some(lang) = i18n::current().filter(|l| l.draft) {
+        ui.add_space(12.0);
+        let note = trf("{language}: draft translation, waiting for a native speaker's review.", &[("language", &lang.name)]);
+        crate::widgets::label(ui, &note, t.text_secondary);
+    }
+}
+
+fn settings_sharing(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
+    let prefs = app.session.prefs.clone();
+    if let Some(on) = app.session.invite_links_on() {
+        if crate::widgets::checkbox(ui, on, tr("Open invite links in Lizard")) {
+            app.run("collab.registerLinks", json!({"on": !on}));
+        }
+        crate::widgets::label(ui, tr("lizard:// links from a browser, chat or email open this app and join the session."), t.text_secondary);
+        ui.add_space(18.0);
+    }
+    ui.label(RichText::new(tr("Your name in comments")).font(semibold(12.0)));
+    ui.add_space(8.0);
+    if let Some(name) = crate::widgets::text_field(ui, Id::new("pref_user_name"), &prefs.user_name, ui.available_width().min(320.0), tr("You")) {
+        app.run("pref.userName", json!({"name": name}));
+    }
+    ui.add_space(20.0);
+    let name = tr("Server for online sharing");
+    ui.label(RichText::new(name).font(semibold(12.0)));
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if let Some(url) =
+            crate::widgets::text_field_named(ui, Id::new("pref_publish_server"), &prefs.publish_server, ui.available_width().min(320.0), name)
+        {
+            app.run("pref.publishServer", json!({"url": url}));
+        }
+        let usual = prefs.publish_server == lizard_engine::live::DEFAULT_SERVER;
+        if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Clear saved server")).clicked() {
+            app.run("pref.publishServer", json!({}));
+        }
+    });
+    if prefs.publish_server.is_empty() {
+        ui.add_space(8.0);
+        crate::widgets::label(ui, tr("Online sharing is off: files are shared on the local network only."), t.text_secondary);
+    }
 }
 
 /// Preferences ▸ Interface size: a size relative to the system's display scale (100 % is the

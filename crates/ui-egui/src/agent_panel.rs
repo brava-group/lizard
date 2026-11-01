@@ -936,6 +936,19 @@ fn reset_chat(app: &mut LizardApp) {
     app.ui.agent.new_chat();
 }
 
+pub(crate) fn select_agent(app: &mut LizardApp, kind: AgentKind) {
+    if app.ui.agent.agent == kind {
+        return;
+    }
+    reset_chat(app);
+    app.ui.agent.agent = kind;
+    app.ui.agent.connection = None;
+    app.ui.agent.model = None;
+    app.ui.agent.models.clear();
+    app.ui.agent.models_requested = None;
+    app.ui.agent.models_loading_until = None;
+}
+
 fn hit(ui: &mut Ui, id: &'static str, rect: Rect, tip: &'static str) -> egui::Response {
     let response = ui.interact(rect, ui.id().with(id), Sense::click()).on_hover_text(tip);
     a11y::button(&response, tip);
@@ -1759,13 +1772,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         Menu::separator(ui, None);
         for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi] {
             if MenuItem::new(kind.label()).checked(app.ui.agent.agent == kind).show(ui).clicked() {
-                reset_chat(app);
-                app.ui.agent.agent = kind;
-                app.ui.agent.connection = None;
-                app.ui.agent.model = None;
-                app.ui.agent.models.clear();
-                app.ui.agent.models_requested = None;
-                app.ui.agent.models_loading_until = None;
+                select_agent(app, kind);
                 ui.close();
             }
         }
