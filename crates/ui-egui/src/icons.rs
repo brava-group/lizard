@@ -661,6 +661,11 @@ pub fn paint_toolbar(painter: &Painter, rect: Rect, index: usize, color: Color32
     ui3::paint_toolbar(painter, rect, index, color);
 }
 
+/// Paint the owner's home icon in the document tab strip.
+pub fn paint_home_tab(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_home_tab(painter, rect, color);
+}
+
 /// Paint the document tab's original 19 × 19 vector artwork.
 pub fn paint_tab_document(painter: &Painter, rect: Rect, color: Color32) {
     ui3::paint_tab_document(painter, rect, color);

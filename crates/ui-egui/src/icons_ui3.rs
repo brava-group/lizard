@@ -16,6 +16,8 @@ mod mapping;
 const VECTORS: &str = include_str!("../assets/ui3-vectors.json");
 const PANEL_REFERENCE: &str = include_str!("../assets/panel-reference-icons.json");
 const TAB_DOCUMENT_SVG: &str = include_str!("../assets/tab-document.svg");
+// Home icon supplied by the owner for the desktop tab strip.
+const HOME_TAB_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M9 21H7C4.79086 21 3 19.2091 3 17V10.7076C3 9.30887 3.73061 8.01175 4.92679 7.28679L9.92679 4.25649C11.2011 3.48421 12.7989 3.48421 14.0732 4.25649L19.0732 7.28679C20.2694 8.01175 21 9.30887 21 10.7076V17C21 19.2091 19.2091 21 17 21H15M9 21V17C9 15.3431 10.3431 14 12 14C13.6569 14 15 15.3431 15 17V21M9 21H15" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>"##;
 const CHEVRON_SVG: &str = include_str!("../assets/chevron.svg");
 const TYPOGRAPHY_SVGS: [&str; 9] = [
     include_str!("../assets/typ-line-height.svg"),
@@ -578,6 +580,13 @@ pub(super) fn paint(painter: &Painter, rect: Rect, icon: super::Icon, color: Col
 
 pub(super) fn paint_compact_chevron(painter: &Painter, rect: Rect, color: Color32) {
     paint_chevron(painter, rect.center(), rect.width().min(rect.height()) * 0.78, ChevronDirection::Down, color);
+}
+
+pub(super) fn paint_home_tab(painter: &Painter, rect: Rect, color: Color32) {
+    static GEOMETRY: OnceLock<Option<Geometry>> = OnceLock::new();
+    if let Some(geometry) = GEOMETRY.get_or_init(|| build(HOME_TAB_SVG, true)) {
+        paint_geometry_optical(painter, rect, geometry, color, [24.0, 24.0]);
+    }
 }
 
 pub(super) fn paint_tab_document(painter: &Painter, rect: Rect, color: Color32) {

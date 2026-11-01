@@ -107,23 +107,27 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
         let buttons_w = if app.ui.title_bar == TitleBar::Custom { window_buttons(app, ui, rect) } else { 0.0 };
         let mut x = rect.min.x + if app.ui.title_bar == TitleBar::Inset { 76.0 } else { 8.0 };
         // Home.
-        let hr = Rect::from_min_size(pos2(x, rect.min.y), vec2(44.0, HEIGHT));
-        let hresp = ui.interact(hr, ui.id().with("home"), Sense::click()).tip(tr("Home"));
+        let home_label = tr("Home");
+        let home_text = ui.painter().layout_no_wrap(home_label.to_owned(), regular(12.0), t.text);
+        let home_width = (home_text.size().x + 48.0).max(80.0);
+        let hr = Rect::from_min_size(pos2(x, rect.min.y), vec2(home_width, HEIGHT));
+        let hresp = ui.interact(hr, ui.id().with("home"), Sense::click()).tip(home_label);
         let home_active = (app.ui.home || !app.has_files()) && app.ui.present.is_none();
-        crate::a11y::tab(&hresp, tr("Home"), home_active);
+        crate::a11y::tab(&hresp, home_label, home_active);
         if home_active {
             ui.painter().rect_filled(hr.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.tab_active);
         } else if hresp.hovered() {
             ui.painter().rect_filled(hr.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
         }
-        icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(16.0, 16.0)), Icon::Home, t.icon);
+        icons::paint_home_tab(ui.painter(), Rect::from_center_size(pos2(hr.min.x + 18.0, hr.center().y), vec2(16.0, 16.0)), t.icon);
+        ui.painter().galley(pos2(hr.min.x + 34.0, hr.center().y - home_text.size().y * 0.5), home_text, t.text);
         if hresp.clicked() {
             if let Some(p) = app.ui.present.take() {
                 app.ui.paused_present = Some(p);
             }
             app.ui.home = true;
         }
-        x += 44.0;
+        x += home_width;
         let document_tabs: Vec<usize> = app.session.docs.iter().enumerate().filter_map(|(i, d)| app.shows(d.uid).then_some(i)).collect();
         let now = ui.input(|input| input.time);
         let motion_id = ui.id().with("tab_motion");
