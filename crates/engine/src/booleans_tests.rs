@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::Session;
 use crate::booleans::{distinct_op, operand_op, outlined_operands, shown_op};
 use crate::params::id_of;
-use crate::tools::{PointerEvent, PointerKind};
+use crate::tools::{PointerEvent, PointerKind, selection_box, selection_frame};
 use lizard_doc::{BoolOp, NodeId, NodeKind};
 use lizard_geom::Shape;
 
@@ -41,6 +41,34 @@ fn subtract(s: &mut Session) -> (NodeId, NodeId, NodeId) {
     ds.view.snap_objects = false;
     ds.view.snap_pixel = false;
     (g, a, b)
+}
+
+#[test]
+fn subtract_selection_box_follows_the_base_operand() {
+    let mut s = Session::new();
+    let bottom = id_of(&ex(&mut s, "shape.rectangle", json!({"x": 0, "y": 37, "width": 100, "height": 100}))["id"]).unwrap();
+    let upper = id_of(&ex(&mut s, "shape.rectangle", json!({"x": 42, "y": 0, "width": 100, "height": 100}))["id"]).unwrap();
+    let group = id_of(&ex(&mut s, "bool.subtract", json!({"ids": [bottom, upper]}))["id"]).unwrap();
+    let doc = s.doc().unwrap();
+    let (frame, w, h) = selection_frame(doc, &[group]).unwrap();
+    assert_eq!((frame * lizard_geom::Point::ZERO, w, h), (lizard_geom::Point::new(0.0, 37.0), 100.0, 100.0));
+    let corners = selection_box(doc, &[group]).unwrap();
+    assert_eq!(corners[2], lizard_geom::Point::new(100.0, 137.0));
+    assert_eq!(doc.world_bounds(group).unwrap().width(), 142.0, "the stored group box still includes its operands");
+
+    ex(&mut s, "select.set", json!({"ids": [group]}));
+    let ds = s.ds_mut().unwrap();
+    ds.view.snap_objects = false;
+    ds.view.snap_pixel = false;
+    s.pointer(&ev(PointerKind::Down, 100.0, 137.0, false)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 120.0, 157.0, false)).unwrap();
+    s.pointer(&ev(PointerKind::Up, 120.0, 157.0, false)).unwrap();
+    let doc = s.doc().unwrap();
+    let base = doc.world_bounds(bottom).unwrap();
+    assert!((base.x0).abs() < 0.01 && (base.y0 - 37.0).abs() < 0.01, "resize keeps the visible base anchored: {base:?}");
+    assert!((base.width() - 120.0).abs() < 0.01 && (base.height() - 120.0).abs() < 0.01, "resize follows the visible box: {base:?}");
+    let (_, w, h) = selection_frame(doc, &[group]).unwrap();
+    assert!((w - 120.0).abs() < 0.01 && (h - 120.0).abs() < 0.01);
 }
 
 #[test]

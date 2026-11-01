@@ -8,7 +8,7 @@ use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, Stro
 use lizard_color::{BlendMode, PaintKind};
 use lizard_doc::{Document, NodeId, NodeKind};
 use lizard_engine::Preedit;
-use lizard_engine::tools::{PointerEvent, PointerKind, ToolId, selection_box, selection_frame};
+use lizard_engine::tools::{PointerEvent, PointerKind, ToolId, selection_bounds, selection_box, selection_frame};
 use lizard_geom::Point;
 use serde_json::json;
 
@@ -2952,7 +2952,7 @@ fn rulers(app: &LizardApp, painter: &egui::Painter, t: &Tokens, doc: &Document, 
     let major_step = ruler_major_step(zoom);
     let minor_step = major_step / 5.0;
     let p0 = app.to_page(r.min);
-    let selected = doc.bounds_of(sel).map(|b| ((b.x0, b.y0), (b.x1, b.y1), app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1)));
+    let selected = selection_bounds(doc, sel).map(|b| ((b.x0, b.y0), (b.x1, b.y1), app.to_screen(b.x0, b.y0), app.to_screen(b.x1, b.y1)));
     let selection_color = accent(painter);
     let selected_label_color = selection_color.gamma_multiply(0.9);
     let number_color = t.text_secondary.gamma_multiply(0.82);

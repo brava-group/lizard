@@ -603,6 +603,25 @@ pub fn selection_box(doc: &Document, sel: &[NodeId]) -> Option<[Point; 4]> {
     Some([f * Point::ZERO, f * Point::new(w, 0.0), f * Point::new(w, h), f * Point::new(0.0, h)])
 }
 
+/// Page-aligned bounds of the box shown to the user, including rotated selections.
+pub fn selection_bounds(doc: &Document, sel: &[NodeId]) -> Option<Rect> {
+    let corners = selection_box(doc, sel)?;
+    Some(Rect::new(
+        corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+        corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+        corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+        corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+    ))
+}
+
+fn subtract_base<'a>(doc: &'a Document, id: NodeId) -> Option<&'a lizard_doc::Node> {
+    let node = doc.node(id)?;
+    if !matches!(node.kind, NodeKind::BooleanOp { op: BoolOp::Subtract }) {
+        return None;
+    }
+    node.children.iter().filter_map(|child| doc.node(*child)).find(|child| child.visible)
+}
+
 /// The selection's handle box: the page transform of its top-left corner (axes along the box) and
 /// its size. One layer: its own box; several sharing a rotation: a box turned with them;
 /// otherwise the page-aligned bounds.
@@ -610,17 +629,29 @@ pub fn selection_frame(doc: &Document, sel: &[NodeId]) -> Option<(Affine, f64, f
     let ids = roots(doc, sel);
     if let [id] = ids.as_slice() {
         let n = doc.node(*id)?;
+        if let Some(base) = subtract_base(doc, *id)
+            && base.width > 0.0
+            && base.height > 0.0
+        {
+            return Some((doc.world_transform(base.id), base.width, base.height));
+        }
         return Some((doc.world_transform(*id), n.width, n.height));
     }
     let Some(angle) = shared_rotation(doc, &ids) else {
-        let b = doc.bounds_of(&ids)?;
+        let b = ids
+            .iter()
+            .filter_map(|id| subtract_base(doc, *id).map(|base| doc.world_bounds(base.id)).unwrap_or_else(|| doc.world_bounds(*id)))
+            .reduce(|a, b| a.union(b))?;
         return Some((Affine::translate((b.x0, b.y0)), b.width(), b.height()));
     };
     let rot = Affine::rotate(angle);
     let inv = rot.inverse();
     let b = ids
         .iter()
-        .filter_map(|i| Some(lizard_geom::transform_rect_bbox(inv * doc.world_transform(*i), doc.node(*i)?.local_rect())))
+        .filter_map(|i| {
+            let id = subtract_base(doc, *i).map_or(*i, |base| base.id);
+            Some(lizard_geom::transform_rect_bbox(inv * doc.world_transform(id), doc.node(id)?.local_rect()))
+        })
         .reduce(|a, b| a.union(b))?;
     Some((rot * Affine::translate((b.x0, b.y0)), b.width(), b.height()))
 }
@@ -1606,6 +1637,22 @@ impl Session {
                 }
                 if flip_y {
                     t *= Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, nh]);
+                }
+                if let Some(base_id) = subtract_base(doc, *id).map(|base| base.id) {
+                    let old = doc.get(*id)?;
+                    let (kx, ky) = (nw / w0.max(1e-9), nh / h0.max(1e-9));
+                    let (new_w, new_h) = (old.width * kx, old.height * ky);
+                    crate::cmd::props::resize_node(doc, *id, new_w.max(0.01), new_h.max(0.01))?;
+                    let base_world = doc.world_transform(base_id);
+                    let mut target = frame * Affine::translate((nx0, ny0));
+                    if flip_x {
+                        target *= Affine::new([-1.0, 0.0, 0.0, 1.0, nw, 0.0]);
+                    }
+                    if flip_y {
+                        target *= Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, nh]);
+                    }
+                    doc.set_world_transform(*id, target * base_world.inverse() * doc.world_transform(*id))?;
+                    return Ok(());
                 }
                 doc.set_world_transform(*id, t)?;
                 if kept.is_empty() {

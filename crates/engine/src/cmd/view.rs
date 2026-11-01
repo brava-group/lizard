@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
 use crate::params::*;
-use crate::tools::ToolId;
+use crate::tools::{ToolId, selection_bounds};
 use crate::{EngineError, Result, Session, ViewState, bad, spec};
 
 fn view(s: &mut Session) -> Result<&mut ViewState> {
@@ -242,7 +242,7 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         spec!("view.zoomSelection", "Zoom to selection", "{}", false, |s, _| {
             let ds = s.ds_mut()?;
-            if let Some(b) = ds.doc.bounds_of(&ds.selection) {
+            if let Some(b) = selection_bounds(&ds.doc, &ds.selection) {
                 ds.view.fit_with_margins(b, ViewState::MAX_ZOOM, 80.0, 140.0);
             }
             Ok(json!({"zoom": ds.view.zoom}))
