@@ -374,7 +374,7 @@ fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     for i in &ids {
         let Some(n) = doc.node(*i) else { continue };
         if matches!(n.kind, NodeKind::Group) {
-            append_group_flatten_parts(doc, n, pw.inverse(), &mut net, 0);
+            append_group_flatten_parts(doc, n, pw.inverse(), &mut net, 0, None)?;
             continue;
         }
         // Keep open paths and unfilled loops, but bake rounded vector points into real curves.
@@ -549,43 +549,151 @@ fn retain_assigned_segments(part: &mut VectorNetwork) {
     }
 }
 
-fn append_group_flatten_parts(doc: &Document, group: &Node, parent_inverse: Affine, net: &mut VectorNetwork, depth: usize) {
+fn append_group_flatten_parts(
+    doc: &Document,
+    group: &Node,
+    parent_inverse: Affine,
+    net: &mut VectorNetwork,
+    depth: usize,
+    clip: Option<&BezPath>,
+) -> Result<()> {
     if depth > 64 {
-        return;
+        return Err(EngineError::Disabled("vector.flatten".into(), "group nesting is too deep".into()));
     }
-    for child_id in &group.children {
-        let Some(child) = doc.node(*child_id).filter(|child| child.visible) else { continue };
-        if matches!(child.kind, NodeKind::Group) {
-            append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1);
-            continue;
-        }
-        if child.kind.is_frame_like() && !child.children.is_empty() {
-            if child.fills.iter().any(|paint| paint.visible)
-                && let Some((path, _)) = lizard_render::node_outline(doc, child)
-            {
-                let mut frame = VectorNetwork::from_path(&path);
-                preserve_flatten_paints(&mut frame, &child.fills);
-                append_flatten_part(net, frame, parent_inverse * doc.world_transform(*child_id));
-            }
-            append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1);
-            continue;
-        }
-        let mut part = match &child.kind {
-            NodeKind::Vector { network } => flattened_painted_vector(network, &child.fills),
-            _ => {
-                let Some((path, rule)) = lizard_render::node_outline(doc, child) else { continue };
-                let mut part = VectorNetwork::from_path(&path);
-                if rule == lizard_render::FillRule::EvenOdd {
-                    for region in &mut part.regions {
-                        region.winding = WindingRule::EvenOdd;
-                    }
+    for run in doc.paint_runs(group) {
+        let Some(first) = group.children.get(run.start).and_then(|id| doc.node(*id)) else { continue };
+        if first.is_mask && first.visible {
+            let mask = flatten_mask_path(doc, first, first.mask_type, parent_inverse, depth + 1)?;
+            let mask = match clip {
+                Some(outer) => intersect_flatten_paths(outer, false, &mask, false)?,
+                None => mask,
+            };
+            for child_id in group.children.get(run.start + 1..run.end).unwrap_or(&[]) {
+                if let Some(child) = doc.node(*child_id).filter(|child| child.visible) {
+                    append_group_flatten_child(doc, child, parent_inverse, net, depth + 1, Some(&mask))?;
                 }
-                part
             }
-        };
-        preserve_flatten_paints(&mut part, &child.fills);
-        append_flatten_part(net, part, parent_inverse * doc.world_transform(*child_id));
+        } else if first.visible {
+            append_group_flatten_child(doc, first, parent_inverse, net, depth + 1, clip)?;
+        }
     }
+    Ok(())
+}
+
+fn append_group_flatten_child(
+    doc: &Document,
+    child: &Node,
+    parent_inverse: Affine,
+    net: &mut VectorNetwork,
+    depth: usize,
+    clip: Option<&BezPath>,
+) -> Result<()> {
+    if depth > 64 {
+        return Err(EngineError::Disabled("vector.flatten".into(), "group nesting is too deep".into()));
+    }
+    let child_id = child.id;
+    if matches!(child.kind, NodeKind::Group) {
+        return append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1, clip);
+    }
+    if child.kind.is_frame_like() && !child.children.is_empty() {
+        if child.fills.iter().any(|paint| paint.visible)
+            && let Some((path, _)) = lizard_render::node_outline(doc, child)
+        {
+            let mut frame = VectorNetwork::from_path(&path);
+            preserve_flatten_paints(&mut frame, &child.fills);
+            let transform = parent_inverse * doc.world_transform(child_id);
+            append_clipped_flatten_part(net, frame, transform, clip)?;
+        }
+        return append_group_flatten_parts(doc, child, parent_inverse, net, depth + 1, clip);
+    }
+    let mut part = match &child.kind {
+        NodeKind::Vector { network } => flattened_painted_vector(network, &child.fills),
+        _ => {
+            let Some((path, rule)) = lizard_render::node_outline(doc, child) else { return Ok(()) };
+            let mut part = VectorNetwork::from_path(&path);
+            if rule == lizard_render::FillRule::EvenOdd {
+                for region in &mut part.regions {
+                    region.winding = WindingRule::EvenOdd;
+                }
+            }
+            part
+        }
+    };
+    preserve_flatten_paints(&mut part, &child.fills);
+    append_clipped_flatten_part(net, part, parent_inverse * doc.world_transform(child_id), clip)
+}
+
+fn intersect_flatten_paths(a: &BezPath, a_even_odd: bool, b: &BezPath, b_even_odd: bool) -> Result<BezPath> {
+    let faces =
+        lizard_pathops::faces(&[(a.clone(), a_even_odd), (b.clone(), b_even_odd)]).map_err(|e| EngineError::Other(format!("flatten mask: {e}")))?;
+    let mut out = BezPath::new();
+    for face in faces.into_iter().filter(|face| face.cover.len() == 2) {
+        out.extend(face.path.elements().iter().copied());
+    }
+    Ok(out)
+}
+
+fn append_clipped_flatten_part(net: &mut VectorNetwork, part: VectorNetwork, transform: Affine, clip: Option<&BezPath>) -> Result<()> {
+    let Some(clip) = clip else {
+        append_flatten_part(net, part, transform);
+        return Ok(());
+    };
+    for (index, region) in part.regions.iter().enumerate() {
+        let Some(mut path) = part.region_path(index) else { continue };
+        path.apply_affine(transform);
+        let clipped = intersect_flatten_paths(clip, false, &path, region.winding == WindingRule::EvenOdd)?;
+        if clipped.elements().is_empty() {
+            continue;
+        }
+        let mut face = VectorNetwork::from_path(&clipped);
+        for output in &mut face.regions {
+            output.winding = WindingRule::EvenOdd;
+            output.fills = region.fills.clone();
+        }
+        append_flatten_part(net, face, Affine::IDENTITY);
+    }
+    Ok(())
+}
+
+fn flatten_mask_path(doc: &Document, node: &Node, mask_type: MaskType, parent_inverse: Affine, depth: usize) -> Result<BezPath> {
+    if depth > 64 {
+        return Err(EngineError::Disabled("vector.flatten".into(), "mask nesting is too deep".into()));
+    }
+    if mask_type != MaskType::Vector && node.opacity < 1.0 {
+        return Err(EngineError::Disabled("vector.flatten".into(), "soft mask opacity cannot be preserved as a vector".into()));
+    }
+    let mut paths = Vec::new();
+    if !node.children.is_empty() {
+        for child in node.children.iter().filter_map(|id| doc.node(*id)).filter(|child| child.visible) {
+            paths.push(flatten_mask_path(doc, child, mask_type, parent_inverse, depth + 1)?);
+        }
+    } else {
+        if mask_type != MaskType::Vector {
+            let paints = if let NodeKind::Vector { network } = &node.kind {
+                network.regions.first().and_then(|region| region.fills.as_ref()).unwrap_or(&node.fills)
+            } else {
+                &node.fills
+            };
+            let supported = paints.len() == 1
+                && paints.first().is_some_and(|paint| {
+                    paint.visible
+                        && paint.opacity >= 1.0
+                        && matches!(&paint.kind, lizard_color::PaintKind::Solid { color }
+                            if color.a >= 1.0 && (mask_type != MaskType::Luminance || (color.r >= 1.0 && color.g >= 1.0 && color.b >= 1.0)))
+                });
+            if !supported {
+                return Err(EngineError::Disabled("vector.flatten".into(), "soft or non-white mask cannot be preserved as a vector".into()));
+            }
+        }
+        if let Some((mut path, rule)) = lizard_render::node_outline(doc, node) {
+            path.apply_affine(parent_inverse * doc.world_transform(node.id));
+            paths.push(
+                if rule == lizard_render::FillRule::EvenOdd { lizard_pathops::simplify_even_odd(&path) } else { lizard_pathops::simplify(&path) }
+                    .map_err(|e| EngineError::Other(format!("flatten mask: {e}")))?,
+            );
+        }
+    }
+    lizard_pathops::union_faces(paths.iter()).map_err(|e| EngineError::Other(format!("flatten mask: {e}")))
 }
 
 fn outline_stroke(s: &mut Session, p: &Value) -> Result<Value> {

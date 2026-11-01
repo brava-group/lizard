@@ -165,6 +165,35 @@ fn a_group_can_be_the_mask() {
 }
 
 #[test]
+fn flatten_mask_group_keeps_the_clipped_fill_and_holes() {
+    use lizard_color::{Color, Paint};
+    use lizard_doc::{NodeKind, WindingRule};
+
+    let mut s = Session::new();
+    let f = board(&mut s, 100.0, 100.0);
+    let a = rect(&mut s, 10.0, 10.0, 50.0, 50.0, "#FFFFFF", Some(f));
+    let b = rect(&mut s, 40.0, 40.0, 50.0, 50.0, "#FFFFFF", Some(f));
+    let mask = id(ex(&mut s, "object.group", json!({"ids": [a, b]})));
+    let content = id(ex(&mut s, "vector.create", json!({"parent": f, "path": "M0 0 L100 0 L100 100 L0 100 Z M30 30 L70 30 L70 70 L30 70 Z"})));
+    {
+        let doc = s.doc_mut().unwrap();
+        let node = doc.get_mut(content).unwrap();
+        node.fills = vec![Paint::solid(Color::from_rgb8_const(255, 0, 0))];
+        let NodeKind::Vector { network } = &mut node.kind else { panic!("content is a vector") };
+        network.regions[0].winding = WindingRule::EvenOdd;
+    }
+    let group = id(ex(&mut s, "object.mask", json!({"ids": [mask, content]})));
+    ex(&mut s, "node.set", json!({"id": mask, "props": {"maskType": "luminance"}}));
+    let samples = [(20, 20), (50, 20), (50, 50), (80, 50), (80, 80), (5, 5), (95, 95)];
+    let before = samples.map(|(x, y)| rgb(&s, f, x, y));
+    assert_eq!(before, [RED, RED, WHITE, RED, RED, WHITE, WHITE]);
+
+    let flattened = id(ex(&mut s, "vector.flatten", json!({"ids": [group]})));
+    assert!(matches!(s.doc().unwrap().node(flattened).unwrap().kind, NodeKind::Vector { .. }));
+    assert_eq!(samples.map(|(x, y)| rgb(&s, f, x, y)), before);
+}
+
+#[test]
 fn masked_out_areas_dont_take_clicks() {
     // Documented: what a mask hides can't be clicked; a click there reaches what's behind. A
     // 50×50 mask over a 100×100 layer, a blue square behind the group at 60..100.
