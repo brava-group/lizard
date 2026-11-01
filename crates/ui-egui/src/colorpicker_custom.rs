@@ -116,70 +116,31 @@ pub(super) fn text_entry(ui: &mut Ui, rect: Rect, id: &'static str, value: Strin
     response.changed().then_some(text)
 }
 
-fn model_entry(ui: &mut Ui, origin: Pos2, model: usize, color: Color) -> Option<Color> {
-    let hex = at(origin, 80.0, 380.0, 89.0, 24.0);
-    field(ui, hex, CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 }, false);
-    match model {
-        1..=3 => {
-            let values = match model {
-                1 => {
-                    let [r, g, b, _] = color.to_rgba8();
-                    [f64::from(r), f64::from(g), f64::from(b)]
-                }
-                2 => {
-                    let hsl = lizard_color::Hsl::from_color(color);
-                    [f64::from(hsl.h), f64::from(hsl.s * 100.0), f64::from(hsl.l * 100.0)]
-                }
-                _ => {
-                    let hsb = Hsb::from_color(color);
-                    [f64::from(hsb.h), f64::from(hsb.s * 100.0), f64::from(hsb.b * 100.0)]
-                }
-            };
-            let ids = ["cp_component_0", "cp_component_1", "cp_component_2"];
-            let mut updated = values;
-            let mut changed = false;
-            for i in 0..3 {
-                if i > 0 {
-                    ui.painter().vline(origin.x + 80.0 + i as f32 * 30.0, origin.y + 384.0..=origin.y + 400.0, Stroke::new(1.0, BORDER));
-                }
-                if let Some(text) = text_entry(ui, at(origin, 83.0 + i as f32 * 29.0, 384.0, 25.0, 16.0), ids[i], format!("{:.0}", values[i]))
-                    && let Ok(value) = text.parse::<f64>()
-                {
-                    updated[i] = value;
-                    changed = true;
-                }
-            }
-            if !changed {
-                return None;
-            }
-            let color = match model {
-                1 => Color::new(
-                    (updated[0] / 255.0).clamp(0.0, 1.0) as f32,
-                    (updated[1] / 255.0).clamp(0.0, 1.0) as f32,
-                    (updated[2] / 255.0).clamp(0.0, 1.0) as f32,
-                    color.a,
-                ),
-                2 => lizard_color::Hsl {
-                    h: updated[0].rem_euclid(360.0) as f32,
-                    s: (updated[1] / 100.0).clamp(0.0, 1.0) as f32,
-                    l: (updated[2] / 100.0).clamp(0.0, 1.0) as f32,
-                }
-                .to_color()
-                .with_alpha(color.a),
-                _ => Hsb {
-                    h: updated[0].rem_euclid(360.0) as f32,
-                    s: (updated[1] / 100.0).clamp(0.0, 1.0) as f32,
-                    b: (updated[2] / 100.0).clamp(0.0, 1.0) as f32,
-                }
-                .to_color()
-                .with_alpha(color.a),
-            };
-            Some(color)
-        }
-        4 => text_entry(ui, at(origin, 84.0, 384.0, 80.0, 16.0), "cp_css_exact", color.to_css()).and_then(|text| Color::parse_css(&text)),
-        _ => text_entry(ui, at(origin, 88.0, 384.0, 73.0, 16.0), "cp_hex_exact", color.to_hex().trim_start_matches('#').to_uppercase())
-            .and_then(|text| Color::from_hex_or_name(&text).map(|c| c.with_alpha(color.a))),
+fn model_entry(ui: &mut Ui, origin: Pos2, model: usize, color: Color, allow_alpha: bool) -> Option<(Color, bool)> {
+    use crate::primitives::{ColorControl, ColorModel, ColorValue};
+
+    let selected = match model {
+        1 => ColorModel::Rgb,
+        2 => ColorModel::Hsl,
+        3 => ColorModel::Hsb,
+        4 => ColorModel::Css,
+        _ => ColorModel::Hex,
+    };
+    let paint = Paint::solid(color.with_alpha(1.0));
+    let change = ColorControl::new(Id::new("cp_model_fields"), &paint, ColorValue::Model(selected), f64::from(color.a) * 100.0)
+        .opacity_editable(allow_alpha)
+        .show_at(ui, at(origin, 80.0, 380.0, 144.0, 24.0));
+    let mut next = change.edited_color.map(|(color, _)| color);
+    let mut done = change.edited_color.is_some_and(|(_, done)| done);
+    if let Some(edit) = change.opacity_edit.filter(|_| allow_alpha) {
+        let (value, finished) = match edit {
+            widgets::FieldEdit::Set(value) => (value, true),
+            widgets::FieldEdit::Scrub(value, finished) => (value, finished),
+        };
+        next = Some(next.unwrap_or(color).with_alpha((value / 100.0).clamp(0.0, 1.0) as f32));
+        done = finished;
     }
+    next.map(|color| (color, done))
 }
 
 pub(super) fn pick_kind(app: &mut LizardApp, target: &PickerTarget, paint: &mut Paint, index: usize) {
@@ -227,12 +188,9 @@ fn edit_solid_controls(ui: &mut Ui, origin: Pos2, color: Color, allow_alpha: boo
     let mut changed = sv_changed || hue_changed || alpha_change.is_some();
     let mut done = sv_done || hue_done || alpha_change.is_some_and(|(_, end)| end);
 
-    let format = at(origin, 16.0, 380.0, 55.0, 24.0);
     let model: usize = ui.data(|d| d.get_temp(Id::new("cp_model"))).unwrap_or(0).min(MODELS.len() - 1);
-    field(ui, format, CornerRadius::same(5), true);
-    ui.painter().text(format.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, MODELS[model], regular(11.0), Color32::WHITE);
-    icons::paint_colorpicker(ui.painter(), at(origin, 60.0, 390.5, 5.002, 3.002), 7, Color32::WHITE);
-    let format_response = ui.interact(format, Id::new("cp_format"), Sense::click());
+    let mut format_ui = ui.new_child(egui::UiBuilder::new().max_rect(at(origin, 16.0, 380.0, 55.0, 24.0)));
+    let format_response = crate::primitives::Select::trigger(&mut format_ui, MODELS[model], 55.0, None);
     crate::right::menu_popup(&format_response).show(|ui| {
         for model in MODELS {
             if crate::right::menu_item(ui, model, "") {
@@ -241,26 +199,12 @@ fn edit_solid_controls(ui: &mut Ui, origin: Pos2, color: Color, allow_alpha: boo
             }
         }
     });
-    let alpha_rect = at(origin, 170.0, 380.0, 54.0, 24.0);
-    field(ui, alpha_rect, CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }, false);
-    if let Some(parsed) = model_entry(ui, origin, model, next) {
+    if let Some((parsed, finished)) = model_entry(ui, origin, model, next, allow_alpha) {
         next = parsed;
         hsb = Hsb::from_color(next);
         changed = true;
-        done = true;
+        done |= finished;
     }
-    if allow_alpha {
-        if let Some(text) = text_entry(ui, at(origin, 178.0, 384.0, 32.0, 16.0), "cp_alpha_exact", format!("{:.0}", next.a * 100.0))
-            && let Ok(value) = text.trim_end_matches('%').parse::<f32>()
-        {
-            next = next.with_alpha((value / 100.0).clamp(0.0, 1.0));
-            changed = true;
-            done = true;
-        }
-    } else {
-        ui.painter().text(pos2(origin.x + 194.0, origin.y + 392.0), Align2::CENTER_CENTER, "100", regular(11.0), MUTED);
-    }
-    ui.painter().text(pos2(origin.x + 215.0, origin.y + 392.0), Align2::CENTER_CENTER, "%", regular(11.0), MUTED);
     ui.data_mut(|d| d.insert_temp(Id::new("cp_hsb"), (hsb.h, hsb.s, hsb.b, next.to_rgba8())));
     changed.then_some((next, done))
 }

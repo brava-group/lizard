@@ -49,11 +49,12 @@ pub struct ColorControl<'a> {
     opacity_percent: f64,
     swatch_id: Option<Id>,
     inline: bool,
+    opacity_editable: bool,
 }
 
 impl<'a> ColorControl<'a> {
     pub fn new(id: Id, paint: &'a Paint, value: ColorValue<'a>, opacity_percent: f64) -> Self {
-        Self { id, paint, value, opacity_percent, swatch_id: None, inline: false }
+        Self { id, paint, value, opacity_percent, swatch_id: None, inline: false, opacity_editable: true }
     }
 
     /// Keep an existing swatch's egui identity when migrating a production row.
@@ -65,6 +66,12 @@ impl<'a> ColorControl<'a> {
     /// Display a colour as an unboxed swatch and value inside a table cell.
     pub fn inline(mut self) -> Self {
         self.inline = true;
+        self
+    }
+
+    /// Show a read-only alpha value for colours that cannot store transparency.
+    pub fn opacity_editable(mut self, editable: bool) -> Self {
+        self.opacity_editable = editable;
         self
     }
 
@@ -120,7 +127,7 @@ impl<'a> ColorControl<'a> {
         }
         if let ColorValue::Model(model) = self.value {
             let color = self.paint.solid_color().unwrap_or(Color::BLACK).with_alpha((self.opacity_percent / 100.0).clamp(0.0, 1.0) as f32);
-            return show_model(ui, rect, self.id, color, model, t);
+            return show_model(ui, rect, self.id, color, model, self.opacity_editable, t);
         }
 
         let hovered = ui.is_enabled() && ui.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
@@ -218,11 +225,11 @@ fn show_style_name(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &str, t
     ColorControlResponse { open_picker: response.clicked(), ..Default::default() }
 }
 
-fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, t: Tokens) -> ColorControlResponse {
+fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, opacity_editable: bool, t: Tokens) -> ColorControlResponse {
     const OPACITY_WIDTH: f32 = 45.0;
     let hovered = ui.is_enabled() && ui.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
-    let value_right = if model == ColorModel::Css { rect.right() } else { (rect.right() - OPACITY_WIDTH).max(rect.left() + 24.0) };
+    let value_right = (rect.right() - OPACITY_WIDTH).max(rect.left() + 24.0);
     let value_rect = Rect::from_min_max(rect.min, pos2(value_right, rect.bottom()));
     let mut result = ColorControlResponse::default();
 
@@ -311,21 +318,26 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
         }
     }
 
-    let mut suffix_active = false;
-    if model != ColorModel::Css {
+    let suffix_active = {
         let opacity_rect = Rect::from_min_max(pos2(value_right, rect.top()), rect.max);
         let number_width = (opacity_rect.width() - 18.0).max(0.0);
         let number_rect = Rect::from_min_size(pos2(opacity_rect.left() + 1.0, rect.top()), vec2((number_width - 1.0).max(0.0), rect.height()));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(number_rect));
         let opacity_id = id.with("model_opacity");
-        result.opacity_edit = widgets::number_field_without_ring(&mut child, opacity_id, f64::from(color.a) * 100.0, number_width);
+        if opacity_editable {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(number_rect));
+            result.opacity_edit = widgets::number_field_without_ring(&mut child, opacity_id, f64::from(color.a) * 100.0, number_width);
+        } else {
+            ui.painter().text(number_rect.center(), Align2::CENTER_CENTER, format!("{:.0}", color.a * 100.0), medium(11.0), t.text_secondary);
+        }
         let suffix = Rect::from_min_max(pos2(number_rect.right(), rect.top()), rect.max);
-        let suffix_response = ui.interact(suffix, id.with("model_percent"), Sense::CLICK | Sense::DRAG);
-        suffix_active = suffix_response.has_focus() || suffix_response.dragged();
+        let suffix_response =
+            ui.interact(suffix, id.with("model_percent"), if opacity_editable { Sense::CLICK | Sense::DRAG } else { Sense::hover() });
+        let suffix_active = suffix_response.has_focus() || suffix_response.dragged();
         if suffix_response.hovered() || suffix_response.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
-        if let Some(edit) = widgets::scrub(ui, id.with("model_percent"), &suffix_response, Some(f64::from(color.a) * 100.0), 1.0) {
+        if opacity_editable && let Some(edit) = widgets::scrub(ui, id.with("model_percent"), &suffix_response, Some(f64::from(color.a) * 100.0), 1.0)
+        {
             result.opacity_edit = Some(edit);
         }
         let suffix_color = if t.dark { Color32::from_white_alpha(178) } else { t.text_secondary };
@@ -333,7 +345,8 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
         let separator =
             if matches!(model, ColorModel::Rgb | ColorModel::Hsl | ColorModel::Hsb) { if t.dark { t.panel } else { t.border } } else { t.bg };
         ui.painter().line_segment([pos2(value_right, rect.top()), pos2(value_right, rect.bottom())], Stroke::new(1.0, separator));
-    }
+        suffix_active
+    };
 
     let focused = ui.memory(|memory| {
         memory.has_focus(id.with("model_value").with("te"))
