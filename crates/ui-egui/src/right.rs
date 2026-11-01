@@ -543,6 +543,14 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     const ACTION_ICON_SIZE: f32 = 14.0;
     const ACTION_CELL_WIDTH: f32 = 28.0;
     let t = Tokens::get(ui.ctx());
+    if let [id] = sel
+        && let Some(node) = doc.node(*id)
+        && matches!(node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. })
+    {
+        component_header(app, ui, doc, *id, &node.name);
+        crate::component_panel::instance_section(app, ui, doc, sel);
+        return;
+    }
     let label = match common(doc, sel, |n| n.kind.label()) {
         Some(l) if sel.len() == 1 => tr(l).to_string(),
         // The plural ("Frames") is a key of its own.
@@ -738,6 +746,32 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         x -= ACTION_CELL_WIDTH;
     }
     crate::component_panel::instance_section(app, ui, doc, sel);
+}
+
+fn component_header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId, name: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    let label = widgets::elide_font(ui, name, (rect.width() - 120.0).max(40.0), regular(12.0));
+    ui.painter().text(pos2(rect.min.x + 16.0, rect.center().y), Align2::LEFT_CENTER, label, regular(12.0), t.text);
+
+    let action = |ui: &mut Ui, index: usize, icon: Icon, size: f32, tip: &str| {
+        let cell = Rect::from_center_size(pos2(rect.max.x - 20.0 - index as f32 * 28.0, rect.center().y), vec2(24.0, 24.0));
+        Button::icon(icon, tip).icon_size(size).show_at(ui, ui.id().with(("component_header", id, index)), cell)
+    };
+    let more = action(ui, 0, Icon::Dots, 14.0, tr("More actions"));
+    let settings = action(ui, 1, Icon::TypeSettings, 20.0, tr("Component properties"));
+    let create = action(ui, 2, Icon::Instance, 14.0, tr("Create instance"));
+    if create.clicked() {
+        app.run("instance.create", json!({"component": id}));
+    }
+    let owner = lizard_engine::components::variant_set(doc, id).unwrap_or(id);
+    menu_popup(&settings).width(180.0).show(|ui| crate::component_panel::add_property_menu(app, ui, doc, owner));
+    menu_popup(&more).width(180.0).show(|ui| {
+        if lizard_engine::cmd::component::can_add_variant(doc, owner) && menu_item(ui, tr("Add variant"), "") {
+            app.run("component.addVariant", json!({"id": owner}));
+            ui.close();
+        }
+    });
 }
 
 fn position(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {

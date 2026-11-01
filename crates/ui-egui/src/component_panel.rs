@@ -12,7 +12,7 @@
 
 use egui::{Id, Sense, Ui, vec2};
 use lizard_doc::*;
-use lizard_engine::cmd::component::{can_add_variant, can_combine_variants};
+use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
     PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slots_of, variant_conflicts,
     variant_options, variant_props, variant_set,
@@ -36,13 +36,11 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
     let Some(n) = doc.node(*id) else { return };
     match &n.kind {
         NodeKind::Instance { .. } => instance_ui(app, ui, doc, n),
-        NodeKind::ComponentSet { description } => {
+        NodeKind::ComponentSet { .. } => {
             properties_ui(app, ui, doc, n.id);
-            description_ui(app, ui, n.id, description);
         }
-        NodeKind::Component { description, .. } => {
+        NodeKind::Component { .. } => {
             properties_ui(app, ui, doc, variant_set(doc, n.id).unwrap_or(n.id));
-            description_ui(app, ui, n.id, description);
         }
         _ => {}
     }
@@ -80,16 +78,6 @@ fn combine_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
             app.run("component.combineVariants", json!({"ids": sel}));
         }
     });
-}
-
-/// A component's description: a multi-line field, saved when it loses focus.
-fn description_ui(app: &mut LizardApp, ui: &mut Ui, id: NodeId, description: &str) {
-    widgets::separator(ui);
-    widgets::sublabels(ui, tr("Description"), None);
-    if let Some(new) = widgets::multiline_field(ui, Id::new(("comp_desc", id)), description, tr("Describe how and when to use this component"), 3) {
-        app.run("node.set", json!({"id": id, "props": {"description": new.chars().take(10_000).collect::<String>()}}));
-    }
-    ui.add_space(8.0);
 }
 
 /// Local components (and component sets, not their variants), for swap menus: (id, label), page
@@ -130,17 +118,18 @@ fn list_components(doc: &Document) -> Vec<(NodeId, String)> {
 /// A section header row with a title and a "+" button; returns the button response.
 fn header_with_plus(ui: &mut Ui, title: &str, tip: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let mut plus = None;
-    row(ui, 36.0, |ui| {
-        ui.label(egui::RichText::new(title).font(semibold(11.0)).color(t.text));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            plus = Some(icons::button(ui, Icon::Plus, 24.0, false, tip));
-        });
-    });
-    match plus {
-        Some(p) => p,
-        None => ui.allocate_response(vec2(0.0, 0.0), Sense::hover()),
-    }
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.min.x + widgets::PAD, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        crate::theme::property_section_title(),
+        t.text,
+    );
+    let button = widgets::section_action_rect(rect, 0);
+    crate::primitives::Button::icon(Icon::Plus, tip)
+        .icon_size(14.0)
+        .show_at(ui, ui.id().with(("component_properties_add", title)), button)
 }
 
 fn type_icon(d: &PropDef) -> Icon {
@@ -220,6 +209,38 @@ fn prop_defs(doc: &Document, c: NodeId) -> std::collections::BTreeMap<String, Pr
     }
 }
 
+/// Menu shared by the Properties add button and the component header settings action.
+pub(crate) fn add_property_menu(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
+    let t = Tokens::get(ui.ctx());
+    let first = if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) {
+        doc.node(owner).and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|n| &n.kind), Some(NodeKind::Component { .. }))))
+    } else {
+        Some(owner)
+    };
+    let defs = first.map(|id| prop_defs(doc, id)).unwrap_or_default();
+    let variants = variant_options(doc, owner);
+    let existing: Vec<String> = defs.keys().cloned().chain(variants.iter().map(|(key, _)| key.clone())).collect();
+    let fresh = (1..).map(|index| format!("Property {index}")).find(|name| !existing.contains(name)).unwrap_or_else(|| "Property".into());
+    let comps = local_components(app, ui, doc);
+    let swap_default = comps.iter().map(|(id, _)| *id).find(|id| *id != owner && first != Some(*id));
+    let items: [(&str, &str, Value); 4] = [
+        (tr("Variant"), "variant", json!("Default")),
+        (tr("Boolean"), "boolean", json!(true)),
+        (tr("Text"), "text", json!("Text")),
+        (tr("Instance swap"), "instanceSwap", swap_default.map(|id| json!(id.0)).unwrap_or(Value::Null)),
+    ];
+    for (label, ty, default) in items {
+        if ty == "instanceSwap" && default.is_null() {
+            ui.label(egui::RichText::new(tr("Instance swap (no other component)")).color(t.text_tertiary));
+            continue;
+        }
+        if menu_item(ui, label, "") {
+            app.run("component.addProperty", json!({"id": owner, "name": fresh, "type": ty, "default": default}));
+            ui.close();
+        }
+    }
+}
+
 /// Properties of a component or component set.
 fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
     let t = Tokens::get(ui.ctx());
@@ -234,31 +255,8 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     let variants = if is_set { variant_options(doc, owner) } else { Vec::new() };
     let comps = local_components(app, ui, doc);
     widgets::separator(ui);
-    let existing: Vec<String> = defs.keys().cloned().chain(variants.iter().map(|(k, _)| k.clone())).collect();
-    let fresh = (1..).map(|k| format!("Property {k}")).find(|n| !existing.contains(n)).unwrap_or_else(|| "Property".into());
     let plus = header_with_plus(ui, tr("Properties"), tr("Create component property"));
-    menu_popup(&plus).width(180.0).show(|ui| {
-        let swap_default = comps.iter().map(|(c, _)| *c).find(|c| *c != owner && first != Some(*c));
-        let items: [(&str, &str, Value); 4] = [
-            (tr("Variant"), "variant", json!("Default")),
-            (tr("Boolean"), "boolean", json!(true)),
-            (tr("Text"), "text", json!("Text")),
-            (tr("Instance swap"), "instanceSwap", swap_default.map(|c| json!(c.0)).unwrap_or(Value::Null)),
-        ];
-        for (label, ty, default) in items {
-            if ty == "instanceSwap" && default.is_null() {
-                ui.label(egui::RichText::new(tr("Instance swap (no other component)")).color(t.text_tertiary));
-                continue;
-            }
-            if menu_item(ui, label, "") {
-                app.run("component.addProperty", json!({"id": owner, "name": fresh, "type": ty, "default": default}));
-                ui.close();
-            }
-        }
-    });
-    if defs.is_empty() && variants.is_empty() {
-        widgets::note(ui, tr("Add properties to make instances configurable"), t.text_tertiary);
-    }
+    menu_popup(&plus).width(180.0).show(|ui| add_property_menu(app, ui, doc, owner));
     if is_set && !variant_conflicts(doc, owner).is_empty() {
         widgets::note(ui, tr("Some variants have the same property values: give each one a unique combination"), t.warning);
     }
@@ -389,21 +387,6 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                 });
             });
         }
-    }
-    // A lone main component too: Add variant makes it a set of itself and the new variant.
-    if can_add_variant(doc, owner) {
-        row(ui, 32.0, |ui| {
-            if crate::primitives::Button::new(tr("Add variant"))
-                .variant(crate::primitives::ButtonVariant::Input)
-                .align(crate::primitives::ButtonAlign::Start)
-                .width(crate::primitives::ControlWidth::Fill)
-                .leading(Icon::Plus)
-                .show(ui)
-                .clicked()
-            {
-                app.run("component.addVariant", json!({"id": owner}));
-            }
-        });
     }
 }
 
