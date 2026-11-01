@@ -172,65 +172,27 @@ fn layout_button(ui: &mut Ui, icon: LayoutIcon, selected: bool, tip: &str) -> eg
 
 fn direction(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
     row(ui, 24.0, |ui| {
-        let items = [
-            (LayoutIcon::Free, tr("Free")),
-            (LayoutIcon::Vertical, tr("Vertical")),
-            (LayoutIcon::Horizontal, tr("Horizontal")),
-            (LayoutIcon::Grid, tr("Grid")),
+        let segments = [
+            Segment::layout_icon(LayoutIcon::Free, tr("Free")),
+            Segment::layout_icon(LayoutIcon::Vertical, tr("Vertical")),
+            Segment::layout_icon(LayoutIcon::Horizontal, tr("Horizontal")),
+            Segment::layout_icon(LayoutIcon::Grid, tr("Grid")),
         ];
         let active = match l.mode {
             LayoutMode::Vertical => 1,
             LayoutMode::Horizontal => 2,
             LayoutMode::Grid => 3,
         };
-        let t = Tokens::get(ui.ctx());
-        let has_wrap = l.mode != LayoutMode::Grid;
-        // The four radio cells stretch to fill the row; the wrap button occupies 24 pt plus
-        // the row's 8 pt gap. Their SVG artwork stays at its original 24 pt view box.
-        let group_width = ui.available_width().max(96.0);
-        let (group, _) = ui.allocate_exact_size(vec2(group_width, 24.0), Sense::hover());
-        let cell_width = group.width() / items.len() as f32;
-        let cell = |position: f32| Rect::from_min_size(pos2(group.min.x + position * cell_width, group.min.y), vec2(cell_width, 24.0));
-        let (group_fill, selected_fill, selected_border, hover_fill, selected_hover) = if t.dark {
-            (Color32::from_gray(0x31), Color32::from_gray(0x27), Color32::from_gray(0x3c), Color32::from_gray(0x3c), Color32::from_gray(0x38))
-        } else {
-            (t.field, t.panel, t.border, t.hover, t.pressed)
-        };
-        ui.painter().rect_filled(group, CornerRadius::same(6), group_fill);
-        let responses =
-            std::array::from_fn::<_, 4, _>(|i| ui.interact(cell(i as f32), ui.id().with(("layout_mode", i)), Sense::click()).tip(items[i].1));
-        for (i, response) in responses.iter().enumerate() {
-            if response.hovered() && i != active {
-                ui.painter().rect_filled(cell(i as f32), CornerRadius::same(5), hover_fill);
-            }
-        }
-        let selected = ui.ctx().animate_value_with_time(ui.id().with("layout_mode_selected_position"), active as f32, 0.18);
-        let selected_rect = cell(selected);
-        ui.painter().rect_filled(selected_rect, CornerRadius::same(5), selected_fill);
-        ui.painter().rect_stroke(selected_rect, CornerRadius::same(5), Stroke::new(1.0, selected_border), StrokeKind::Inside);
-        if responses[active].hovered() {
-            ui.painter().rect_filled(selected_rect.shrink(1.0), CornerRadius::same(4), selected_hover);
-        }
-        for (i, ((icon, tip), response)) in items.into_iter().zip(responses.iter()).enumerate() {
-            crate::a11y::toggle(response, tip, i == active);
-            icons::paint_layout(
-                ui.painter(),
-                Rect::from_center_size(cell(i as f32).center(), vec2(18.0, 18.0)),
-                icon,
-                if i == active { t.icon } else { t.icon_secondary },
-            );
-            if !response.clicked() {
-                continue;
-            }
-            if i == 0 {
+        if let Some(index) = SegmentedControl::new(&segments, Some(active)).width(ControlWidth::Fill).icon_size(16.0).show(ui) {
+            if index == 0 {
                 app.run("layout.remove", json!({"ids": ids}));
-                continue;
+            } else {
+                // Wrap carries over between the flows: rows of a horizontal one, columns of a vertical one.
+                let mode = ["vertical", "horizontal", "grid"][index - 1];
+                app.set_props(ids, json!({"layout": mode}));
             }
-            // Wrap carries over between the flows: rows of a horizontal one, columns of a vertical one.
-            let mode = ["vertical", "horizontal", "grid"][i - 1];
-            app.set_props(ids, json!({"layout": mode}));
         }
-        if has_wrap {
+        if l.mode != LayoutMode::Grid {
             let resp = layout_button(ui, LayoutIcon::Wrap, l.wrap, tr("Wrap"));
             crate::a11y::toggle(&resp, tr("Wrap"), l.wrap);
             if resp.clicked() {

@@ -66,12 +66,21 @@ pub struct SegmentedControl<'a> {
     width: ControlWidth,
     sizing: SegmentSizing,
     size: SegmentSize,
+    icon_size: Option<f32>,
     animated: bool,
 }
 
 impl<'a> SegmentedControl<'a> {
     pub fn new(segments: &'a [Segment<'a>], selected: Option<usize>) -> Self {
-        Self { segments, selected, width: ControlWidth::Hug, sizing: SegmentSizing::Equal, size: SegmentSize::Regular, animated: true }
+        Self {
+            segments,
+            selected,
+            width: ControlWidth::Hug,
+            sizing: SegmentSizing::Equal,
+            size: SegmentSize::Regular,
+            icon_size: None,
+            animated: true,
+        }
     }
 
     pub fn width(mut self, width: ControlWidth) -> Self {
@@ -86,6 +95,12 @@ impl<'a> SegmentedControl<'a> {
 
     pub fn size(mut self, size: SegmentSize) -> Self {
         self.size = size;
+        self
+    }
+
+    /// Override the artwork size without changing the segment hit targets.
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = Some(size);
         self
     }
 
@@ -210,16 +225,20 @@ impl<'a> SegmentedControl<'a> {
                     } else {
                         16.0
                     };
+                    let size = self.icon_size.unwrap_or(size);
                     icons::paint(ui.painter(), Rect::from_center_size(bounds.center(), vec2(size, size)), icon, color);
                 }
                 SegmentContent::LayoutIcon(icon) => {
-                    icons::paint_layout(ui.painter(), Rect::from_center_size(bounds.center(), vec2(24.0, 24.0)), icon, color);
+                    let size = self.icon_size.unwrap_or(24.0);
+                    icons::paint_layout(ui.painter(), Rect::from_center_size(bounds.center(), vec2(size, size)), icon, color);
                 }
                 SegmentContent::PositionIcon(icon) => {
-                    icons::paint_position(ui.painter(), Rect::from_center_size(bounds.center(), vec2(16.0, 16.0)), icon, color, t.text_tertiary);
+                    let size = self.icon_size.unwrap_or(16.0);
+                    icons::paint_position(ui.painter(), Rect::from_center_size(bounds.center(), vec2(size, size)), icon, color, t.text_tertiary);
                 }
                 SegmentContent::VectorPointIcon(icon) => {
-                    icons::paint_vector_point(ui.painter(), Rect::from_center_size(bounds.center(), vec2(20.0, 20.0)), icon, color);
+                    let size = self.icon_size.unwrap_or(20.0);
+                    icons::paint_vector_point(ui.painter(), Rect::from_center_size(bounds.center(), vec2(size, size)), icon, color);
                 }
             }
         }

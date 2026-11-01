@@ -541,6 +541,7 @@ fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
 
 fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     const ACTION_ICON_SIZE: f32 = 14.0;
+    const ACTION_CELL_WIDTH: f32 = 28.0;
     let t = Tokens::get(ui.ctx());
     let label = match common(doc, sel, |n| n.kind.label()) {
         Some(l) if sel.len() == 1 => tr(l).to_string(),
@@ -568,11 +569,14 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if resp.hovered() {
         ui.painter().rect_filled(lr, CornerRadius::same(5), t.hover);
     }
-    ui.painter().text(pos2(lr.min.x + 8.0, lr.center().y), Align2::LEFT_CENTER, &label, regular(12.0), t.text);
+    let label_font = regular(12.0);
+    let label_x = lr.min.x + 8.0;
+    let label_width = ui.painter().layout_no_wrap(label.clone(), label_font.clone(), t.text).size().x;
+    ui.painter().text(pos2(label_x, lr.center().y), Align2::LEFT_CENTER, &label, label_font, t.text);
     if is_frame || is_group {
         icons::paint(
             ui.painter(),
-            Rect::from_center_size(pos2(lr.min.x + 18.0 + label.len() as f32 * 6.5, lr.center().y), vec2(10.0, 10.0)),
+            Rect::from_center_size(pos2(label_x + label_width + 13.0, lr.center().y), vec2(10.0, 10.0)),
             Icon::Chevron,
             t.icon_secondary,
         );
@@ -581,7 +585,8 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         menu_popup(&resp).width(180.0).show(|ui| kind_items(app, ui, false));
     }
     if is_frame {
-        let sr = Rect::from_min_size(pos2(lr.max.x + 4.0, r.center().y - 12.0), vec2(24.0, 24.0));
+        // Align this action with the four action cells and the chevron on the right.
+        let sr = Rect::from_min_size(pos2(r.max.x - 8.0 - 16.0 - 5.0 * ACTION_CELL_WIDTH, r.center().y - 16.0), vec2(ACTION_CELL_WIDTH, 32.0));
         let sresp = ui.interact(sr, ui.id().with("swap_orient"), Sense::click()).tip(tr("Swap orientation"));
         if sresp.hovered() {
             ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
@@ -639,12 +644,12 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         crate::component_panel::instance_section(app, ui, doc, sel);
         return;
     }
-    // The 32-point cells are hit targets; their artwork is smaller and centred within them.
+    // Compact horizontal cells keep the artwork centred in 32-point-tall hit targets.
     let mut x = r.max.x - 8.0;
     let action_rect = |x: f32, width: f32| Rect::from_min_size(pos2(x - width, r.center().y - 16.0), vec2(width, 32.0));
     let edit_id = (sel.len() == 1).then(|| sel[0]).filter(|id| doc.node(*id).is_some_and(|n| n.kind.is_shape()));
     if let Some(id) = edit_id {
-        let br = action_rect(x, 32.0);
+        let br = action_rect(x, ACTION_CELL_WIDTH);
         let resp = ui.interact(br, ui.id().with("edit_object"), Sense::click()).tip(tr("Edit object"));
         if resp.hovered() {
             ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
@@ -658,7 +663,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if resp.clicked() {
             app.run("vector.edit.begin", json!({"id": id}));
         }
-        x -= 32.0;
+        x -= ACTION_CELL_WIDTH;
     }
     // Layers in boolean groups, or one boolean group: the operation they use (checked in the menu).
     let current = lizard_engine::booleans::shown_op(doc, sel);
@@ -697,7 +702,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         }
     });
     x -= 16.0;
-    let bool_rect = action_rect(x, 32.0);
+    let bool_rect = action_rect(x, ACTION_CELL_WIDTH);
     let bool_button = ui.interact(bool_rect, ui.id().with("bool_union"), Sense::click()).tip(tr("Union"));
     if bool_button.hovered() {
         ui.painter().rect_filled(bool_rect, CornerRadius::same(5), t.hover);
@@ -712,13 +717,13 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if bool_button.clicked() && sel.len() >= 2 {
         app.run("bool.union", json!({}));
     }
-    x -= 32.0;
+    x -= ACTION_CELL_WIDTH;
     for (icon, label, cmd) in [
         (HeaderIcon::Mask, tr("Use as mask"), "object.mask"),
         (HeaderIcon::CreateComponent, tr("Create component"), "component.create"),
         (HeaderIcon::SelectMatching, tr("Select matching layers"), "select.matching"),
     ] {
-        let br = action_rect(x, 32.0);
+        let br = action_rect(x, ACTION_CELL_WIDTH);
         let resp = ui.interact(br, ui.id().with(("qa", cmd)), Sense::click()).tip(crate::shortcuts::tip(label, cmd));
         if resp.hovered() {
             ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
@@ -731,7 +736,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if resp.clicked() {
             app.run(cmd, json!({}));
         }
-        x -= 32.0;
+        x -= ACTION_CELL_WIDTH;
     }
     crate::component_panel::instance_section(app, ui, doc, sel);
 }
