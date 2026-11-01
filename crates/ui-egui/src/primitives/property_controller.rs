@@ -169,7 +169,11 @@ impl<'a> PropertyController<'a> {
         if editing {
             ui.painter().rect_stroke(card, CornerRadius::same(5), Stroke::new(1.0, t.focus), StrokeKind::Inside);
         }
-        self.kind.paint(ui.painter(), Rect::from_center_size(pos2(card.left() + 13.0, card.center().y), vec2(14.0, 14.0)), t.icon);
+        self.kind.paint(
+            ui.painter(),
+            Rect::from_center_size(pos2(card.left() + 13.0, card.center().y), vec2(14.0, 14.0)),
+            t.icon.gamma_multiply(0.8),
+        );
         let text_x = card.left() + 27.0;
         let mut renamed = None;
         if editing {
