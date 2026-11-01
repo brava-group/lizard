@@ -540,6 +540,7 @@ fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
 }
 
 fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+    const ACTION_ICON_SIZE: f32 = 14.0;
     let t = Tokens::get(ui.ctx());
     let label = match common(doc, sel, |n| n.kind.label()) {
         Some(l) if sel.len() == 1 => tr(l).to_string(),
@@ -585,7 +586,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if sresp.hovered() {
             ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
         }
-        icons::paint(ui.painter(), sr.shrink(5.0), Icon::Rotate, t.icon);
+        icons::paint(ui.painter(), Rect::from_center_size(sr.center(), vec2(ACTION_ICON_SIZE, ACTION_ICON_SIZE)), Icon::Rotate, t.icon);
         if sresp.clicked() {
             app.run("frame.swapOrientation", json!({"ids": sel}));
         }
@@ -648,7 +649,12 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if resp.hovered() {
             ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
         }
-        icons::paint_header(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), HeaderIcon::EditObject, t.icon);
+        icons::paint_header(
+            ui.painter(),
+            Rect::from_center_size(br.center(), vec2(ACTION_ICON_SIZE, ACTION_ICON_SIZE)),
+            HeaderIcon::EditObject,
+            t.icon,
+        );
         if resp.clicked() {
             app.run("vector.edit.begin", json!({"id": id}));
         }
@@ -696,7 +702,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if bool_button.hovered() {
         ui.painter().rect_filled(bool_rect, CornerRadius::same(5), t.hover);
     }
-    let icon_rect = Rect::from_center_size(bool_rect.center(), vec2(18.0, 18.0));
+    let icon_rect = Rect::from_center_size(bool_rect.center(), vec2(ACTION_ICON_SIZE, ACTION_ICON_SIZE));
     if let Some(op) = current {
         icons::paint(ui.painter(), icon_rect, crate::layers::op_icon(op), t.icon);
     } else {
@@ -717,7 +723,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if resp.hovered() {
             ui.painter().rect_filled(br, CornerRadius::same(5), t.hover);
         }
-        let icon_rect = Rect::from_center_size(br.center(), vec2(18.0, 18.0));
+        let icon_rect = Rect::from_center_size(br.center(), vec2(ACTION_ICON_SIZE, ACTION_ICON_SIZE));
         icons::paint_header(ui.painter(), icon_rect, icon, t.icon);
         if icon == HeaderIcon::Mask {
             icons::paint_header(ui.painter(), icon_rect, HeaderIcon::MaskTertiary, t.text_tertiary);
