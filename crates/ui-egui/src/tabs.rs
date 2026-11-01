@@ -15,6 +15,8 @@ pub const HEIGHT: f32 = 40.0;
 
 const TAB_INSET: f32 = 4.0;
 const TAB_RADIUS: u8 = 6;
+const TAB_CLOSE_GLYPH: f32 = 8.5;
+const TAB_CLOSE_RIGHT_PADDING: f32 = 3.0;
 const MIN_TAB_WIDTH: f32 = 96.0;
 const OVERFLOW_WIDTH: f32 = 32.0;
 const OPEN_TIME: f64 = 0.18;
@@ -204,7 +206,8 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let resp = if live.is_some() { resp.on_hover_text(&label) } else { resp };
             crate::a11y::tab(&resp, &label, active);
             let progress = open_progress(&opening, d.uid, now);
-            let paint_r = r.shrink(TAB_INSET).translate(vec2(-28.0 * (1.0 - progress).powi(2), 0.0));
+            let slide_x = -28.0 * (1.0 - progress).powi(2);
+            let paint_r = r.shrink(TAB_INSET).translate(vec2(slide_x, 0.0));
             let painter = ui.painter().with_clip_rect(r);
             if active {
                 painter.rect_filled(paint_r, CornerRadius::same(TAB_RADIUS), t.tab_active.linear_multiply(progress));
@@ -228,17 +231,13 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             if dirty {
                 ui.painter().circle_filled(pos2(shown.max.x + 7.0, r.center().y), 3.0, t.accent_text);
             }
-            let cr = Rect::from_center_size(close_r.center() + vec2(paint_r.min.x - r.min.x, 0.0), vec2(18.0, 18.0));
+            let cr = Rect::from_center_size(close_r.center() + vec2(slide_x - TAB_CLOSE_RIGHT_PADDING, 0.0), vec2(18.0, 18.0));
             // The close target never overlaps the draggable body, including on inactive tabs.
             if resp.hovered() || cresp.hovered() || active {
                 if cresp.hovered() {
                     ui.painter().rect_filled(cr, CornerRadius::same(4), t.pressed);
                 }
-                icons::paint_colorpicker(ui.painter(), Rect::from_center_size(cr.center(), vec2(10.01, 10.01)), 9, t.icon_secondary);
-                if cresp.clicked() {
-                    close = Some(i);
-                }
-                icons::paint(&painter, cr.shrink(4.0), Icon::Close, t.icon_secondary.linear_multiply(progress));
+                icons::paint_colorpicker(&painter, Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)), 9, t.icon_secondary.linear_multiply(progress));
             }
             if cresp.clicked() {
                 close = Some(i);
@@ -300,12 +299,12 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             }
             icons::paint(ui.painter(), Rect::from_center_size(pos2(x + 19.0, r.center().y), vec2(14.0, 14.0)), Icon::Play, t.icon);
             ui.painter().text(pos2(x + 34.0, r.center().y), Align2::LEFT_CENTER, tr("Present"), regular(12.0), t.text);
-            let cr = Rect::from_center_size(close_r.center(), vec2(18.0, 18.0));
+            let cr = Rect::from_center_size(close_r.center() - vec2(TAB_CLOSE_RIGHT_PADDING, 0.0), vec2(18.0, 18.0));
             if resp.hovered() || close_resp.hovered() || active {
                 if close_resp.hovered() {
                     ui.painter().rect_filled(cr, CornerRadius::same(4), t.pressed);
                 }
-                icons::paint(ui.painter(), cr.shrink(4.0), Icon::Close, t.icon_secondary);
+                icons::paint_colorpicker(ui.painter(), Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)), 9, t.icon_secondary);
             }
             if close_resp.clicked() {
                 app.ui.present = None;
