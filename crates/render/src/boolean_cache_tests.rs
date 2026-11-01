@@ -50,6 +50,69 @@ fn operands_combine_by_their_own_operations() {
 }
 
 #[test]
+fn boolean_corner_radius_rounds_the_result_without_changing_operands() {
+    for op in [BoolOp::Union, BoolOp::Subtract, BoolOp::Intersect, BoolOp::Exclude] {
+        let mut d = Document::new("rounded boolean");
+        let page = d.first_page().unwrap();
+        let group = d.create(page, NodeKind::BooleanOp { op }, "Boolean", 0.0, 0.0, 0.0, 0.0).unwrap();
+        d.get_mut(group).unwrap().fills = vec![Paint::solid(Color::BLACK)];
+        let base = d.create(group, NodeKind::Rectangle, "Base", 10.0, 10.0, 100.0, 100.0).unwrap();
+        let other = d.create(group, NodeKind::Rectangle, "Other", 60.0, 10.0, 100.0, 50.0).unwrap();
+        d.fit_to_children(group).unwrap();
+        let sharp = outline(&d, group);
+        assert!(!sharp.elements().iter().any(|el| matches!(el, lizard_geom::kurbo::PathEl::CurveTo(..))), "{op:?} starts sharp");
+
+        d.get_mut(group).unwrap().corners.radii = [12.0; 4];
+        let rounded = outline(&d, group);
+        assert!(rounded.elements().iter().any(|el| matches!(el, lizard_geom::kurbo::PathEl::CurveTo(..))), "{op:?} rounds its final outline");
+        assert!((rounded.area().abs() - sharp.area().abs()).abs() > 1.0, "{op:?} changes the painted geometry");
+        assert_eq!(d.node(base).unwrap().corners.radii, [0.0; 4]);
+        assert_eq!(d.node(other).unwrap().corners.radii, [0.0; 4]);
+    }
+}
+
+#[test]
+fn subtract_rounds_a_corner_created_at_the_base_edge() {
+    let mut d = Document::new("subtract edge corner");
+    let page = d.first_page().unwrap();
+    let group = d.create(page, NodeKind::BooleanOp { op: BoolOp::Subtract }, "Subtract", 0.0, 0.0, 0.0, 0.0).unwrap();
+    let _base = d.create(group, NodeKind::Rectangle, "Base", 0.0, 37.0, 100.0, 100.0).unwrap();
+    let _other = d.create(group, NodeKind::Rectangle, "Other", 37.0, 0.0, 100.0, 100.0).unwrap();
+    d.fit_to_children(group).unwrap();
+    let sharp = outline(&d, group);
+    d.get_mut(group).unwrap().corners.radii = [12.0; 4];
+    let rounded = outline(&d, group);
+    assert_ne!(sharp.winding(lizard_geom::Point::new(36.0, 38.0)), 0);
+    assert_eq!(rounded.winding(lizard_geom::Point::new(36.0, 38.0)), 0, "the new top-right corner should round");
+}
+
+#[test]
+fn subtract_rounds_a_corner_created_on_a_slightly_rotated_base() {
+    let mut d = Document::new("rotated subtract edge corner");
+    let page = d.first_page().unwrap();
+    let group = d.create(page, NodeKind::BooleanOp { op: BoolOp::Subtract }, "Subtract", 0.0, 0.0, 125.0, 130.07).unwrap();
+    d.get_mut(group).unwrap().fills = vec![Paint::solid(Color::BLACK)];
+    let base = d.create(group, NodeKind::Rectangle, "Base", 0.135, 29.932, 100.0, 100.0).unwrap();
+    d.get_mut(base).unwrap().transform = lizard_geom::Affine::new([
+        0.999999085570868,
+        0.0013523525530840044,
+        -0.0013523525530840044,
+        0.999999085570868,
+        0.13523525530843017,
+        29.932428093802457,
+    ]);
+    let _other = d.create(group, NodeKind::Rectangle, "Other", 25.0, 0.0, 100.0, 100.0).unwrap();
+    let sharp = outline(&d, group);
+    d.get_mut(group).unwrap().corners.radii = [17.0; 4];
+    let rounded = outline(&d, group);
+    assert_ne!(sharp.winding(lizard_geom::Point::new(24.0, 31.0)), 0);
+    assert_eq!(rounded.winding(lizard_geom::Point::new(24.0, 31.0)), 0, "the new top-right corner should round");
+    let pixels = render(&d, page);
+    assert!(!dark(&pixels, 24, 31), "the exported result also cuts away the rounded corner");
+    assert!(dark(&pixels, 10, 60), "the visible part of the subtract result remains filled");
+}
+
+#[test]
 fn editing_one_operand_recombines_only_from_it_up() {
     // Distinct sizes so no other test's cached results can be reused.
     let (mut d, _, b, kids) = row_of_squares(BoolOp::Union, 8);

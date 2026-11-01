@@ -379,13 +379,15 @@ impl NodeKind {
                 | NodeKind::Polygon { .. }
                 | NodeKind::Star { .. }
                 | NodeKind::Vector { .. }
+                | NodeKind::BooleanOp { .. }
                 | NodeKind::Section { .. }
         )
     }
 
     /// Kinds with a radius per corner (the others round every corner alike).
     pub fn has_independent_corners(&self) -> bool {
-        self.has_corner_radius() && !matches!(self, NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. })
+        self.has_corner_radius()
+            && !matches!(self, NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. } | NodeKind::BooleanOp { .. })
     }
 
     pub fn text(&self) -> Option<&TextData> {

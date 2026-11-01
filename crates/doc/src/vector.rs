@@ -193,6 +193,12 @@ impl VectorNetwork {
                 }
                 PathEl::LineTo(p) => {
                     let Some(a) = cur_v else { continue };
+                    // Boolean intersections can emit two nearly identical points at a new
+                    // corner. Their zero-length edge makes that corner appear to have three
+                    // incident segments, so the radius calculation cannot round it.
+                    if net.vertices.get(a).is_some_and(|vertex| (vertex.point() - p).hypot() <= 1e-6) {
+                        continue;
+                    }
                     let b = push_v(&mut net, p);
                     net.segments.push(Segment::line(a, b));
                     loop_segs.push(net.segments.len() - 1);

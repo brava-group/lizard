@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use lizard_color::{BlendMode, Paint};
-use lizard_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, StrokeJoin, WindingRule};
+use lizard_doc::{BoolOp, Document, EffectKind, Node, NodeId, NodeKind, StrokeAlign, StrokeJoin, VectorNetwork, WindingRule};
 use lizard_geom::{Affine, BezPath, Rect, Shape};
 use tiny_skia::{FillRule, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
 
@@ -334,7 +334,16 @@ fn node_outline_at(doc: &Document, n: &Node, depth: usize) -> Option<(BezPath, F
                     Some((p, c.bool_op.unwrap_or(*op)))
                 })
                 .collect();
-            Some((crate::boolean::fold_cached(&operands), FillRule::EvenOdd))
+            let result = crate::boolean::fold_cached(&operands);
+            let radius = n.corners.radii[0];
+            if radius <= 0.0 || result.elements().is_empty() {
+                return Some((result, FillRule::EvenOdd));
+            }
+            let mut network = VectorNetwork::from_path(&result);
+            for vertex in &mut network.vertices {
+                vertex.radius = radius;
+            }
+            Some((network.fill_path(), FillRule::EvenOdd))
         }
         NodeKind::Text(_) => {
             let (l, dy) = lizard_text::layout_node(n)?;
