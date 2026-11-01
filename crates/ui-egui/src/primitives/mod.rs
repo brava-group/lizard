@@ -8,6 +8,7 @@ mod floating_panel;
 mod inline_field;
 mod menu;
 mod number_field;
+mod property_controller;
 mod search_field;
 mod segmented;
 mod select;
@@ -24,6 +25,7 @@ pub use floating_panel::{FloatingPanel, FloatingPanelHeight, FloatingPanelWidth}
 pub use inline_field::InlineField;
 pub use menu::{Menu, MenuItem, MenuPopup};
 pub use number_field::{NumberField, NumberFieldResponse};
+pub use property_controller::{PropertyController, PropertyControllerKind};
 pub use search_field::SearchField;
 pub use segmented::{Segment, SegmentContent, SegmentSize, SegmentSizing, SegmentedControl};
 pub use select::{Select, SelectLead, SelectPosition, SelectVariant};

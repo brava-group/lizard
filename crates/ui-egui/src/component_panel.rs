@@ -10,7 +10,7 @@
 //! - A slot inside an instance (and an instance's slot properties): fill it with components
 //!   (preferred ones first), select it, reset it to the main's default content.
 
-use egui::{Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
@@ -23,7 +23,7 @@ use crate::LizardApp;
 use crate::i18n::{tr, tr_noop, trn};
 use crate::icons::{self, Icon};
 use crate::list_drag::ListDrag;
-use crate::primitives::{Button, ButtonVariant, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, Select, Switch};
+use crate::primitives::{Button, ButtonVariant, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyController, PropertyControllerKind, Select, Switch};
 use crate::right::{menu_item, menu_popup, row, row_rect};
 use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
@@ -216,44 +216,31 @@ fn prop_defs(doc: &Document, c: NodeId) -> std::collections::BTreeMap<String, Pr
     }
 }
 
-/// The five menu glyphs in mask-example, drawn in the menu's ink colour.
-fn property_menu_icon(painter: &Painter, rect: Rect, kind: &str, ink: Color32) {
-    let center = rect.center();
-    let at = |x: f32, y: f32| -> Pos2 { pos2(center.x + x, center.y + y) };
-    let stroke = Stroke::new(1.3, ink);
-    match kind {
-        "variant" | "instanceSwap" => {
-            painter.add(egui::Shape::line(
-                vec![at(0.0, -6.0), at(0.7, -5.7), at(5.7, -0.7), at(6.0, 0.0), at(5.7, 0.7), at(0.7, 5.7), at(0.0, 6.0), at(-0.7, 5.7), at(-5.7, 0.7), at(-6.0, 0.0), at(-5.7, -0.7), at(-0.7, -5.7), at(0.0, -6.0)],
-                stroke,
-            ));
-        }
-        "text" => {
-            painter.rect_stroke(Rect::from_center_size(center, vec2(10.0, 10.0)), CornerRadius::same(1), stroke, StrokeKind::Inside);
-            painter.line_segment([at(-2.5, -1.8), at(2.5, -1.8)], stroke);
-            painter.line_segment([at(0.0, -1.8), at(0.0, 2.5)], stroke);
-        }
-        "boolean" => {
-            painter.add(egui::Shape::line(
-                vec![at(-6.0, 0.0), at(-4.8, -2.5), at(-2.5, -3.7), at(2.5, -3.7), at(4.8, -2.5), at(6.0, 0.0), at(4.8, 2.5), at(2.5, 3.7), at(-2.5, 3.7), at(-4.8, 2.5), at(-6.0, 0.0)],
-                stroke,
-            ));
-            painter.circle_stroke(center, 1.5, stroke);
-        }
-        "slot" => {
-            painter.rect_stroke(Rect::from_center_size(center, vec2(10.0, 10.0)), CornerRadius::same(1), stroke, StrokeKind::Inside);
-            painter.line_segment([at(-2.0, 0.0), at(2.0, 0.0)], stroke);
-            painter.line_segment([at(0.0, -2.0), at(0.0, 2.0)], stroke);
-        }
-        _ => {}
-    }
+fn property_is_used(doc: &Document, owner: NodeId, name: &str) -> bool {
+    let components: Vec<NodeId> = match doc.node(owner).map(|node| &node.kind) {
+        Some(NodeKind::ComponentSet { .. }) => doc
+            .node(owner)
+            .map(|set| set.children.iter().copied().filter(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))).collect())
+            .unwrap_or_default(),
+        _ => vec![owner],
+    };
+    components.into_iter().any(|component| {
+        doc.subtree(component)
+            .into_iter()
+            .filter_map(|id| doc.node(id))
+            .any(|node| node.prop_refs.values().any(|property| property == name))
+    })
 }
 
 fn property_menu_row(ui: &mut Ui, label: &str, kind: &str, enabled: bool) -> egui::Response {
     MenuItem::new(label).enabled(enabled).show_with_parts(
         ui,
         20.0,
-        |painter, rect, ink| property_menu_icon(painter, rect, kind, ink),
+        |painter, rect, ink| {
+            if let Some(kind) = PropertyControllerKind::from_code(kind) {
+                kind.paint(painter, rect, ink);
+            }
+        },
         0.0,
         |_, _, _| {},
     )
@@ -502,61 +489,103 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     } else {
         Default::default()
     };
-    // Variant properties: name, values (the matrix), add value, delete. Dragged by their left
-    // margin to reorder them (only among themselves: the shared ones keep the engine's order).
+    // Variant properties have a compact summary; clicking one exposes its name and value matrix.
     let mut drag = ListDrag::in_order(ui, ("variant_props", owner));
     for (i, (k, vals)) in variants.iter().enumerate() {
-        let header = row_rect(ui, 32.0, |ui| {
-            let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-            icons::paint(ui.painter(), ir, Icon::ComponentSet, COMPONENT);
-            if let Some(nn) = widgets::text_field(ui, Id::new(("vprop_name", owner, k.as_str())), k, 110.0, tr("Name")) {
-                app.run("component.editProperty", json!({"id": owner, "name": k, "newName": nn}));
-            }
-            let def = defaults.get(k).or(vals.first()).cloned().unwrap_or_default();
-            let resp = crate::primitives::Select::trigger(ui, &def, 70.0, None).on_hover_text(tr("Default value (the top-left variant)"));
-            menu_popup(&resp).show(|ui| {
-                for v in vals {
-                    if menu_item(ui, v, "") {
-                        app.run("component.editProperty", json!({"id": owner, "name": k, "default": v}));
-                        ui.close();
-                    }
-                }
-            });
-            if icons::button(ui, Icon::Minus, 22.0, false, tr("Delete property")).clicked() {
-                app.run("component.deleteProperty", json!({"id": owner, "name": k}));
-            }
-        });
-        // Values: rename inline; "+" adds a variant with a new value.
-        let mut vi = 0;
-        while vi < vals.len() {
-            let chunk: Vec<String> = vals.iter().skip(vi).take(3).cloned().collect();
-            let last = vi + chunk.len() >= vals.len();
-            row(ui, 30.0, |ui| {
-                ui.add_space(22.0);
-                for v in &chunk {
-                    if let Some(nv) = widgets::text_field(ui, Id::new(("vprop_val", owner, k.as_str(), v.as_str())), v, 62.0, "")
-                        && nv != *v
-                    {
-                        app.run("component.editProperty", json!({"id": owner, "name": k, "value": v, "newValue": nv}));
-                    }
-                }
-                if last && icons::button(ui, Icon::Plus, 22.0, false, tr("Add variant with a new value")).clicked() {
-                    let nv = (vals.len() + 1..).map(|n| format!("Value {n}")).find(|n| !vals.contains(n)).unwrap_or_default();
-                    app.run("component.addVariant", json!({"id": owner, "property": k, "value": nv}));
-                }
-            });
-            vi += 3;
+        let def = defaults.get(k).or(vals.first()).cloned().unwrap_or_default();
+        let expanded_id = Id::new(("variant_property_expanded", owner, k.as_str()));
+        let mut expanded = ui.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(false);
+        let summary = PropertyController::new(PropertyControllerKind::Variant, k).value(&def).selected(expanded).show(ui);
+        if summary.clicked() {
+            expanded = !expanded;
+            ui.data_mut(|data| data.insert_temp(expanded_id, expanded));
         }
-        drag.row(ui, i, header, header.with_max_y(ui.cursor().min.y.max(header.max.y)), || k.clone());
+        if expanded {
+            row_rect(ui, 32.0, |ui| {
+                let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                icons::paint(ui.painter(), ir, Icon::ComponentSet, COMPONENT);
+                if let Some(nn) = widgets::text_field(ui, Id::new(("vprop_name", owner, k.as_str())), k, 110.0, tr("Name")) {
+                    app.run("component.editProperty", json!({"id": owner, "name": k, "newName": nn}));
+                }
+                let resp = crate::primitives::Select::trigger(ui, &def, 70.0, None).on_hover_text(tr("Default value (the top-left variant)"));
+                menu_popup(&resp).show(|ui| {
+                    for v in vals {
+                        if menu_item(ui, v, "") {
+                            app.run("component.editProperty", json!({"id": owner, "name": k, "default": v}));
+                            ui.close();
+                        }
+                    }
+                });
+                if icons::button(ui, Icon::Minus, 22.0, false, tr("Delete property")).clicked() {
+                    app.run("component.deleteProperty", json!({"id": owner, "name": k}));
+                }
+            });
+            // Values: rename inline; "+" adds a variant with a new value.
+            let mut vi = 0;
+            while vi < vals.len() {
+                let chunk: Vec<String> = vals.iter().skip(vi).take(3).cloned().collect();
+                let last = vi + chunk.len() >= vals.len();
+                row(ui, 30.0, |ui| {
+                    ui.add_space(22.0);
+                    for v in &chunk {
+                        if let Some(nv) = widgets::text_field(ui, Id::new(("vprop_val", owner, k.as_str(), v.as_str())), v, 62.0, "")
+                            && nv != *v
+                        {
+                            app.run("component.editProperty", json!({"id": owner, "name": k, "value": v, "newValue": nv}));
+                        }
+                    }
+                    if last && icons::button(ui, Icon::Plus, 22.0, false, tr("Add variant with a new value")).clicked() {
+                        let nv = (vals.len() + 1..).map(|n| format!("Value {n}")).find(|n| !vals.contains(n)).unwrap_or_default();
+                        app.run("component.addVariant", json!({"id": owner, "property": k, "value": nv}));
+                    }
+                });
+                vi += 3;
+            }
+        }
+        drag.row_by(&summary, i, summary.rect.with_max_y(ui.cursor().min.y.max(summary.rect.max.y)), || k.clone());
     }
     if let Some((from, to)) = drag.finish(ui)
         && let Some((k, _)) = variants.get(from)
     {
         app.run("component.editProperty", json!({"id": owner, "name": k, "index": to}));
     }
-    // Shared properties.
-    for (k, d) in &defs {
-        if matches!(d, PropDef::Variant { .. }) {
+    // Shared properties follow the same type order as the creation menu.
+    let mut shared: Vec<_> = defs.iter().filter(|(_, def)| !matches!(def, PropDef::Variant { .. })).collect();
+    shared.sort_by_key(|(name, def)| {
+        let order = match def {
+            PropDef::Text { .. } => 0,
+            PropDef::Boolean { .. } => 1,
+            PropDef::InstanceSwap { .. } => 2,
+            PropDef::Slot { .. } => 3,
+            PropDef::Variant { .. } => 4,
+        };
+        (order, *name)
+    });
+    for (k, d) in shared {
+        let kind = match d {
+            PropDef::Text { .. } => PropertyControllerKind::Text,
+            PropDef::Boolean { .. } => PropertyControllerKind::Boolean,
+            PropDef::InstanceSwap { .. } => PropertyControllerKind::InstanceSwap,
+            PropDef::Slot { .. } => PropertyControllerKind::Slot,
+            PropDef::Variant { .. } => PropertyControllerKind::Variant,
+        };
+        let value = match d {
+            PropDef::Text { default } => Some(default.clone()),
+            PropDef::Boolean { default } => Some(tr(if *default { "True" } else { "False" }).to_string()),
+            PropDef::InstanceSwap { default, .. } => Some(doc.node(*default).map(|node| node.name.clone()).unwrap_or_else(|| tr("Missing").to_string())),
+            PropDef::Slot { .. } | PropDef::Variant { .. } => None,
+        };
+        let expanded_id = Id::new(("component_property_expanded", owner, k.as_str()));
+        let mut expanded = ui.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(false);
+        let mut controller = PropertyController::new(kind, k).unused(!property_is_used(doc, owner, k)).selected(expanded);
+        if let Some(value) = value.as_deref() {
+            controller = controller.value(value);
+        }
+        if controller.show(ui).clicked() {
+            expanded = !expanded;
+            ui.data_mut(|data| data.insert_temp(expanded_id, expanded));
+        }
+        if !expanded {
             continue;
         }
         row(ui, 32.0, |ui| {

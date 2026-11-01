@@ -29,6 +29,7 @@ enum Page {
     Choices,
     Paint,
     ColorControl,
+    PropertyController,
     Sliders,
     PrimitiveTabs,
     Shimmer,
@@ -116,6 +117,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::Choices, "Primitives", "Choices", "checkbox · radio"),
     (Page::Paint, "Primitives", "Paint", "swatch · checker"),
     (Page::ColorControl, "Primitives", "Color control", "primitives::ColorControl · swatch / models / opacity · width"),
+    (Page::PropertyController, "Primitives", "Property controller", "primitives::PropertyController · component properties · usage indicator"),
     (Page::Sliders, "Primitives", "Sliders", "slider · progress_bar"),
     (Page::PrimitiveTabs, "Primitives", "Tabs", "primitives::Tabs · selection · content · overflow"),
     (Page::Shimmer, "Primitives", "Shimmer text", "primitives::ShimmerText · direction · duration · playing"),
@@ -237,6 +239,7 @@ pub struct State {
     tab_overflow_fade: usize,
     disclosure: bool,
     menu_choice: usize,
+    property_selection: Option<usize>,
     cursor_playground: cursor_playground::State,
 }
 
@@ -286,6 +289,7 @@ impl Default for State {
             tab_overflow_fade: 0,
             disclosure: true,
             menu_choice: 0,
+            property_selection: None,
             cursor_playground: cursor_playground::State::default(),
         }
     }
@@ -768,6 +772,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::Choices => choices(ui, state),
                     Page::Paint => paint(ui),
                     Page::ColorControl => color_control(ui, state, fig, fixture),
+                    Page::PropertyController => property_controllers(ui, state),
                     Page::Sliders => sliders(ui, state),
                     Page::PrimitiveTabs => primitive_tabs(ui, state),
                     Page::Shimmer => shimmer(ui, state),
@@ -1421,6 +1426,38 @@ fn floating_panels(ui: &mut Ui, state: &mut State) {
             });
         state.floating_open[index] = open && !close;
     }
+}
+
+fn property_controllers(ui: &mut Ui, state: &mut State) {
+    use lizard_ui_egui::primitives::{PropertyController, PropertyControllerKind as Kind};
+
+    example(ui, "Component properties", "Click a row to inspect its selected state. The warning appears only when a property is unused.", |ui| {
+        ui.allocate_ui_with_layout(vec2(320.0, 200.0), Layout::top_down(egui::Align::Min), |ui| {
+            ui.label(egui::RichText::new("Properties").font(theme::property_section_title()).color(Tokens::get(ui.ctx()).text));
+            let rows = [
+                (Kind::Variant, "Property 1", Some("Default"), false),
+                (Kind::Text, "Text", Some("value"), true),
+                (Kind::Boolean, "Boolean", Some("True"), true),
+                (Kind::InstanceSwap, "Instance", Some("Button"), true),
+                (Kind::Slot, "Slot", None, true),
+            ];
+            for (index, (kind, name, value, unused)) in rows.into_iter().enumerate() {
+                let mut controller = PropertyController::new(kind, name).unused(unused).selected(state.property_selection == Some(index));
+                if let Some(value) = value {
+                    controller = controller.value(value);
+                }
+                if controller.show(ui).clicked() {
+                    state.property_selection = (state.property_selection != Some(index)).then_some(index);
+                }
+            }
+        });
+    });
+    example(ui, "Bound properties", "A property linked to a component layer has no warning icon.", |ui| {
+        ui.allocate_ui_with_layout(vec2(320.0, 72.0), Layout::top_down(egui::Align::Min), |ui| {
+            PropertyController::new(Kind::Text, "Label").value("Button").show(ui);
+            PropertyController::new(Kind::Slot, "Content").show(ui);
+        });
+    });
 }
 
 fn segmented(ui: &mut Ui, state: &mut State) {
