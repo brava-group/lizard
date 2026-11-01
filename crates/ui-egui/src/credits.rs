@@ -275,7 +275,7 @@ fn contributors_in(ui: &mut egui::Ui, contributors: &[Contributor], total_commit
             v.key = key;
             v.ascending = key.default_ascending();
         }
-        // egui's icon font has these arrows; the UI font (Inter) may not have ▲/▼.
+        // egui's icon font has these arrows; the UI font may not have ▲/▼.
         if ui.button(if v.ascending { "⏶" } else { "⏷" }).on_hover_text(tr("Reverse the order")).clicked() {
             v.ascending = !v.ascending;
         }

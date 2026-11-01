@@ -309,7 +309,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                             .filter(|root| entries.iter().all(|entry| entry.name.starts_with(&format!("{root}/"))));
                         let title = shared_root.map_or_else(|| group.clone(), |root| format!("{group} / {root}"));
                         ui.add_space(9.0);
-                        ui.label(egui::RichText::new(title).size(11.0).color(custom::MUTED));
+                        ui.label(egui::RichText::new(title).size(crate::theme::ui_font_size(11.0)).color(custom::MUTED));
                         ui.add_space(5.0);
                         if s.grid {
                             ui.horizontal_wrapped(|ui| {
@@ -328,7 +328,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                                 let (folder, label) = short.rsplit_once('/').unwrap_or(("", short));
                                 if !folder.is_empty() && folder != previous_folder {
                                     ui.add_space(6.0);
-                                    ui.label(egui::RichText::new(folder).size(11.0).color(custom::MUTED));
+                                    ui.label(egui::RichText::new(folder).size(crate::theme::ui_font_size(11.0)).color(custom::MUTED));
                                     previous_folder = folder.to_string();
                                 }
                                 let (r, response) = ui.allocate_exact_size(vec2(216.0, 28.0), Sense::click());

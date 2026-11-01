@@ -566,7 +566,7 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
                             pos2(gutter.right() - 4.0, y),
                             Align2::RIGHT_CENTER,
                             (index + 1).to_string(),
-                            egui::FontId::monospace(11.0),
+                            egui::FontId::monospace(crate::theme::ui_font_size(11.0)),
                             MUTED,
                         );
                     }
@@ -582,7 +582,7 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
                 state.checked_draft = state.draft.clone();
             }
             let diagnostic = state.diagnostic.as_deref().unwrap_or("WGSL valid");
-            ui.label(egui::RichText::new(diagnostic.lines().take(2).collect::<Vec<_>>().join(" ")).size(10.0).color(if state.diagnostic.is_some() {
+            ui.label(egui::RichText::new(diagnostic.lines().take(2).collect::<Vec<_>>().join(" ")).size(crate::theme::ui_font_size(10.0)).color(if state.diagnostic.is_some() {
                 Color32::from_rgb(255, 130, 120)
             } else {
                 Color32::from_rgb(125, 205, 150)
@@ -624,7 +624,7 @@ fn wgsl_layout_job(source: &str) -> egui::text::LayoutJob {
 
     let mut job = LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
-    let font = egui::FontId::monospace(11.0);
+    let font = egui::FontId::monospace(crate::theme::ui_font_size(11.0));
     let format = |color| TextFormat { font_id: font.clone(), color, ..Default::default() };
     let normal = format(Color32::from_rgb(225, 225, 225));
     let mut cursor = 0;

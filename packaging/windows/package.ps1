@@ -95,6 +95,9 @@ Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 $Exes = $Bins | ForEach-Object { "$_.exe" }
 foreach ($exe in $Exes) { Copy-Item (Join-Path $Bin $exe) $Stage }
+Copy-Item (Join-Path $Root 'NOTICE') $Stage
+Copy-Item (Join-Path $Root 'ATTRIBUTION.md') $Stage
+Copy-Item (Join-Path $Root 'assets\fonts\nv-legible-next\OFL.txt') (Join-Path $Stage 'OFL-NV-Legible-Next.txt')
 
 & (Join-Path $PSScriptRoot 'sign.ps1') @($Exes | ForEach-Object { Join-Path $Stage $_ })
 
@@ -158,10 +161,11 @@ $Portable = Join-Path $TargetDir "windows-package\lizard-$Version-windows-$Arch-
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
-foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE') {
+foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'ATTRIBUTION.md') {
   $p = Join-Path $Root $f
   if (Test-Path $p) { Copy-Item $p $Portable }
 }
+Copy-Item (Join-Path $Root 'assets\fonts\nv-legible-next\OFL.txt') (Join-Path $Portable 'OFL-NV-Legible-Next.txt')
 # Builds made with craft-fonts (CRAFT_FONTS_DIR, all official releases) embed its OFL-1.1 fonts:
 # ship each font's licence as OFL-<family-dir>.txt.
 if ($env:CRAFT_FONTS_DIR) {

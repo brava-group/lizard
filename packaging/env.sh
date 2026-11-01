@@ -80,9 +80,10 @@ warn() {
 # Copy licence and readme files that exist into a package directory.
 copy_docs() {
   local dest="$1" f
-  for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE COPYRIGHT; do
+  for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md COPYRIGHT; do
     if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$dest/"; fi
   done
+  cp "$ROOT/assets/fonts/nv-legible-next/OFL.txt" "$dest/OFL-NV-Legible-Next.txt"
   copy_font_licences "$dest"
 }
 

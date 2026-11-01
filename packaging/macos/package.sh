@@ -170,6 +170,8 @@ mkdir -p "$APP/Contents/Resources/Licenses"
 for notice in LICENSE-MIT LICENSE-APACHE NOTICE; do
   cp "$ROOT/$notice" "$APP/Contents/Resources/Licenses/$notice"
 done
+cp "$ROOT/ATTRIBUTION.md" "$APP/Contents/Resources/Licenses/ATTRIBUTION.md"
+cp "$ROOT/assets/fonts/nv-legible-next/OFL.txt" "$APP/Contents/Resources/Licenses/OFL-NV-Legible-Next.txt"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
 if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   copy_font_licences "$APP/Contents/Resources/Licenses"

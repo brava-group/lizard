@@ -26,7 +26,7 @@ fn format(style: &Style, color: Color32, accent: Color32, inline_code: bool) -> 
     let code = inline_code || style.code_block > 0;
     TextFormat {
         font_id: if code {
-            FontId::monospace(12.0)
+            FontId::monospace(crate::theme::ui_font_size(12.0))
         } else if style.strong > 0 || style.heading.is_some() {
             semibold(size)
         } else {
@@ -175,7 +175,7 @@ mod tests {
         assert!(!job.text.contains('`'));
         assert!(!job.text.ends_with('\n'));
         assert!(job.sections.iter().any(|section| section.format.font_id == semibold(14.0)));
-        assert!(job.sections.iter().any(|section| section.format.font_id == FontId::monospace(12.0)));
+        assert!(job.sections.iter().any(|section| section.format.font_id == FontId::monospace(crate::theme::ui_font_size(12.0))));
     }
 
     #[test]

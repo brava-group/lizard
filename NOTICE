@@ -35,6 +35,10 @@ their redistribution licence has not been verified. Confirm rights before distri
 Release builds made with the optional craft-fonts build input (CRAFT_FONTS_DIR) embed fonts
 including Inter under the SIL Open Font License 1.1. Each package must carry its font licences.
 
+The Lizard interface embeds NV Legible Next Regular and Bold, adapted by Nico Verbruggen
+from Atkinson Hyperlegible Next. The font is distributed under the SIL Open Font License 1.1;
+see ATTRIBUTION.md and assets/fonts/nv-legible-next/OFL.txt. Document fonts remain user-selected.
+
 Rust crate dependencies keep their own licenses (MIT, Apache-2.0, BSD, ISC, Zlib, OFL for egui's
 default fonts, CDLA-Permissive-2.0 for the root certificate list webpki-roots compiles in, and
 similar permissive licenses); see each crate's metadata.

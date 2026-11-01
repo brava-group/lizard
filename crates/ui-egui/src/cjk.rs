@@ -1,4 +1,4 @@
-//! Chinese, Japanese, Korean and Bengali text in the UI. egui's own fonts and Inter have no glyphs
+//! Chinese, Japanese, Korean and Bengali text in the UI. The bundled Latin font has no glyphs
 //! for them, so the UI adds a face per script it needs: the UI language's, the scripts in the open file's names
 //! and comments, the language picker's and typed text. Desktop finds them among the installed
 //! fonts (the system font scan), only once one is needed, so English users load none; the web

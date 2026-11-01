@@ -107,6 +107,9 @@ fi
 if has appimage; then
   APPDIR="$WORK/Lizard.AppDir"
   cp -R "$STAGE" "$APPDIR"
+  mkdir -p "$APPDIR/usr/share/licenses/lizard"
+  cp "$ROOT/assets/fonts/nv-legible-next/OFL.txt" "$APPDIR/usr/share/licenses/lizard/OFL-NV-Legible-Next.txt"
+  cp "$ROOT/NOTICE" "$ROOT/ATTRIBUTION.md" "$APPDIR/usr/share/licenses/lizard/"
   mv "$APPDIR/usr/share/doc" "$WORK/doc-unused"
   # AppRun is a script, not a symlink: it installs the .desktop entry and icons into
   # $XDG_DATA_HOME before launching, so Wayland compositors can resolve the window's

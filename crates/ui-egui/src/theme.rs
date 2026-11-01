@@ -6,7 +6,7 @@ pub use colors::{ALL_COLOR_ROLES, ColorRole};
 
 use std::sync::Arc;
 
-use egui::{Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
+use egui::{Color32, Context, FontData, FontDefinitions, FontFamily, FontId, FontTweak, Stroke, TextStyle, Visuals};
 use workbench_ui::ThemeRecipe;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -332,11 +332,11 @@ pub fn apply_with(ctx: &Context, t: Tokens, reduce_motion: bool) {
         s.spacing.menu_margin = egui::Margin::same(8);
         s.spacing.window_margin = egui::Margin::same(12);
         s.text_styles = [
-            (TextStyle::Small, FontId::new(10.0, FontFamily::Proportional)),
-            (TextStyle::Body, FontId::new(11.0, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(11.0, FontFamily::Proportional)),
-            (TextStyle::Heading, FontId::new(13.0, FontFamily::Name("semibold".into()))),
-            (TextStyle::Monospace, FontId::new(11.0, FontFamily::Monospace)),
+            (TextStyle::Small, FontId::new(ui_font_size(10.0), FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(ui_font_size(11.0), FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(ui_font_size(11.0), FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(ui_font_size(13.0), FontFamily::Name("semibold".into()))),
+            (TextStyle::Monospace, FontId::new(ui_font_size(11.0), FontFamily::Monospace)),
         ]
         .into();
         s.interaction.tooltip_delay = 0.4;
@@ -400,51 +400,38 @@ pub fn on_dark<R>(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     with_theme(ui, Tokens::dark(), f)
 }
 
-/// UI fonts: Inter from the optional craft-fonts build input or the system when available. With
-/// `system`, also system faces for scripts Inter lacks (Hebrew, joined Arabic) so names in them show,
-/// and faces for the CJK scripts in `cjk` ([`crate::cjk`]).
+/// UI fonts: bundled NV Legible Next for Latin text, with system and optional craft-fonts
+/// fallbacks for scripts and symbols it does not cover. Document text keeps its own font choices.
 pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     let mut fonts = FontDefinitions::default();
-    let find = |family: &str, style: &str| lizard_text::CRAFT_FONTS.iter().find(|f| f.family == family && f.style == style).map(|f| f.bytes);
-    let regular =
-        find("Inter", "Regular").map(FontData::from_static).or_else(|| lizard_text::find_face("Inter", "Regular").map(|face| font_data(&face)));
-    let medium =
-        find("Inter", "Medium").map(FontData::from_static).or_else(|| lizard_text::find_face("Inter", "Medium").map(|face| font_data(&face)));
-    let semibold = find("Inter", "SemiBold")
-        .or_else(|| find("Inter", "Bold"))
-        .map(FontData::from_static)
-        .or_else(|| lizard_text::find_face("Inter", "SemiBold").or_else(|| lizard_text::find_face("Inter", "Bold")).map(|face| font_data(&face)));
-    if let Some(regular) = regular {
-        fonts.font_data.insert("inter".into(), Arc::new(regular));
-        if let Some(list) = fonts.families.get_mut(&FontFamily::Proportional) {
-            list.insert(0, "inter".into());
-        }
+    // NV Legible Next's visible glyphs sit high inside its line box. Move the ink down
+    // without changing layout metrics, so labels center in every control at every UI size.
+    let ui_font_tweak = FontTweak { y_offset_factor: 0.20, ..Default::default() };
+    fonts.font_data.insert(
+        "nv-legible-next-regular".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Regular.ttf")).tweak(ui_font_tweak.clone())),
+    );
+    fonts.font_data.insert(
+        "nv-legible-next-bold".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Bold.ttf")).tweak(ui_font_tweak)),
+    );
+    if let Some(list) = fonts.families.get_mut(&FontFamily::Proportional) {
+        list.insert(0, "nv-legible-next-regular".into());
     }
-    let mut medium_family = Vec::new();
-    if let Some(medium) = medium {
-        fonts.font_data.insert("inter-medium".into(), Arc::new(medium));
-        medium_family.push("inter-medium".into());
-    }
-    medium_family.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
-    fonts.families.insert(FontFamily::Name("medium".into()), medium_family);
-    let mut semi = Vec::new();
-    if let Some(semibold) = semibold {
-        fonts.font_data.insert("inter-semibold".into(), Arc::new(semibold));
-        semi.push("inter-semibold".into());
-    } else if fonts.font_data.contains_key("inter") {
-        semi.push("inter".into());
-    }
-    semi.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
+    let proportional = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    fonts.families.insert(FontFamily::Name("medium".into()), proportional.clone());
+    let mut semi = vec!["nv-legible-next-bold".into()];
+    semi.extend(proportional);
     fonts.families.insert(FontFamily::Name("semibold".into()), semi);
     // CJK and other scripts from craft-fonts as fallbacks (Noto Sans CJK only with LIZARD_EMBED_CJK).
-    const BUILT_IN: [&str; 5] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Georgian"];
+    const BUILT_IN: [&str; 4] = ["BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Georgian"];
     let lang = crate::i18n::current().map_or("en", |l| l.code);
     // A Chinese UI draws Han in a Chinese face: the built-in Japanese one goes after the system faces.
     let late = |family: &str| family == "BIZ UDPGothic" && crate::cjk::language(lang) == crate::cjk::HAN;
     let craft = |last: bool| {
         lizard_text::CRAFT_FONTS
             .iter()
-            .filter(move |f| f.family != "Inter" && f.style == "Regular" && BUILT_IN.contains(&f.family) && late(f.family) == last)
+            .filter(move |f| f.style == "Regular" && BUILT_IN.contains(&f.family) && late(f.family) == last)
             .map(|f| (format!("craft-{}", f.family), FontData::from_static(f.bytes)))
     };
     let mut extra: Vec<(String, FontData)> = craft(false).collect();
@@ -519,16 +506,21 @@ pub fn font_data(face: &lizard_text::Face) -> FontData {
     data
 }
 
+/// Scale the interface type ramp so its smallest fixed size, 8.5, renders at 10 logical points.
+pub fn ui_font_size(size: f32) -> f32 {
+    (size * (10.0 / 8.5)).max(10.0)
+}
+
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name("semibold".into()))
+    FontId::new(ui_font_size(size), FontFamily::Name("semibold".into()))
 }
 
 pub fn medium(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name("medium".into()))
+    FontId::new(ui_font_size(size), FontFamily::Name("medium".into()))
 }
 
 pub fn regular(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Proportional)
+    FontId::new(ui_font_size(size), FontFamily::Proportional)
 }
 
 pub fn c32(c: lizard_color::Color) -> Color32 {

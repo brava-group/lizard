@@ -89,6 +89,9 @@
               Description="Lizard interface design and prototyping" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
               Icon="LizardIcon.exe" IconIndex="0" />
         </File>
+        <File Id="LizardNotice" Source="$(var.BinDir)\NOTICE" />
+        <File Id="LizardAttribution" Source="$(var.BinDir)\ATTRIBUTION.md" />
+        <File Id="LizardLegibleNextLicense" Source="$(var.BinDir)\OFL-NV-Legible-Next.txt" />
 
         <!-- .lizard: Lizard's own format; Lizard is its default app. -->
         <ProgId Id="Lizard.Document" Description="Lizard Document" Icon="LizardExe" IconIndex="0">

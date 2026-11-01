@@ -1077,11 +1077,11 @@ fn message_timestamp(created_at: u64) -> String {
 
 fn receipt_detail(ui: &mut Ui, label: &str, text: &str) {
     ui.add_space(10.0);
-    ui.label(egui::RichText::new(label).size(11.0).strong().color(Color32::from_rgb(0xA5, 0xA5, 0xA9)));
+    ui.label(egui::RichText::new(label).size(crate::theme::ui_font_size(11.0)).strong().color(Color32::from_rgb(0xA5, 0xA5, 0xA9)));
     ui.add_space(5.0);
     egui::Frame::new().fill(Color32::from_rgb(0x26, 0x26, 0x26)).corner_radius(5).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
         ui.add(
-            egui::Label::new(egui::RichText::new(text).monospace().size(11.0).color(Color32::from_rgb(0xC9, 0xC9, 0xCD)))
+            egui::Label::new(egui::RichText::new(text).monospace().size(crate::theme::ui_font_size(11.0)).color(Color32::from_rgb(0xC9, 0xC9, 0xCD)))
                 .wrap_mode(egui::TextWrapMode::Extend),
         );
     });
@@ -1165,7 +1165,7 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
                             } else {
                                 "Sem detalhes enviados pela ferramenta."
                             })
-                            .size(11.0)
+                            .size(crate::theme::ui_font_size(11.0))
                             .color(Color32::from_rgb(0x94, 0x94, 0x98)),
                         );
                     }
@@ -1283,10 +1283,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
             if chats.is_empty() {
-                ui.label(egui::RichText::new("Nenhum chat anterior").size(11.0).color(secondary));
+                ui.label(egui::RichText::new("Nenhum chat anterior").size(crate::theme::ui_font_size(11.0)).color(secondary));
             }
             for chat in chats.iter().rev() {
-                if ui.add_sized([list.width() - 16.0, 36.0], egui::Button::new(egui::RichText::new(&chat.title).size(12.0)).frame(false)).clicked() {
+                if ui.add_sized([list.width() - 16.0, 36.0], egui::Button::new(egui::RichText::new(&chat.title).size(crate::theme::ui_font_size(12.0))).frame(false)).clicked() {
                     chosen = Some((chat.id, chat.agent));
                 }
             }
@@ -1321,9 +1321,9 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             ui.set_width(bubble_width);
                             ui.allocate_ui_with_layout(vec2(bubble_width, 18.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
-                                    egui::RichText::new(message_timestamp(message.created_at)).size(12.0).color(Color32::from_rgb(0x92, 0x92, 0x98)),
+                                    egui::RichText::new(message_timestamp(message.created_at)).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x92, 0x92, 0x98)),
                                 );
-                                ui.label(egui::RichText::new("Você").size(12.0).strong().color(Color32::from_rgb(0xC9, 0xC9, 0xCD)));
+                                ui.label(egui::RichText::new("Você").size(crate::theme::ui_font_size(12.0)).strong().color(Color32::from_rgb(0xC9, 0xC9, 0xCD)));
                             });
                             ui.add_space(5.0);
                             egui::Frame::new()
@@ -1334,7 +1334,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     ui.set_width((bubble_width - 32.0).max(0.0));
                                     for node in &message.selected_nodes {
                                         let badge = egui::Button::new(
-                                            egui::RichText::new(format!("⌗ {}", node.name)).size(12.0).color(Tokens::get(ui.ctx()).accent_text),
+                                            egui::RichText::new(format!("⌗ {}", node.name)).size(crate::theme::ui_font_size(12.0)).color(Tokens::get(ui.ctx()).accent_text),
                                         )
                                         .fill(Tokens::get(ui.ctx()).selected_row)
                                         .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).accent_text.gamma_multiply(0.4)))
@@ -1344,10 +1344,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         }
                                     }
                                     if !message.text.is_empty() {
-                                        ui.label(egui::RichText::new(&message.text).size(14.0).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
+                                        ui.label(egui::RichText::new(&message.text).size(crate::theme::ui_font_size(14.0)).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
                                     }
                                     for image in &message.attached_images {
-                                        ui.label(egui::RichText::new(format!("▧ {image}")).size(11.0).color(Tokens::get(ui.ctx()).accent_text));
+                                        ui.label(egui::RichText::new(format!("▧ {image}")).size(crate::theme::ui_font_size(11.0)).color(Tokens::get(ui.ctx()).accent_text));
                                     }
                                 });
                         });
@@ -1360,14 +1360,14 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         ui.add_space(1.0);
                         let agent_name =
                             if message.parallel { format!("Lizard Agent {}", message.agent_index + 1) } else { "Lizard Agent".to_string() };
-                        ui.label(egui::RichText::new(agent_name).size(12.0).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
+                        ui.label(egui::RichText::new(agent_name).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
                         if !message.model_label.is_empty() {
-                            ui.label(egui::RichText::new(&message.model_label).size(12.0).color(Color32::from_rgb(0x85, 0x85, 0x8A)));
+                            ui.label(egui::RichText::new(&message.model_label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x85, 0x85, 0x8A)));
                         }
                         if message.variant_total > 1 {
                             ui.label(
                                 egui::RichText::new(format!("Variação {}", message.variant_index))
-                                    .size(12.0)
+                                    .size(crate::theme::ui_font_size(12.0))
                                     .color(Color32::from_rgb(0x85, 0x85, 0x8A)),
                             );
                         }
@@ -1391,7 +1391,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         let shimmer = ShimmerText::new(word)
                                             .direction(ShimmerDirection::Diagonal)
                                             .duration(0.6)
-                                            .size(12.0)
+                                            .size(crate::theme::ui_font_size(12.0))
                                             .colors(Color32::from_rgb(0x94, 0x94, 0x98), Color32::from_rgb(0xD1, 0xD1, 0xD4))
                                             .show(ui);
                                         let click = ui.interact(shimmer.rect, header_id.with("label"), Sense::click());
@@ -1402,19 +1402,19 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     });
                                     state.show_body_indented(&header.response, ui, |ui| {
                                         if !message.thinking.is_empty() {
-                                            ui.label(egui::RichText::new(&message.thinking).size(12.0).color(secondary));
+                                            ui.label(egui::RichText::new(&message.thinking).size(crate::theme::ui_font_size(12.0)).color(secondary));
                                         }
                                     });
                                 });
                             } else {
                                 let label = message.work_seconds.map_or_else(|| "Pensando…".to_string(), |s| format!("Thought for {s}s"));
-                                egui::CollapsingHeader::new(egui::RichText::new(label).size(12.0).color(Color32::from_rgb(0x94, 0x94, 0x98)))
+                                egui::CollapsingHeader::new(egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)))
                                     .id_salt(("agent_work", chat.id, index))
                                     .default_open(false)
                                     .icon(thought_chevron)
                                     .show(ui, |ui| {
                                         if !message.thinking.is_empty() {
-                                            ui.label(egui::RichText::new(&message.thinking).size(12.0).color(secondary));
+                                            ui.label(egui::RichText::new(&message.thinking).size(crate::theme::ui_font_size(12.0)).color(secondary));
                                         }
                                     });
                             }
@@ -1445,11 +1445,11 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         crate::agent_markdown::show(ui, &message.text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
                     }
                     if message.stopped {
-                        ui.label(egui::RichText::new("Interrompido").size(11.0).color(secondary));
+                        ui.label(egui::RichText::new("Interrompido").size(crate::theme::ui_font_size(11.0)).color(secondary));
                     }
                     if let Some(seconds) = message.work_seconds {
                         ui.add_space(9.0);
-                        ui.label(egui::RichText::new(format!("Designed for {seconds}s")).size(14.0).color(Color32::from_rgb(0x94, 0x94, 0x98)));
+                        ui.label(egui::RichText::new(format!("Designed for {seconds}s")).size(crate::theme::ui_font_size(14.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)));
                     }
                     if !app.ui.agent.busy
                         && !message.parallel
@@ -1659,7 +1659,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                 egui::TextEdit::multiline(&mut app.ui.agent.draft)
                     .id(Id::new("agent_prompt"))
                     .font(regular(13.0))
-                    .hint_text(egui::RichText::new("Solicitar alterações").size(13.0).color(secondary))
+                    .hint_text(egui::RichText::new("Solicitar alterações").size(crate::theme::ui_font_size(13.0)).color(secondary))
                     .frame(egui::Frame::NONE)
                     .desired_width(ui.available_width())
                     .desired_rows(3),
@@ -1860,7 +1860,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     });
     Menu::popup(&parallel_resp).width(196.0).align(egui::RectAlign::TOP_START).show(|ui| {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("Agentes em paralelo").size(11.0).color(ui.visuals().text_color()));
+        ui.label(egui::RichText::new("Agentes em paralelo").size(crate::theme::ui_font_size(11.0)).color(ui.visuals().text_color()));
         ui.add_space(4.0);
         for count in 1..=6_u8 {
             let label = format!("{count}x");
@@ -1877,7 +1877,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     });
     Menu::popup(&variants_resp).width(192.0).align(egui::RectAlign::TOP_START).show(|ui| {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("Variantes").size(11.0).color(ui.visuals().text_color()));
+        ui.label(egui::RichText::new("Variantes").size(crate::theme::ui_font_size(11.0)).color(ui.visuals().text_color()));
         ui.add_space(4.0);
         for count in 1..=6_u8 {
             let label = if count == 1 { "1x · Sem iteração".to_owned() } else { format!("{count}x") };
