@@ -731,6 +731,11 @@ pub fn paint_agent(painter: &Painter, rect: Rect, icon: AgentIcon, color: Color3
     ui3::paint_agent(painter, rect, icon, color);
 }
 
+/// Monochrome provider marks for the Settings integration list.
+pub fn paint_provider(painter: &Painter, rect: Rect, index: usize, color: Color32) {
+    ui3::paint_provider(painter, rect, index, color);
+}
+
 pub fn paint_sizing(painter: &Painter, rect: Rect, icon: SizingIcon, color: Color32) {
     ui3::paint_sizing(painter, rect, icon, color);
 }

@@ -19,6 +19,8 @@ pub enum ButtonVariant {
     DangerGhost,
     DangerLink,
     Ghost,
+    /// Sidebar navigation: a solid accent when selected.
+    Navigation,
     Link,
     Input,
     Property,
@@ -349,6 +351,7 @@ fn palette(t: Tokens, variant: ButtonVariant, enabled: bool, selected: bool) -> 
             (clear, if variant == ButtonVariant::DangerGhost { danger_soft } else { clear }, danger_soft, clear, danger_ink)
         }
         ButtonVariant::Ghost => (clear, color(ColorRole::BgTransparentHover), translucent_press(t), clear, t.text),
+        ButtonVariant::Navigation => (clear, t.hover, translucent_press(t), clear, t.text),
         ButtonVariant::Link => (clear, clear, t.selected_row, clear, t.accent_text),
         ButtonVariant::Input => (t.field, clear, translucent_press(t), clear, t.text),
         ButtonVariant::Overlay => (color(ColorRole::Bg), color(ColorRole::Bg), t.field, border, t.text),
@@ -367,6 +370,17 @@ fn palette(t: Tokens, variant: ButtonVariant, enabled: bool, selected: bool) -> 
         };
     }
     if selected {
+        if variant == ButtonVariant::Navigation {
+            return Palette {
+                normal: t.accent,
+                hover: t.accent_hover,
+                pressed: t.accent_pressed,
+                border: clear,
+                ink: t.accent_on,
+                pressed_ink: t.accent_on,
+                disabled_ink,
+            };
+        }
         let fill = t.selected_row;
         let ink = t.accent_text;
         return Palette { normal: fill, hover: fill, pressed: fill, border: clear, ink, pressed_ink: ink, disabled_ink };

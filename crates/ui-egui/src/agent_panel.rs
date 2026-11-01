@@ -62,6 +62,15 @@ impl AgentKind {
     }
 }
 
+pub(crate) fn setup_url(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Codex => "https://developers.openai.com/codex/cli",
+        AgentKind::Claude => "https://github.com/zed-industries/claude-agent-acp",
+        AgentKind::Gemini => "https://github.com/google-gemini/gemini-cli",
+        AgentKind::Kimi => "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/ides",
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AgentConnection {
     pub installed: bool,
@@ -280,6 +289,7 @@ pub struct AgentUi {
     pub permission: Option<AgentPermission>,
     pub connection: Option<(AgentKind, AgentConnection)>,
     pub login_pending: bool,
+    pub login_error: Option<String>,
     pub model: Option<String>,
     pub models: Vec<(String, String)>,
     pub agent_count: u8,
@@ -377,10 +387,12 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
             }
             AgentEvent::LoginComplete => {
                 app.ui.agent.login_pending = false;
+                app.ui.agent.login_error = None;
                 app.ui.agent.connection = None;
             }
             AgentEvent::LoginError(error) => {
                 app.ui.agent.login_pending = false;
+                app.ui.agent.login_error = Some(error.clone());
                 app.toast(error);
             }
             AgentEvent::Models(models) => {
@@ -1512,13 +1524,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         painter.text(pos2(setup.min.x + 12.0, setup.min.y + 29.0), Align2::LEFT_TOP, &connection.detail, regular(11.0), secondary);
         if hit(ui, "agent_setup", setup, setup_title).clicked() && !app.ui.agent.login_pending {
             if !connection.installed {
-                let url = match app.ui.agent.agent {
-                    AgentKind::Codex => "https://developers.openai.com/codex/cli",
-                    AgentKind::Claude => "https://github.com/zed-industries/claude-agent-acp",
-                    AgentKind::Gemini => "https://github.com/google-gemini/gemini-cli",
-                    AgentKind::Kimi => "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/ides",
-                };
-                app.services.open_url(url);
+                app.services.open_url(setup_url(app.ui.agent.agent));
             } else if !connection.authenticated && app.ui.agent.agent == AgentKind::Codex {
                 match app.services.agent_login() {
                     Ok(()) => app.ui.agent.login_pending = true,
@@ -1787,13 +1793,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                     Err(error) => app.toast(error),
                 }
             } else if app.ui.agent.agent != AgentKind::Codex {
-                let url = match app.ui.agent.agent {
-                    AgentKind::Codex => "https://developers.openai.com/codex/cli",
-                    AgentKind::Claude => "https://github.com/zed-industries/claude-agent-acp",
-                    AgentKind::Gemini => "https://github.com/google-gemini/gemini-cli",
-                    AgentKind::Kimi => "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/ides",
-                };
-                app.services.open_url(url);
+                app.services.open_url(setup_url(app.ui.agent.agent));
             }
             ui.close();
         }

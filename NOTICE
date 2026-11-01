@@ -20,6 +20,15 @@ https://www.figma.com/community/file/1486123838948777078/ui3-figmas-ui-kit .
 The optional icon package also claims MIT: https://www.npmjs.com/package/@ui3/icons .
 These notices cover the SVG and JSON artwork in crates/ui-egui/assets/.
 
+The provider marks embedded in crates/ui-egui/src/icons_ui3.rs identify integrations only.
+The OpenAI Blossom comes from OpenAI's published brand artwork via
+https://commons.wikimedia.org/wiki/File:OpenAI_logo_2025_(symbol).svg and is subject to
+https://openai.com/brand/. The Anthropic and Google Gemini glyphs come from Simple Icons
+(https://github.com/simple-icons/simple-icons, whose repository is CC0; individual marks may
+have separate rights). The Kimi Code glyph comes from
+https://github.com/MoonshotAI/kimi-code/blob/main/apps/vscode/resources/kimi-icon.svg
+(Apache-2.0; LICENSE-APACHE). The names and marks remain their owners' trademarks.
+
 The cursor images in crates/ui-egui/assets/cursors/ were supplied from an owner reference;
 their redistribution licence has not been verified. Confirm rights before distributing them.
 

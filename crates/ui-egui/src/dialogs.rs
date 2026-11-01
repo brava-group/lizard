@@ -10,6 +10,7 @@ use lizard_engine::cmd::file::{export_jobs, exportable_layers};
 use serde_json::{Value, json};
 
 use crate::LizardApp;
+use crate::agent_panel::{AgentConnection, AgentKind};
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
@@ -95,6 +96,34 @@ impl SettingsSection {
             Self::Language => tr_noop("Language"),
             Self::Sharing => tr_noop("Sharing"),
         }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            Self::General => Icon::Adjust,
+            Self::Agents => Icon::Actions,
+            Self::Appearance => Icon::Sun,
+            Self::Language => Icon::Text,
+            Self::Sharing => Icon::Link,
+        }
+    }
+}
+
+const AGENT_PROVIDERS: [AgentKind; 4] = [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi];
+
+#[derive(Clone, Default)]
+struct AgentSettingsState {
+    detail: Option<AgentKind>,
+    connections: [Option<AgentConnection>; 4],
+    login_was_pending: bool,
+}
+
+fn provider_index(kind: AgentKind) -> usize {
+    match kind {
+        AgentKind::Codex => 0,
+        AgentKind::Claude => 1,
+        AgentKind::Gemini => 2,
+        AgentKind::Kimi => 3,
     }
 }
 
@@ -220,6 +249,8 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
     }
     if app.ui.preferences {
         settings_modal(app, ctx, &t);
+    } else {
+        ctx.data_mut(|data| data.remove::<AgentSettingsState>(Id::new("settings_agent_state")));
     }
     crate::shortcuts_panel::show(app, ctx);
     if let Some((mut find, mut replace)) = app.ui.find.clone() {
@@ -386,6 +417,8 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
     let id = Id::new("settings_modal");
     let section_id = id.with("section");
     let mut section = ctx.data(|data| data.get_temp::<SettingsSection>(section_id)).unwrap_or_default();
+    let agent_state_id = Id::new("settings_agent_state");
+    let mut agent_state = ctx.data(|data| data.get_temp::<AgentSettingsState>(agent_state_id)).unwrap_or_default();
     let mut close = false;
 
     let response = egui::Modal::new(id)
@@ -409,7 +442,7 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
 
             let (body, _) = ui.allocate_exact_size(vec2(width, height - 56.0), Sense::hover());
             let sidebar = Rect::from_min_max(body.min, pos2(body.left() + sidebar_width, body.bottom()));
-            ui.painter().rect_filled(sidebar, CornerRadius { nw: 0, ne: 0, sw: 13, se: 0 }, t.field);
+            ui.painter().rect_filled(sidebar, CornerRadius { nw: 0, ne: 0, sw: 13, se: 0 }, t.panel);
             ui.painter().line_segment([sidebar.right_top(), sidebar.right_bottom()], Stroke::new(1.0, t.border));
             let nav_rect = sidebar.shrink2(vec2(12.0, 14.0));
             ui.scope_builder(UiBuilder::new().max_rect(nav_rect).layout(Layout::top_down(Align::Min)), |ui| {
@@ -417,7 +450,8 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 for choice in SettingsSection::ALL {
                     if Button::new(tr(choice.label()))
-                        .variant(ButtonVariant::Ghost)
+                        .leading(choice.icon())
+                        .variant(ButtonVariant::Navigation)
                         .behavior(ButtonBehavior::Toggle { selected: section == choice })
                         .align(ButtonAlign::Start)
                         .size(ButtonSize::Large)
@@ -441,7 +475,7 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
                         ui.add_space(16.0);
                         match section {
                             SettingsSection::General => settings_general(app, ui, t),
-                            SettingsSection::Agents => settings_agents(app, ui, t),
+                            SettingsSection::Agents => settings_agents(app, ui, t, &mut agent_state),
                             SettingsSection::Appearance => settings_appearance(app, ui),
                             SettingsSection::Language => settings_language(app, ui, t),
                             SettingsSection::Sharing => settings_sharing(app, ui, t),
@@ -451,6 +485,7 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
             });
         });
     ctx.data_mut(|data| data.insert_temp(section_id, section));
+    ctx.data_mut(|data| data.insert_temp(agent_state_id, agent_state));
     if close || response.should_close() {
         app.ui.preferences = false;
     }
@@ -500,34 +535,220 @@ fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
-fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
-    crate::widgets::label(ui, tr("Choose the agent used in the chat panel."), t.text_secondary);
-    ui.add_space(16.0);
-    for kind in [
-        crate::agent_panel::AgentKind::Codex,
-        crate::agent_panel::AgentKind::Claude,
-        crate::agent_panel::AgentKind::Gemini,
-        crate::agent_panel::AgentKind::Kimi,
-    ] {
-        if Button::new(kind.label())
-            .variant(ButtonVariant::Ghost)
-            .behavior(ButtonBehavior::Toggle { selected: app.ui.agent.agent == kind })
-            .align(ButtonAlign::Start)
-            .size(ButtonSize::Large)
-            .width(ControlWidth::Fill)
+fn provider_title(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Codex => tr_noop("OpenAI · Codex"),
+        AgentKind::Claude => tr_noop("Anthropic · Claude Code"),
+        AgentKind::Gemini => tr_noop("Google · Gemini CLI"),
+        AgentKind::Kimi => tr_noop("Kimi Code"),
+    }
+}
+
+fn provider_description(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Codex => tr_noop("Sign in with your ChatGPT account through Codex CLI."),
+        AgentKind::Claude => tr_noop("Use your local Claude Agent ACP installation."),
+        AgentKind::Gemini => tr_noop("Use your local Gemini CLI installation."),
+        AgentKind::Kimi => tr_noop("Use your local Kimi Code CLI installation."),
+    }
+}
+
+fn provider_status(kind: AgentKind, connection: &AgentConnection, pending: bool, login_error: bool) -> &'static str {
+    if kind == AgentKind::Codex && pending {
+        tr_noop("Signing in…")
+    } else if !connection.installed {
+        tr_noop("CLI not found")
+    } else if kind == AgentKind::Codex && login_error {
+        tr_noop("Sign-in failed")
+    } else if kind == AgentKind::Codex {
+        if connection.authenticated { tr_noop("Connected") } else { tr_noop("Sign-in required") }
+    } else {
+        tr_noop("CLI detected")
+    }
+}
+
+fn provider_emblem(ui: &egui::Ui, t: &Tokens, kind: AgentKind, rect: Rect) {
+    ui.painter().rect_filled(rect, CornerRadius::same(8), t.surface_tertiary);
+    icons::paint_provider(ui.painter(), rect.shrink(6.5), provider_index(kind), t.icon);
+}
+
+fn provider_row(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    kind: AgentKind,
+    connection: &AgentConnection,
+    selected: bool,
+    pending: bool,
+    login_error: bool,
+) -> bool {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 78.0), Sense::click());
+    let fill = if response.hovered() { t.hover } else { t.field };
+    ui.painter().rect(rect, CornerRadius::same(9), fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let emblem = Rect::from_min_size(pos2(rect.left() + 14.0, rect.top() + 17.0), vec2(44.0, 44.0));
+    provider_emblem(ui, t, kind, emblem);
+    let title_x = emblem.right() + 14.0;
+    ui.painter().text(pos2(title_x, rect.top() + 23.0), Align2::LEFT_CENTER, tr(provider_title(kind)), semibold(13.0), t.text);
+    ui.painter().text(pos2(title_x, rect.top() + 51.0), Align2::LEFT_CENTER, tr(provider_description(kind)), regular(11.0), t.text_secondary);
+    if selected {
+        let dot = pos2(rect.right() - 18.0, rect.top() + 21.0);
+        ui.painter().circle_filled(dot, 4.0, t.accent);
+    }
+    if width >= 470.0 {
+        let label = tr(provider_status(kind, connection, pending, login_error));
+        let text_width = ui.painter().layout_no_wrap(label.to_owned(), semibold(11.0), t.text).size().x;
+        let badge_width = text_width + 34.0;
+        let badge = Rect::from_min_size(pos2(rect.right() - 16.0 - badge_width, rect.center().y - 13.0), vec2(badge_width, 26.0));
+        let status_color = if login_error && kind == AgentKind::Codex && connection.installed && !pending {
+            t.danger
+        } else if kind == AgentKind::Codex && connection.authenticated {
+            t.success
+        } else {
+            t.text_secondary
+        };
+        ui.painter().rect_filled(badge, CornerRadius::same(13), t.surface_tertiary);
+        ui.painter().circle_filled(pos2(badge.left() + 12.0, badge.center().y), 3.5, status_color);
+        ui.painter().text(pos2(badge.left() + 23.0, badge.center().y), Align2::LEFT_CENTER, label, semibold(11.0), t.text_secondary);
+    }
+    crate::a11y::button(&response, tr(provider_title(kind)));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+fn settings_agents(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &mut AgentSettingsState) {
+    if state.login_was_pending && !app.ui.agent.login_pending {
+        state.connections[provider_index(AgentKind::Codex)] = None;
+        state.login_was_pending = false;
+    }
+    for kind in AGENT_PROVIDERS {
+        let index = provider_index(kind);
+        if state.connections[index].is_none() {
+            state.connections[index] = Some(app.services.agent_connection(kind));
+        }
+    }
+    if let Some(kind) = state.detail {
+        settings_agent_detail(app, ui, t, state, kind);
+        return;
+    }
+
+    ui.label(RichText::new(tr("Connect AI providers")).font(semibold(18.0)));
+    ui.add_space(6.0);
+    crate::widgets::label(ui, tr("Connect an available provider, then choose it in the agent chat."), t.text_secondary);
+    ui.add_space(18.0);
+    let codex = state.connections[provider_index(AgentKind::Codex)].as_ref();
+    if codex.is_some_and(|connection| connection.installed && !connection.authenticated) {
+        if Button::new(tr(if app.ui.agent.login_pending { "Waiting for browser sign-in…" } else { "Sign in with ChatGPT" }))
+            .enabled(!app.ui.agent.login_pending)
             .show(ui)
             .clicked()
         {
-            crate::agent_panel::select_agent(app, kind);
+            start_codex_login(app, state);
         }
-        ui.add_space(4.0);
+        ui.add_space(20.0);
     }
-    ui.add_space(16.0);
-    if Button::new(tr("Open agent panel")).variant(ButtonVariant::Secondary).show(ui).clicked() {
-        app.ui.left_tab = crate::LeftTab::Agent;
-        app.ui.left_collapsed = false;
-        app.ui.preferences = false;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Available providers")).font(semibold(12.0)));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if Button::new(tr("Refresh connections")).variant(ButtonVariant::Ghost).show(ui).clicked() {
+                state.connections = Default::default();
+                ui.ctx().request_repaint();
+            }
+        });
+    });
+    ui.add_space(12.0);
+    for kind in AGENT_PROVIDERS {
+        let index = provider_index(kind);
+        if let Some(connection) = &state.connections[index]
+            && provider_row(ui, t, kind, connection, app.ui.agent.agent == kind, app.ui.agent.login_pending, app.ui.agent.login_error.is_some())
+        {
+            state.detail = Some(kind);
+        }
+        ui.add_space(9.0);
     }
+}
+
+fn start_codex_login(app: &mut LizardApp, state: &mut AgentSettingsState) {
+    match app.services.agent_login() {
+        Ok(()) => {
+            app.ui.agent.login_pending = true;
+            app.ui.agent.login_error = None;
+            state.login_was_pending = true;
+        }
+        Err(error) => {
+            app.ui.agent.login_error = Some(error.clone());
+            app.toast(error);
+        }
+    }
+}
+
+fn settings_agent_detail(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, state: &mut AgentSettingsState, kind: AgentKind) {
+    if Button::new(tr("All providers")).leading(Icon::ChevronLeft).variant(ButtonVariant::Ghost).show(ui).clicked() {
+        state.detail = None;
+    }
+    ui.add_space(20.0);
+    ui.horizontal(|ui| {
+        let (emblem, _) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::hover());
+        provider_emblem(ui, t, kind, emblem);
+        ui.add_space(14.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(tr(provider_title(kind))).font(semibold(19.0)));
+            ui.add_space(6.0);
+            crate::widgets::label(ui, tr(provider_description(kind)), t.text_secondary);
+        });
+    });
+    ui.add_space(28.0);
+    ui.label(RichText::new(tr("Connection")).font(semibold(12.0)));
+    ui.add_space(10.0);
+
+    let index = provider_index(kind);
+    let Some(connection) = state.connections[index].clone() else { return };
+    let status = tr(provider_status(kind, &connection, app.ui.agent.login_pending, app.ui.agent.login_error.is_some()));
+    let card_width = ui.available_width();
+    egui::Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(9))
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_min_width((card_width - 32.0).max(0.0));
+            ui.label(RichText::new(status).font(semibold(13.0)));
+            ui.add_space(6.0);
+            let description = if !connection.installed {
+                tr("Install the provider's CLI to use it in Lizard.")
+            } else if kind == AgentKind::Codex && connection.authenticated {
+                tr("Your ChatGPT account is connected. Codex models are available in the chat model picker.")
+            } else if kind == AgentKind::Codex {
+                tr("Sign in with ChatGPT in your browser to connect Codex.")
+            } else {
+                tr("The provider CLI manages its own sign-in. Complete it there before using this agent in Lizard.")
+            };
+            crate::widgets::label(ui, description, t.text_secondary);
+        });
+    ui.add_space(20.0);
+
+    ui.horizontal(|ui| {
+        if kind == AgentKind::Codex && connection.installed && !connection.authenticated {
+            if Button::new(tr(if app.ui.agent.login_pending { "Waiting for browser sign-in…" } else { "Sign in with ChatGPT" }))
+                .enabled(!app.ui.agent.login_pending)
+                .show(ui)
+                .clicked()
+            {
+                start_codex_login(app, state);
+            }
+        } else if connection.installed {
+            if Button::new(tr("Use in chat")).show(ui).clicked() {
+                crate::agent_panel::select_agent(app, kind);
+                app.select_left_tab(crate::LeftTab::Agent);
+                app.ui.preferences = false;
+            }
+        }
+        if Button::new(tr(if connection.installed { "Setup guide" } else { "Install CLI" })).variant(ButtonVariant::Secondary).show(ui).clicked() {
+            app.services.open_url(crate::agent_panel::setup_url(kind));
+        }
+        if Button::new(tr("Check again")).variant(ButtonVariant::Ghost).show(ui).clicked() {
+            state.connections[index] = None;
+            ui.ctx().request_repaint();
+        }
+    });
 }
 
 fn settings_appearance(app: &mut LizardApp, ui: &mut egui::Ui) {
