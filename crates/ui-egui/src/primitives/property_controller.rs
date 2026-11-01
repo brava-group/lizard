@@ -31,27 +31,31 @@ impl PropertyControllerKind {
     pub fn paint(self, painter: &Painter, rect: Rect, ink: Color32) {
         let center = rect.center();
         let at = |x: f32, y: f32| -> Pos2 { pos2(center.x + x, center.y + y) };
-        let stroke = Stroke::new(1.3, ink);
         match self {
             Self::Variant => {
+                // The supplied 24×24 add-variant SVG: rounded diamond with a centered plus.
+                let scale = 0.65;
+                let line = Stroke::new(1.5 * scale, ink);
                 painter.add(egui::Shape::line(
                     vec![
-                        at(0.0, -6.0),
-                        at(0.7, -5.7),
-                        at(5.7, -0.7),
-                        at(6.0, 0.0),
-                        at(5.7, 0.7),
-                        at(0.7, 5.7),
-                        at(0.0, 6.0),
-                        at(-0.7, 5.7),
-                        at(-5.7, 0.7),
-                        at(-6.0, 0.0),
-                        at(-5.7, -0.7),
-                        at(-0.7, -5.7),
-                        at(0.0, -6.0),
+                        at(0.0, -10.25 * scale),
+                        at(1.48 * scale, -9.37 * scale),
+                        at(8.78 * scale, -1.35 * scale),
+                        at(9.47 * scale, 0.0),
+                        at(8.78 * scale, 1.35 * scale),
+                        at(1.48 * scale, 9.37 * scale),
+                        at(0.0, 10.25 * scale),
+                        at(-1.48 * scale, 9.37 * scale),
+                        at(-8.78 * scale, 1.35 * scale),
+                        at(-9.47 * scale, 0.0),
+                        at(-8.78 * scale, -1.35 * scale),
+                        at(-1.48 * scale, -9.37 * scale),
+                        at(0.0, -10.25 * scale),
                     ],
-                    stroke,
+                    line,
                 ));
+                painter.line_segment([at(-3.0 * scale, 0.0), at(3.0 * scale, 0.0)], line);
+                painter.line_segment([at(0.0, -3.0 * scale), at(0.0, 3.0 * scale)], line);
             }
             Self::InstanceSwap => {
                 // The supplied 24×24 swap SVG: arrow feeding a circular instance.
