@@ -216,13 +216,13 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     let mut custom = false;
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
         .height(crate::primitives::FloatingPanelHeight::Fixed(427.0))
-        .fill(custom::PANEL)
+        .fill(custom::panel(ctx))
         .corner_radius(8)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let panel = Rect::from_min_size(header.min, vec2(240.0, 427.0));
             ui.allocate_exact_size(vec2(240.0, 387.0), Sense::hover());
-            ui.painter().rect_filled(panel, CornerRadius::same(8), custom::PANEL);
+            ui.painter().rect_filled(panel, CornerRadius::same(8), custom::panel(ui.ctx()));
             let o = panel.min;
             if custom::header_tabs(ui, o, "cpl_tabs", 1) == Some(0) {
                 custom = true;
@@ -405,11 +405,11 @@ fn creation_panel(app: &mut LizardApp, ctx: &egui::Context, doc: &lizard_doc::Do
     crate::primitives::FloatingPanel::new(Id::new("color_library_create"), pos2(x, library_pos.y))
         .width(crate::primitives::FloatingPanelWidth::Regular)
         .height(crate::primitives::FloatingPanelHeight::Fixed(height))
-        .fill(custom::PANEL)
+        .fill(custom::panel(ctx))
         .show_with_header(ctx, |ui, header| {
             let panel = Rect::from_min_size(header.min, vec2(304.0, height));
             ui.allocate_exact_size(vec2(304.0, height - 40.0), Sense::hover());
-            ui.painter().rect_filled(panel, CornerRadius::same(13), custom::PANEL);
+            ui.painter().rect_filled(panel, CornerRadius::same(13), custom::panel(ui.ctx()));
             let o = panel.min;
             let at = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(o + vec2(x, y), vec2(w, h));
             ui.painter().hline(o.x..=o.x + 304.0, o.y + 39.5, Stroke::new(1.0, custom::BORDER));

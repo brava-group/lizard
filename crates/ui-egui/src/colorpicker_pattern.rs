@@ -1,6 +1,6 @@
 //! Compact pattern editor, laid out on the 240 × 522 reference dialog.
 
-use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, paint_kind_button, text_entry, vector_button};
+use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, text_entry, vector_button};
 use super::*;
 
 const HEIGHT: f32 = 522.0;
@@ -75,7 +75,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(HEIGHT))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -168,7 +168,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                 let rect = at(origin, 80.0 + index as f32 * 68.0, 313.0, 68.0, 24.0);
                 let selected = pattern.tile == tile || (index == 1 && pattern.tile == PatternTile::VerticalHex);
                 if selected {
-                    ui.painter().rect_filled(rect, CornerRadius::same(5), PANEL);
+                    ui.painter().rect_filled(rect, CornerRadius::same(5), panel(ui.ctx()));
                 }
                 tile_icon(
                     ui,

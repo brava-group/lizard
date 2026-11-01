@@ -14,6 +14,8 @@ pub struct Tokens {
     pub dark: bool,
     pub bg: Color32,
     pub panel: Color32,
+    /// The color picker can follow the host application's panel color.
+    pub picker_surface: Color32,
     pub canvas: Color32,
     pub border: Color32,
     pub border_strong: Color32,
@@ -124,7 +126,9 @@ pub const DEV_COMPLETED: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x73);
 
 impl Tokens {
     pub fn lizard(dark: bool) -> Self {
-        Self::from_recipe(dark, LIZARD_THEME)
+        let mut tokens = Self::from_recipe(dark, LIZARD_THEME);
+        tokens.picker_surface = tokens.panel;
+        tokens
     }
 
     pub fn light() -> Self {
@@ -133,6 +137,7 @@ impl Tokens {
             dark: false,
             bg: color(ColorRole::Bg),
             panel: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            picker_surface: Color32::from_rgb(0x2C, 0x2C, 0x2C),
             canvas: Color32::from_rgb(0xF5, 0xF5, 0xF5),
             border: color(ColorRole::Border),
             border_strong: Color32::from_rgb(0xD9, 0xD9, 0xD9),
@@ -178,6 +183,7 @@ impl Tokens {
             dark: true,
             bg: color(ColorRole::Bg),
             panel: Color32::from_rgb(0x2B, 0x2B, 0x2B),
+            picker_surface: Color32::from_rgb(0x2C, 0x2C, 0x2C),
             canvas: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             border: color(ColorRole::Border),
             border_strong: Color32::from_rgb(0x55, 0x55, 0x55),
@@ -549,6 +555,14 @@ pub fn doc_c32(ctx: &Context, c: lizard_color::Color) -> Color32 {
 #[cfg(test)]
 mod ui_font_tests {
     use super::*;
+
+    #[test]
+    fn lizard_picker_follows_properties_without_changing_catalog_surface() {
+        let lizard = Tokens::lizard(true);
+        assert_eq!(lizard.picker_surface, lizard.panel);
+        assert_eq!(Tokens::dark().picker_surface, crate::primitives::FloatingPanel::DARK_SURFACE);
+        assert_eq!(Tokens::light().picker_surface, crate::primitives::FloatingPanel::DARK_SURFACE);
+    }
 
     #[test]
     fn available_ui_fonts_render_antialiased_glyphs() {

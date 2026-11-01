@@ -1,6 +1,6 @@
 //! Compact image editor, laid out on the 240 × 577 reference dialog.
 
-use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, paint_kind_button, vector_button};
+use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, vector_button};
 use super::*;
 
 const HEIGHT: f32 = 577.0;
@@ -130,7 +130,7 @@ fn preview(ui: &mut Ui, app: &mut LizardApp, ctx: &egui::Context, target: &Picke
     }
 
     let create_rect = at(origin, 36.0, 236.0, 168.0, 24.0);
-    ui.painter().rect_filled(create_rect, CornerRadius::same(5), PANEL);
+    ui.painter().rect_filled(create_rect, CornerRadius::same(5), panel(ui.ctx()));
     icons::paint_colorpicker(ui.painter(), at(origin, 62.0, 241.0, 13.939, 13.939), 16, Color32::WHITE);
     ui.painter().text(pos2(origin.x + 83.0, origin.y + 248.0), Align2::LEFT_CENTER, "Create an image", regular(11.0), Color32::WHITE);
     if ui.interact(create_rect, Id::new("cp_image_create"), Sense::click()).tip("Create an image").clicked() {
@@ -147,7 +147,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(HEIGHT))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);

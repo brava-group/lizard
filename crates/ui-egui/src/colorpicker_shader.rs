@@ -1,6 +1,6 @@
 //! Shader browser and parameter editor inside the existing colour picker flow.
 
-use super::custom::{self, BORDER, FIELD, MUTED, PANEL, WIDTH, at, label_tab, paint_kind_button, vector_button};
+use super::custom::{self, BORDER, FIELD, MUTED, WIDTH, at, label_tab, paint_kind_button, panel, vector_button};
 use super::*;
 use lizard_color::ShaderFill;
 use lizard_doc::{ShaderDefinition, ShaderFloatParameter, ShaderParameterControl};
@@ -160,7 +160,7 @@ pub(super) fn show_browser(app: &mut LizardApp, ctx: &egui::Context, target: &Pi
     crate::primitives::FloatingPanel::new(Id::new("shader_browser"), position)
         .width(crate::primitives::FloatingPanelWidth::Regular)
         .height(crate::primitives::FloatingPanelHeight::Fixed(420.0))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
@@ -273,7 +273,7 @@ pub(super) fn show_editor(app: &mut LizardApp, ctx: &egui::Context, target: &Pic
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), position)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(height))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -459,7 +459,7 @@ fn show_color_parameter(app: &mut LizardApp, ctx: &egui::Context, target: &Picke
     crate::primitives::FloatingPanel::new(Id::new("shader_color_parameter_panel"), position)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(360.0))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -522,7 +522,7 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
     crate::primitives::FloatingPanel::new(Id::new("shader_code_editor"), position)
         .width(crate::primitives::FloatingPanelWidth::Wide)
         .height(crate::primitives::FloatingPanelHeight::Fixed(470.0))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);

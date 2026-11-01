@@ -1,6 +1,6 @@
 //! Compact gradient editor, laid out on the 240 × 329 reference dialog.
 
-use super::custom::{BORDER, FIELD, MUTED, PANEL, WIDTH, at, field, label_tab, paint_kind_button, vector_button};
+use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, vector_button};
 use super::*;
 
 const BASE_HEIGHT: f32 = 329.0;
@@ -129,7 +129,7 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
 
 fn draw_stop_marker(ui: &Ui, marker: Rect, color: Color, selected: bool) {
     let fill = if selected { Color32::WHITE } else { FIELD };
-    let border = if selected { Color32::from_gray(0x59) } else { PANEL };
+    let border = if selected { Color32::from_gray(0x59) } else { panel(ui.ctx()) };
     let center = marker.center().x;
     ui.painter().add(egui::Shape::convex_polygon(
         vec![pos2(center - 5.0, marker.bottom() - 1.0), pos2(center + 5.0, marker.bottom() - 1.0), pos2(center, marker.bottom() + 7.0)],
@@ -234,7 +234,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(height))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);

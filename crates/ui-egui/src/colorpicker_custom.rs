@@ -4,10 +4,14 @@ use super::*;
 
 pub(super) const WIDTH: f32 = 240.0;
 const HEIGHT: f32 = 513.0;
-pub(super) const PANEL: Color32 = crate::primitives::FloatingPanel::DARK_SURFACE;
 pub(super) const FIELD: Color32 = crate::primitives::FloatingPanel::DARK_FIELD;
 pub(super) const BORDER: Color32 = Color32::from_rgb(68, 68, 68);
 pub(super) const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
+
+pub(super) fn panel(ctx: &egui::Context) -> Color32 {
+    Tokens::get(ctx).picker_surface
+}
+
 const PAINT_KIND_HINTS: [&str; 6] = ["Solid", "Gradient", "Pattern", "Image", "Video", "Shader"];
 const PAINT_KIND_IDS: [&str; 6] = ["cp_kind0", "cp_kind1", "cp_kind2", "cp_kind3", "cp_kind4", "cp_kind5"];
 
@@ -63,7 +67,7 @@ pub(super) fn paint_kind_button(ui: &mut Ui, origin: Pos2, index: usize, selecte
 
 pub(super) fn label_tab(ui: &mut Ui, rect: Rect, id: &'static str, text: &str, active: bool) -> bool {
     let response = ui.interact(rect, Id::new(id), Sense::click()).tip(text);
-    ui.painter().rect_filled(rect, CornerRadius::same(5), if active { FIELD } else { PANEL });
+    ui.painter().rect_filled(rect, CornerRadius::same(5), if active { FIELD } else { panel(ui.ctx()) });
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -89,7 +93,7 @@ pub(super) fn header_tabs(ui: &mut Ui, origin: Pos2, id: &'static str, selected:
 }
 
 pub(super) fn field(ui: &Ui, rect: Rect, corners: CornerRadius, border: bool) {
-    ui.painter().rect_filled(rect, corners, if border { PANEL } else { FIELD });
+    ui.painter().rect_filled(rect, corners, if border { panel(ui.ctx()) } else { FIELD });
     if border {
         ui.painter().rect_stroke(rect, corners, Stroke::new(1.0, BORDER), StrokeKind::Inside);
     }
@@ -216,7 +220,7 @@ pub(super) fn show_standalone_solid(ctx: &egui::Context, color: Color, anchor: P
     crate::primitives::FloatingPanel::new(Id::new("theme_solid_color_picker"), anchor)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(414.0))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             ui.allocate_exact_size(vec2(WIDTH, 374.0), Sense::hover());
@@ -245,7 +249,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
     crate::primitives::FloatingPanel::new(Id::new(if stop.is_some() { "color_stop_picker" } else { "color_picker" }), pos)
         .width(crate::primitives::FloatingPanelWidth::Compact)
         .height(crate::primitives::FloatingPanelHeight::Fixed(height))
-        .fill(PANEL)
+        .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
