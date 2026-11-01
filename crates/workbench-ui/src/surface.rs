@@ -54,6 +54,22 @@ impl Surface {
         response
     }
 
+    /// Paint the same surface behind content that already owns a fixed rectangle and input area.
+    pub fn paint_at(&self, painter: &Painter, rect: Rect, theme: SurfaceTheme) {
+        let frame = self.frame(theme);
+        let margin = frame.inner_margin;
+        let content = Rect::from_min_max(
+            pos2(rect.min.x + f32::from(margin.left), rect.min.y + f32::from(margin.top)),
+            pos2(rect.max.x - f32::from(margin.right), rect.max.y - f32::from(margin.bottom)),
+        );
+        if !content.is_positive() {
+            return;
+        }
+        self.paint_close_shadow_outside(painter, rect);
+        painter.add(frame.paint(content));
+        self.paint_top_highlight(painter, rect);
+    }
+
     fn close_shadow(&self) -> Shadow {
         match self.variant {
             // CSS reference: 0 2px 4.375px #00000059. egui stores blur in whole pixels.

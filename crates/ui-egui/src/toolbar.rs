@@ -592,8 +592,8 @@ pub(crate) fn pill_rect(canvas: Rect, width: f32) -> Rect {
     Rect::from_center_size(pos2(canvas.center().x, canvas.max.y - 12.0 - 24.0), vec2(width, 48.0))
 }
 
-/// The floating pill (shadow, panel, border) `width` wide at the bottom centre of the canvas: the
-/// toolbar region keyboard navigation moves through.
+/// The floating toolbar surface `width` wide at the bottom centre of the canvas: the toolbar
+/// region keyboard navigation moves through.
 fn pill(ui: &Ui, nav: &mut Nav, canvas: Rect, width: f32, t: &Tokens) -> Rect {
     let rect = pill_rect(canvas, width);
     // The pill takes the press and the drag over it: its buttons sense clicks only, and egui gives
@@ -602,15 +602,7 @@ fn pill(ui: &Ui, nav: &mut Nav, canvas: Rect, width: f32, t: &Tokens) -> Rect {
     ui.interact(rect, ui.id().with("pill"), Sense::CLICK | Sense::DRAG);
     a11y::area(nav, Region::Toolbar, rect);
     a11y::container_bounds(ui, rect);
-    let painter = ui.painter();
-    for (i, a) in [(3.0, 12u8), (1.0, 30)] {
-        painter.rect_filled(rect.expand(i).translate(vec2(0.0, 1.0)), CornerRadius::same((12.0 + i) as u8), Color32::from_black_alpha(a));
-    }
-    painter.rect_filled(rect, CornerRadius::same(12), if t.dark { Color32::from_rgb(0x27, 0x27, 0x27) } else { t.panel });
-    painter.line_segment(
-        [pos2(rect.min.x + 12.0, rect.min.y + 0.5), pos2(rect.max.x - 12.0, rect.min.y + 0.5)],
-        Stroke::new(1.0, if t.dark { Color32::from_rgb(0x3e, 0x3c, 0x3e) } else { t.border }),
-    );
+    Surface::palette().paint_at(ui.painter(), rect, *t);
     rect
 }
 

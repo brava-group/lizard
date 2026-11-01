@@ -22,6 +22,9 @@ impl Surface {
         let tokens = Tokens::get(ui.ctx());
         self.0.show(ui, SurfaceTheme { dark: tokens.dark, panel: tokens.panel }, content)
     }
+    pub fn paint_at(&self, painter: &Painter, rect: Rect, tokens: Tokens) {
+        self.0.paint_at(painter, rect, SurfaceTheme { dark: tokens.dark, panel: tokens.panel });
+    }
     pub fn paint_close_shadow_outside(&self, painter: &Painter, rect: Rect) {
         self.0.paint_close_shadow_outside(painter, rect);
     }
