@@ -2321,6 +2321,7 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         }
         return;
     };
+    ui.data_mut(|data| data.insert_temp(Id::new("fx_open_count"), list.len()));
     if list.is_empty() {
         if has_chip {
             ui.add_space(12.0);
@@ -2374,6 +2375,20 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
 
 /// Salt of the flags that keep effect rows' settings open.
 const FX_OPEN: &str = "fx_open";
+
+/// Clear settings tied to the previous layer selection.
+pub(crate) fn dismiss_selection_panels(ctx: &egui::Context) {
+    let effect_count = ctx.data(|data| data.get_temp::<usize>(Id::new("fx_open_count"))).unwrap_or(0);
+    ctx.data_mut(|data| {
+        for key in ["corner_smoothing_open", "blend_open", "indep_corners"] {
+            data.insert_temp(Id::new(key), false);
+        }
+        for index in 0..effect_count {
+            data.insert_temp(Id::new((FX_OPEN, index)), false);
+        }
+        data.insert_temp(Id::new("fx_open_count"), 0usize);
+    });
+}
 
 /// Whether effect `i`'s settings are open in the Design panel.
 pub(crate) fn effect_open(ctx: &egui::Context, i: usize) -> bool {

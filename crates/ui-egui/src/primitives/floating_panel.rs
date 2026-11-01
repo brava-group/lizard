@@ -61,20 +61,64 @@ impl<'a> FloatingPanel<'a> {
         if t.dark { Self::DARK_SURFACE } else { t.panel }
     }
 
+    fn open_panels_id() -> Id {
+        Id::new("selection_floating_panels")
+    }
+
+    fn visible_panels_id() -> Id {
+        Id::new("visible_floating_panels")
+    }
+
+    pub fn begin_visibility_tracking(ctx: &Context) {
+        ctx.data_mut(|data| data.insert_temp(Self::visible_panels_id(), Vec::<Rect>::new()));
+    }
+
+    pub fn visible_panel_contains(ctx: &Context, position: Pos2) -> Option<bool> {
+        ctx.data(|data| data.get_temp::<Vec<Rect>>(Self::visible_panels_id()))
+            .filter(|rects| !rects.is_empty())
+            .map(|rects| rects.iter().any(|rect| rect.contains(position)))
+    }
+
     /// Toggle a property panel from its trigger without coupling the trigger to
     /// egui's selection-menu popup state.
     pub fn toggle(ctx: &Context, id: Id, clicked: bool) -> bool {
         let state_id = id.with("open");
         let was_open = ctx.data(|data| data.get_temp::<bool>(state_id)).unwrap_or(false);
         let open = if clicked { !was_open } else { was_open };
-        if clicked {
-            ctx.data_mut(|data| data.insert_temp(state_id, open));
+        if !open && !clicked {
+            return false;
         }
+        ctx.data_mut(|data| {
+            if clicked {
+                data.insert_temp(state_id, open);
+            }
+            let mut ids = data.get_temp::<Vec<Id>>(Self::open_panels_id()).unwrap_or_default();
+            if open && !ids.contains(&id) {
+                ids.push(id);
+            } else if !open && clicked {
+                ids.retain(|candidate| *candidate != id);
+            }
+            data.insert_temp(Self::open_panels_id(), ids);
+        });
         open
     }
 
     pub fn dismiss(ctx: &Context, id: Id) {
-        ctx.data_mut(|data| data.insert_temp(id.with("open"), false));
+        ctx.data_mut(|data| {
+            data.insert_temp(id.with("open"), false);
+            let mut ids = data.get_temp::<Vec<Id>>(Self::open_panels_id()).unwrap_or_default();
+            ids.retain(|candidate| *candidate != id);
+            data.insert_temp(Self::open_panels_id(), ids);
+        });
+    }
+
+    /// A property panel must not retain its open state after its layer selection changes.
+    pub fn dismiss_selection_panels(ctx: &Context) {
+        ctx.data_mut(|data| {
+            for id in data.remove_temp::<Vec<Id>>(Self::open_panels_id()).unwrap_or_default() {
+                data.insert_temp(id.with("open"), false);
+            }
+        });
     }
 
     /// A simple titled header. Callers may paint any other header instead.
@@ -225,6 +269,12 @@ impl<'a> FloatingPanel<'a> {
         });
         if let Some(result) = &result {
             ctx.data_mut(|d| d.insert_temp(self.id.with("height"), result.response.rect.height()));
+            ctx.data_mut(|data| {
+                if let Some(mut rects) = data.get_temp::<Vec<Rect>>(Self::visible_panels_id()) {
+                    rects.push(result.response.rect);
+                    data.insert_temp(Self::visible_panels_id(), rects);
+                }
+            });
         }
         result
     }

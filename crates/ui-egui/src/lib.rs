@@ -618,6 +618,8 @@ pub struct UiState {
     /// layer row or a press on the canvas).
     pub pages_focus: Option<u64>,
     pub layers_seen_sel: Vec<NodeId>,
+    /// Layer selection that owns the currently open property popovers.
+    pub selection_panels_owner: Option<(u64, Vec<NodeId>)>,
     pub dark: bool,
     pub follow_system: bool,
     pub tool_flyout: Option<&'static str>,
@@ -763,6 +765,7 @@ impl Default for UiState {
             layers_focus: false,
             pages_focus: None,
             layers_seen_sel: Vec::new(),
+            selection_panels_owner: None,
             dark: false,
             follow_system: false,
             tool_flyout: None,
@@ -1663,6 +1666,7 @@ impl LizardApp {
     /// One frame of the window drawing now.
     pub(crate) fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        primitives::FloatingPanel::begin_visibility_tracking(&ctx);
         let t = theme::Tokens::get(&ctx);
         // A field that had the keyboard when the frame began keeps its keys from the shortcuts
         // even if it lets go during the frame (Enter commits it), or as it began (egui drops the
@@ -1694,6 +1698,7 @@ impl LizardApp {
         self.session.tool.redlines = self.ui.right_tab == RightTab::Inspect;
         self.end_pen_outside_design();
         tabs::tab_bar(self, ui);
+        self.sync_selection_panels(&ctx);
         if self.ui.present.is_some() {
             // A close request can arrive while the presenter fills the window. Let its unsaved
             // changes dialog take Escape and draw above the player just as it does in the editor.
@@ -1753,7 +1758,7 @@ impl LizardApp {
                 right::right_panel(self, ui)
             });
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+        let canvas_area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             let worker = self.worker.take();
             let mut worker = worker.unwrap_or_else(|| render_worker::Worker::new(ctx.clone()));
             canvas::show(self, ui, &mut worker);
@@ -1788,9 +1793,12 @@ impl LizardApp {
         dialogs::keys(self, &ctx);
         shortcuts::handle(self, &ctx, typing, swallowed);
         menus::popups(self, &ctx);
+        self.sync_selection_panels(&ctx);
         variable_ui::picker(self, &ctx);
         style_picker::show(self, &ctx);
         colorpicker::show_standalone_creation(self, &ctx);
+        let workspace = egui::Rect::from_min_max(ctx.content_rect().min, egui::pos2(canvas_area.response.rect.right(), ctx.content_rect().max.y));
+        self.dismiss_panels_on_workspace_press(&ctx, workspace);
         self.end_unwanted_text_preview(&ctx);
         self.end_pen_outside_design();
         dialogs::show(self, &ctx);
@@ -1807,6 +1815,32 @@ impl LizardApp {
         // changed), from the window with its file.
         let windows = &self.windows;
         self.session.live_sync_in(|uid| uid.map_or(0, |u| windows.of(u)) == windows.current);
+    }
+
+    fn sync_selection_panels(&mut self, ctx: &egui::Context) {
+        let owner = (self.windows.current, self.session.selection());
+        if self.ui.selection_panels_owner.as_ref() == Some(&owner) {
+            return;
+        }
+        if self.ui.selection_panels_owner.is_some() {
+            primitives::FloatingPanel::dismiss_selection_panels(ctx);
+            right::dismiss_selection_panels(ctx);
+            proto_panel::open_editor(ctx, None);
+        }
+        self.ui.selection_panels_owner = Some(owner);
+    }
+
+    fn dismiss_panels_on_workspace_press(&mut self, ctx: &egui::Context, workspace: egui::Rect) {
+        let outside = ctx.input(|input| input.pointer.any_pressed().then(|| input.pointer.interact_pos()).flatten())
+            .filter(|position| workspace.contains(*position))
+            .and_then(|position| primitives::FloatingPanel::visible_panel_contains(ctx, position))
+            == Some(false);
+        if outside && !egui::Popup::is_any_open(ctx) {
+            primitives::FloatingPanel::dismiss_selection_panels(ctx);
+            right::dismiss_selection_panels(ctx);
+            proto_panel::open_editor(ctx, None);
+            colorpicker::dismiss(self, ctx);
+        }
     }
 
     fn toast_ui(&mut self, ctx: &egui::Context) {

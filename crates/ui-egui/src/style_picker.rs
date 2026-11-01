@@ -1737,6 +1737,17 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     let Ok(doc) = app.session.ds().map(|d| d.text_preview.clone().unwrap_or_else(|| d.doc.clone())) else { return };
     // A new selection closes the picker (it acts on the layers it was opened for).
     if app.session.selection() != p.ids {
+        if matches!(app.ui.picker, Some(PickerTarget::Style { .. } | PickerTarget::StyleEffect { .. } | PickerTarget::DraftStyle { .. })) {
+            crate::colorpicker::dismiss(app, ctx);
+        }
+        crate::primitives::FloatingPanel::dismiss(ctx, Id::new("text_style_font_panel"));
+        crate::primitives::FloatingPanel::dismiss(ctx, Id::new("text_style_settings_panel"));
+        if let Some(edit) = &p.edit {
+            ctx.data_mut(|data| {
+                data.remove_temp::<usize>(Id::new(("effect_style_open", &edit.id)));
+                data.remove_temp::<usize>(Id::new(("grid_style_open", &edit.id)));
+            });
+        }
         if let Some(e) = &p.edit {
             commit_edit(app, &doc, e);
         }

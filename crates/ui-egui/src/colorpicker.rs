@@ -297,6 +297,16 @@ fn finish(app: &mut LizardApp) {
     }
 }
 
+pub(crate) fn dismiss(app: &mut LizardApp, ctx: &egui::Context) {
+    if app.ui.picker.is_some() {
+        finish(app);
+        app.ui.picker = None;
+        ctx.data_mut(|data| data.remove::<usize>(Id::new("cp_gradient_stop_popup")));
+        library_tab::deactivate(ctx);
+        shader_tab::deactivate(ctx);
+    }
+}
+
 /// The selected gradient stop in the picker (shared with the on-canvas stops).
 pub fn stop_id() -> Id {
     Id::new("cp_stop")
@@ -580,12 +590,7 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     };
     let current = if stale { None } else { current_paint(app, &target) };
     let Some(mut paint) = current else {
-        if matches!(target, PickerTarget::SelectionColor { .. }) {
-            finish(app);
-        }
-        app.ui.picker = None;
-        library_tab::deactivate(ctx);
-        shader_tab::deactivate(ctx);
+        dismiss(app, ctx);
         return;
     };
     if library_tab::active(ctx) {
