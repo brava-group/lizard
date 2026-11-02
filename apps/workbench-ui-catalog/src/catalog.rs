@@ -97,7 +97,6 @@ enum Page {
     ImagePicker,
     PatternPicker,
     ColorLibrary,
-    StylePicker,
     Variables,
     Shortcuts,
     Plugins,
@@ -187,7 +186,6 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::ImagePicker, "Popovers", "Image editor", "colorpicker::show · image"),
     (Page::PatternPicker, "Popovers", "Pattern editor", "colorpicker::show · pattern"),
     (Page::ColorLibrary, "Popovers", "Color libraries", "colorpicker::show · libraries tab"),
-    (Page::StylePicker, "Popovers", "Style picker", "style_picker::show"),
     (Page::Variables, "Windows", "Variables", "variables_panel::show"),
     (Page::Shortcuts, "Windows", "Shortcuts", "shortcuts_panel::show"),
     (Page::Plugins, "Windows", "Plugins", "plugins_ui::show"),
@@ -303,7 +301,15 @@ impl Default for State {
             property_selection: None,
             property_binding_attached: true,
             property_binding_located: false,
-            property_names: ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()],
+            property_names: [
+                "Property 1".into(),
+                "Text".into(),
+                "Boolean".into(),
+                "Instance".into(),
+                "Slot".into(),
+                "Label".into(),
+                "Content".into(),
+            ],
             property_visible: [true; 7],
             cursor_playground: cursor_playground::State::default(),
         }
@@ -494,7 +500,6 @@ impl Fixture {
             Page::Layers => self.layer_tree.first().copied().into_iter().collect(),
             Page::ColorControl => self.color.into_iter().collect(),
             Page::RectangleProperties
-            | Page::StylePicker
             | Page::ColorPicker
             | Page::ColorLibrary
             | Page::Prototype
@@ -638,7 +643,6 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
                 ids: fixture.ids(state.page).into_iter().map(NodeId).collect(),
             })
         }
-        Page::StylePicker => lizard_ui_egui::style_picker::open_for_selection(fig, lizard_ui_egui::style_picker::StyleSlot::Fill, None),
         Page::Variables => fig.ui.variables = Some(lizard_ui_egui::variables_panel::Editor::on(None)),
         Page::Shortcuts => fig.ui.shortcuts_panel = true,
         Page::Plugins => fig.ui.plugins_window = true,
@@ -710,7 +714,9 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                 ui.set_min_height((total.y - 32.0).max(0.0));
                 ui.spacing_mut().item_spacing.y = 4.0;
                 ui.label(egui::RichText::new("Workbench UI").font(theme::semibold(16.0)).color(t.text));
-                ui.label(egui::RichText::new(format!("{} component pages · local only", PAGES.len())).font(theme::regular(11.0)).color(t.text_secondary));
+                ui.label(
+                    egui::RichText::new(format!("{} component pages · local only", PAGES.len())).font(theme::regular(11.0)).color(t.text_secondary),
+                );
                 ui.add_space(8.0);
                 if Button::new(if state.dark { "Light mode" } else { "Dark mode" })
                     .variant(ButtonVariant::Ghost)
@@ -776,7 +782,6 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     | Page::ImagePicker
                     | Page::PatternPicker
                     | Page::ColorLibrary
-                    | Page::StylePicker
                     | Page::Variables
                     | Page::Shortcuts
                     | Page::Plugins
@@ -840,7 +845,6 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
         Page::ColorControl | Page::ColorPicker | Page::GradientPicker | Page::ImagePicker | Page::PatternPicker | Page::ColorLibrary => {
             lizard_ui_egui::colorpicker::show(fig, ui.ctx())
         }
-        Page::StylePicker => lizard_ui_egui::style_picker::show(fig, ui.ctx()),
         Page::Variables => lizard_ui_egui::variables_panel::show(fig, ui.ctx()),
         Page::Shortcuts => lizard_ui_egui::shortcuts_panel::show(fig, ui.ctx()),
         Page::Plugins => lizard_ui_egui::plugins_ui::show(fig, ui.ctx()),
@@ -923,7 +927,6 @@ fn production_preview(ui: &mut Ui, fig: &mut LizardApp, page: Page) {
             | Page::ImagePicker
             | Page::PatternPicker
             | Page::ColorLibrary
-            | Page::StylePicker
             | Page::Variables
             | Page::Shortcuts
             | Page::Plugins
@@ -1256,8 +1259,9 @@ fn text_fields(ui: &mut Ui, state: &mut State) {
     });
     example(ui, "Text input with presets", "Edit the text directly or open the joined chevron to choose a variant value.", |ui| {
         let values = ["Default", "Hover", "Active"];
-        if let Some(next) =
-            TextFieldWithPresets::new(Id::new("library_text_presets"), &state.text_presets, &values).rename_action().show(ui, ControlWidth::Fixed(160.0))
+        if let Some(next) = TextFieldWithPresets::new(Id::new("library_text_presets"), &state.text_presets, &values)
+            .rename_action()
+            .show(ui, ControlWidth::Fixed(160.0))
         {
             state.text_presets = next;
         }
@@ -1549,7 +1553,8 @@ fn property_controllers(ui: &mut Ui, state: &mut State) {
         });
     });
     if Button::new("Reset examples").variant(ButtonVariant::Secondary).show(ui).clicked() {
-        state.property_names = ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()];
+        state.property_names =
+            ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()];
         state.property_visible = [true; 7];
         state.property_selection = None;
         state.property_binding_attached = true;

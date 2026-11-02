@@ -6,14 +6,12 @@
 //! chars of the text being edited). Click applies a style (a library's is copied in, linked); a
 //! local style's edit button (or a right-click) edits its name, description and values; `+`
 //! creates a style from the selection (for text, the selected chars); the detach button unlinks
-//! it. Colour slots also list colour variables to bind (this file's, then each enabled library's).
+//! it. Colour slots open the shared Color libraries browser and retain their style editor here.
 
 use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use lizard_color::{Paint, PaintKind};
-use lizard_doc::{
-    Document, Effect, GridKind, LayoutGrid, Node, NodeId, NodeKind, PublishedLibrary, Style, StyleKind, TextStyle, VariableType, trim_num,
-};
+use lizard_doc::{Document, Effect, GridKind, LayoutGrid, Node, NodeId, NodeKind, PublishedLibrary, Style, StyleKind, TextStyle, trim_num};
 use lizard_engine::library;
 use serde_json::{Value, json};
 
@@ -22,7 +20,7 @@ use crate::a11y::Tip;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::{tr, trf};
 use crate::icons::{self, Icon, LayoutIcon};
-use crate::primitives::{Button, ButtonBehavior, ControlWidth, SearchField, Select, SelectPosition, Tab, Tabs};
+use crate::primitives::{Button, ButtonBehavior, ControlWidth, SearchField};
 use crate::theme::{Tokens, regular, semibold};
 use crate::widgets;
 
@@ -161,10 +159,6 @@ pub struct Picker {
     y: f32,
     query: String,
     edit: Option<Editing>,
-    /// Colour styles show local colours in Custom and all sources in Libraries.
-    libraries_tab: bool,
-    /// The library selected in the colour picker: None is all, `_local` is this file.
-    library_filter: Option<String>,
     /// The book button narrows the text and effect pickers to enabled libraries.
     libraries_only: bool,
 }
@@ -177,25 +171,38 @@ impl Picker {
 
 /// Open the picker for `slot` of `ids`, centred on the trigger when space permits.
 pub fn open(app: &mut LizardApp, ui: &Ui, ids: &[NodeId], slot: StyleSlot) {
+    if slot.paints() {
+        crate::colorpicker::open_style_library(app, ui.ctx(), ids.to_vec(), slot == StyleSlot::Fill);
+        return;
+    }
+    if matches!(app.ui.picker, Some(PickerTarget::ColorLibraryStyle { .. })) {
+        crate::colorpicker::dismiss(app, ui.ctx());
+    }
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y);
-    app.ui.style_picker = Some(Picker {
-        slot,
-        ids: ids.to_vec(),
-        y,
-        query: String::new(),
-        edit: None,
-        libraries_tab: true,
-        library_filter: None,
-        libraries_only: false,
-    });
+    app.ui.style_picker = Some(Picker { slot, ids: ids.to_vec(), y, query: String::new(), edit: None, libraries_only: false });
 }
 
 /// Open the picker for `slot` of the selection (the control channel), optionally editing `style`.
 pub fn open_for_selection(app: &mut LizardApp, slot: StyleSlot, style: Option<&str>) {
     let ids = app.session.selection();
     let edit = style.and_then(|s| app.session.doc().ok()?.style(s).map(editing));
-    app.ui.style_picker =
-        Some(Picker { slot, ids, y: 140.0, query: String::new(), edit, libraries_tab: true, library_filter: None, libraries_only: false });
+    if slot.paints() && edit.is_none() {
+        if let Some(ctx) = app.ui_context.clone() {
+            crate::colorpicker::open_style_library(app, &ctx, ids, slot == StyleSlot::Fill);
+        } else {
+            app.ui.style_picker = None;
+            app.ui.picker = Some(PickerTarget::ColorLibraryStyle { fills: slot == StyleSlot::Fill, ids });
+        }
+        return;
+    }
+    if matches!(app.ui.picker, Some(PickerTarget::ColorLibraryStyle { .. })) {
+        if let Some(ctx) = app.ui_context.clone() {
+            crate::colorpicker::dismiss(app, &ctx);
+        } else {
+            app.ui.picker = None;
+        }
+    }
+    app.ui.style_picker = Some(Picker { slot, ids, y: 140.0, query: String::new(), edit, libraries_only: false });
 }
 
 fn editing(s: &Style) -> Editing {
@@ -284,8 +291,6 @@ impl Key {
 /// What the user asked the picker to do this frame.
 enum Act {
     Apply(Key),
-    UseCustomColor,
-    Bind(crate::variable_ui::Pick),
     Create,
     Edit(String),
     Back,
@@ -561,48 +566,34 @@ fn offered<'a>(doc: &'a Document, lib: Option<&'a PublishedLibrary>, slot: Style
 fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame, header: Rect) {
     let t = Tokens::get(ui.ctx());
     let slot = p.slot;
-    let color = slot.paints();
     let grid = slot.has_grid() && app.ui.style_grid;
     let applied = link_of(app, doc, &p.ids, slot).flatten().map(|id| Key::of_local(doc, &id));
     let border = Stroke::new(1.0, t.border);
 
-    if color {
-        let tabs = [Tab::new(tr("Custom")), Tab::new(tr("Libraries"))];
-        let tabs_rect = Rect::from_min_size(pos2(header.left() + 8.0, header.top() + 4.0), vec2(168.0, 32.0));
-        let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
-        if let Some(index) = Tabs::new(Id::new("color_style_picker_tabs"), &tabs, Some(usize::from(p.libraries_tab)))
-            .width(ControlWidth::Fixed(168.0))
-            .selected_fill(if t.dark { crate::primitives::FloatingPanel::DARK_FIELD } else { t.field })
-            .show(&mut tabs_ui)
-        {
-            p.libraries_tab = index == 1;
+    ui.painter().text(pos2(header.left() + 16.0, header.center().y), Align2::LEFT_CENTER, slot.title(), semibold(11.0), t.text);
+    let book = Rect::from_center_size(pos2(header.right() - 88.0, header.center().y), vec2(24.0, 24.0));
+    let book_button = Button::icon(Icon::Library, tr("Libraries"))
+        .behavior(ButtonBehavior::Toggle { selected: p.libraries_only })
+        .icon_size(16.0)
+        .show_at(ui, Id::new(("style_picker_libraries", slot.key())), book);
+    crate::right::menu_popup(&book_button).show(|ui| {
+        if crate::right::menu_check(ui, !p.libraries_only, tr("Styles"), "") {
+            p.libraries_only = false;
+            ui.close();
         }
-    } else {
-        ui.painter().text(pos2(header.left() + 16.0, header.center().y), Align2::LEFT_CENTER, slot.title(), semibold(11.0), t.text);
-        let book = Rect::from_center_size(pos2(header.right() - 88.0, header.center().y), vec2(24.0, 24.0));
-        let book_button = Button::icon(Icon::Library, tr("Libraries"))
-            .behavior(ButtonBehavior::Toggle { selected: p.libraries_only })
-            .icon_size(16.0)
-            .show_at(ui, Id::new(("style_picker_libraries", slot.key())), book);
-        crate::right::menu_popup(&book_button).show(|ui| {
-            if crate::right::menu_check(ui, !p.libraries_only, tr("Styles"), "") {
-                p.libraries_only = false;
+        if crate::right::menu_check(ui, p.libraries_only, tr("Libraries"), "") {
+            p.libraries_only = true;
+            ui.close();
+        }
+        if slot.has_grid() {
+            crate::primitives::Menu::separator(ui, None);
+            let label = if grid { tr("Show as list") } else { tr("Show as grid") };
+            if crate::right::menu_item(ui, label, "") {
+                out.act = Some(Act::ToggleView);
                 ui.close();
             }
-            if crate::right::menu_check(ui, p.libraries_only, tr("Libraries"), "") {
-                p.libraries_only = true;
-                ui.close();
-            }
-            if slot.has_grid() {
-                crate::primitives::Menu::separator(ui, None);
-                let label = if grid { tr("Show as list") } else { tr("Show as grid") };
-                if crate::right::menu_item(ui, label, "") {
-                    out.act = Some(Act::ToggleView);
-                    ui.close();
-                }
-            }
-        });
-    }
+        }
+    });
     let add_rect = Rect::from_center_size(pos2(header.right() - 52.0, header.center().y), vec2(24.0, 24.0));
     let create_tip = if slot == StyleSlot::Text { tr("Create style from the selected text") } else { tr("Create style") };
     if Button::icon(Icon::Plus, create_tip).icon_size(16.0).show_at(ui, Id::new(("style_picker_add", slot.key())), add_rect).clicked() {
@@ -625,84 +616,23 @@ fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &m
         .show(&mut search_ui, &mut p.query);
     ui.painter().hline(search_row.x_range(), search_row.bottom() - 0.5, border);
 
-    let libs = crate::variable_ui::libraries(app, doc);
-    if color && p.libraries_tab {
-        let (filter_row, _) = ui.allocate_exact_size(vec2(W, 40.0), Sense::hover());
-        let mut names = vec![tr("All libraries").to_string(), tr("This file").to_string()];
-        names.extend(libs.iter().map(|library| library.manifest.name.clone()));
-        let labels: Vec<&str> = names.iter().map(String::as_str).collect();
-        let selected = match p.library_filter.as_deref() {
-            Some("_local") => 1,
-            Some(id) => libs.iter().position(|library| library.manifest.id == id).map_or(0, |index| index + 2),
-            None => 0,
-        };
-        let select_rect = Rect::from_min_size(pos2(filter_row.left() + 16.0, filter_row.top() + 8.0), vec2(160.0, 24.0));
-        let mut select_ui = ui.new_child(egui::UiBuilder::new().max_rect(select_rect));
-        if let Some(index) =
-            Select::new(&labels, selected).label(tr("Libraries")).width(ControlWidth::Fill).position(SelectPosition::BottomLeft).show(&mut select_ui)
-        {
-            p.library_filter = match index {
-                0 => None,
-                1 => Some("_local".to_string()),
-                other => libs.get(other - 2).map(|library| library.manifest.id.clone()),
-            };
-        }
-        let view_rect = Rect::from_center_size(pos2(filter_row.right() - 24.0, filter_row.center().y), vec2(24.0, 24.0));
-        let (icon, hint) = if grid { (Icon::ViewList, tr("Show as list")) } else { (Icon::ViewGrid, tr("Show as grid")) };
-        if Button::icon(icon, hint).icon_size(16.0).show_at(ui, Id::new("color_style_picker_view"), view_rect).clicked() {
-            out.act = Some(Act::ToggleView);
-        }
-        ui.painter().hline(filter_row.x_range(), filter_row.bottom() - 0.5, border);
-    }
-
     let q = p.query.trim().to_lowercase();
-    let filter = if color && !p.libraries_tab { None } else { p.library_filter.as_deref() };
-    let local = !p.libraries_only && (!color || !p.libraries_tab || filter.is_none() || filter == Some("_local"));
-    let remote = !color || p.libraries_tab;
+    let libs = crate::variable_ui::libraries(app, doc);
     let mut sources: Vec<(Option<&PublishedLibrary>, Vec<&Style>)> = Vec::new();
-    if local {
+    if !p.libraries_only {
         sources.push((None, offered(doc, None, slot, &q)));
     }
-    if remote && filter != Some("_local") {
-        for library in &libs {
-            if color && filter.is_some_and(|id| id != library.manifest.id.as_str()) {
-                continue;
-            }
-            let list = offered(doc, Some(library), slot, &q);
-            if !list.is_empty() {
-                sources.push((Some(library.as_ref()), list));
-            }
+    for library in &libs {
+        let list = offered(doc, Some(library), slot, &q);
+        if !list.is_empty() {
+            sources.push((Some(library.as_ref()), list));
         }
     }
-    let colors = if color {
-        crate::variable_ui::groups(doc, &libs, |_, variable| {
-            variable.kind == VariableType::Color && (q.is_empty() || variable.name.to_lowercase().contains(&q))
-        })
-    } else {
-        Vec::new()
-    };
-    let current_paint = if color && local {
-        p.ids.first().and_then(|id| doc.node(*id)).and_then(|node| if slot == StyleSlot::Fill { node.fills.last() } else { node.strokes.last() })
-    } else {
-        None
-    };
-    let list_height = if color { if p.libraries_tab { 307.0 } else { 347.0 } } else { 300.0 };
-    egui::ScrollArea::vertical().id_salt(("style_picker_scroll", slot.key())).max_height(list_height).auto_shrink([false, false]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt(("style_picker_scroll", slot.key())).max_height(300.0).auto_shrink([false, false]).show(ui, |ui| {
         ui.set_width(W - 12.0);
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.add_space(8.0);
-        if let Some(paint) = current_paint {
-            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-            if response.hovered() || applied.is_none() {
-                ui.painter().rect_filled(rect, CornerRadius::ZERO, t.menu_hover);
-            }
-            widgets::paint_swatch(ui.painter(), Rect::from_center_size(pos2(rect.left() + 28.0, rect.center().y), vec2(16.0, 16.0)), paint);
-            ui.painter().text(pos2(rect.left() + 48.0, rect.center().y), Align2::LEFT_CENTER, tr("Color"), regular(11.0), t.text);
-            if response.clicked() {
-                out.act = Some(Act::UseCustomColor);
-            }
-        }
-        if sources.iter().all(|(_, styles)| styles.is_empty()) && current_paint.is_none() {
+        if sources.iter().all(|(_, styles)| styles.is_empty()) {
             let any = library::local_styles(doc).any(|style| slot.holds(&style.kind));
             let hint = match (any, slot) {
                 (true, _) => tr("No matching styles"),
@@ -721,9 +651,6 @@ fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &m
                 let (title, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
                 ui.painter().hline(title.left()..=title.right() + 12.0, title.top() - 0.5, border);
                 ui.painter().text(pos2(title.left() + 16.0, title.center().y), Align2::LEFT_CENTER, &library.manifest.name, semibold(11.0), t.text);
-            } else if color {
-                let (title, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-                ui.painter().text(pos2(title.left() + 16.0, title.center().y), Align2::LEFT_CENTER, tr("Styles"), semibold(11.0), t.text);
             }
             let library_id = library.map(|library| library.manifest.id.clone());
             for (folder, group) in by_folder(styles.iter().copied()) {
@@ -768,26 +695,6 @@ fn listing(app: &LizardApp, ui: &mut Ui, doc: &Document, p: &mut Picker, out: &m
                         let can_edit = editable(&key);
                         style_row(ui, style, key, slot, on, can_edit, out);
                     }
-                }
-            }
-        }
-        for (library, collection, variables) in &colors {
-            let library_id = library.map(|library| library.manifest.id.as_str());
-            if (library_id.is_none() && !local)
-                || (library_id.is_some() && (!remote || filter == Some("_local")))
-                || (color && filter.is_some_and(|id| id != "_local" && Some(id) != library_id))
-            {
-                continue;
-            }
-            crate::variable_ui::group_caption(ui, *library, collection);
-            let all = library.map_or(&doc.variables, |library| &library.doc.variables);
-            for variable in variables {
-                let width = ui.available_width();
-                if crate::variable_ui::variable_row(ui, all, variable, width) {
-                    out.act = Some(Act::Bind(crate::variable_ui::Pick {
-                        library: library.map(|library| library.manifest.id.clone()),
-                        id: variable.id.clone(),
-                    }));
                 }
             }
         }
@@ -1885,14 +1792,6 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
             app.run(cmd, params);
             close = true;
         }
-        Some(Act::UseCustomColor) => {
-            app.run("style.detach", json!({"ids": ids, "which": slot.key()}));
-            close = true;
-        }
-        Some(Act::Bind(pick)) => {
-            crate::variable_ui::bind(app, &ids, slot.key(), &pick);
-            close = true;
-        }
         Some(Act::Create) => {
             let name = next_name(&doc, slot.default_name());
             let made = app.run("style.create", json!({"type": slot.create_type(), "name": name, "from": ids.first()}));
@@ -1990,16 +1889,10 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
 fn edit_local(app: &mut LizardApp, ui: &Ui, slot: StyleSlot, id: &str) {
     let y = ui.input(|i| i.pointer.interact_pos()).map_or(140.0, |p| p.y - 12.0);
     let edit = app.session.doc().ok().and_then(|d| d.style(id).map(editing));
-    app.ui.style_picker = Some(Picker {
-        slot,
-        ids: app.session.selection(),
-        y,
-        query: String::new(),
-        edit,
-        libraries_tab: true,
-        library_filter: None,
-        libraries_only: false,
-    });
+    if edit.is_none() {
+        return;
+    }
+    app.ui.style_picker = Some(Picker { slot, ids: app.session.selection(), y, query: String::new(), edit, libraries_only: false });
 }
 
 /// `style.move` for the shown style `from` dropped at shown position `to` (`shown` in display

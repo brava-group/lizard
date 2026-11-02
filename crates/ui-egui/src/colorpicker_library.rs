@@ -1,6 +1,6 @@
 //! Libraries and the adjacent style/variable creation panel of the colour picker.
-use crate::primitives::TooltipResponseExt as _;
 use super::*;
+use crate::primitives::TooltipResponseExt as _;
 use lizard_doc::{StyleKind, VariableType, VariableValue};
 use lizard_engine::library;
 
@@ -213,6 +213,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     let pos = pos2(screen.max.x - app.ui.right_width - 260.0, 140.0);
     let rows = collect(app, &doc, &s.query, &s.filter);
     let mut picked: Option<Swatch> = None;
+    let mut edit_style: Option<String> = None;
     let mut close = false;
     let mut custom = false;
     crate::primitives::FloatingPanel::new(Id::new("color_picker"), pos)
@@ -317,7 +318,12 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                                 for swatch in entries {
                                     let (r, response) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
                                     ui.painter().rect_filled(r.shrink(3.0), CornerRadius::same(5), doc_c32(ctx, swatch.color));
-                                    if response.lizard_tooltip(&swatch.name).clicked() {
+                                    let response = response.lizard_tooltip(&swatch.name);
+                                    if response.double_clicked()
+                                        && let Some((None, id)) = &swatch.style
+                                    {
+                                        edit_style = Some(id.clone());
+                                    } else if response.clicked() {
                                         picked = Some(swatch.clone());
                                     }
                                 }
@@ -342,7 +348,11 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                                     doc_c32(ctx, swatch.color),
                                 );
                                 ui.painter().text(r.min + vec2(27.0, 14.0), Align2::LEFT_CENTER, label, regular(11.0), Color32::WHITE);
-                                if response.clicked() {
+                                if response.double_clicked()
+                                    && let Some((None, id)) = &swatch.style
+                                {
+                                    edit_style = Some(id.clone());
+                                } else if response.clicked() {
                                     picked = Some(swatch.clone());
                                 }
                             }
@@ -354,37 +364,35 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     if custom {
         s.active = false;
         s.create = None;
+        if let PickerTarget::ColorLibraryStyle { fills, ids } = target {
+            let index = ids.first().and_then(|id| doc.node(*id)).map(|node| if *fills { node.fills.len() } else { node.strokes.len() });
+            if let Some(index) = index.and_then(|len| len.checked_sub(1)) {
+                app.ui.picker = Some(PickerTarget::Paint { fills: *fills, index, ids: ids.clone() });
+            } else {
+                app.ui.picker = None;
+            }
+        }
     }
     if close {
         app.ui.picker = None;
         s.active = false;
         s.create = None;
     }
-    if let Some(swatch) = picked {
-        match (&target, &swatch.style, &swatch.variable) {
-            (PickerTarget::Paint { fills, ids, .. }, Some((lib, id)), _) => {
-                let kind = if *fills { "fill" } else { "stroke" };
-                if let Some(lib) = lib {
-                    app.run("library.applyStyle", json!({"library": lib, "style": id, "ids": ids, "target": kind}));
-                } else {
-                    app.run("style.apply", json!({"style": id, "ids": ids, "target": kind}));
-                }
-            }
-            (PickerTarget::Paint { fills, index, ids }, _, Some((lib, id))) => {
-                let field = format!("{}/{index}/color", if *fills { "fills" } else { "strokes" });
-                if let Some(lib) = lib {
-                    app.run("library.bindVariable", json!({"library": lib, "variable": id, "ids": ids, "field": field}));
-                } else {
-                    app.run("variable.bind", json!({"variable": id, "ids": ids, "field": field}));
-                }
-            }
-            _ => {
-                let mut next = paint.clone();
-                next.kind = PaintKind::Solid { color: swatch.color.with_alpha(1.0) };
-                next.opacity = swatch.color.a;
-                write(app, target, &next, false);
-            }
-        }
+    if let Some(id) = edit_style {
+        app.ui.picker = None;
+        s.active = false;
+        s.create = None;
+        crate::style_picker::open_for_selection(
+            app,
+            if matches!(target, PickerTarget::ColorLibraryStyle { fills: true, .. } | PickerTarget::Paint { fills: true, .. }) {
+                crate::style_picker::StyleSlot::Fill
+            } else {
+                crate::style_picker::StyleSlot::Stroke
+            },
+            Some(&id),
+        );
+    } else if let Some(swatch) = picked {
+        apply_swatch(app, target, &swatch, &paint);
         app.ui.picker = None;
         s.active = false;
         s.create = None;
@@ -394,6 +402,41 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
         creation_panel(app, ctx, &doc, library_pos, &mut s, kind);
     }
     save(ctx, s);
+}
+
+fn apply_swatch(app: &mut LizardApp, target: &PickerTarget, swatch: &Swatch, paint: &Paint) {
+    match (target, &swatch.style, &swatch.variable) {
+        (PickerTarget::Paint { fills, ids, .. } | PickerTarget::ColorLibraryStyle { fills, ids }, Some((lib, id)), _) => {
+            let kind = if *fills { "fill" } else { "stroke" };
+            if let Some(lib) = lib {
+                app.run("library.applyStyle", json!({"library": lib, "style": id, "ids": ids, "target": kind}));
+            } else {
+                app.run("style.apply", json!({"style": id, "ids": ids, "target": kind}));
+            }
+        }
+        (PickerTarget::ColorLibraryStyle { fills, ids }, _, Some((lib, id))) => {
+            crate::variable_ui::bind(
+                app,
+                ids,
+                if *fills { "fill" } else { "stroke" },
+                &crate::variable_ui::Pick { library: lib.clone(), id: id.clone() },
+            );
+        }
+        (PickerTarget::Paint { fills, index, ids }, _, Some((lib, id))) => {
+            let field = format!("{}/{index}/color", if *fills { "fills" } else { "strokes" });
+            if let Some(lib) = lib {
+                app.run("library.bindVariable", json!({"library": lib, "variable": id, "ids": ids, "field": field}));
+            } else {
+                app.run("variable.bind", json!({"variable": id, "ids": ids, "field": field}));
+            }
+        }
+        _ => {
+            let mut next = paint.clone();
+            next.kind = PaintKind::Solid { color: swatch.color.with_alpha(1.0) };
+            next.opacity = swatch.color.a;
+            write(app, target, &next, false);
+        }
+    }
 }
 
 fn creation_panel(app: &mut LizardApp, ctx: &egui::Context, doc: &lizard_doc::Document, library_pos: Pos2, s: &mut State, kind: CreateKind) {
@@ -611,6 +654,8 @@ fn creation_panel(app: &mut LizardApp, ctx: &egui::Context, doc: &lizard_doc::Do
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NoServices;
+    use lizard_engine::Session;
 
     #[test]
     fn creation_rows_save_as_bottom_first_without_losing_fill_properties() {
@@ -621,5 +666,25 @@ mod tests {
         let stored = creation_style_paints(&state);
         assert_eq!(stored, vec![bottom, top]);
         assert_eq!(stored[1].opacity, 0.62);
+    }
+
+    #[test]
+    fn shared_library_applies_color_styles_to_fill_and_stroke_slots() {
+        let mut session = Session::new();
+        let id = NodeId(session.execute("shape.rectangle", &json!({"width": 40, "height": 40})).unwrap()["id"].as_u64().unwrap());
+        let style = session.execute("style.create", &json!({"type": "paint", "name": "Brand/Blue", "value": ["#0D99FF"]})).unwrap();
+        let style_id = style["id"].as_str().unwrap().to_string();
+        let mut app = LizardApp::new(session, Box::new(NoServices));
+        let swatch = Swatch {
+            name: "Brand/Blue".to_string(),
+            color: Color::from_hex("#0D99FF").unwrap(),
+            style: Some((None, style_id.clone())),
+            variable: None,
+        };
+        for fills in [true, false] {
+            apply_swatch(&mut app, &PickerTarget::ColorLibraryStyle { fills, ids: vec![id] }, &swatch, &Paint::solid(Color::TRANSPARENT));
+            let links = &app.session.doc().unwrap().node(id).unwrap().styles;
+            assert_eq!(if fills { &links.fill } else { &links.stroke }, &Some(style_id.clone()));
+        }
     }
 }

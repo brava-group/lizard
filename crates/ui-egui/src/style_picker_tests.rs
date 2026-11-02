@@ -74,7 +74,14 @@ fn picker_draws_every_view_and_commits_a_typed_name_on_close() {
             for _ in 0..3 {
                 frame(&ctx, &mut app, &mut t);
             }
-            assert_eq!(app.ui.style_picker.as_ref().map(Picker::slot), Some(slot), "{slot:?} stays open");
+            if slot.paints() {
+                assert!(matches!(app.ui.picker, Some(PickerTarget::ColorLibraryStyle { fills, .. }) if fills == (slot == StyleSlot::Fill)));
+                assert!(app.ui.style_picker.is_none(), "color styles use Color libraries");
+                assert!(ctx.memory(|memory| memory.area_rect(Id::new("color_picker"))).is_some(), "the Color libraries panel is visible");
+            } else {
+                assert_eq!(app.ui.style_picker.as_ref().map(Picker::slot), Some(slot), "{slot:?} stays open");
+                assert!(!matches!(app.ui.picker, Some(PickerTarget::ColorLibraryStyle { .. })), "the color browser closes for other style types");
+            }
         }
     }
     // Folders fold.

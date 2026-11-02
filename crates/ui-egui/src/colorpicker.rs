@@ -40,6 +40,13 @@ pub(crate) fn open_creation_from_eyedropper(ctx: &egui::Context, color: Color) {
     library_tab::create_variable(ctx, color);
 }
 
+/// Open the one Color libraries browser for a layer's fill or stroke styles.
+pub(crate) fn open_style_library(app: &mut LizardApp, ctx: &egui::Context, ids: Vec<NodeId>, fills: bool) {
+    app.ui.style_picker = None;
+    app.ui.picker = Some(PickerTarget::ColorLibraryStyle { fills, ids });
+    library_tab::activate(ctx);
+}
+
 fn eyedrop_params(target: &PickerTarget, stop: Option<usize>) -> serde_json::Value {
     use lizard_engine::selection_colors::PaintTarget;
     let targets = match target {
@@ -83,6 +90,11 @@ mod shader_tab;
 #[derive(Clone, Debug, PartialEq)]
 pub enum PickerTarget {
     PageBackground,
+    /// The shared Color libraries browser opened from a Fill or Stroke style control.
+    ColorLibraryStyle {
+        fills: bool,
+        ids: Vec<NodeId>,
+    },
     SelectionColor {
         targets: Vec<lizard_engine::selection_colors::PaintTarget>,
         selection: Vec<NodeId>,
@@ -171,6 +183,11 @@ fn current_paint(app: &LizardApp, target: &PickerTarget) -> Option<Paint> {
             NodeKind::Page { background, .. } => Some(Paint::solid(*background)),
             _ => None,
         },
+        PickerTarget::ColorLibraryStyle { fills, ids } => {
+            let node = doc.node(*ids.first()?)?;
+            let paints = if *fills { &node.fills } else { &node.strokes };
+            Some(paints.last().cloned().unwrap_or_else(|| Paint::solid(Color::TRANSPARENT)))
+        }
         PickerTarget::Paint { fills, index, ids } => {
             let n = doc.node(*ids.first()?)?;
             let list = if *fills { &n.fills } else { &n.strokes };
@@ -277,7 +294,7 @@ fn write(app: &mut LizardApp, target: &PickerTarget, paint: &Paint, live: bool) 
             }
             app.session.execute("style.update", &json!({"style": id, "value": paints}))
         }
-        PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable => return,
+        PickerTarget::ColorLibraryStyle { .. } | PickerTarget::DraftStyle { .. } | PickerTarget::DraftVariable => return,
         PickerTarget::StyleEffect { id, index, secondary } => {
             let Some(mut effects) = app.session.doc().ok().and_then(|doc| match &doc.style(id)?.kind {
                 lizard_doc::StyleKind::Effect { effects } => Some(effects.clone()),
@@ -558,7 +575,9 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     // A layer's picker belongs to the selection it was opened for: once that changes, close it
     // rather than keep editing layers that are no longer selected.
     let stale = match &target {
-        PickerTarget::Paint { ids, .. } | PickerTarget::Effect { ids, .. } => *ids != app.session.selection(),
+        PickerTarget::Paint { ids, .. } | PickerTarget::Effect { ids, .. } | PickerTarget::ColorLibraryStyle { ids, .. } => {
+            *ids != app.session.selection()
+        }
         PickerTarget::VectorRegion { id, regions, .. } => {
             !app.session.selection().contains(id)
                 || app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).is_none_or(|ve| ve.id != *id || ve.regions != *regions)
@@ -571,6 +590,9 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
         dismiss(app, ctx);
         return;
     };
+    if matches!(target, PickerTarget::ColorLibraryStyle { .. }) && !library_tab::active(ctx) {
+        library_tab::activate(ctx);
+    }
     if library_tab::active(ctx) {
         library_tab::show(app, ctx, &target, paint);
         return;
