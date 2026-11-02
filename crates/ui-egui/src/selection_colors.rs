@@ -3,18 +3,48 @@
 
 use std::sync::Arc;
 
-use egui::{Id, Ui};
+use egui::{Align2, Color32, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_color::Color;
 use lizard_doc::{Document, NodeId, StyleKind};
 use lizard_engine::selection_colors::{PaintTarget, SelectionColor, collect};
 use serde_json::json;
 
 use crate::a11y::Tip;
+use crate::a11y;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 use crate::{LizardApp, widgets};
+
+fn header(ui: &mut Ui, colors: &[SelectionColor], open: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let title = tr("Selection colors");
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+    a11y::disclosure(&response, title, open);
+    let hovered = response.hovered();
+    let ink = if hovered && t.dark { Color32::WHITE } else if hovered { t.text } else { t.text_secondary };
+    ui.painter().text(pos2(rect.left() + widgets::PAD + 18.0, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), ink);
+    if hovered {
+        let chevron = Rect::from_center_size(pos2(rect.left() + widgets::PAD + 5.0, rect.center().y), vec2(10.0, 10.0));
+        icons::paint(ui.painter(), chevron, if open { Icon::Chevron } else { Icon::ChevronRight }, ink);
+    }
+    if !open {
+        let extra = colors.len().saturating_sub(3);
+        let mut right = rect.right() - widgets::PAD;
+        if extra > 0 {
+            let label = format!("+{extra}");
+            let label_rect = ui.painter().text(pos2(right, rect.center().y), Align2::RIGHT_CENTER, label, crate::theme::regular(11.0), t.text_secondary);
+            right = label_rect.left() - 8.0;
+        }
+        for color in colors.iter().take(3).rev() {
+            let swatch = Rect::from_center_size(pos2(right - 8.0, rect.center().y), vec2(16.0, 16.0));
+            widgets::paint_swatch(ui.painter(), swatch, &color.paint);
+            right = swatch.left() - 8.0;
+        }
+    }
+    response.clicked()
+}
 
 #[derive(Clone)]
 struct Cache {
@@ -57,7 +87,16 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[Nod
         return;
     }
     let t = Tokens::get(ui.ctx());
-    widgets::section_header(ui, tr("Selection colors"), &[], false);
+    let open_id = Id::new(("selection_colors_open", ds.uid));
+    let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+    if header(ui, &colors, open) {
+        open = !open;
+        ui.data_mut(|d| d.insert_temp(open_id, open));
+    }
+    if !open {
+        widgets::separator(ui);
+        return;
+    }
     // Bound the panel's height; a document with many distinct colors stays scrollable.
     ui.add_enabled_ui(!interacting, |ui| {
         egui::ScrollArea::vertical().id_salt("selection_colors_rows").max_height(240.0).show_rows(ui, 32.0, colors.len(), |ui, range| {
@@ -206,6 +245,10 @@ mod tests {
                 ]);
             }
         }
+        fn expand(&mut self) {
+            let title = self.frame(vec![]).into_iter().find(|(s, _)| s == "Selection colors").unwrap().1;
+            self.click(title);
+        }
     }
 
     #[test]
@@ -213,6 +256,9 @@ mod tests {
         let (mut p, a, b) = Panel::new();
         let texts = p.frame(vec![]);
         assert!(texts.iter().any(|(s, _)| s == "Selection colors"));
+        assert!(!texts.iter().any(|(s, _)| s == "FF0000"));
+        p.expand();
+        let texts = p.frame(vec![]);
         let red = texts.iter().find(|(s, _)| s == "FF0000").unwrap().1;
         p.click(Pos2::new(28.0, red.y));
         let Some(PickerTarget::SelectionColor { targets, .. }) = &p.app.ui.picker else { panic!("the swatch must open its picker") };
@@ -224,6 +270,7 @@ mod tests {
     #[test]
     fn panel_keeps_cached_colors_during_interaction_and_refreshes_after_commit() {
         let (mut p, a, _) = Panel::new();
+        p.expand();
         let key = Id::new("selection_colors_cache");
         let before = p.ctx.data(|d| d.get_temp::<Cache>(key)).unwrap();
         p.app.session.begin_interaction("Color").unwrap();
@@ -243,6 +290,7 @@ mod tests {
     #[test]
     fn panel_defers_discovery_without_a_matching_cache_during_interaction() {
         let (mut p, a, _) = Panel::new();
+        p.expand();
         let key = Id::new("selection_colors_cache");
         p.ctx.data_mut(|d| d.remove::<Cache>(key));
         p.app.session.begin_interaction("Color").unwrap();
@@ -256,6 +304,7 @@ mod tests {
     #[test]
     fn select_color_button_selects_only_the_matching_layers() {
         let (mut p, a, _) = Panel::new();
+        p.expand();
         let red = p.frame(vec![]).into_iter().find(|(s, _)| s == "FF0000").unwrap().1;
         p.click(Pos2::new(220.0, red.y));
         assert_eq!(p.app.session.selection(), [a]);
@@ -265,6 +314,7 @@ mod tests {
     #[test]
     fn panel_displays_the_linked_style_name_and_the_other_color() {
         let (mut p, a, b) = Panel::new();
+        p.expand();
         p.app.run("style.create", json!({"type":"paint","name":"Brand","value":"#ff0000"}));
         p.app.run("style.apply", json!({"id":a,"style":"Brand","target":"fill"}));
         let texts = p.frame(vec![]);
