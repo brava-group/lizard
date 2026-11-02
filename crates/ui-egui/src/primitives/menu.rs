@@ -5,7 +5,7 @@ use egui::{
     pos2, vec2,
 };
 
-use super::Surface;
+use super::{Shortcut, Surface};
 use crate::a11y;
 use crate::icons::{self, Icon};
 use crate::theme::{Tokens, medium, regular};
@@ -270,16 +270,12 @@ impl<'a> MenuItem<'a> {
             icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(16.0, 16.0)), icon, t.icon_secondary);
             text_x = rect.left() + 36.0;
         }
-        let hint_width = if self.shortcut.is_empty() {
-            0.0
-        } else {
-            ui.painter().layout_no_wrap(self.shortcut.to_owned(), regular(11.0), t.text_tertiary).size().x + 12.0
-        };
+        let hint_width = if self.shortcut.is_empty() { 0.0 } else { Shortcut::new(self.shortcut).width(ui) + 12.0 };
         let text_rect = Rect::from_min_max(pos2(text_x, rect.top()), pos2((rect.right() - hint_width - 8.0).max(text_x), rect.bottom()));
         let text = crate::widgets::elide_font(ui, self.label, text_rect.width(), regular(13.0));
         ui.painter().text(pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, text, regular(13.0), ink);
         if !self.shortcut.is_empty() {
-            ui.painter().text(pos2(rect.right() - 8.0, rect.center().y), egui::Align2::RIGHT_CENTER, self.shortcut, regular(11.0), t.text_tertiary);
+            Shortcut::new(self.shortcut).ink(t.text_tertiary).paint_right(ui, rect.right() - 8.0, rect.center().y);
         }
         response
     }
@@ -300,14 +296,14 @@ impl<'a> MenuItem<'a> {
     ) -> Response {
         let t = Tokens::get(ui.ctx());
         let natural_label = ui.painter().layout_no_wrap(self.label.to_owned(), medium(11.0), Color32::PLACEHOLDER);
-        let keys = (!self.shortcut.is_empty())
-            .then(|| ui.painter().layout_no_wrap(crate::toolbar::pretty_shortcut(self.shortcut), regular(11.0), Color32::PLACEHOLDER));
+        let shown_shortcut = crate::toolbar::pretty_shortcut(self.shortcut);
+        let keys = (!self.shortcut.is_empty()).then(|| Shortcut::new(&shown_shortcut).width(ui));
         let check_width = if self.checked.is_some() { 20.0 } else { 0.0 };
         let icon_width = if self.leading.is_some() { 20.0 } else { 0.0 };
         let prefix_width = check_width + icon_width;
         let leading_width = prefix_width + leading_art_width.max(0.0);
         let trail_width = trailing_art_width.max(if self.trailing.is_some() { 16.0 } else { 0.0 });
-        let trail_width = trail_width.max(keys.as_ref().map_or(0.0, |text| text.size().x));
+        let trail_width = trail_width.max(keys.unwrap_or(0.0));
         let trailing_space = if trail_width > 0.0 { 24.0 + trail_width } else { 0.0 };
         let intrinsic = LABEL_INSET * 2.0 + leading_width + natural_label.size().x + trailing_space;
         let width = self.max_width.map_or_else(|| ui.available_width().max(intrinsic.ceil()).max(MIN_WIDTH), |max| ui.available_width().min(max));
@@ -347,8 +343,8 @@ impl<'a> MenuItem<'a> {
             leading_art(ui.painter(), art_rect, ink);
         }
         ui.painter().galley(pos2(rect.min.x + LABEL_INSET + leading_width, rect.center().y - label.size().y / 2.0), label, ink);
-        if let Some(keys) = keys {
-            ui.painter().galley(pos2(rect.max.x - 24.0 - keys.size().x, rect.center().y - keys.size().y / 2.0), keys, muted);
+        if keys.is_some() {
+            Shortcut::new(&shown_shortcut).ink(muted).paint_right(ui, rect.max.x - 24.0, rect.center().y);
         }
         if let Some(icon) = self.trailing {
             icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.max.x - 19.0, rect.center().y), vec2(12.0, 12.0)), icon, ink);

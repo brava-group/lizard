@@ -1462,11 +1462,9 @@ fn eyedropper_preview(app: &mut LizardApp, ctx: &egui::Context) {
             Color32::WHITE,
         );
         ui.painter().text(pos2(create.min.x + 28.0, create.center().y), Align2::LEFT_CENTER, tr("Create variable"), semibold(13.0), Color32::WHITE);
-        for (x, label) in [(271.0, "shift"), (313.0, "⌘")] {
-            let key = Rect::from_min_size(panel.min + vec2(x, 45.0), vec2(if x < 300.0 { 38.0 } else { 25.0 }, 25.0));
-            ui.painter().rect_filled(key, CornerRadius::same(6), Color32::from_rgb(51, 51, 51));
-            ui.painter().rect_stroke(key, CornerRadius::same(6), Stroke::new(1.0, Color32::from_rgb(81, 81, 81)), StrokeKind::Inside);
-            ui.painter().text(key.center(), Align2::CENTER_CENTER, label, regular(13.0), Color32::from_rgb(238, 238, 238));
+        let mut right = panel.min.x + 340.0;
+        for label in ["⌘", "⇧"] {
+            right = crate::primitives::Shortcut::new(label).ink(Color32::WHITE).paint_right(ui, right, create.center().y) - 5.0;
         }
         if response.clicked() {
             crate::colorpicker::open_creation_from_eyedropper(ctx, color);

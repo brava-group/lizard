@@ -3,6 +3,7 @@
 use egui::{Color32, Frame, InnerResponse, Margin, Pos2, Rect, Response, RichText, Shape, Stroke, Ui, WidgetText, pos2};
 
 use crate::theme::{Tokens, regular, semibold};
+use super::Shortcut;
 
 pub struct Tooltip<'a> {
     title: &'a str,
@@ -41,7 +42,23 @@ impl<'a> Tooltip<'a> {
     }
 
     fn from_text(text: &'a str) -> Self {
-        if let Some((title, description)) = text.split_once('\n') { Self::new(title).description(description) } else { Self::new(text) }
+        if let Some((title, description)) = text.split_once('\n') {
+            return Self::new(title).description(description);
+        }
+        if let Some((title, shortcut)) = text.rsplit_once("  hold ")
+            && looks_like_shortcut(shortcut)
+        {
+            return Self::new(title).shortcut(shortcut);
+        }
+        if let Some((title, shortcut)) = text.rsplit_once("  ")
+            && looks_like_shortcut(shortcut)
+        {
+            return Self::new(title).shortcut(shortcut);
+        }
+        if matches!(text, "Esc" | "Escape" | "Enter" | "Tab") {
+            return Self::new("").shortcut(text);
+        }
+        Self::new(text)
     }
 
     fn frame(t: Tokens) -> Frame {
@@ -58,10 +75,14 @@ impl<'a> Tooltip<'a> {
         let colors = TooltipColors::for_theme(Tokens::get(ui.ctx()));
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.title).font(semibold(11.0)).color(colors.text));
+            if !self.title.is_empty() {
+                ui.label(RichText::new(self.title).font(semibold(11.0)).color(colors.text));
+            }
             if let Some(shortcut) = self.shortcut {
-                ui.add_space(8.0);
-                ui.label(RichText::new(shortcut).font(regular(10.0)).color(colors.secondary));
+                if !self.title.is_empty() {
+                    ui.add_space(8.0);
+                }
+                Shortcut::new(shortcut).ink(colors.secondary).show(ui);
             }
         });
         if let Some(description) = self.description {
@@ -106,6 +127,14 @@ impl<'a> Tooltip<'a> {
         let frame = Self::frame(Tokens::get(ui.ctx()));
         frame.show(ui, |ui| self.content(ui))
     }
+}
+
+fn looks_like_shortcut(text: &str) -> bool {
+    !text.is_empty()
+        && !text.contains(' ')
+        && (text.chars().count() == 1
+            || text.chars().any(|c| "⌃⌥⇧⌘⌫↵⇥⇞⇟←→↑↓".contains(c))
+            || ["Ctrl", "Alt", "Shift", "Esc", "Enter", "Tab", "F1"].iter().any(|prefix| text.starts_with(prefix)))
 }
 
 /// A small filled triangle on the popup edge nearest its trigger.

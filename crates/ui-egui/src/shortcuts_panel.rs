@@ -3,10 +3,11 @@
 //! across every group.
 
 use crate::primitives::TooltipResponseExt as _;
-use egui::{Align2, Context, CornerRadius, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Context, CornerRadius, Sense, Ui, pos2, vec2};
 use lizard_engine::keymap::{GESTURES, Group, KEYS, Platform};
 
 use crate::LizardApp;
+use crate::primitives::Shortcut;
 use crate::i18n::{self, tr};
 use crate::theme::{Tokens, regular};
 
@@ -60,13 +61,7 @@ fn rows(group: Option<Group>, query: &str, platform: Platform) -> Vec<Row> {
 
 /// Paint `text` as a keycap ending at `right`; returns its left edge.
 fn keycap(ui: &Ui, t: &Tokens, text: &str, right: f32, cy: f32) -> f32 {
-    let galley = ui.painter().layout_no_wrap(text.to_string(), regular(11.0), t.text);
-    let w = galley.size().x + 10.0;
-    let r = egui::Rect::from_min_size(pos2(right - w, cy - 10.0), vec2(w, 20.0));
-    ui.painter().rect_filled(r, CornerRadius::same(4), t.field);
-    ui.painter().rect_stroke(r, CornerRadius::same(4), Stroke::new(1.0, t.border), StrokeKind::Inside);
-    ui.painter().galley(pos2(r.min.x + 5.0, cy - galley.size().y / 2.0), galley, t.text);
-    r.min.x
+    Shortcut::new(text).ink(t.text).paint_right(ui, right, cy)
 }
 
 fn row(ui: &mut Ui, t: &Tokens, row: &Row, width: f32) {

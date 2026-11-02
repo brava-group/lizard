@@ -12,6 +12,7 @@ mod property_controller;
 mod property_binding;
 mod tooltip;
 mod search_field;
+mod shortcut;
 mod segmented;
 mod select;
 mod shimmer;
@@ -32,6 +33,7 @@ pub use property_controller::{PropertyController, PropertyControllerKind, Proper
 pub use property_binding::{PropertyBinding, PropertyBindingResponse};
 pub use tooltip::{Tooltip, TooltipResponseExt};
 pub use search_field::SearchField;
+pub use shortcut::Shortcut;
 pub use segmented::{Segment, SegmentContent, SegmentSize, SegmentSizing, SegmentedControl};
 pub use select::{Select, SelectLead, SelectPosition, SelectVariant};
 pub use shimmer::{ShimmerDirection, ShimmerText};

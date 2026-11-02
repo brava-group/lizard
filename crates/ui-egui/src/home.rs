@@ -442,7 +442,11 @@ fn getting_started(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
         let x = cell.min.x + 30.0;
         let title_end = ui.painter().text(pos2(x, cell.min.y + 12.0), Align2::LEFT_CENTER, tr(title), semibold(12.0), t.text).max.x;
         if let Some(key) = shortcut(command) {
-            ui.painter().text(pos2(title_end + 8.0, cell.min.y + 12.0), Align2::LEFT_CENTER, key, regular(11.0), t.text_tertiary);
+            crate::primitives::Shortcut::new(&key).ink(t.text_tertiary).paint_right(
+                ui,
+                title_end + 8.0 + crate::primitives::Shortcut::new(&key).width(ui),
+                cell.min.y + 12.0,
+            );
         }
         let galley = lines(ui, tr(line), regular(11.0), t.text_secondary, cell.max.x - x, 2);
         ui.painter().galley(pos2(x, cell.min.y + 24.0), galley, t.text_secondary);

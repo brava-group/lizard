@@ -15,6 +15,7 @@ use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
 use crate::theme::{Tokens, regular};
 use crate::toolbar::pretty_shortcut;
+use crate::primitives::Shortcut;
 
 /// Commands the UI layer implements itself (dialogs and platform actions).
 pub const UI_COMMANDS: &[&str] = &[
@@ -808,13 +809,13 @@ fn indented_item(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool, checke
         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 12.0, r.center().y), vec2(12.0, 12.0)), Icon::Check, col);
     }
     let galley = ui.painter().layout_no_wrap(label.to_string(), regular(12.0), col);
-    let keys = (!shortcut.is_empty())
-        .then(|| ui.painter().layout_no_wrap(pretty_shortcut(shortcut), regular(12.0), if hov { t.menu_text } else { t.menu_dim }));
-    need_width(ui, 28.0 + indent + galley.size().x + keys.as_ref().map_or(8.0, |k| 16.0 + k.size().x + 10.0));
+    let shown_keys = pretty_shortcut(shortcut);
+    let keys = (!shortcut.is_empty()).then(|| Shortcut::new(&shown_keys).width(ui));
+    need_width(ui, 28.0 + indent + galley.size().x + keys.map_or(8.0, |w| 16.0 + w + 10.0));
     let text_rect = Rect::from_min_max(pos2(r.min.x + 28.0 + indent, r.min.y), pos2(r.max.x - 8.0, r.max.y));
     ui.painter().with_clip_rect(text_rect).galley(pos2(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, col);
-    if let Some(k) = keys {
-        ui.painter().galley(pos2(r.max.x - 10.0 - k.size().x, r.center().y - k.size().y / 2.0), k, col);
+    if keys.is_some() {
+        Shortcut::new(&shown_keys).ink(if hov { t.menu_text } else { t.menu_dim }).paint_right(ui, r.max.x - 10.0, r.center().y);
     }
     resp.clicked()
 }
@@ -892,13 +893,8 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                 ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(5), Color32::from_white_alpha(18));
                 icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 16.0, r.center().y), vec2(14.0, 14.0)), Icon::Search, t.menu_dim);
                 ui.painter().text(pos2(r.min.x + 32.0, r.center().y), Align2::LEFT_CENTER, tr("Actions…"), regular(12.0), t.menu_dim);
-                ui.painter().text(
-                    pos2(r.max.x - 10.0, r.center().y),
-                    Align2::RIGHT_CENTER,
-                    pretty_shortcut(crate::shortcuts::shortcut("app.actions").unwrap_or("")),
-                    regular(12.0),
-                    t.menu_dim,
-                );
+                let keys = pretty_shortcut(crate::shortcuts::shortcut("app.actions").unwrap_or(""));
+                Shortcut::new(&keys).ink(t.menu_dim).paint_right(ui, r.max.x - 10.0, r.center().y);
                 if resp.clicked() {
                     set_palette(&mut app.ui, true);
                     close = true;

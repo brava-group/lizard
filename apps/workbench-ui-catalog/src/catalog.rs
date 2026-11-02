@@ -32,6 +32,7 @@ enum Page {
     ColorControl,
     PropertyController,
     Tooltip,
+    Shortcut,
     Sliders,
     PrimitiveTabs,
     Shimmer,
@@ -121,6 +122,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::ColorControl, "Primitives", "Color control", "primitives::ColorControl · swatch / models / opacity · width"),
     (Page::PropertyController, "Primitives", "Property controller", "primitives::PropertyController · component properties · usage indicator"),
     (Page::Tooltip, "Primitives", "Tooltip", "primitives::Tooltip · title · shortcut · description"),
+    (Page::Shortcut, "Primitives", "Shortcut", "primitives::Shortcut · keyboard font · badge"),
     (Page::Sliders, "Primitives", "Sliders", "slider · progress_bar"),
     (Page::PrimitiveTabs, "Primitives", "Tabs", "primitives::Tabs · selection · content · overflow"),
     (Page::Shimmer, "Primitives", "Shimmer text", "primitives::ShimmerText · direction · duration · playing"),
@@ -787,6 +789,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::ColorControl => color_control(ui, state, fig, fixture),
                     Page::PropertyController => property_controllers(ui, state),
                     Page::Tooltip => tooltips(ui),
+                    Page::Shortcut => shortcut_primitive(ui),
                     Page::Sliders => sliders(ui, state),
                     Page::PrimitiveTabs => primitive_tabs(ui, state),
                     Page::Shimmer => shimmer(ui, state),
@@ -1559,6 +1562,18 @@ fn tooltips(ui: &mut Ui) {
         });
         ui.add_space(16.0);
         Tooltip::new("Apply variable").description("Bind this value to a variable or component property.").preview(ui);
+    });
+}
+
+fn shortcut_primitive(ui: &mut Ui) {
+    use lizard_ui_egui::primitives::Shortcut;
+
+    example(ui, "Shortcut specimens", "The same compact badge is used in menus, tooltips and shortcut help.", |ui| {
+        ui.horizontal(|ui| {
+            for keys in ["⌘V", "⌘A", "⌘\\", "⇧1", "⇧R", "⌥⌘K", "Ctrl+Shift+K", "↵"] {
+                Shortcut::new(keys).show(ui);
+            }
+        });
     });
 }
 

@@ -421,10 +421,17 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
         "nv-legible-next-bold".into(),
         Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Bold.ttf")).tweak(ui_font_tweak)),
     );
+    fonts.font_data.insert(
+        "shortcuts-font".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/shortcuts-font/ShortcutsFont.ttf"))),
+    );
     if let Some(list) = fonts.families.get_mut(&FontFamily::Proportional) {
         list.insert(0, "nv-legible-next-regular".into());
     }
     let proportional = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let mut shortcut_faces = vec!["shortcuts-font".into()];
+    shortcut_faces.extend(proportional.clone());
+    fonts.families.insert(FontFamily::Name("shortcuts".into()), shortcut_faces);
     fonts.families.insert(FontFamily::Name("medium".into()), proportional.clone());
     let mut semi = vec!["nv-legible-next-bold".into()];
     semi.extend(proportional);
@@ -458,7 +465,7 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     extra.extend(craft(true));
     for (key, data) in extra {
         fonts.font_data.insert(key.clone(), Arc::new(data));
-        for fam in [FontFamily::Proportional, FontFamily::Name("medium".into()), FontFamily::Name("semibold".into())] {
+        for fam in [FontFamily::Proportional, FontFamily::Name("medium".into()), FontFamily::Name("semibold".into()), FontFamily::Name("shortcuts".into())] {
             if let Some(list) = fonts.families.get_mut(&fam) {
                 list.push(key.clone());
             }
