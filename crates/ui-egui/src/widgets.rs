@@ -8,7 +8,7 @@ use crate::a11y::{self, Tip};
 pub use crate::field_math::{Rel, Typed, eval, parse, stepped};
 use crate::i18n::tr;
 use crate::icons::{self, AppearanceIcon, Icon, LayoutIcon, PositionIcon};
-use crate::primitives::{Button, ButtonVariant};
+use crate::primitives::{Button, ButtonVariant, CONTROL_CHEVRON_SIZE};
 use crate::theme::{Tokens, medium, regular};
 
 fn appearance_lead_size(icon: AppearanceIcon) -> f32 {
@@ -580,10 +580,14 @@ fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, 
     let hovered = field.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN)));
     if hovered || response.has_focus() {
         ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
-        icons::paint(ui.painter(), Rect::from_center_size(pos2(field.max.x - 12.0, field.center().y), vec2(24.0, 24.0)), Icon::Chevron, t.icon);
+        icons::paint_compact_chevron(
+            ui.painter(),
+            Rect::from_center_size(pos2(field.max.x - 12.0, field.center().y), vec2(CONTROL_CHEVRON_SIZE, CONTROL_CHEVRON_SIZE)),
+            t.icon_secondary,
+        );
     } else {
-        let text = elide(ui, label, (rect.width() - 8.0).max(0.0));
-        ui.painter().with_clip_rect(rect).text(pos2(rect.max.x - 8.0, rect.center().y), Align2::RIGHT_CENTER, text, regular(11.0), t.text);
+        let text = elide_font(ui, label, (rect.width() - 8.0).max(0.0), regular(9.0));
+        ui.painter().with_clip_rect(rect).text(pos2(rect.max.x - 8.0, rect.center().y), Align2::RIGHT_CENTER, text, regular(9.0), t.text);
     }
     response
 }
