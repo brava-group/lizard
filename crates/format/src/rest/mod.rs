@@ -49,7 +49,7 @@ use std::sync::Arc;
 use lizard_doc::geom::{Affine, BezPath, Rect, Shape};
 use lizard_doc::proto::Flow;
 use lizard_doc::{
-    BoolOp, Document, ImageData, LayoutMode, Node, NodeId, NodeKind, PropDef, Style, StyleKind, VariableType, VectorNetwork, WindingRule,
+    BoolOp, Document, ImageData, LayoutMode, Node, NodeId, NodeKind, PropDef, SlotSettings, Style, StyleKind, VariableType, VectorNetwork, WindingRule,
 };
 use serde_json::Value;
 
@@ -785,7 +785,16 @@ impl<'a> Ctx<'a> {
                         self.slot_defaults.insert((owner, name.clone()), d);
                     }
                     self.slot_notes(d);
-                    PropDef::Slot { preferred: Vec::new() }
+                    let slot = d.get("slotSettings");
+                    let limit = |key: &str| slot.and_then(|settings| num(settings, key)).filter(|value| value.is_finite() && *value >= 0.0 && value.fract() == 0.0 && *value <= u32::MAX as f64).map(|value| value as u32);
+                    PropDef::Slot { preferred: Vec::new(), settings: SlotSettings {
+                        description: text(d, "description").unwrap_or("").chars().take(1000).collect(),
+                        min_layers: limit("minChildren"),
+                        max_layers: limit("maxChildren"),
+                        only_preferred: slot.and_then(|settings| flag(settings, "allowPreferredValuesOnly")).unwrap_or(false),
+                        show_empty: slot.and_then(|settings| flag(settings, "displayEmptyByDefault")).unwrap_or(false),
+                        fill_counter_axis: slot.and_then(|settings| flag(settings, "stretchChildOnInsert")).unwrap_or(false),
+                    } }
                 }
                 _ => {
                     self.warn("unknown component property types were skipped");
@@ -797,17 +806,10 @@ impl<'a> Ctx<'a> {
         out
     }
 
-    /// Notes on what a slot property sets that the editor doesn't keep: preferred components (keys
-    /// of library components, not layers of the file) and limits on its content.
+    /// Preferred component keys from libraries cannot be resolved to file nodes.
     fn slot_notes(&mut self, d: &Value) {
         if !list(d, "preferredValues").is_empty() {
             self.warn("preferred slot component keys cannot be resolved to file nodes and were skipped");
-        }
-        // Insertion and empty-slot display only change editing aids, not what the file shows.
-        let s = d.get("slotSettings");
-        let limit = |k: &str| s.and_then(|s| num(s, k)).is_some_and(|n| n != 0.0);
-        if limit("minChildren") || limit("maxChildren") || s.and_then(|s| flag(s, "allowPreferredValuesOnly")) == Some(true) {
-            self.warn("non-default slot settings are not represented and were skipped");
         }
     }
 

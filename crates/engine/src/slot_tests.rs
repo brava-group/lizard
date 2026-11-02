@@ -53,6 +53,84 @@ fn a_refused_slot_names_make_slot() {
 }
 
 #[test]
+fn slot_property_can_be_created_before_a_frame_is_assigned() {
+    let mut s = Session::new();
+    let frame = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 200, "height": 100, "name": "Card"})));
+    let component = idv(&ex(&mut s, "component.create", json!({"ids": [frame]})));
+    ex(&mut s, "component.addProperty", json!({"id": component, "name": "Content", "type": "slot"}));
+    assert_eq!(props_of(&mut s, component)[0]["layers"], json!([]));
+    let content = idv(&ex(&mut s, "frame.create", json!({"x": 8, "y": 8, "width": 180, "height": 80, "parent": component})));
+    ex(&mut s, "component.bindProperty", json!({"layer": content, "property": "Content"}));
+    assert_eq!(slot_name(s.doc().unwrap(), content).as_deref(), Some("Content"));
+    healthy(&s);
+}
+
+#[test]
+fn slot_settings_round_trip_validate_and_fill_new_instances() {
+    let mut s = Session::new();
+    let (card, _, content, _) = slot_card(&mut s);
+    ex(&mut s, "component.editProperty", json!({"id": card, "name": "Content", "description": "Actions", "minLayers": 1,
+        "maxLayers": 3, "onlyPreferred": true, "showEmpty": true, "fillCounterAxis": true}));
+    let props = props_of(&mut s, card);
+    assert_eq!(props[0]["description"], "Actions");
+    assert_eq!(props[0]["minLayers"], 1);
+    assert_eq!(props[0]["maxLayers"], 3);
+    assert_eq!(props[0]["onlyPreferred"], true);
+    assert_eq!(props[0]["showEmpty"], true);
+    assert_eq!(props[0]["fillCounterAxis"], true);
+    let saved = serde_json::to_value(s.doc().unwrap()).unwrap();
+    let reopened: Document = serde_json::from_value(saved).unwrap();
+    assert!(matches!(&reopened.node(card).unwrap().kind, NodeKind::Component { props, .. }
+        if matches!(props.get("Content"), Some(PropDef::Slot { settings, .. }) if settings.show_empty && settings.max_layers == Some(3))));
+    let legacy: PropDef = serde_json::from_value(json!({"type": "slot", "preferred": []})).unwrap();
+    assert!(matches!(legacy, PropDef::Slot { settings, .. } if settings == SlotSettings::default()));
+    refused(&mut s, "component.editProperty", json!({"id": card, "name": "Content", "minLayers": 4}));
+    refused(&mut s, "component.editProperty", json!({"id": card, "name": "Content", "maxLayers": -1}));
+    ex(&mut s, "node.set", json!({"id": content, "props": {"layout": "horizontal", "padding": 0}}));
+    let (chip, _) = chip(&mut s);
+    let instance = idv(&ex(&mut s, "instance.create", json!({"component": card, "x": 400, "y": 0})));
+    let slot = copy_of(&s, instance, content);
+    let inserted = idv(&ex(&mut s, "instance.slotInsert", json!({"id": slot, "component": chip})));
+    assert_eq!(node(&s, inserted).child_layout.sizing_v, Sizing::Fill);
+    assert_eq!(node(&s, inserted).child_layout.sizing_h, Sizing::Fixed);
+    healthy(&s);
+}
+
+#[test]
+fn clearing_a_slot_keeps_it_empty_until_reset() {
+    let mut s = Session::new();
+    let (card, _, content, _) = slot_card(&mut s);
+    let instance = idv(&ex(&mut s, "instance.create", json!({"component": card, "x": 400, "y": 0})));
+    let slot = copy_of(&s, instance, content);
+    assert_eq!(node(&s, slot).children.len(), 1);
+    ex(&mut s, "instance.clearSlot", json!({"id": slot}));
+    assert!(node(&s, slot).children.is_empty());
+    assert!(slot_edited(s.doc().unwrap(), slot));
+    ex(&mut s, "shape.rectangle", json!({"parent": content, "x": 40, "y": 40, "width": 20, "height": 20}));
+    assert!(node(&s, slot).children.is_empty());
+    ex(&mut s, "instance.resetSlot", json!({"id": slot}));
+    assert_eq!(node(&s, slot).children.len(), 2);
+    healthy(&s);
+}
+
+#[test]
+fn wrapping_layers_in_a_slot_keeps_the_component_and_drops_nested_bindings() {
+    let mut s = Session::new();
+    let frame = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 200, "height": 100, "name": "Card"})));
+    let title = idv(&ex(&mut s, "text.create", json!({"text": "Title", "x": 10, "y": 10, "parent": frame})));
+    let component = idv(&ex(&mut s, "component.create", json!({"ids": [frame]})));
+    ex(&mut s, "component.addProperty", json!({"id": component, "name": "Label", "type": "text", "layer": title}));
+    let wrapped = idv(&ex(&mut s, "component.wrapInSlot", json!({"ids": [title], "name": "Content"})));
+    assert_eq!(slot_name(s.doc().unwrap(), wrapped).as_deref(), Some("Content"));
+    assert_eq!(node(&s, title).parent, Some(wrapped));
+    assert!(node(&s, title).prop_refs.is_empty());
+    refused(&mut s, "component.bindProperty", json!({"layer": title, "property": "Label"}));
+    let nested = idv(&ex(&mut s, "frame.create", json!({"parent": wrapped, "width": 20, "height": 20})));
+    refused(&mut s, "component.makeSlot", json!({"id": nested}));
+    healthy(&s);
+}
+
+#[test]
 fn slots_are_frames_of_a_main_with_a_slot_property() {
     let mut s = Session::new();
     let (c, title, content, ph) = slot_card(&mut s);

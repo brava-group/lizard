@@ -93,7 +93,7 @@ fn slot_layers_bind_to_their_property_and_keep_instance_content() {
 
     let main = by_rest(&doc, &v, "1:2");
     let NodeKind::Component { props, .. } = &main.kind else { panic!("{:?}", main.kind) };
-    assert_eq!(props.get("Slot"), Some(&PropDef::Slot { preferred: Vec::new() }), "named without its #id suffix");
+    assert_eq!(props.get("Slot"), Some(&PropDef::Slot { preferred: Vec::new(), settings: SlotSettings::default() }), "named without its #id suffix");
     let main_slot = by_rest(&doc, &v, "1:5");
     assert!(matches!(main_slot.kind, NodeKind::Frame));
     assert_eq!(main_slot.prop_refs.get("slot").map(String::as_str), Some("Slot"));
@@ -202,14 +202,16 @@ fn slots_outside_components_or_without_a_property_stay_frames() {
 }
 
 #[test]
-fn slot_settings_the_editor_cannot_keep_are_noted() {
+fn slot_settings_are_imported_and_external_preferred_keys_are_noted() {
     let mut v = container_file(Vec::new());
     v["document"]["children"][0]["children"][1]["componentPropertyDefinitions"]["Slot#1:3"]["slotSettings"] =
         json!({"stretchChildOnInsert": true, "displayEmptyByDefault": true, "minChildren": null, "maxChildren": 3});
+    v["document"]["children"][0]["children"][1]["componentPropertyDefinitions"]["Slot#1:3"]["description"] = json!("Drop content here");
     v["document"]["children"][0]["children"][1]["componentPropertyDefinitions"]["Slot#1:3"]["preferredValues"] =
         json!([{"type": "COMPONENT", "key": "abc"}]);
-    let (_, warnings) = import(&v, &no_images).unwrap();
-    assert!(warnings.iter().any(|w| w == "non-default slot settings are not represented and were skipped"), "{warnings:?}");
+    let (doc, warnings) = import(&v, &no_images).unwrap();
+    let main = by_rest(&doc, &v, "1:2");
+    assert!(matches!(&main.kind, NodeKind::Component { props, .. } if matches!(props.get("Slot"), Some(PropDef::Slot { settings, .. }) if settings.description == "Drop content here" && settings.max_layers == Some(3) && settings.min_layers.is_none() && settings.show_empty && settings.fill_counter_axis)));
     assert!(warnings.iter().any(|w| w == "preferred slot component keys cannot be resolved to file nodes and were skipped"), "{warnings:?}");
     let mut plain = container_file(Vec::new());
     plain["document"]["children"][0]["children"][1]["componentPropertyDefinitions"]["Slot#1:3"]["slotSettings"] =

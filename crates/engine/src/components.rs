@@ -116,7 +116,7 @@ pub fn inside_instance(doc: &Document, id: NodeId) -> bool {
 
 /// The slot property frame `id` stands for (its name and preferred components): a frame bound to
 /// a slot property of its component, or an instance's copy of one (followed through its sources).
-pub fn slot_def(doc: &Document, id: NodeId) -> Option<(&str, &[NodeId])> {
+pub fn slot_metadata(doc: &Document, id: NodeId) -> Option<(&str, &[NodeId], &SlotSettings)> {
     let mut cur = id;
     for _ in 0..=MAX_DEPTH {
         let n = doc.node(cur)?;
@@ -126,13 +126,17 @@ pub fn slot_def(doc: &Document, id: NodeId) -> Option<(&str, &[NodeId])> {
         if let Some(name) = n.prop_refs.get(SLOT) {
             let NodeKind::Component { props, .. } = &doc.node(owning_component(doc, cur)?)?.kind else { return None };
             return match props.get(name) {
-                Some(PropDef::Slot { preferred }) => Some((name.as_str(), preferred.as_slice())),
+                Some(PropDef::Slot { preferred, settings }) => Some((name.as_str(), preferred.as_slice(), settings)),
                 _ => None,
             };
         }
         cur = n.source?;
     }
     None
+}
+
+pub fn slot_def(doc: &Document, id: NodeId) -> Option<(&str, &[NodeId])> {
+    slot_metadata(doc, id).map(|(name, preferred, _)| (name, preferred))
 }
 
 /// The name of the slot property frame `id` stands for ([`slot_def`]).
@@ -287,6 +291,15 @@ pub fn create_instance_at(doc: &mut Document, component: NodeId, parent: NodeId,
     root.interactions.clear();
     // So do the variable modes the main sets (see `Document::inherited_modes`).
     root.var_modes.clear();
+    if slot_metadata(doc, parent).is_some_and(|(_, _, settings)| settings.fill_counter_axis)
+        && let Some(layout) = doc.node(parent).and_then(|node| node.layout.as_ref())
+    {
+        match layout.mode {
+            LayoutMode::Horizontal => root.child_layout.sizing_v = Sizing::Fill,
+            LayoutMode::Vertical => root.child_layout.sizing_h = Sizing::Fill,
+            LayoutMode::Grid => {}
+        }
+    }
     doc.insert(root, parent, index)?;
     sync_instance(doc, id);
     Ok(id)

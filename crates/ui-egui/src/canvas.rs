@@ -2150,7 +2150,8 @@ fn quad(painter: &egui::Painter, q: [Pos2; 4], s: Stroke) {
 /// outline and the slot's name above its top-left corner, like a frame label (never over the
 /// content).
 fn slot_badges(app: &LizardApp, painter: &egui::Painter, doc: &Document, sel: &[NodeId], drop: Option<NodeId>) {
-    use lizard_engine::components::{owning_component, owning_instance, slot_name, slots_of};
+    use lizard_engine::components::{owning_component, owning_instance, slot_metadata, slot_name, slots_of};
+    type EmptyCache = ((u64, u64, Option<NodeId>), Vec<(NodeId, String)>);
     let mut roots: Vec<NodeId> = Vec::new();
     for id in sel {
         let root = match doc.node(*id).map(|n| &n.kind) {
@@ -2162,6 +2163,30 @@ fn slot_badges(app: &LizardApp, painter: &egui::Painter, doc: &Document, sel: &[
         }
     }
     let mut slots: Vec<(NodeId, String)> = roots.iter().flat_map(|r| slots_of(doc, *r)).collect();
+    let key = app.session.ds().map(|state| (state.uid, state.revision, doc.current_page)).unwrap_or_default();
+    let cache_id = egui::Id::new("slot_badges_empty_instances");
+    let empty = painter.ctx().data(|data| data.get_temp::<EmptyCache>(cache_id)).filter(|(cached, _)| *cached == key).map(|(_, slots)| slots).unwrap_or_else(|| {
+        let mut found = Vec::new();
+        if let Some(page) = doc.current_page {
+            for id in doc.subtree(page) {
+                if !doc.node(id).is_some_and(|node| matches!(node.kind, NodeKind::Frame) && node.children.is_empty()) || owning_instance(doc, id).is_none() {
+                    continue;
+                }
+                if let Some((name, _, settings)) = slot_metadata(doc, id)
+                    && settings.show_empty
+                {
+                    found.push((id, name.to_string()));
+                }
+            }
+        }
+        painter.ctx().data_mut(|data| data.insert_temp(cache_id, (key, found.clone())));
+        found
+    });
+    for item in empty {
+        if !slots.iter().any(|(id, _)| *id == item.0) {
+            slots.push(item);
+        }
+    }
     if let Some(d) = drop
         && !slots.iter().any(|(s, _)| *s == d)
         && let Some(name) = slot_name(doc, d)

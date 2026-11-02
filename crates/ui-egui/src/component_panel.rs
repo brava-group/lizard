@@ -14,7 +14,7 @@ use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
-    PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slots_of, variant_conflicts,
+    PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slot_metadata, slots_of, variant_conflicts,
     variant_options, variant_props, variant_set,
 };
 use serde_json::{Value, json};
@@ -64,7 +64,8 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
         overrides_ui(app, ui, n);
     }
     if matches!(n.kind, NodeKind::Frame) && !inside_instance(doc, n.id) && owning_component(doc, n.id).is_some() {
-        scoped_property_row(app, ui, doc, n, "slot", "slot", tr("Slot"));
+        let label = if lizard_engine::components::is_slot(doc, n.id) { tr("Slot") } else { tr("Convert to slot") };
+        scoped_property_row(app, ui, doc, n, "slot", "slot", label);
     }
 }
 
@@ -193,6 +194,26 @@ fn slot_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, 
         let w = ui.available_width().max(60.0);
         slot_fill(app, ui, doc, slot, preferred, &comps, w);
     });
+    if let Some((_, _, settings)) = slot_metadata(doc, slot)
+        && let Some(node) = doc.node(slot)
+    {
+        let count = node.children.len();
+        let out_of_range = settings.min_layers.is_some_and(|min| count < min as usize)
+            || settings.max_layers.is_some_and(|max| count > max as usize);
+        let unexpected = settings.only_preferred && node.children.iter().any(|id| {
+            let Some(NodeKind::Instance { component, .. }) = doc.node(*id).map(|node| &node.kind) else { return true };
+            !preferred.contains(component) && !variant_set(doc, *component).is_some_and(|set| preferred.contains(&set))
+        });
+        if out_of_range {
+            widgets::note(ui, tr("Slot content is outside the suggested layer count"), t.warning);
+        }
+        if unexpected {
+            widgets::note(ui, tr("Slot contains content outside preferred instances"), t.warning);
+        }
+        if !settings.description.is_empty() {
+            widgets::note(ui, &settings.description, t.text_secondary);
+        }
+    }
 }
 
 /// The fill menu of slot `slot` inside an instance: its preferred components first, then every
@@ -231,6 +252,10 @@ fn slot_fill(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, pre
         });
         if menu_item(ui, tr("Select slot"), "") {
             app.run("select.set", json!({"ids": [slot.0]}));
+            ui.close();
+        }
+        if doc.node(slot).is_some_and(|node| !node.children.is_empty()) && menu_item(ui, tr("Clear slot"), "") {
+            app.run("instance.clearSlot", json!({"id": slot.0}));
             ui.close();
         }
         if edited && menu_item(ui, tr("Reset slot"), "") {
@@ -339,19 +364,14 @@ pub(crate) fn add_property_menu(app: &mut LizardApp, ui: &mut Ui, doc: &Document
         }
     }
     if property_menu_row(ui, tr("Slot"), "slot", first.is_some()).clicked() {
-        if let Some(component) = first {
-            app.run(
-                "command.batch",
-                json!({
-                    "label": "Create slot property",
-                    "commands": [
-                        {"command": "node.create", "as": "slot", "params": {"type": "frame", "parent": component, "name": fresh}},
-                        {"command": "component.makeSlot", "params": {"id": {"$ref": "slot"}, "name": fresh}},
-                        {"command": "select.set", "params": {"ids": [owner]}}
-                    ]
-                }),
-            );
-        }
+        let base = tr("Slot");
+        let name = if existing.contains(&base.to_string()) { fresh } else { base.to_string() };
+        ui.data_mut(|data| {
+            data.insert_temp(
+                property_draft_id(),
+                PropertyDraft { owner, kind: "slot", name, text: String::new(), boolean: true, instance: None, preferred: Vec::new() },
+            )
+        });
         ui.close();
     }
 }
@@ -370,6 +390,29 @@ fn property_form_field(ui: &mut Ui, id: Id, label: &str, value: &str) -> Option<
         ui.add_space(16.0);
     });
     changed
+}
+
+fn preferred_instances_field(ui: &mut Ui, draft: &mut PropertyDraft, comps: &[(NodeId, String)], owner: NodeId, first: Option<NodeId>) {
+    ui.add_space(16.0);
+    widgets::separator(ui);
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        let (label, _) = ui.allocate_exact_size(vec2(264.0, 24.0), Sense::hover());
+        ui.painter().text(label.left_center(), Align2::LEFT_CENTER, tr("Preferred instances"), crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+        let plus = Button::icon(Icon::Plus, tr("Add preferred instance")).show(ui);
+        menu_popup(&plus).width(220.0).show(|ui| {
+            for (id, name) in comps.iter().filter(|(id, _)| *id != owner && first != Some(*id)) {
+                if MenuItem::new(name).checked(draft.preferred.contains(id)).show(ui).clicked() {
+                    if let Some(index) = draft.preferred.iter().position(|candidate| candidate == id) {
+                        draft.preferred.remove(index);
+                    } else {
+                        draft.preferred.push(*id);
+                    }
+                }
+            }
+        });
+    });
 }
 
 fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
@@ -393,7 +436,7 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
     let mut create = false;
     FloatingPanel::new(panel_id, pos2(0.0, ui.cursor().min.y))
         .width(FloatingPanelWidth::Fixed(320.0))
-        .height(FloatingPanelHeight::Fixed(if draft.kind == "instanceSwap" { 252.0 } else { 202.0 }))
+        .height(FloatingPanelHeight::Fixed(match draft.kind { "instanceSwap" => 252.0, "slot" => 240.0, _ => 202.0 }))
         .header_height(42.0)
         .anchor_to_properties()
         .open(&mut open)
@@ -436,28 +479,12 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
                             }
                         });
                     });
-                    ui.add_space(16.0);
-                    widgets::separator(ui);
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(16.0);
-                        let (label, _) = ui.allocate_exact_size(vec2(264.0, 24.0), Sense::hover());
-                        ui.painter().text(label.left_center(), Align2::LEFT_CENTER, tr("Preferred instances"), crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
-                        let plus = Button::icon(Icon::Plus, tr("Add preferred instance")).show(ui);
-                        menu_popup(&plus).width(220.0).show(|ui| {
-                            for (id, name) in comps.iter().filter(|(id, _)| *id != owner && first != Some(*id)) {
-                                if MenuItem::new(name).checked(draft.preferred.contains(id)).show(ui).clicked() {
-                                    if let Some(index) = draft.preferred.iter().position(|candidate| candidate == id) {
-                                        draft.preferred.remove(index);
-                                    } else {
-                                        draft.preferred.push(*id);
-                                    }
-                                }
-                            }
-                        });
-                    });
                 }
+                "slot" => {}
                 _ => {}
+            }
+            if matches!(draft.kind, "instanceSwap" | "slot") {
+                preferred_instances_field(ui, &mut draft, &comps, owner, first);
             }
             ui.add_space(20.0);
             widgets::separator(ui);
@@ -492,6 +519,43 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
         FloatingPanel::dismiss(&ctx, panel_id);
     } else {
         ctx.data_mut(|data| data.insert_temp(property_draft_id(), draft));
+    }
+}
+
+fn slot_settings_ui(app: &mut LizardApp, ui: &mut Ui, owner: NodeId, name: &str, settings: &SlotSettings) {
+    let edit = |app: &mut LizardApp, key: &str, value: Value| {
+        let mut params = json!({"id": owner, "name": name});
+        params[key] = value;
+        app.run("component.editProperty", params);
+    };
+    row(ui, 30.0, |ui| {
+        ui.label(tr("Description"));
+        let width = ui.available_width().max(60.0);
+        if let Some(value) = widgets::text_field(ui, Id::new(("slot_description", owner, name)), &settings.description, width, tr("Describe this slot")) {
+            edit(app, "description", json!(value));
+        }
+    });
+    row(ui, 30.0, |ui| {
+        ui.label(tr("Layers"));
+        for (key, label, value) in [("minLayers", tr("Min"), settings.min_layers), ("maxLayers", tr("Max"), settings.max_layers)] {
+            let current = value.map(|n| n.to_string()).unwrap_or_default();
+            if let Some(next) = widgets::text_field(ui, Id::new(("slot_limit", owner, name, key)), &current, 52.0, label)
+                && (next.trim().is_empty() || next.parse::<u32>().is_ok())
+            {
+                edit(app, key, next.trim().parse::<u32>().map_or(Value::Null, |n| json!(n)));
+            }
+        }
+    });
+    for (key, label, value) in [
+        ("onlyPreferred", tr("Only preferred instances"), settings.only_preferred),
+        ("showEmpty", tr("Show empty slot"), settings.show_empty),
+        ("fillCounterAxis", tr("Fill inserted instances"), settings.fill_counter_axis),
+    ] {
+        row(ui, 30.0, |ui| {
+            if widgets::checkbox(ui, value, label) {
+                edit(app, key, json!(!value));
+            }
+        });
     }
 }
 
@@ -667,7 +731,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
             });
         });
         // An instance swap or slot property's preferred components, on a row of their own.
-        if let PropDef::Slot { preferred } | PropDef::InstanceSwap { preferred, .. } = d {
+        if let PropDef::Slot { preferred, .. } | PropDef::InstanceSwap { preferred, .. } = d {
             let tip = if matches!(d, PropDef::Slot { .. }) {
                 tr("Offered first when filling the slot (any content is allowed)")
             } else {
@@ -693,6 +757,9 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                     });
                 });
             });
+        }
+        if let PropDef::Slot { settings, .. } = d {
+            slot_settings_ui(app, ui, owner, k, settings);
         }
     }
     if has_properties {
@@ -1076,7 +1143,7 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
                     });
                 }
                 PropDef::Variant { .. } => {}
-                PropDef::Slot { preferred } => {
+                PropDef::Slot { preferred, .. } => {
                     if let Some((slot, _)) = slots.iter().find(|(_, name)| *name == k) {
                         slot_fill(app, ui, doc, *slot, &preferred, comps, w);
                     }

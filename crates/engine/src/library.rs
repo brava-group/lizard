@@ -98,7 +98,7 @@ fn used_components(doc: &Document, root: NodeId) -> BTreeSet<NodeId> {
                             out.insert(*default);
                             out.extend(preferred.iter().copied());
                         }
-                        PropDef::Slot { preferred } => out.extend(preferred.iter().copied()),
+                        PropDef::Slot { preferred, .. } => out.extend(preferred.iter().copied()),
                         _ => {}
                     }
                 }
@@ -798,7 +798,7 @@ fn localize(n: &mut Node, src: &Document, map: &BTreeMap<NodeId, NodeId>, styles
                         }
                         *preferred = preferred.iter().filter_map(|c| map.get(c).copied()).collect();
                     }
-                    PropDef::Slot { preferred } => *preferred = preferred.iter().filter_map(|c| map.get(c).copied()).collect(),
+                    PropDef::Slot { preferred, .. } => *preferred = preferred.iter().filter_map(|c| map.get(c).copied()).collect(),
                     _ => {}
                 }
             }

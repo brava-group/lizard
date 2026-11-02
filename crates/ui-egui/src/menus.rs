@@ -967,6 +967,26 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                     .ok()
                     .filter(|doc| lizard_engine::cmd::component::can_combine_variants(doc, &app.session.selection()))
                     .map(|_| i18n::command("component.combineVariants", "Combine as variants"));
+                let slot_action = app.session.doc().ok().and_then(|doc| {
+                    let nodes: Vec<_> = ids.iter().filter_map(|id| doc.node(*id)).collect();
+                    if nodes.len() != ids.len() || nodes.is_empty() {
+                        return None;
+                    }
+                    let eligible = nodes.iter().all(|node| {
+                        lizard_engine::components::owning_component(doc, node.id).is_some()
+                            && lizard_engine::components::owning_instance(doc, node.id).is_none()
+                            && !doc.ancestors(node.id).into_iter().any(|ancestor| lizard_engine::components::is_slot(doc, ancestor))
+                    });
+                    if !eligible {
+                        None
+                    } else if nodes.len() == 1 && matches!(nodes[0].kind, lizard_doc::NodeKind::Frame) && !lizard_engine::components::is_slot(doc, nodes[0].id) {
+                        Some((tr("Convert to slot"), "component.makeSlot"))
+                    } else if nodes.iter().all(|node| !matches!(node.kind, lizard_doc::NodeKind::Component { .. } | lizard_doc::NodeKind::ComponentSet { .. })) {
+                        Some((tr("Wrap in new slot"), "component.wrapInSlot"))
+                    } else {
+                        None
+                    }
+                });
                 let vector_contours = app.session.ds().ok().and_then(|ds| {
                     let edit = ds.vector_edit.as_ref()?;
                     if !ids.contains(&edit.id) {
@@ -1037,6 +1057,11 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                 {
                     entries.insert(at + 1, (label, "component.combineVariants"));
                 }
+                if let Some(entry) = slot_action
+                    && let Some(at) = entries.iter().position(|entry| entry.1 == "object.frameSelection")
+                {
+                    entries.insert(at + 1, entry);
+                }
                 if let Some((outer, inner)) = vector_contours
                     && (outer || inner)
                     && let Some(at) = entries.iter().position(|entry| entry.1 == "vector.outlineStroke")
@@ -1064,6 +1089,8 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                         if *id == "edit.paste" {
                             let p = app.to_page(pos);
                             paste(app, None, Some((p.x, p.y)));
+                        } else if matches!(*id, "component.makeSlot" | "component.wrapInSlot") {
+                            app.run(id, serde_json::json!({"ids": ids}));
                         } else {
                             invoke(app, id);
                         }

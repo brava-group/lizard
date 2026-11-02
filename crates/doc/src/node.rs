@@ -59,7 +59,27 @@ pub enum PropDef {
     Slot {
         #[serde(default)]
         preferred: Vec<NodeId>,
+        #[serde(default, flatten)]
+        settings: SlotSettings,
     },
+}
+
+/// Editing guidance for a component slot. Limits and preferred instances never reject content.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotSettings {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_layers: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_layers: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub only_preferred: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_empty: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fill_counter_axis: bool,
 }
 
 /// What a node is, with per-type data.

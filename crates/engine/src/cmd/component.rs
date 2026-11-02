@@ -135,9 +135,16 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "component.makeSlot",
             "Make slot",
-            "{id? (a frame inside a main component), name? (the slot property's name; the frame's by default), preferred? [component or set ids]}  (its instances take any content there)",
+            "{id? (a frame inside a main component), name? (the slot property's name; the frame's by default), preferred? [component or set ids], description?, minLayers?, maxLayers?, onlyPreferred?, showEmpty?, fillCounterAxis?}  (its instances take any content there)",
             true,
             make_slot
+        ),
+        spec!(
+            "component.wrapInSlot",
+            "Wrap in new slot",
+            "{ids? (sibling layers inside one main component), name?, preferred?, description?, minLayers?, maxLayers?, onlyPreferred?, showEmpty?, fillCounterAxis?}  (wraps the layers in a frame and makes it a slot)",
+            true,
+            wrap_in_slot
         ),
         spec!(
             "component.removeSlot",
@@ -159,6 +166,13 @@ pub fn specs() -> Vec<CommandSpec> {
             "{id? (a slot inside an instance, or the instance with `slot`), slot?}  (back to the main's default content)",
             true,
             reset_slot
+        ),
+        spec!(
+            "instance.clearSlot",
+            "Clear slot",
+            "{id? (a slot inside an instance, or the instance with `slot`), slot? (slot property name)}  (keeps the slot empty across main updates)",
+            true,
+            clear_slot
         ),
         spec!(
             "component.hideWhenPublishing",
@@ -700,12 +714,38 @@ fn preferred_arg(cmd: &str, doc: &Document, p: &Value) -> Result<Vec<NodeId>> {
     Ok(out)
 }
 
+fn slot_settings_arg(cmd: &str, p: &Value, mut settings: SlotSettings) -> Result<SlotSettings> {
+    if let Some(value) = get(p, "description") {
+        settings.description = value.as_str().filter(|s| s.chars().count() <= 1000).ok_or_else(|| bad(cmd, "`description`: text of at most 1000 characters"))?.to_string();
+    }
+    for (key, limit) in [("minLayers", &mut settings.min_layers), ("maxLayers", &mut settings.max_layers)] {
+        if let Some(value) = get(p, key) {
+            *limit = if value.is_null() { None } else { Some(value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(cmd, format!("`{key}`: a non-negative integer or null")))?) };
+        }
+    }
+    for (key, flag) in [
+        ("onlyPreferred", &mut settings.only_preferred),
+        ("showEmpty", &mut settings.show_empty),
+        ("fillCounterAxis", &mut settings.fill_counter_axis),
+    ] {
+        if let Some(value) = get(p, key) {
+            *flag = value.as_bool().ok_or_else(|| bad(cmd, format!("`{key}`: true or false")))?;
+        }
+    }
+    if settings.min_layers.zip(settings.max_layers).is_some_and(|(min, max)| min > max) {
+        return Err(bad(cmd, "`minLayers` must not exceed `maxLayers`"));
+    }
+    Ok(settings)
+}
+
 fn make_slot(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.makeSlot";
     let id = targets(s, p).first().copied().ok_or_else(|| bad(cmd, "select a frame inside a main component"))?;
     let doc = s.doc()?;
     let n = doc.get(id)?;
-    let inside_main = owning_component(doc, id).is_some_and(|c| c != id) && owning_instance(doc, id).is_none();
+    let inside_main = owning_component(doc, id).is_some_and(|c| c != id)
+        && owning_instance(doc, id).is_none()
+        && !doc.ancestors(id).into_iter().any(|ancestor| is_slot(doc, ancestor));
     if !matches!(n.kind, NodeKind::Frame) || !inside_main {
         return Err(bad(cmd, "only a frame inside a main component (not inside an instance) can become a slot"));
     }
@@ -714,8 +754,53 @@ fn make_slot(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let owner = Owner::resolve(doc, id).ok_or_else(|| bad(cmd, "the frame isn't inside a component"))?;
     let name = string(p, "name").unwrap_or_else(|| fresh_prop_name(doc, &owner, &n.name));
-    let preferred = get(p, "preferred").cloned().unwrap_or(Value::Null);
-    add_prop_for(cmd, s, &json!({"id": id, "layer": id, "name": name, "type": "slot", "preferred": preferred}))
+    let mut params = json!({"id": id, "layer": id, "name": name, "type": "slot"});
+    for key in ["preferred", "description", "minLayers", "maxLayers", "onlyPreferred", "showEmpty", "fillCounterAxis"] {
+        if let Some(value) = get(p, key) {
+            params[key] = value.clone();
+        }
+    }
+    add_prop_for(cmd, s, &params)
+}
+
+fn wrap_in_slot(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.wrapInSlot";
+    let ids = req_targets(cmd, s, p)?;
+    let doc = s.doc()?;
+    let roots = roots(doc, &ids);
+    let first = roots.first().copied().ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
+    let parent = doc.get(first)?.parent.ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
+    let owner = Owner::resolve(doc, first).ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
+    let main = owning_component(doc, first).ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
+    if roots.iter().any(|id| {
+        doc.node(*id).is_none_or(|n| n.parent != Some(parent) || matches!(n.kind, NodeKind::Section { .. } | NodeKind::Component { .. } | NodeKind::ComponentSet { .. }))
+            || owning_instance(doc, *id).is_some()
+            || owning_component(doc, *id).is_none_or(|component| !owner.components(doc).contains(&component))
+            || doc.ancestors(*id).into_iter().any(|ancestor| is_slot(doc, ancestor))
+    }) {
+        return Err(bad(cmd, "select sibling layers inside one main component, outside instances and slots"));
+    }
+    let name = string(p, "name").unwrap_or_else(|| fresh_prop_name(doc, &owner, "Slot"));
+    let result = super::structure::specs()
+        .into_iter()
+        .find(|spec| spec.id == "object.frameSelection")
+        .map(|spec| (spec.run)(s, &json!({"ids": roots, "name": name})))
+        .ok_or_else(|| EngineError::Other("frame selection unavailable".into()))??;
+    let frame = id_of(&result["id"]).ok_or_else(|| EngineError::Other("slot wrap failed".into()))?;
+    let moved = s.doc()?.subtree(frame);
+    for id in moved.into_iter().filter(|id| *id != frame) {
+        if owning_component(s.doc()?, id) == Some(main) {
+            s.doc_mut()?.get_mut(id)?.prop_refs.clear();
+        }
+    }
+    let mut params = json!({"id": frame, "name": name});
+    for key in ["preferred", "description", "minLayers", "maxLayers", "onlyPreferred", "showEmpty", "fillCounterAxis"] {
+        if let Some(value) = get(p, key) {
+            params[key] = value.clone();
+        }
+    }
+    make_slot(s, &params)?;
+    Ok(json!({"id": frame, "name": name}))
 }
 
 fn remove_slot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -772,6 +857,19 @@ fn reset_slot(s: &mut Session, p: &Value) -> Result<Value> {
     if changed {
         doc.get_mut(slot)?.overrides.remove(SLOT);
     }
+    Ok(json!({"id": slot, "changed": changed}))
+}
+
+fn clear_slot(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "instance.clearSlot";
+    let id = targets(s, p).first().copied().ok_or_else(|| bad(cmd, "select a slot inside an instance"))?;
+    let doc = s.doc_mut()?;
+    let slot = instance_slot(cmd, doc, id, string(p, "slot").as_deref())?;
+    let changed = !slot_edited(doc, slot) || !doc.get(slot)?.children.is_empty();
+    for child in doc.get(slot)?.children.clone() {
+        doc.remove(child)?;
+    }
+    doc.get_mut(slot)?.overrides.insert(SLOT.into());
     Ok(json!({"id": slot, "changed": changed}))
 }
 
@@ -1206,10 +1304,10 @@ fn add_prop_for(cmd: &str, s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(json!({"id": set}));
         }
         "slot" => {
-            if !layer_node.as_ref().is_some_and(|n| matches!(n.kind, NodeKind::Frame)) {
-                return Err(bad(cmd, "a slot is a frame inside the component: select one (or pass `layer`)"));
+            if layer.is_some() && !layer_node.as_ref().is_some_and(|n| matches!(n.kind, NodeKind::Frame)) {
+                return Err(bad(cmd, "a slot property can only be applied to a frame inside the component"));
             }
-            PropDef::Slot { preferred: preferred_arg(cmd, doc, p)? }
+            PropDef::Slot { preferred: preferred_arg(cmd, doc, p)?, settings: slot_settings_arg(cmd, p, SlotSettings::default())? }
         }
         _ => return Err(bad(cmd, "type: boolean|text|instanceSwap|variant|slot")),
     };
@@ -1250,6 +1348,9 @@ fn bind(cmd: &str, doc: &mut Document, layer: NodeId, property: Option<&str>, fi
         }
         return Ok(());
     };
+    if doc.ancestors(layer).into_iter().any(|ancestor| is_slot(doc, ancestor)) {
+        return Err(bad(cmd, "component properties cannot be applied to layers inside a slot"));
+    }
     let defs = prop_defs(doc, comp);
     let def = defs.get(property).ok_or_else(|| bad(cmd, format!("the component has no property `{property}`")))?;
     let expected = match def {
@@ -1429,8 +1530,11 @@ fn edit_prop(s: &mut Session, p: &Value) -> Result<Value> {
         },
         None => def.clone(),
     };
-    if let (Some(list), PropDef::Slot { preferred } | PropDef::InstanceSwap { preferred, .. }) = (preferred, &mut new_def) {
+    if let (Some(list), PropDef::Slot { preferred, .. } | PropDef::InstanceSwap { preferred, .. }) = (preferred, &mut new_def) {
         *preferred = list;
+    }
+    if let PropDef::Slot { settings, .. } = &mut new_def {
+        *settings = slot_settings_arg(cmd, p, settings.clone())?;
     }
     for c in &comps {
         let had = prop_defs(doc, *c).contains_key(&name);
@@ -1492,7 +1596,9 @@ fn def_json(name: &str, d: &PropDef) -> Value {
         PropDef::Text { default } => json!({"name": name, "type": "text", "default": default}),
         PropDef::InstanceSwap { default, preferred } => json!({"name": name, "type": "instanceSwap", "default": default, "preferred": preferred}),
         PropDef::Variant { options, default } => json!({"name": name, "type": "variant", "default": default, "options": options}),
-        PropDef::Slot { preferred } => json!({"name": name, "type": "slot", "preferred": preferred}),
+        PropDef::Slot { preferred, settings } => json!({"name": name, "type": "slot", "preferred": preferred,
+            "description": settings.description, "minLayers": settings.min_layers, "maxLayers": settings.max_layers,
+            "onlyPreferred": settings.only_preferred, "showEmpty": settings.show_empty, "fillCounterAxis": settings.fill_counter_axis}),
     }
 }
 

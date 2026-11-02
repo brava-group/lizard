@@ -429,7 +429,7 @@ pub fn design_system(doc: &mut Document, page: NodeId, spec: &DsSpec) -> DocResu
     let mut card_props = BTreeMap::new();
     card_props.insert("Title".to_string(), PropDef::Text { default: "Card title".into() });
     card_props.insert("Body".to_string(), PropDef::Text { default: "Supporting text".into() });
-    card_props.insert("Actions".to_string(), PropDef::Slot { preferred: vec![button, badge] });
+    card_props.insert("Actions".to_string(), PropDef::Slot { preferred: vec![button, badge], settings: SlotSettings::default() });
     let axes = [("Size", sizes.clone()), ("Type", CARD_TYPES.to_vec()), ("Theme", themes.clone())];
     let y = y + (n.div_ceil(12) as f64) * 160.0 + 120.0;
     let (card, n) = component_set(doc, page, "Card", (0.0, y), &axes, 6, |doc, c, v| {

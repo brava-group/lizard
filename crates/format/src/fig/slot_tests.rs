@@ -112,7 +112,7 @@ fn slot_definition_reference_and_arbitrary_override_children_are_imported() {
         .find_map(|id| doc.node(*id).filter(|n| n.name == "Synthetic" && matches!(n.kind, lizard_doc::NodeKind::Component { .. })))
         .unwrap();
     assert!(
-        matches!(&main.kind, lizard_doc::NodeKind::Component { props, .. } if matches!(props.get("Content"), Some(lizard_doc::PropDef::Slot { preferred }) if preferred.is_empty()))
+        matches!(&main.kind, lizard_doc::NodeKind::Component { props, .. } if matches!(props.get("Content"), Some(lizard_doc::PropDef::Slot { preferred, .. }) if preferred.is_empty()))
     );
     let instance = doc.ids().filter_map(|id| doc.node(id)).find(|n| matches!(n.kind, lizard_doc::NodeKind::Instance { .. })).unwrap();
     let slot = doc.node(instance.children[0]).unwrap();
