@@ -15,7 +15,7 @@ use crate::agent_panel::{AgentConnection, AgentKind};
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
-use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth};
+use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, SearchField};
 use crate::theme::{Tokens, regular, semibold};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -254,44 +254,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         ctx.data_mut(|data| data.remove::<AgentSettingsState>(Id::new("settings_agent_state")));
     }
     crate::shortcuts_panel::show(app, ctx);
-    if let Some((mut find, mut replace)) = app.ui.find.clone() {
-        let mut open = true;
-        let mut action = None;
-        egui::Window::new(tr("Find and replace"))
-            .id(egui::Id::new("Find and replace"))
-            .open(&mut open)
-            .anchor(Align2::LEFT_TOP, vec2(260.0, 120.0))
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.set_width(280.0);
-                let r = ui.add(egui::TextEdit::singleline(&mut find).hint_text(tr("Find")).desired_width(260.0));
-                crate::widgets::select_all_on_focus(ui, &r, &find);
-                let r = ui.add(egui::TextEdit::singleline(&mut replace).hint_text(tr("Replace with")).desired_width(260.0));
-                crate::widgets::select_all_on_focus(ui, &r, &replace);
-                ui.horizontal(|ui| {
-                    if ui.button(tr("Find")).clicked() {
-                        action = Some(false);
-                    }
-                    if ui.button(tr("Replace all")).clicked() {
-                        action = Some(true);
-                    }
-                });
-            });
-        if let Some(rep) = action
-            && !find.is_empty()
-        {
-            let r = if rep {
-                app.run("edit.findReplace", json!({"find": find, "replace": replace, "layerNames": false}))
-            } else {
-                app.run("edit.findReplace", json!({"find": find, "layerNames": true}))
-            };
-            if let Some(v) = r {
-                let n = v["matches"].as_array().map(|a| a.len()).unwrap_or(0);
-                app.toast(trn("{n} matches", n, &[]));
-            }
-        }
-        app.ui.find = if open { Some((find, replace)) } else { None };
-    }
+    find_replace_dialog(app, ctx);
     batch_rename_dialog(app, ctx);
     menu_input_dialog(app, ctx);
     crate::variables_panel::show(app, ctx);
@@ -306,6 +269,75 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
     crate::live::publish_dialog(app, ctx);
     crate::online::dialogs(app, ctx);
     crate::windows::confirm_close(app, ctx);
+}
+
+fn find_replace_dialog(app: &mut LizardApp, ctx: &Context) {
+    let Some((mut find, mut replace)) = app.ui.find.clone() else { return };
+    let panel_id = Id::new("find_replace_panel");
+    let expanded_id = panel_id.with("expanded");
+    let mut expanded = ctx.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(true);
+    let mut open = true;
+    let mut close_requested = false;
+    let mut action = None;
+    FloatingPanel::new(panel_id, pos2(260.0, 120.0))
+        .width(FloatingPanelWidth::Fixed(340.0))
+        .height(FloatingPanelHeight::Fixed(if expanded { 160.0 } else { 44.0 }))
+        .header_height(44.0)
+        .open(&mut open)
+        .show_with_header(ctx, |ui, header| {
+            let t = Tokens::get(ui.ctx());
+            ui.painter().hline(header.x_range(), header.bottom() - 0.5, Stroke::new(1.0, t.border));
+            ui.painter().text(header.center(), Align2::CENTER_CENTER, tr("Find and replace"), semibold(13.0), t.text);
+            let collapse = Rect::from_center_size(pos2(header.left() + 24.0, header.center().y), vec2(24.0, 24.0));
+            if Button::icon(if expanded { Icon::Chevron } else { Icon::ChevronRight }, if expanded { tr("Collapse") } else { tr("Expand") })
+                .icon_size(14.0)
+                .show_at(ui, panel_id.with("collapse"), collapse)
+                .clicked()
+            {
+                expanded = !expanded;
+            }
+            let close = Rect::from_center_size(pos2(header.right() - 24.0, header.center().y), vec2(24.0, 24.0));
+            close_requested = Button::icon(Icon::Close, tr("Close")).icon_size(14.0).show_at(ui, panel_id.with("close"), close).clicked();
+            if !expanded {
+                return;
+            }
+            let body_rect = Rect::from_min_size(pos2(header.left() + 16.0, header.bottom() + 12.0), vec2(308.0, 92.0));
+            let mut body = ui.new_child(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)));
+            body.spacing_mut().item_spacing.y = 8.0;
+            let find_response = SearchField::new(panel_id.with("find"), tr("Find")).width(ControlWidth::Fill).compact().clearable().show(&mut body, &mut find);
+            crate::widgets::select_all_on_focus(&body, &find_response, &find);
+            if find_response.has_focus() && body.input(|input| input.key_pressed(egui::Key::Enter)) {
+                action = Some(false);
+            }
+            let replace_response = crate::widgets::text_input(&mut body, panel_id.with("replace"), &mut replace, 308.0, tr("Replace with"));
+            if replace_response.has_focus() && body.input(|input| input.key_pressed(egui::Key::Enter)) {
+                action = Some(true);
+            }
+            body.add_space(4.0);
+            body.horizontal(|ui| {
+                if Button::new(tr("Find")).variant(ButtonVariant::Secondary).enabled(!find.is_empty()).show(ui).clicked() {
+                    action = Some(false);
+                }
+                if Button::new(tr("Replace all")).variant(ButtonVariant::Secondary).enabled(!find.is_empty()).show(ui).clicked() {
+                    action = Some(true);
+                }
+            });
+        });
+    ctx.data_mut(|data| data.insert_temp(expanded_id, expanded));
+    if let Some(rep) = action
+        && !find.is_empty()
+    {
+        let result = if rep {
+            app.run("edit.findReplace", json!({"find": find, "replace": replace, "layerNames": false}))
+        } else {
+            app.run("edit.findReplace", json!({"find": find, "layerNames": true}))
+        };
+        if let Some(value) = result {
+            let count = value["matches"].as_array().map(|matches| matches.len()).unwrap_or(0);
+            app.toast(trn("{n} matches", count, &[]));
+        }
+    }
+    app.ui.find = if open && !close_requested { Some((find, replace)) } else { None };
 }
 
 /// Menus and Actions cannot pass a value themselves. Gather it here, then run the regular
@@ -943,54 +975,84 @@ fn batch_rename_dialog(app: &mut LizardApp, ctx: &Context) {
     let mut open = true;
     let mut cancel = false;
     let mut apply = false;
-    window(tr("Rename layers"), ctx).id(egui::Id::new("Rename layers")).open(&mut open).show(ctx, |ui| {
-        ui.set_width(320.0);
-        ui.label(RichText::new(trn("{n} layers", n, &[])).color(t.text_secondary));
-        ui.add_space(6.0);
-        let r = ui.add(egui::TextEdit::singleline(&mut b.find).hint_text(tr("Match (empty: the whole name)")).desired_width(300.0));
-        crate::widgets::select_all_on_focus(ui, &r, &b.find);
-        if crate::widgets::checkbox(ui, b.regex, tr("Regular expression")) {
-            b.regex = !b.regex;
-        }
-        let to = ui.add(egui::TextEdit::singleline(&mut b.to).hint_text(tr("Rename to")).desired_width(300.0));
-        crate::widgets::select_all_on_focus(ui, &to, &b.to);
-        ui.horizontal(|ui| {
-            for (label, code) in [(tr("Current name"), "$&"), (tr("Number ↑"), "$n"), (tr("Number ↓"), "$N")] {
-                if ui.button(label).clicked() {
-                    b.to.push_str(code);
-                    to.request_focus();
+    let panel_id = Id::new("batch_rename_panel");
+    let extra_preview = usize::from(ready && n > PREVIEW_ROWS);
+    let preview_height = if rename.is_err() { 40.0 } else { (preview.len() + extra_preview) as f32 * 20.0 };
+    let panel_height = 300.0 + preview_height;
+    let center = ctx.content_rect().center();
+    FloatingPanel::new(panel_id, pos2(center.x - 180.0, center.y - panel_height / 2.0))
+        .width(FloatingPanelWidth::Fixed(360.0))
+        .height(FloatingPanelHeight::Fixed(panel_height))
+        .header_height(44.0)
+        .open(&mut open)
+        .show_with_header(ctx, |ui, header| {
+            ui.painter().hline(header.x_range(), header.bottom() - 0.5, Stroke::new(1.0, t.border));
+            ui.painter().text(header.center(), Align2::CENTER_CENTER, tr("Rename layers"), semibold(13.0), t.text);
+            let close = Rect::from_center_size(pos2(header.right() - 24.0, header.center().y), vec2(24.0, 24.0));
+            cancel = Button::icon(Icon::Close, tr("Close")).icon_size(14.0).show_at(ui, panel_id.with("close"), close).clicked();
+
+            let body_rect = Rect::from_min_size(pos2(header.left() + 20.0, header.bottom() + 16.0), vec2(320.0, panel_height - 76.0));
+            let mut body = ui.new_child(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)));
+            body.spacing_mut().item_spacing.y = 0.0;
+            body.label(RichText::new(trn("{n} layers", n, &[])).font(regular(11.0)).color(t.text_secondary));
+            body.add_space(12.0);
+            crate::widgets::text_input(&mut body, panel_id.with("match"), &mut b.find, 320.0, tr("Match (empty: the whole name)"));
+            body.add_space(8.0);
+            if crate::widgets::checkbox(&mut body, b.regex, tr("Regular expression")) {
+                b.regex = !b.regex;
+            }
+            body.add_space(8.0);
+            let to = crate::widgets::text_input(&mut body, panel_id.with("rename_to"), &mut b.to, 320.0, tr("Rename to"));
+            body.add_space(8.0);
+            body.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for (label, code) in [(tr("Current name"), "$&"), (tr("Number ↑"), "$n"), (tr("Number ↓"), "$N")] {
+                    if Button::new(label).variant(ButtonVariant::Ghost).show(ui).clicked() {
+                        b.to.push_str(code);
+                        to.request_focus();
+                    }
+                }
+            });
+            body.add_space(8.0);
+            body.horizontal(|ui| {
+                ui.label(RichText::new(tr("Start ascending from / stop descending at")).font(regular(11.0)).color(t.text_secondary));
+                let number = crate::primitives::NumberField::new(panel_id.with("start"), crate::widgets::Lead::None, Some(f64::from(b.start)), "")
+                    .show(ui, ControlWidth::Fixed(64.0));
+                let next = match number.edit {
+                    Some(crate::widgets::Edit::All(crate::widgets::FieldEdit::Set(value) | crate::widgets::FieldEdit::Scrub(value, _))) => Some(value),
+                    Some(crate::widgets::Edit::Each(relative)) => relative.apply(f64::from(b.start)),
+                    None => None,
+                };
+                if let Some(value) = next.filter(|value| value.is_finite()) {
+                    b.start = value.round().clamp(0.0, 1_000_000.0) as u32;
+                }
+            });
+            body.add_space(8.0);
+            match &rename {
+                Err(error) => {
+                    body.label(RichText::new(error).font(regular(11.0)).color(t.danger));
+                }
+                Ok(_) => {
+                    for (old, new) in &preview {
+                        let (rect, _) = body.allocate_exact_size(vec2(320.0, 20.0), Sense::hover());
+                        let old = crate::widgets::elide_font(&body, old, 132.0, regular(11.0));
+                        let new = crate::widgets::elide_font(&body, new, 154.0, regular(11.0));
+                        body.painter().text(rect.left_center(), Align2::LEFT_CENTER, old, regular(11.0), t.text_secondary);
+                        body.painter().text(pos2(rect.left() + 140.0, rect.center().y), Align2::LEFT_CENTER, "→", regular(11.0), t.text_secondary);
+                        body.painter().text(pos2(rect.left() + 162.0, rect.center().y), Align2::LEFT_CENTER, new, regular(11.0), t.text);
+                    }
+                    if extra_preview > 0 {
+                        body.label(RichText::new(trn("and {n} more", n - PREVIEW_ROWS, &[])).font(regular(11.0)).color(t.text_secondary));
+                    }
                 }
             }
+            body.add_space(12.0);
+            body.horizontal(|ui| {
+                cancel |= Button::new(tr("Cancel")).variant(ButtonVariant::Secondary).show(ui).clicked();
+                let enter = to.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                apply = (Button::new(tr("Rename")).enabled(ready).show(ui).clicked() || enter) && ready;
+            });
         });
-        ui.horizontal(|ui| {
-            ui.label(tr("Start ascending from / stop descending at"));
-            ui.add(egui::DragValue::new(&mut b.start).range(0..=1_000_000));
-        });
-        ui.add_space(8.0);
-        match &rename {
-            Err(e) => {
-                ui.label(RichText::new(e).color(t.danger));
-            }
-            Ok(_) => {
-                for (old, new) in &preview {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(old).color(t.text_secondary));
-                        ui.label("→");
-                        ui.label(new);
-                    });
-                }
-                if ready && n > PREVIEW_ROWS {
-                    ui.label(RichText::new(trn("and {n} more", n - PREVIEW_ROWS, &[])).color(t.text_secondary));
-                }
-            }
-        }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            cancel = crate::widgets::button(ui, tr("Cancel"), false, true).clicked();
-            let enter = to.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            apply = (crate::widgets::button(ui, tr("Rename"), true, ready).clicked() || enter) && ready;
-        });
-    });
     if apply {
         app.run("object.batchRename", batch_rename_params(&b));
     }
