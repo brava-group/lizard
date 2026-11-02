@@ -26,9 +26,9 @@ fn header(ui: &mut Ui, colors: &[SelectionColor], open: bool) -> bool {
     a11y::disclosure(&response, title, open);
     let hovered = response.hovered();
     let ink = if hovered && t.dark { Color32::WHITE } else if hovered { t.text } else { t.text_secondary };
-    ui.painter().text(pos2(rect.left() + widgets::PAD + 18.0, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), ink);
+    ui.painter().text(pos2(rect.left() + widgets::PAD, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), ink);
     if hovered {
-        let chevron = Rect::from_center_size(pos2(rect.left() + widgets::PAD + 5.0, rect.center().y), vec2(10.0, 10.0));
+        let chevron = Rect::from_center_size(pos2(rect.left() + widgets::PAD - 10.0, rect.center().y), vec2(10.0, 10.0));
         icons::paint(ui.painter(), chevron, if open { Icon::Chevron } else { Icon::ChevronRight }, ink);
     }
     if !open {
@@ -99,11 +99,10 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[Nod
         widgets::separator(ui);
         return;
     }
-    // Bound the panel's height; a document with many distinct colors stays scrollable.
     ui.add_enabled_ui(!interacting, |ui| {
-        egui::ScrollArea::vertical().id_salt("selection_colors_rows").max_height(240.0).show_rows(ui, 32.0, colors.len(), |ui, range| {
+        ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            for group in &colors[range] {
+            for group in colors.iter() {
                 ui.push_id((&group.targets, "selection_color"), |ui| {
                     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
                     let control = Rect::from_min_size(pos2(row.left() + 16.0, row.top() + 4.0), vec2((row.width() - 84.0).max(64.0), 24.0));
