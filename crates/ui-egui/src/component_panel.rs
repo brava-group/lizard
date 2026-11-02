@@ -5,8 +5,8 @@
 //! - A component or component set: its properties (add, rename, default, delete), Add variant
 //!   (a lone main component becomes a set) and, for a set, the variant property matrix.
 //! - Several main components: Combine as variants.
-//! - A layer inside a component: bind its visibility / text / instance to a property, or make a
-//!   frame a slot.
+//! - A text layer inside a component: edit its text and bind that value to a component property
+//!   or file variable in the layer's own header.
 //! - A slot inside an instance (and an instance's slot properties): fill it with components
 //!   (preferred ones first), select it, reset it to the main's default content.
 
@@ -20,8 +20,8 @@ use lizard_engine::components::{
 use serde_json::{Value, json};
 
 use crate::LizardApp;
-use crate::i18n::{tr, tr_noop, trn};
-use crate::icons::{self, Icon};
+use crate::i18n::{tr, trn};
+use crate::icons::{self, HeaderIcon, Icon};
 use crate::list_drag::ListDrag;
 use crate::primitives::{Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyController, PropertyControllerKind, Select, Switch, TextFieldWithPresets};
 use crate::right::{menu_item, menu_popup, row, row_rect};
@@ -63,11 +63,8 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
     if !matches!(n.kind, NodeKind::Instance { .. }) && n.source.is_some() && owning_instance(doc, n.id).is_some() {
         overrides_ui(app, ui, n);
     }
-    if !matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. })
-        && !inside_instance(doc, n.id)
-        && owning_component(doc, n.id).is_some()
-    {
-        bind_ui(app, ui, doc, n);
+    if matches!(n.kind, NodeKind::Frame) && !inside_instance(doc, n.id) && owning_component(doc, n.id).is_some() {
+        scoped_property_row(app, ui, doc, n, "slot", "slot", tr("Slot"));
     }
 }
 
@@ -703,87 +700,97 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     }
 }
 
-/// Bind a layer inside a component to a component property.
-fn bind_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
-    let t = Tokens::get(ui.ctx());
-    let Some(comp) = owning_component(doc, n.id) else { return };
-    let defs = prop_defs(doc, comp);
-    // The English label also names a new property (document content); it shows translated.
-    let mut fields: Vec<(&str, &str, &str)> = vec![("visible", tr_noop("Visibility"), "boolean")];
-    if n.kind.text().is_some() {
-        fields.push(("characters", tr_noop("Text"), "text"));
-    }
-    if matches!(n.kind, NodeKind::Instance { .. }) {
-        fields.push(("mainComponent", tr_noop("Instance"), "instanceSwap"));
-    }
-    if matches!(n.kind, NodeKind::Frame) {
-        fields.push(("slot", tr_noop("Slot"), "slot"));
-    }
-    widgets::separator(ui);
-    row(ui, 36.0, |ui| {
-        ui.label(egui::RichText::new(tr("Component property")).font(semibold(11.0)).color(t.text));
+/// The selected text layer's value and binding action, directly below its name and actions.
+pub(crate) fn text_value_ui(app: &mut LizardApp, ui: &mut Ui, n: &Node) {
+    let Some(text) = n.kind.text() else { return };
+    let value = text.characters.as_str();
+    let rect = crate::right::row_rect(ui, 40.0, |ui| {
+        let width = ui.available_width();
+        if let Some(next) = widgets::text_field_named(ui, Id::new(("selected_text_value", n.id)), value, width, tr("Text content"))
+            && next != value
+        {
+            app.run("text.set", json!({"id": n.id, "characters": next}));
+        }
     });
-    for (field, label, ty) in fields {
-        let matching: Vec<&String> = defs
-            .iter()
-            .filter(|(_, d)| {
-                matches!(
-                    (ty, d),
-                    ("boolean", PropDef::Boolean { .. })
-                        | ("text", PropDef::Text { .. })
-                        | ("instanceSwap", PropDef::InstanceSwap { .. })
-                        | ("slot", PropDef::Slot { .. })
-                )
-            })
-            .map(|(k, _)| k)
-            .collect();
-        let bound = n.prop_refs.get(field).cloned();
-        row(ui, 32.0, |ui| {
-            let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-            let icon = match field {
-                "visible" => Icon::Eye,
-                "characters" => Icon::Text,
-                "slot" => Icon::Slot,
-                _ => Icon::Instance,
-            };
-            icons::paint(ui.painter(), ir, icon, if bound.is_some() { COMPONENT } else { t.icon_secondary });
-            widgets::label(ui, tr(label), t.text_secondary);
-            let shown = bound.clone().unwrap_or_else(|| tr("Not bound").into());
-            let resp = crate::primitives::Select::trigger(ui, &shown, 120.0, None).on_hover_text(tr("Apply a component property"));
-            menu_popup(&resp).width(180.0).show(|ui| {
-                for k in &matching {
-                    if menu_item(ui, k, "") {
-                        app.run("component.bindProperty", json!({"layer": n.id, "property": k, "field": field}));
-                        ui.close();
-                    }
+    value_binding_button(ui, n.id, "characters", VariableType::String, rect);
+    ui.add_space(8.0);
+}
+
+/// Visibility is bound beside the visibility control in Appearance, not in a separate section.
+pub(crate) fn visibility_value_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+    let [id] = sel else { return };
+    let Some(n) = doc.node(*id) else { return };
+    if matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. })
+        || inside_instance(doc, *id)
+        || lizard_engine::components::owning_component(doc, *id).is_none()
+    {
+        return;
+    }
+    let rect = crate::right::row_rect(ui, 32.0, |ui| {
+        if widgets::checkbox(ui, n.visible, tr("Visible")) {
+            app.run("object.toggleVisible", json!({"ids": [id]}));
+        }
+    });
+    value_binding_button(ui, *id, "visible", VariableType::Boolean, rect);
+}
+
+fn value_binding_button(ui: &mut Ui, id: NodeId, field: &str, kind: VariableType, rect: Rect) {
+    let button = widgets::section_action_rect(rect, 0);
+    let t = Tokens::get(ui.ctx());
+    let response = ui.interact(button, Id::new(("component_value_binding", id, field)), Sense::click())
+        .on_hover_text(tr("Apply a component property or variable"));
+    if response.hovered() {
+        ui.painter().rect_filled(button.shrink(2.0), egui::CornerRadius::same(5), t.hover);
+    }
+    icons::paint_header(ui.painter(), Rect::from_center_size(button.center(), vec2(18.0, 18.0)), HeaderIcon::TextVariable, t.icon);
+    if response.clicked() {
+        crate::variable_ui::open(ui, &[id], field, kind, button.left_bottom());
+    }
+}
+
+/// Bind fields that accept component properties but cannot use file variables.
+fn scoped_property_row(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, field: &str, ty: &str, label: &str) {
+    let Some(owner) = owning_component(doc, n.id) else { return };
+    let defs = prop_defs(doc, owner);
+    let bound = n.prop_refs.get(field);
+    row(ui, 32.0, |ui| {
+        widgets::label(ui, label, Tokens::get(ui.ctx()).text_secondary);
+        let width = ui.available_width().max(80.0);
+        let shown = bound.map(String::as_str).unwrap_or(tr("Not bound"));
+        let response = Select::trigger(ui, shown, width, None);
+        menu_popup(&response).width(190.0).show(|ui| {
+            for (name, def) in &defs {
+                let fits = matches!((ty, def), ("slot", PropDef::Slot { .. }) | ("instanceSwap", PropDef::InstanceSwap { .. }));
+                if fits && menu_item(ui, name, "") {
+                    app.run("component.bindProperty", json!({"layer": n.id, "field": field, "property": name}));
+                    ui.close();
                 }
-                if ty == "slot" {
-                    if bound.is_none() && menu_item(ui, tr("Make slot"), "") {
-                        // Named after the frame.
-                        app.run("component.makeSlot", json!({"id": n.id}));
-                        ui.close();
-                    }
-                } else if menu_item(ui, tr("Create property…"), "") {
-                    let existing: Vec<String> = defs.keys().cloned().collect();
+            }
+            if ty == "slot" {
+                if bound.is_none() && menu_item(ui, tr("Make slot"), "") {
+                    app.run("component.makeSlot", json!({"id": n.id}));
+                    ui.close();
+                }
+                if bound.is_some() && menu_item(ui, tr("Remove slot"), "") {
+                    app.run("component.removeSlot", json!({"id": n.id}));
+                    ui.close();
+                }
+            } else {
+                if menu_item(ui, tr("Create property…"), "") {
                     let name = (1..)
-                        .map(|k| if k == 1 { label.to_string() } else { format!("{label} {k}") })
-                        .find(|x| !existing.contains(x))
-                        .unwrap_or_default();
+                        .map(|index| if index == 1 { label.to_string() } else { format!("{label} {index}") })
+                        .find(|name| !defs.contains_key(name))
+                        .unwrap_or_else(|| label.to_string());
                     app.run("component.addProperty", json!({"id": n.id, "name": name, "type": ty}));
                     ui.close();
                 }
-                if ty == "slot" {
-                    if bound.is_some() && menu_item(ui, tr("Remove slot"), "") {
-                        app.run("component.removeSlot", json!({"id": n.id}));
-                        ui.close();
-                    }
-                } else if bound.is_some() && menu_item(ui, tr("Detach property"), "") {
-                    app.run("component.bindProperty", json!({"layer": n.id, "property": null, "field": field}));
+                if bound.is_some() && menu_item(ui, tr("Detach property"), "") {
+                    app.run("component.bindProperty", json!({"layer": n.id, "field": field, "property": null}));
                     ui.close();
                 }
-            });
+            }
         });
-    }
+    });
 }
 
 /// Overridden property groups of a layer inside an instance, each with a reset button.
@@ -917,6 +924,9 @@ fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
             app.run("component.goToMain", json!({"id": id}));
         }
     });
+    if nested_in_main(doc, id) {
+        scoped_property_row(app, ui, doc, n, "mainComponent", "instanceSwap", tr("Instance"));
+    }
     // The main component's description (the set's when the variant has none).
     let desc = [Some(*component), set]
         .into_iter()

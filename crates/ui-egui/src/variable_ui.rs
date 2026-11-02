@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use lizard_doc::{Collection, Document, ModeId, NodeId, PublishedLibrary, Variable, VariableId, VariableType, VariableValue, Variables};
+use lizard_doc::{Collection, Document, ModeId, NodeId, PropDef, PublishedLibrary, Variable, VariableId, VariableType, VariableValue, Variables};
 use lizard_engine::library;
 use serde_json::json;
 
@@ -16,7 +16,8 @@ use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
-use crate::theme::{Tokens, regular, semibold};
+use crate::primitives::{Button, ControlWidth, FloatingPanel, FloatingPanelWidth, SearchField, Select, SelectPosition, SelectVariant};
+use crate::theme::{COMPONENT, Tokens, regular, semibold};
 use crate::widgets::{self, BindEvent, Edit, Empty, FieldEdit, Lead};
 
 /// What picking a variable does.
@@ -38,6 +39,8 @@ struct Picker {
     target: Target,
     kind: Option<VariableType>,
     at: Pos2,
+    opened_frame: u64,
+    library_filter: usize,
 }
 
 fn picker_id() -> Id {
@@ -182,18 +185,21 @@ pub fn group_caption(ui: &mut Ui, lib: Option<&PublishedLibrary>, coll: &Collect
 /// Open the picker for `field` of `ids` at `at`.
 pub fn open(ui: &Ui, ids: &[NodeId], field: &str, kind: VariableType, at: Pos2) {
     let target = Target::Bind { ids: ids.to_vec(), field: field.to_string() };
-    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at }));
+    let opened_frame = ui.ctx().cumulative_frame_nr();
+    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at, opened_frame, library_filter: 0 }));
 }
 
 /// Open the picker at `at` to pick a variable (of `kind`, or any) for a prototype action.
 pub fn open_proto(ui: &Ui, slot: crate::proto_editor::VarSlot, kind: Option<VariableType>, at: Pos2) {
-    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target: Target::Proto(slot), kind, at }));
+    let opened_frame = ui.ctx().cumulative_frame_nr();
+    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target: Target::Proto(slot), kind, at, opened_frame, library_filter: 0 }));
 }
 
 /// Open the picker at `at` to bind a variable of `kind` to `field` of the shared style `style`.
 pub fn open_style(ui: &Ui, style: &str, field: &str, kind: VariableType, at: Pos2) {
     let target = Target::Style { style: style.to_string(), field: field.to_string() };
-    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at }));
+    let opened_frame = ui.ctx().cumulative_frame_nr();
+    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at, opened_frame, library_filter: 0 }));
 }
 
 /// Where the open picker is on screen (clicks in it don't close what opened it).
@@ -209,7 +215,8 @@ pub fn picker_open(ctx: &egui::Context) -> bool {
 /// Open the picker at `at` to alias `variable`'s value in `mode` to another variable.
 pub fn open_alias(ui: &Ui, variable: &str, mode: &str, kind: VariableType, at: Pos2) {
     let target = Target::Alias { variable: variable.to_string(), mode: mode.to_string() };
-    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at }));
+    let opened_frame = ui.ctx().cumulative_frame_nr();
+    ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at, opened_frame, library_filter: 0 }));
 }
 
 /// Open the picker for `field` of `ids` under the pointer (from a section header button).
@@ -418,6 +425,32 @@ pub fn bound_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], field: &str, 
     });
 }
 
+fn binding_pick_row(ui: &mut Ui, label: &str, value: &str, icon: Icon, icon_color: Color32) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
+    }
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(16.0, 16.0)), icon, icon_color);
+    let name_rect = Rect::from_min_max(pos2(rect.left() + 40.0, rect.top()), pos2((rect.right() - 92.0).max(rect.left() + 40.0), rect.bottom()));
+    let name = crate::widgets::elide_font(ui, label, name_rect.width(), regular(11.0));
+    ui.painter().text(pos2(name_rect.left(), rect.center().y), Align2::LEFT_CENTER, name, regular(11.0), t.menu_text);
+    let value_rect = Rect::from_min_max(pos2(rect.right() - 88.0, rect.top()), pos2(rect.right() - 12.0, rect.bottom()));
+    let value = crate::widgets::elide_font(ui, value, value_rect.width(), regular(11.0));
+    ui.painter().with_clip_rect(value_rect).text(
+        pos2(value_rect.right(), rect.center().y), Align2::RIGHT_CENTER, value, regular(11.0), t.menu_dim,
+    );
+    response.clicked()
+}
+
+fn picker_heading(ui: &mut Ui, title: &str) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 40.0), Sense::hover());
+    ui.painter().text(pos2(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, title, regular(10.0), t.text_secondary);
+}
+
 /// Whether a variable of type `have` belongs in a picker for `want` on `field`: its own type, and
 /// numbers for text content too (shown as text).
 fn kind_fits(want: Option<VariableType>, field: Option<&str>, have: VariableType) -> bool {
@@ -426,7 +459,7 @@ fn kind_fits(want: Option<VariableType>, field: Option<&str>, have: VariableType
 
 /// The picker popover (call once per frame).
 pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
-    let Some(p) = ctx.data(|d| d.get_temp::<Picker>(picker_id())) else { return };
+    let Some(mut p) = ctx.data(|d| d.get_temp::<Picker>(picker_id())) else { return };
     if let Target::Bind { ids, .. } = &p.target
         && *ids != app.session.selection()
     {
@@ -447,7 +480,7 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
         Target::Proto(_) | Target::Style { .. } => (None, None),
     };
     // Prototypes and styles use this file's variables.
-    let local_only = matches!(p.target, Target::Proto(_) | Target::Style { .. });
+    let local_only = matches!(p.target, Target::Proto(_) | Target::Style { .. }) || p.library_filter == 1;
     let field = match &p.target {
         Target::Bind { field, .. } => Some(field.as_str()),
         _ => None,
@@ -460,34 +493,128 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
             && (lib.is_some() || own.is_none_or(|o| lizard_engine::cmd::variables::alias_target(&doc.variables, o, &v.id).is_ok()))
     };
     let groups = groups(&doc, &libs, keep);
+    let component = match &p.target {
+        Target::Bind { ids, field } if ids.len() == 1 => ids.first().and_then(|id| {
+            (!lizard_engine::components::inside_instance(&doc, *id))
+                .then(|| lizard_engine::components::owning_component(&doc, *id))
+                .flatten()
+                .map(|owner| (*id, owner, field.as_str()))
+        }),
+        _ => None,
+    };
+    let component_properties: Vec<(String, String)> = component
+        .and_then(|(_, owner, field)| doc.node(owner).map(|node| (node, field)))
+        .and_then(|(node, field)| match &node.kind {
+            lizard_doc::NodeKind::Component { props, .. } => Some((props, field)),
+            _ => None,
+        })
+        .map(|(defs, field)| {
+            defs.iter()
+                .filter_map(|(name, def)| match (field, def) {
+                    ("characters", PropDef::Text { default }) => Some((name.clone(), default.clone())),
+                    ("visible", PropDef::Boolean { default }) => Some((name.clone(), default.to_string())),
+                    _ => None,
+                })
+                .filter(|(name, _)| q.is_empty() || name.to_lowercase().contains(&q))
+                .collect()
+        })
+        .unwrap_or_default();
+    let component_name = component.and_then(|(_, owner, _)| {
+        let display = lizard_engine::components::variant_set(&doc, owner).unwrap_or(owner);
+        doc.node(display).map(|n| n.name.clone())
+    });
     let mut chosen: Option<Pick> = None;
+    let mut chosen_property: Option<(NodeId, String, String)> = None;
+    let mut open_variables = false;
     let mut close = false;
-    let area = crate::primitives::Menu::area(Id::new("variable_picker_area"), p.at + vec2(0.0, 4.0)).show(ctx, |ui| {
-        egui::Frame::NONE.fill(t.menu).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
-            ui.set_width(240.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tr("Variables")).font(semibold(11.0)).color(t.menu_text));
-            });
+    const WIDTH: f32 = 230.0;
+    let border = Stroke::new(1.0, t.border);
+    let panel = FloatingPanel::new(Id::new("variable_picker_area"), p.at + vec2(0.0, 4.0))
+        .anchor_to_properties()
+        .width(FloatingPanelWidth::Fixed(WIDTH))
+        .corner_radius(12)
+        .header_height(40.0);
+    let Some(area) = panel.show_with_header(ctx, |ui, header| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        ui.painter().text(pos2(header.left() + 16.0, header.center().y), Align2::LEFT_CENTER, tr("Apply variable"), semibold(11.0), t.text);
+        let close_rect = Rect::from_center_size(pos2(header.right() - 20.0, header.center().y), vec2(24.0, 24.0));
+        if Button::icon(Icon::Close, tr("Close")).icon_size(14.0).show_at(ui, Id::new("variable_picker_close"), close_rect).clicked() {
+            close = true;
+        }
+        ui.painter().hline(header.x_range(), header.bottom() - 0.5, border);
+
+        let (search_row, _) = ui.allocate_exact_size(vec2(WIDTH, 40.0), Sense::hover());
+        let search_rect = Rect::from_min_size(pos2(search_row.left() + 16.0, search_row.top() + 8.0), vec2(WIDTH - 32.0, 24.0));
+        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(search_rect));
+        SearchField::new(query_id, tr("Search"))
+            .width(ControlWidth::Fill)
+            .compact()
+            .clearable()
+            .ghost()
+            .show(&mut search_ui, &mut query);
+        ui.painter().hline(search_row.x_range(), search_row.bottom() - 0.5, border);
+
+        let (filter_row, _) = ui.allocate_exact_size(vec2(WIDTH, 40.0), Sense::hover());
+        let options = [tr("All libraries"), tr("This file")];
+        let select_rect = Rect::from_min_size(pos2(filter_row.left() + 16.0, filter_row.top() + 8.0), vec2(WIDTH - 80.0, 24.0));
+        let mut select_ui = ui.new_child(egui::UiBuilder::new().max_rect(select_rect));
+        if let Some(next) = Select::new(&options, p.library_filter)
+            .label(tr("Libraries"))
+            .width(ControlWidth::Fill)
+            .variant(SelectVariant::Outlined)
+            .position(SelectPosition::BottomLeft)
+            .show(&mut select_ui)
+        {
+            p.library_filter = next;
+        }
+        let add_rect = Rect::from_center_size(pos2(filter_row.right() - 24.0, filter_row.center().y), vec2(24.0, 24.0));
+        if Button::icon(Icon::Plus, tr("Create variable")).icon_size(16.0).show_at(ui, Id::new("variable_picker_add"), add_rect).clicked() {
+            open_variables = true;
+        }
+        ui.painter().hline(filter_row.x_range(), filter_row.bottom() - 0.5, border);
+
+        egui::ScrollArea::vertical().id_salt("variable_picker_scroll").max_height(300.0).show(ui, |ui| {
+            ui.set_width(WIDTH);
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.add_space(4.0);
-            let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tr("Search")).font(regular(11.0)).desired_width(224.0));
-            crate::widgets::select_all_on_focus(ui, &r, &query);
-            if !r.has_focus() && !crate::a11y::field_focused(ui.ctx()) {
-                r.request_focus();
-            }
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-                for (lib, c, vars) in &groups {
-                    group_caption(ui, *lib, c);
-                    let all = lib.map_or(&doc.variables, |l| &l.doc.variables);
-                    for v in vars {
-                        if variable_row(ui, all, v, 224.0) {
-                            chosen = Some(Pick { library: lib.map(|l| l.manifest.id.clone()), id: v.id.clone() });
+            if let Some(name) = &component_name {
+                picker_heading(ui, &format!("{} {name}", tr("Properties in")));
+                if let Some((layer, _, field)) = component {
+                    for (property, default) in &component_properties {
+                        let icon = if field == "visible" { Icon::VariableBoolean } else { Icon::VariableString };
+                        if binding_pick_row(ui, property, default, icon, COMPONENT) {
+                            chosen_property = Some((layer, field.to_string(), property.clone()));
                         }
                     }
                 }
-            });
-            if groups.is_empty() {
-                // Whole sentences per type: languages place the type differently.
+                ui.add_space(8.0);
+            }
+            picker_heading(ui, tr("Variables in this file"));
+            let mut library_heading = false;
+            for (lib, c, vars) in &groups {
+                if lib.is_some() && !library_heading {
+                    ui.add_space(8.0);
+                    picker_heading(ui, tr("Library variables"));
+                    library_heading = true;
+                }
+                if lib.is_some() || component_name.is_none() {
+                    group_caption(ui, *lib, c);
+                }
+                let all = lib.map_or(&doc.variables, |l| &l.doc.variables);
+                for v in vars {
+                    let value = all.resolve(&v.id, &std::collections::BTreeMap::new()).map(|value| value.display()).unwrap_or_default();
+                    let icon = match v.kind {
+                        VariableType::String => Icon::VariableString,
+                        VariableType::Boolean => Icon::VariableBoolean,
+                        VariableType::Number => Icon::VariableNumber,
+                        VariableType::Color => Icon::VariableColor,
+                    };
+                    if binding_pick_row(ui, &v.name, &value, icon, t.icon) {
+                        chosen = Some(Pick { library: lib.map(|l| l.manifest.id.clone()), id: v.id.clone() });
+                    }
+                }
+            }
+            if groups.is_empty() && component_properties.is_empty() {
                 let (fit, none) = match p.kind {
                     Some(VariableType::Color) => {
                         (tr("No colour variables fit here."), tr("No colour variables yet. Create them in Local variables."))
@@ -506,16 +633,11 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
                 let msg = if groups_any_kind(&doc, &libs, p.kind) { fit } else { none };
                 ui.label(egui::RichText::new(msg).font(regular(11.0)).color(t.menu_dim));
             }
+            ui.add_space(8.0);
         });
-    });
+    }) else { return };
     let rect = area.response.rect;
-    ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("variable_picker_border"))).rect_stroke(
-        rect,
-        CornerRadius::same(10),
-        Stroke::new(1.0, Color32::from_black_alpha(40)),
-        egui::StrokeKind::Inside,
-    );
-    let clicked_outside = !matches!(&p.target, Target::Bind { .. })
+    let clicked_outside = ctx.cumulative_frame_nr() > p.opened_frame
         && ctx.input(|i| {
             (i.pointer.button_pressed(egui::PointerButton::Primary) || i.pointer.button_pressed(egui::PointerButton::Secondary))
                 && i.pointer.interact_pos().is_some_and(|pos| !rect.contains(pos))
@@ -539,13 +661,24 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
         }
         close = true;
     }
+    if let Some((layer, field, property)) = chosen_property {
+        app.run("component.bindProperty", json!({"layer": layer, "field": field, "property": property}));
+        close = true;
+    }
+    if open_variables {
+        app.ui.variables.get_or_insert_with(Default::default);
+        close = true;
+    }
     if close {
         ctx.data_mut(|d| {
             d.remove::<Picker>(picker_id());
             d.remove::<String>(query_id);
         });
     } else {
-        ctx.data_mut(|d| d.insert_temp(query_id, query));
+        ctx.data_mut(|d| {
+            d.insert_temp(query_id, query);
+            d.insert_temp(picker_id(), p);
+        });
     }
 }
 
@@ -557,6 +690,16 @@ fn groups_any_kind(doc: &Document, libs: &[Arc<PublishedLibrary>], kind: Option<
 #[cfg(test)]
 mod kind_tests {
     use super::*;
+
+    #[test]
+    fn opening_value_picker_does_not_reenter_egui_data_lock() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            open(ui, &[NodeId(1)], "characters", VariableType::String, Pos2::ZERO);
+            assert!(picker_open(ui.ctx()));
+        });
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn text_content_offers_numbers_too() {

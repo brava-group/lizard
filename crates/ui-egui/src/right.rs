@@ -629,24 +629,27 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         let actions = [
             (HeaderIcon::SelectMatching, tr("Select matching layers"), "select.matching"),
             (HeaderIcon::TextLink, tr("Create link"), "text.link"),
-            (HeaderIcon::TextVariable, tr("Apply variable"), "text.variable"),
             (HeaderIcon::CreateComponent, tr("Create component"), "component.create"),
             (HeaderIcon::More, tr("More actions"), "text.more"),
         ];
         for (index, (icon, label, command)) in actions.into_iter().enumerate() {
-            let button = Rect::from_min_size(pos2(r.max.x - 8.0 - (5 - index) as f32 * 24.0, r.center().y - 12.0), vec2(24.0, 24.0));
+            let button = Rect::from_min_size(pos2(r.max.x - 8.0 - (4 - index) as f32 * 24.0, r.center().y - 12.0), vec2(24.0, 24.0));
             let size = if icon == HeaderIcon::More { 16.0 } else { 18.0 };
             let response = Button::header_icon(icon, label).icon_size(size).show_at(ui, ui.id().with(("text_header", index)), button);
             if response.clicked() {
                 match command {
                     "text.link" => crate::menus::invoke(app, command),
-                    "text.variable" => crate::variable_ui::open_at_pointer(ui, sel, "characters", VariableType::String),
                     "text.more" => app.ui.context_menu = Some((button.left_bottom(), sel.to_vec())),
                     _ => {
                         app.run(command, json!({}));
                     }
                 }
             }
+        }
+        if let [id] = sel
+            && let Some(node) = doc.node(*id)
+        {
+            crate::component_panel::text_value_ui(app, ui, node);
         }
         crate::component_panel::instance_section(app, ui, doc, sel);
         return;
@@ -1021,6 +1024,7 @@ fn appearance(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
     }
     let col = widgets::col_width(ui.available_width());
     crate::variable_ui::bound_row(app, ui, &ids, "visible", VariableType::Boolean, Lead::Icon(Icon::Eye, tr("Visible")), f32::INFINITY);
+    crate::component_panel::visibility_value_ui(app, ui, doc, sel);
     // Masks: how they mask.
     if sel.iter().all(|i| doc.node(*i).is_some_and(|n| n.is_mask)) {
         let mt = common(doc, sel, |n| n.mask_type);

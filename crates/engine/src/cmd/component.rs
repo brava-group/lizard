@@ -1277,7 +1277,9 @@ fn bind(cmd: &str, doc: &mut Document, layer: NodeId, property: Option<&str>, fi
         }
         _ => {}
     }
-    doc.get_mut(layer)?.prop_refs.insert(field.to_string(), property.to_string());
+    let layer = doc.get_mut(layer)?;
+    layer.bound.remove(field);
+    layer.prop_refs.insert(field.to_string(), property.to_string());
     Ok(())
 }
 

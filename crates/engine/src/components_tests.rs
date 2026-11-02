@@ -430,6 +430,25 @@ fn component_properties_apply_to_instances() {
 }
 
 #[test]
+fn text_value_uses_either_a_component_property_or_a_file_variable() {
+    let mut s = Session::new();
+    let (component, _, title, _) = card(&mut s);
+    ex(&mut s, "component.addProperty", json!({"id": component, "name": "Label", "type": "text", "layer": title}));
+    assert_eq!(node(&s, title).prop_refs.get("characters").map(String::as_str), Some("Label"));
+
+    ex(&mut s, "variable.createCollection", json!({"name": "Copy"}));
+    ex(&mut s, "variable.create", json!({"collection": "Copy", "name": "Caption", "type": "string", "value": "Variable text"}));
+    ex(&mut s, "variable.bind", json!({"ids": [title], "field": "characters", "variable": "Caption"}));
+    assert!(!node(&s, title).prop_refs.contains_key("characters"));
+    assert!(node(&s, title).bound.contains_key("characters"));
+
+    ex(&mut s, "component.bindProperty", json!({"layer": title, "field": "characters", "property": "Label"}));
+    assert_eq!(node(&s, title).prop_refs.get("characters").map(String::as_str), Some("Label"));
+    assert!(!node(&s, title).bound.contains_key("characters"));
+    healthy(&s);
+}
+
+#[test]
 fn push_changes_to_main() {
     let mut s = Session::new();
     let (c, bg, _title, _dot) = card(&mut s);

@@ -792,6 +792,7 @@ pub fn bind(s: &mut Session, p: &Value) -> Result<Value> {
                 if n.bound.get(&field) != Some(v) {
                     rebind_paint_alpha(&mut n.fills, &mut n.strokes, &field, true);
                 }
+                n.prop_refs.remove(&field);
                 n.bound.insert(field.clone(), v.clone());
             }
             None => {
