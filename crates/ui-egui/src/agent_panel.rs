@@ -1,5 +1,6 @@
 //! The Agent sidebar and its conversation state.
 
+use crate::primitives::TooltipResponseExt as _;
 use base64::Engine as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use lizard_doc::NodeId;
@@ -979,7 +980,7 @@ pub(crate) fn select_agent(app: &mut LizardApp, kind: AgentKind) {
 }
 
 fn hit(ui: &mut Ui, id: &'static str, rect: Rect, tip: &'static str) -> egui::Response {
-    let response = ui.interact(rect, ui.id().with(id), Sense::click()).on_hover_text(tip);
+    let response = ui.interact(rect, ui.id().with(id), Sense::click()).lizard_tooltip(tip);
     a11y::button(&response, tip);
     response
 }
@@ -1181,8 +1182,8 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
 fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -> (bool, bool) {
     let body = Rect::from_min_max(rect.min, pos2(rect.max.x - 24.0, rect.max.y));
     let remove = Rect::from_min_max(pos2(body.max.x, rect.min.y), rect.max);
-    let locate = ui.interact(body, ui.id().with(("agent_node", &salt)), Sense::click()).on_hover_text("Localizar no canvas");
-    let exclude = ui.interact(remove, ui.id().with(("agent_remove_node", &salt)), Sense::click()).on_hover_text("Retirar do contexto do chat");
+    let locate = ui.interact(body, ui.id().with(("agent_node", &salt)), Sense::click()).lizard_tooltip("Localizar no canvas");
+    let exclude = ui.interact(remove, ui.id().with(("agent_remove_node", &salt)), Sense::click()).lizard_tooltip("Retirar do contexto do chat");
     a11y::button(&locate, "Localizar no canvas");
     a11y::button(&exclude, "Retirar do contexto do chat");
     ui.painter().rect(
@@ -1339,7 +1340,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         .fill(Tokens::get(ui.ctx()).selected_row)
                                         .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).accent_text.gamma_multiply(0.4)))
                                         .corner_radius(5);
-                                        if ui.add(badge).on_hover_text("Localizar no canvas").clicked() {
+                                        if ui.add(badge).lizard_tooltip("Localizar no canvas").clicked() {
                                             locate_node = Some(node.id);
                                         }
                                     }
@@ -1595,13 +1596,13 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                 pos2(composer.min.x + 12.0 + column as f32 * (image_size + 8.0), composer.min.y + 8.0 + row as f32 * (image_size + 8.0)),
                 vec2(image_size, image_size),
             );
-            let _ = ui.interact(tile, ui.id().with(("agent_image", index)), Sense::hover()).on_hover_text(&image.name);
+            let _ = ui.interact(tile, ui.id().with(("agent_image", index)), Sense::hover()).lizard_tooltip(&image.name);
             ui.painter().rect(tile, CornerRadius::same(8), t.field, Stroke::new(1.0, border), egui::StrokeKind::Inside);
             if let Some(preview) = &image.preview {
                 egui::Image::from_texture(preview).corner_radius(8).paint_at(ui, tile.shrink(1.0));
             }
             let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y + 4.0), vec2(20.0, 20.0));
-            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).on_hover_text("Remover imagem");
+            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).lizard_tooltip("Remover imagem");
             a11y::button(&remove_resp, "Remover imagem");
             ui.painter().circle_filled(remove.center(), 10.0, if remove_resp.hovered() { t.pressed } else { panel });
             ui.painter().circle_stroke(remove.center(), 9.5, Stroke::new(1.0, border));

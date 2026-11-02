@@ -1,5 +1,6 @@
 //! Compact gradient editor, laid out on the 240 × 329 reference dialog.
 
+use crate::primitives::TooltipResponseExt as _;
 use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, vector_button};
 use super::*;
 
@@ -97,7 +98,7 @@ fn preview(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut us
         let marker = Rect::from_center_size(pos2(bar.left() + stop.position.clamp(0.0, 1.0) * bar.width(), origin.y + 140.0), vec2(24.0, 24.0));
         let response = ui
             .interact(marker, Id::new(("cp_gradient_marker", index)), Sense::click_and_drag())
-            .on_hover_text(format!("{}%", (stop.position * 100.0).round()));
+            .lizard_tooltip(format!("{}%", (stop.position * 100.0).round()));
         draw_stop_marker(ui, marker, stop.color, index == *selected);
         if response.clicked() || response.drag_started() {
             *selected = index;
@@ -173,7 +174,7 @@ fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut 
         }
         let swatch = at(origin, 77.0, y + 8.0, 16.0, 16.0);
         widgets::paint_swatch(ui.painter(), swatch, &Paint::solid(stop.color));
-        if ui.interact(swatch, Id::new(("cp_gradient_swatch", index)), Sense::click()).on_hover_text("Edit stop color").clicked() {
+        if ui.interact(swatch, Id::new(("cp_gradient_swatch", index)), Sense::click()).lizard_tooltip("Edit stop color").clicked() {
             *selected = index;
             ui.data_mut(|data| data.insert_temp(Id::new("cp_gradient_stop_popup"), index));
         }

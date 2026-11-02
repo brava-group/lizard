@@ -19,6 +19,7 @@
 //! momentum after a drag or the wheel lets go ([`fling_axis`]), and a drag past the end of a
 //! scroll range stretches ([`rubber_band`]) and springs back on release.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -1780,7 +1781,7 @@ fn navigation_bar(p: &mut Presenter, ctx: &egui::Context, now: f64) -> Option<St
                     let prev = index.and_then(|i| i.checked_sub(1)).and_then(|i| frames.get(i)).copied();
                     let next = index.and_then(|i| frames.get(i + 1)).copied();
                     let previous =
-                        ui.add_enabled(prev.is_some(), egui::Button::new("").min_size(vec2(26.0, 24.0))).on_hover_text(tr("Previous frame"));
+                        ui.add_enabled(prev.is_some(), egui::Button::new("").min_size(vec2(26.0, 24.0))).lizard_tooltip(tr("Previous frame"));
                     icons::paint(
                         ui.painter(),
                         Rect::from_center_size(previous.rect.center(), vec2(21.0, 21.0)),
@@ -1791,7 +1792,7 @@ fn navigation_bar(p: &mut Presenter, ctx: &egui::Context, now: f64) -> Option<St
                         navigate = prev;
                     }
                     ui.label(egui::RichText::new(format!("{} / {}", index.map_or(0, |i| i + 1), frames.len())).color(t.text));
-                    let following = ui.add_enabled(next.is_some(), egui::Button::new("").min_size(vec2(26.0, 24.0))).on_hover_text(tr("Next frame"));
+                    let following = ui.add_enabled(next.is_some(), egui::Button::new("").min_size(vec2(26.0, 24.0))).lizard_tooltip(tr("Next frame"));
                     icons::paint(
                         ui.painter(),
                         Rect::from_center_size(following.rect.center(), vec2(21.0, 21.0)),
@@ -2221,7 +2222,7 @@ fn player(p: &mut Presenter, ui: &mut Ui, rect: Rect, now: f64, chrome: Chrome) 
 // canvas editor takes several lines. Upgrade if prototypes need multiline widget text.
 fn widget_extras(p: &mut Presenter, ui: &mut Ui, area: &egui::Response, l: &Layout) {
     if let Some(tip) = p.widget_tip.as_deref().filter(|_| area.hovered()) {
-        area.clone().on_hover_text_at_pointer(tip);
+        area.clone().lizard_tooltip_at_pointer(tip);
     }
     let Some((layer, start)) = p.widget_input else { return };
     // The field opens the frame after the click that asked for it: a field takes a click that

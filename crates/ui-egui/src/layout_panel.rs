@@ -4,6 +4,7 @@
 //! alignment in its cell, and clip content. Everything goes through `node.set` props or `layout.*`
 //! commands.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_doc::*;
 use serde_json::json;
@@ -47,7 +48,7 @@ pub fn layout_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[N
     }
     let from_main = tr("In an instance, this comes from the main component");
     if let Some(Some(l)) = &al {
-        ui.add_enabled_ui(!in_instance, |ui| direction(app, ui, &ids, l)).response.on_disabled_hover_text(from_main);
+        ui.add_enabled_ui(!in_instance, |ui| direction(app, ui, &ids, l)).response.lizard_disabled_tooltip(from_main);
     }
     if is_text {
         let resize = common(doc, sel, |node| match &node.kind {
@@ -76,7 +77,7 @@ pub fn layout_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[N
             }
         });
     }
-    ui.add_enabled_ui(!nested, |ui| dimensions(app, ui, doc, sel, has_al)).response.on_disabled_hover_text(from_main);
+    ui.add_enabled_ui(!nested, |ui| dimensions(app, ui, doc, sel, has_al)).response.lizard_disabled_tooltip(from_main);
     let parent_al = sel.iter().all(|i| parent_of(doc, *i).is_some_and(|p| p.layout.is_some()));
     if parent_al {
         let absolute = common(doc, sel, |n| n.child_layout.absolute).unwrap_or(false);
@@ -104,12 +105,12 @@ pub fn layout_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[N
             }
         })
         .response
-        .on_disabled_hover_text(from_main);
+        .lizard_disabled_tooltip(from_main);
     }
     crate::selection_spacing::panel(app, ui, sel);
     let grid_parent = sel.iter().all(|i| parent_of(doc, *i).and_then(|p| p.layout.as_ref()).is_some_and(|l| l.mode == LayoutMode::Grid));
     if grid_parent && common(doc, sel, |n| n.child_layout.absolute) == Some(false) {
-        ui.add_enabled_ui(!nested, |ui| grid_cell(app, ui, doc, sel)).response.on_disabled_hover_text(from_main);
+        ui.add_enabled_ui(!nested, |ui| grid_cell(app, ui, doc, sel)).response.lizard_disabled_tooltip(from_main);
     }
     if frames {
         ui.add_space(8.0);

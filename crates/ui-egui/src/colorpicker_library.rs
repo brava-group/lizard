@@ -1,4 +1,5 @@
 //! Libraries and the adjacent style/variable creation panel of the colour picker.
+use crate::primitives::TooltipResponseExt as _;
 use super::*;
 use lizard_doc::{StyleKind, VariableType, VariableValue};
 use lizard_engine::library;
@@ -197,7 +198,7 @@ fn collect(app: &LizardApp, doc: &lizard_doc::Document, query: &str, filter: &st
 }
 
 fn icon_button(ui: &mut Ui, rect: Rect, id: impl std::hash::Hash + std::fmt::Debug, index: usize, size: egui::Vec2, hint: &str) -> bool {
-    let response = ui.interact(rect, Id::new(id), Sense::click()).on_hover_text(hint);
+    let response = ui.interact(rect, Id::new(id), Sense::click()).lizard_tooltip(hint);
     if response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(5), custom::FIELD);
     }
@@ -316,7 +317,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                                 for swatch in entries {
                                     let (r, response) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
                                     ui.painter().rect_filled(r.shrink(3.0), CornerRadius::same(5), doc_c32(ctx, swatch.color));
-                                    if response.on_hover_text(&swatch.name).clicked() {
+                                    if response.lizard_tooltip(&swatch.name).clicked() {
                                         picked = Some(swatch.clone());
                                     }
                                 }

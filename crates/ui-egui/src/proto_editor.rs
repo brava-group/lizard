@@ -4,6 +4,7 @@
 //! set variable values given as expressions. Every edit runs a `proto.action.*` or
 //! `proto.conditional.*` command (one undo step each).
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use lizard_doc::proto::{Action, ConditionalBlock, Expr, ExprOp};
 use lizard_doc::{Document, NodeId, VariableType, VariableValue, Variables};
@@ -263,7 +264,7 @@ fn action_item(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, a: &Action, path: Vec<
             let text = action_summary(cx.doc, a);
             let shown = widgets::elide(ui, &text, w - 12.0);
             ui.painter().text(pos2(r.min.x + 6.0, r.center().y), Align2::LEFT_CENTER, &shown, regular(11.0), t.text);
-            let resp = if shown != text { resp.on_hover_text(text) } else { resp };
+            let resp = if shown != text { resp.lizard_tooltip(text) } else { resp };
             if resp.clicked() {
                 set_open(ui.ctx(), cx, slot.path.clone());
             }
@@ -333,10 +334,10 @@ fn conditional_blocks(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, bl
     }
     let has_else = blocks.last().is_some_and(|b| b.condition.is_none());
     row(ui, 28.0, |ui| {
-        if link_button(ui, Icon::Plus, tr("Else if")).on_hover_text(tr("Add another condition")).clicked() {
+        if link_button(ui, Icon::Plus, tr("Else if")).lizard_tooltip(tr("Add another condition")).clicked() {
             run_at(app, slot, "proto.conditional.addBlock", json!({}));
         }
-        if !has_else && link_button(ui, Icon::Plus, tr("Else")).on_hover_text(tr("Add actions for when no condition holds")).clicked() {
+        if !has_else && link_button(ui, Icon::Plus, tr("Else")).lizard_tooltip(tr("Add actions for when no condition holds")).clicked() {
             run_at(app, slot, "proto.conditional.addBlock", json!({"else": true}));
         }
     });
@@ -468,7 +469,7 @@ fn builder_row(app: &mut LizardApp, ui: &mut Ui, cx: &Cx, slot: &Slot, b: usize,
         // The variable tested, from the variable picker.
         let name = var.map_or(tr("Missing variable"), |v| v.name.as_str());
         let shown = widgets::elide(ui, name, side - 48.0);
-        let resp = crate::primitives::Select::trigger(ui, &shown, side, Some(Icon::Variable)).on_hover_text(name);
+        let resp = crate::primitives::Select::trigger(ui, &shown, side, Some(Icon::Variable)).lizard_tooltip(name);
         if resp.clicked() {
             crate::variable_ui::open_proto(ui, VarSlot { slot: slot.clone(), part: VarPart::Lhs(b) }, None, resp.rect.left_bottom());
         }

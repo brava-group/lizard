@@ -1,5 +1,6 @@
 //! A selection group with one animated surface shared by its segments.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::ControlWidth;
@@ -159,7 +160,7 @@ impl<'a> SegmentedControl<'a> {
                 segment.content,
                 SegmentContent::Icon(_) | SegmentContent::LayoutIcon(_) | SegmentContent::PositionIcon(_) | SegmentContent::VectorPointIcon(_)
             ) {
-                response.on_hover_text(segment.label)
+                response.lizard_tooltip(segment.label)
             } else {
                 response
             };

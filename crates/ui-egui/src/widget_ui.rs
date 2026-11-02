@@ -3,6 +3,7 @@
 //! under the pointer; and the widgets' timers, which wake the window when the next one is due and
 //! at no other time. Everything acts through the engine's `widget.*` commands.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Context, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_color::{Color, Paint};
 use lizard_doc::{Document, NodeId};
@@ -69,7 +70,7 @@ fn items(ui: &mut Ui, menu: &[MenuItem], t: &Tokens) -> Option<(String, Value)> 
             MenuKind::Link => {
                 let resp = widgets::button(ui, &format!("{label} ↗"), false, true);
                 crate::a11y::link(&resp, label);
-                resp.on_hover_text(item.url.as_str()).clicked().then_some(Value::Null)
+                resp.lizard_tooltip(item.url.as_str()).clicked().then_some(Value::Null)
             }
             MenuKind::Toggle => {
                 let on = value.and_then(Value::as_bool).unwrap_or(false);
@@ -105,7 +106,7 @@ fn items(ui: &mut Ui, menu: &[MenuItem], t: &Tokens) -> Option<(String, Value)> 
                             StrokeKind::Outside,
                         );
                     }
-                    if resp.on_hover_text(hex.as_str()).clicked() {
+                    if resp.lizard_tooltip(hex.as_str()).clicked() {
                         picked = Some(json!(hex));
                     }
                 }
@@ -215,7 +216,7 @@ pub fn design_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[N
 pub fn pointer(app: &mut LizardApp, canvas: &egui::Response) {
     if canvas.hovered() {
         if let Some(tip) = app.session.tool.overlay.widget_tip.as_deref() {
-            canvas.clone().on_hover_text_at_pointer(tip);
+            canvas.clone().lizard_tooltip_at_pointer(tip);
         }
     } else if !canvas.ctx.input(|i| i.pointer.any_down()) {
         engine::set_hover(&mut app.session, None);

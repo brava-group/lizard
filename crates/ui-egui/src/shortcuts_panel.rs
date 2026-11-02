@@ -2,6 +2,7 @@
 //! keymap (Essential, Tools, View…), each command's keys as keycaps for this platform, and a search
 //! across every group.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Context, CornerRadius, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_engine::keymap::{GESTURES, Group, KEYS, Platform};
 
@@ -89,7 +90,7 @@ fn row(ui: &mut Ui, t: &Tokens, row: &Row, width: f32) {
     // shows in full on hover.
     let label = crate::widgets::elide_font(ui, &row.label, label_w, regular(12.0));
     if label != row.label {
-        resp.on_hover_text(&*row.label);
+        resp.lizard_tooltip(&*row.label);
     }
     ui.painter().text(pos2(r.min.x + 6.0, cy), Align2::LEFT_CENTER, label, regular(12.0), t.text);
 }

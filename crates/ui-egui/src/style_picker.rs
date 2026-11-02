@@ -8,6 +8,7 @@
 //! creates a style from the selection (for text, the selected chars); the detach button unlinks
 //! it. Colour slots also list colour variables to bind (this file's, then each enabled library's).
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use lizard_color::{Paint, PaintKind};
 use lizard_doc::{
@@ -240,7 +241,7 @@ pub fn chip(app: &mut LizardApp, ui: &mut Ui, doc: &Document, ids: &[NodeId], sl
         let col = if mixed { t.text_secondary } else { t.text };
         crate::bidi::paint_name(ui.painter(), pos2(r.min.x + 26.0, r.center().y), &name, regular(11.0), col, r.width() - 32.0);
         let tip = if mixed { tr("The selection uses several text styles: click to apply one") } else { tr("Change style") };
-        open_it = resp.on_hover_text(tip).clicked();
+        open_it = resp.lizard_tooltip(tip).clicked();
         let detach = if mixed { tr("Detach styles") } else { tr("Detach style") };
         if icons::button(ui, Icon::Detach, 24.0, false, detach).clicked() {
             app.run("style.detach", json!({"ids": ids, "which": slot.key()}));
@@ -491,7 +492,7 @@ fn style_row(ui: &mut Ui, s: &Style, key: Key, slot: StyleSlot, applied: bool, e
         (false, _) => Some(s.description.clone()),
     };
     let resp = match tip {
-        Some(tip) => resp.on_hover_text(tip),
+        Some(tip) => resp.lizard_tooltip(tip),
         None => resp,
     };
     react(&resp, key, editable, out);
@@ -537,7 +538,7 @@ fn style_grid(ui: &mut Ui, list: &[(&Style, Key)], applied: Option<&Key>, editab
                     Some(def) => format!("{}\n{} {} · {}", s.name, def.font_family, def.font_style, text_meta(def)),
                     None => s.name.clone(),
                 };
-                let resp = resp.on_hover_text(tip);
+                let resp = resp.lizard_tooltip(tip);
                 react(&resp, key.clone(), editable(key), out);
             }
         });
@@ -828,7 +829,7 @@ fn binding_cell(ui: &mut Ui, doc: &Document, style: &Style, field: &str, kind: l
     let w = ui.painter().layout_no_wrap(shown.clone(), regular(10.0), t.menu_dim).size().x + 22.0;
     let chip = Rect::from_min_max(pos2(row.max.x - w - 4.0, row.min.y + 4.0), pos2(row.max.x - 4.0, row.max.y - 4.0));
     let resp =
-        ui.interact(chip, id, Sense::click()).on_hover_text(crate::i18n::trf("Bound to {name}. Click to detach the variable.", &[("name", &name)]));
+        ui.interact(chip, id, Sense::click()).lizard_tooltip(crate::i18n::trf("Bound to {name}. Click to detach the variable.", &[("name", &name)]));
     ui.painter().rect_filled(chip, CornerRadius::same(4), if resp.hovered() { t.menu_hover } else { t.menu });
     ui.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, t.menu_dim.gamma_multiply(0.4)), egui::StrokeKind::Inside);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(chip.min.x + 9.0, chip.center().y), vec2(11.0, 11.0)), Icon::Variable, t.menu_dim);
@@ -881,10 +882,10 @@ fn text_properties(ui: &mut Ui, id: &str, def: &TextStyle, out: &mut Frame) {
     // The dropdowns' menus open outside the dark scope (they're regular popups).
     let (family_resp, style_resp) = crate::theme::on_dark(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
-        let family_resp = crate::primitives::Select::trigger(ui, &def.font_family, W, None).on_hover_text(tr("Font"));
+        let family_resp = crate::primitives::Select::trigger(ui, &def.font_family, W, None).lizard_tooltip(tr("Font"));
         let mut style_resp = None;
         ui.horizontal(|ui| {
-            style_resp = Some(crate::primitives::Select::trigger(ui, &def.font_style, half, None).on_hover_text(tr("Font style")));
+            style_resp = Some(crate::primitives::Select::trigger(ui, &def.font_style, half, None).lizard_tooltip(tr("Font style")));
             if let Some(widgets::FieldEdit::Set(v) | widgets::FieldEdit::Scrub(v, true)) =
                 widgets::number_field(ui, Id::new(("ts_size", id)), widgets::Lead::Text(tr("Size")), Some(def.font_size), "", half, 1.0)
             {
@@ -1704,11 +1705,11 @@ fn editor(ui: &mut Ui, doc: &Document, p: &mut Picker, out: &mut Frame) {
     });
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if has_selection && menu_button(ui, tr("Update from selection")).on_hover_text(tr("Take the values from the first selected layer")).clicked()
+        if has_selection && menu_button(ui, tr("Update from selection")).lizard_tooltip(tr("Take the values from the first selected layer")).clicked()
         {
             out.act = Some(Act::UpdateFromSelection(style.id.clone()));
         }
-        if menu_button(ui, tr("Delete")).on_hover_text(tr("Delete the style (layers keep their values)")).clicked() {
+        if menu_button(ui, tr("Delete")).lizard_tooltip(tr("Delete the style (layers keep their values)")).clicked() {
             out.act = Some(Act::Delete(style.id.clone()));
         }
     });

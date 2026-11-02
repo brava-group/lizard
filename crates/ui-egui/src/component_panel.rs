@@ -10,6 +10,7 @@
 //! - A slot inside an instance (and an instance's slot properties): fill it with components
 //!   (preferred ones first), select it, reset it to the main's default content.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
@@ -226,7 +227,7 @@ fn slot_fill(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, pre
         (false, _) => tr("Default content").to_string(),
         (true, k) => trn("{n} layers", k, &[]),
     };
-    let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Slot)).on_hover_text(tr("Add content to this slot"));
+    let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Slot)).lizard_tooltip(tr("Add content to this slot"));
     menu_popup(&resp).width(w.max(200.0)).show(|ui| {
         let insert = |app: &mut LizardApp, c: NodeId| app.run("instance.slotInsert", json!({"id": slot, "component": c.0}));
         let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));
@@ -609,7 +610,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                 if let Some(nn) = widgets::text_field(ui, Id::new(("vprop_name", owner, k.as_str())), k, 110.0, tr("Name")) {
                     app.run("component.editProperty", json!({"id": owner, "name": k, "newName": nn}));
                 }
-                let resp = crate::primitives::Select::trigger(ui, &def, 70.0, None).on_hover_text(tr("Default value (the top-left variant)"));
+                let resp = crate::primitives::Select::trigger(ui, &def, 70.0, None).lizard_tooltip(tr("Default value (the top-left variant)"));
                 menu_popup(&resp).show(|ui| {
                     for v in vals {
                         if menu_item(ui, v, "") {
@@ -744,7 +745,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                     k => trn("{n} preferred components", k, &[]),
                 };
                 let w = (ui.available_width() - 8.0).max(60.0);
-                let resp = crate::primitives::Select::trigger(ui, &label, w, None).on_hover_text(tip);
+                let resp = crate::primitives::Select::trigger(ui, &label, w, None).lizard_tooltip(tip);
                 menu_popup(&resp).width(w.max(200.0)).show(|ui| {
                     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                         for (c, name) in comps.iter().filter(|(c, _)| *c != owner && first != Some(*c)) {
@@ -822,7 +823,7 @@ fn value_binding_button(ui: &mut Ui, id: NodeId, field: &str, kind: VariableType
     let button = widgets::section_action_rect(rect, 0);
     let t = Tokens::get(ui.ctx());
     let response = ui.interact(button, Id::new(("component_value_binding", id, field)), Sense::click())
-        .on_hover_text(tr("Apply a component property or variable"));
+        .lizard_tooltip(tr("Apply a component property or variable"));
     if response.hovered() {
         ui.painter().rect_filled(button.shrink(2.0), egui::CornerRadius::same(5), t.hover);
     }
@@ -981,7 +982,7 @@ fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     // Main component with a swap menu, and "go to main".
     row(ui, 32.0, |ui| {
         let w = ui.available_width().max(80.0);
-        let resp = crate::primitives::Select::trigger(ui, &comp_name, w, Some(Icon::Instance)).on_hover_text(tr("Swap instance"));
+        let resp = crate::primitives::Select::trigger(ui, &comp_name, w, Some(Icon::Instance)).lizard_tooltip(tr("Swap instance"));
         menu_popup(&resp).width(w.max(200.0)).show(|ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 let mut page = None;

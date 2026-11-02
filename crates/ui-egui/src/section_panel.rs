@@ -1,5 +1,6 @@
 //! Section-specific Design controls and the status picker shared with Dev Mode.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{CornerRadius, Sense, Stroke, Ui, vec2};
 use lizard_doc::{DevStatus, Document, NodeId, NodeKind};
 use serde_json::json;
@@ -66,7 +67,7 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
             ui.painter().rect_stroke(r, CornerRadius::same(9), stroke, egui::StrokeKind::Inside);
             let name = tr(name);
             crate::a11y::radio(&resp, name, on);
-            if resp.on_hover_text(name).clicked() {
+            if resp.lizard_tooltip(name).clicked() {
                 app.set_props(&ids, json!({"fills": [hex]}));
             }
         }

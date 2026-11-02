@@ -3,6 +3,7 @@
 //! Dev Mode's compare pieces, the conflicts with a branch / main choice each, what changed on each
 //! side, and Update from main / Merge. The Branches list is in the version history panel.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -329,14 +330,14 @@ fn footer(ui: &mut Ui, t: &Tokens, r: &Review, picks: &BTreeMap<String, Side>) -
         ui.spacing_mut().item_spacing.x = 8.0;
         let ready = active && left == 0;
         if widgets::button(ui, tr("Merge into main"), true, ready)
-            .on_hover_text(tr("Merge the branch into the main file (one undo step) and archive it"))
+            .lizard_tooltip(tr("Merge the branch into the main file (one undo step) and archive it"))
             .clicked()
         {
             out = Some(Action::Merge);
         }
         let main_changed = !(r.main.layers.is_empty() && r.main.document.is_empty());
         if widgets::button(ui, tr("Update from main"), false, ready && main_changed)
-            .on_hover_text(tr("Bring the main file's changes into the branch"))
+            .lizard_tooltip(tr("Bring the main file's changes into the branch"))
             .clicked()
         {
             out = Some(Action::Update);

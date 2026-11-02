@@ -7,6 +7,7 @@
 //! frame's thread: only the cards in view read their pictures, each cached by path and modification
 //! time, and a frame never waits for a file.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -769,7 +770,7 @@ fn grid(ui: &mut Ui, t: &Tokens, recents: &mut Recents, files: &[Shown], now: u6
             let rect = Rect::from_min_size(pos2(r.min.x + i as f32 * (card_w + GAP), r.min.y), vec2(card_w, card_h));
             let resp = ui.interact(rect, card_id(&file.path), Sense::click());
             a11y::named_button(&resp, &spoken(file, now));
-            let resp = resp.on_hover_text(&file.path);
+            let resp = resp.lizard_tooltip(&file.path);
             let visible = ui.is_rect_visible(rect);
             let picture = recents.picture(&file.path, visible, time);
             let selected = recents.selected.as_deref() == Some(file.path.as_str());
@@ -909,7 +910,7 @@ fn list(ui: &mut Ui, t: &Tokens, recents: &mut Recents, files: &[Shown], now: u6
         let (r, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
         let resp = ui.interact(r, card_id(&file.path), Sense::click());
         a11y::named_button(&resp, &spoken(file, now));
-        let resp = resp.on_hover_text(&file.path);
+        let resp = resp.lizard_tooltip(&file.path);
         if let Some(a) = interact(ui, &resp, recents, file) {
             action = Some(a);
         }

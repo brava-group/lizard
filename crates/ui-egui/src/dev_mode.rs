@@ -5,6 +5,7 @@
 //! focus view's bar, Connect to code (a component's link to its code component), dev resources
 //! (links for developers) and the plugins that only read the document.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_doc::{Annotation, AnnotationCategory, CodeLink, DevStatus, Document, NodeId};
 use lizard_engine::annotations::{self, PINNABLE, Pinnable};
@@ -512,7 +513,7 @@ pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
                 draft = text;
                 ui.data_mut(|data| data.insert_temp(draft_id, draft.clone()));
             }
-            let resolve = widgets::button(ui, tr("Resolve"), true, true).on_hover_text(tr("Back to Ready for dev"));
+            let resolve = widgets::button(ui, tr("Resolve"), true, true).lizard_tooltip(tr("Back to Ready for dev"));
             if enter || resolve.clicked() {
                 let reason = draft.trim();
                 let params = if reason.is_empty() { json!({"ids": sel}) } else { json!({"ids": sel, "reason": reason}) };
@@ -530,12 +531,12 @@ pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
         let focused = app.session.ds().ok().and_then(lizard_engine::DocState::focused) == Some(*id);
         row(ui, 32.0, |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            if !focused && widgets::button(ui, tr("Focus view"), false, true).on_hover_text(tr("Show only this on the canvas")).clicked() {
+            if !focused && widgets::button(ui, tr("Focus view"), false, true).lizard_tooltip(tr("Show only this on the canvas")).clicked() {
                 app.run("dev.focus", json!({"id": id}));
             }
             if changed
                 && widgets::button(ui, tr("Compare changes"), true, true)
-                    .on_hover_text(tr("What changed since it was marked ready for dev"))
+                    .lizard_tooltip(tr("What changed since it was marked ready for dev"))
                     .clicked()
             {
                 app.run("dev.compare", json!({"id": id, "show": true}));
@@ -664,7 +665,7 @@ pub fn dev_resources_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, i
         crate::a11y::link(&resp, name);
         // Opened only on a click, never fetched, and a dev resource's URL comes from the
         // document, so only a web link opens.
-        if resp.on_hover_text(url.as_str()).clicked() && lizard_engine::doc_urls::openable(url) {
+        if resp.lizard_tooltip(url.as_str()).clicked() && lizard_engine::doc_urls::openable(url) {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
         if let Some(i) = item.index {
@@ -754,7 +755,7 @@ pub fn categories_section(app: &mut LizardApp, ui: &mut Ui) {
             _ => Some(SelectLead::Icon(Icon::Comment)),
         };
         let resp =
-            crate::primitives::Select::trigger_with_lead(ui, &filter.label(&doc), w, lead).on_hover_text(tr("Annotations shown on the canvas"));
+            crate::primitives::Select::trigger_with_lead(ui, &filter.label(&doc), w, lead).lizard_tooltip(tr("Annotations shown on the canvas"));
         menu_popup(&resp).show(|ui| {
             for (f, label) in [(CategoryFilter::All, tr("All categories")), (CategoryFilter::Uncategorized, tr("No category"))] {
                 if menu_check(ui, filter == f, label, "") {

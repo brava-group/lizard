@@ -3,6 +3,7 @@
 //! and the list of what changed (`dev.compare`). Rendered once per document version. The branch
 //! review ([`crate::branch_ui`]) shows two versions with the same pieces.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -376,7 +377,7 @@ pub(crate) fn change_row(
 ) -> egui::Response {
     let indent = 16.0 + (depth.min(6) as f32) * 10.0;
     let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
-    let resp = resp.on_hover_text(tip);
+    let resp = resp.lizard_tooltip(tip);
     crate::a11y::list_item(&resp, &format!("{} {name}", tr(kind.label())), selected);
     if selected {
         ui.painter().rect_filled(row.shrink2(vec2(8.0, 1.0)), CornerRadius::same(5), t.selected_row);
@@ -426,7 +427,7 @@ fn footer(ui: &mut Ui, t: &Tokens, cmp: &Comparison) -> Option<Action> {
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let resolve = widgets::button(ui, tr("Resolve change"), true, cmp.changed)
-            .on_hover_text(tr("Back to Ready for dev: the next change compares with how it is now"));
+            .lizard_tooltip(tr("Back to Ready for dev: the next change compares with how it is now"));
         if resolve.clicked() {
             out = Some(Action::Resolve);
         }

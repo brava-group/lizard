@@ -5,6 +5,7 @@
 //! edits apply to the range (`text.style`, `text.setVariations`); otherwise they apply to whole
 //! layers. Differing values show "Mixed".
 
+use crate::primitives::TooltipResponseExt as _;
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -935,7 +936,7 @@ fn details_toggle(ui: &mut Ui, label: &str, value: Option<bool>, supported: bool
         let items = [Segment::icon(Icon::TypeDialogNone, tr("Off")), Segment::icon(Icon::Check, tr("On"))];
         let result =
             ui.add_enabled_ui(supported, |ui| SegmentedControl::new(&items, value.map(usize::from)).width(ControlWidth::Fixed(48.0)).show(ui));
-        result.response.on_disabled_hover_text(tr("Not in this font"));
+        result.response.lizard_disabled_tooltip(tr("Not in this font"));
         result.inner.map(|index| index == 1)
     })
 }
@@ -1016,7 +1017,7 @@ fn decoration_details(
                         egui::Label::new(egui::RichText::new(tr("Auto")).font(regular(11.0)).color(Tokens::get(ui.ctx()).accent_text))
                             .sense(Sense::click()),
                     )
-                    .on_hover_text(tip)
+                    .lizard_tooltip(tip)
                     .clicked()
             {
                 apply_style(app, key, json!("auto"));
@@ -1097,7 +1098,7 @@ fn variable_axes(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], styles: &[Tex
                     ("default", &trim_num(axis.default)),
                 ],
             );
-            ui.interact(lr, Id::new(("ty_axis_label", &axis.tag)), Sense::hover()).on_hover_text(tip);
+            ui.interact(lr, Id::new(("ty_axis_label", &axis.tag)), Sense::hover()).lizard_tooltip(tip);
             ui.painter().galley(pos2(lr.min.x, lr.center().y - name.size().y / 2.0), name, t.text);
             match axis_slider(ui, Id::new(("ty_axis_slider", &axis.tag)), axis, shown, slider_w) {
                 Some((Some(v), done)) => set = Some((json!(round_axis(axis, v)), done)),
@@ -1140,7 +1141,7 @@ fn variable_axes(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], styles: &[Tex
     if styles.iter().any(|s| !s.variations.is_empty()) {
         ui.add_space(8.0);
         let r = ui.add(egui::Label::new(egui::RichText::new(tr("Reset to style")).font(regular(11.0)).color(t.accent_text)).sense(Sense::click()));
-        if r.on_hover_text(tr("Back to the values the font style implies")).clicked() {
+        if r.lizard_tooltip(tr("Back to the values the font style implies")).clicked() {
             app.run("text.setVariations", json!({"ids": ids, "variations": {}, "replace": true}));
         }
     }
@@ -1169,7 +1170,7 @@ fn named_instances(
     // An inline list (a menu would close the Type settings popover it opens from).
     let open_id = Id::new("ty_instances_open");
     let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
-    if crate::primitives::Select::trigger(ui, &label, ui.available_width(), None).on_hover_text(tr("Named instance")).clicked() {
+    if crate::primitives::Select::trigger(ui, &label, ui.available_width(), None).lizard_tooltip(tr("Named instance")).clicked() {
         open = !open;
     }
     if open {
@@ -1249,7 +1250,7 @@ fn text_seg(ui: &mut Ui, salt: &str, items: &[(&str, &str)], active: Option<usiz
     let mut out = None;
     for (i, (label, tip)) in items.iter().enumerate() {
         let r = Rect::from_min_size(pos2(rect.min.x + i as f32 * cell, rect.min.y), vec2(cell, FIELD_H));
-        let resp = ui.interact(r, Id::new(("ty_seg", salt, i)), Sense::click()).on_hover_text(tr(tip));
+        let resp = ui.interact(r, Id::new(("ty_seg", salt, i)), Sense::click()).lizard_tooltip(tr(tip));
         crate::a11y::toggle(&resp, tr(tip), active == Some(i));
         if active == Some(i) {
             ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(4), t.panel);
@@ -1452,7 +1453,7 @@ fn lead_field(ui: &mut Ui, id: Id, glyph: LeadGlyph, value: &str, width: f32, ti
     let text_rect = Rect::from_min_max(pos2(lead.max.x, rect.min.y), rect.max);
     let editing_id = id.with("editing");
     let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
-    let resp = ui.interact(rect, id.with("click"), Sense::click()).on_hover_text(tip);
+    let resp = ui.interact(rect, id.with("click"), Sense::click()).lizard_tooltip(tip);
     crate::a11y::text(&resp, tip, value);
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     if editing.is_some() {

@@ -1,5 +1,6 @@
 //! Compact pattern editor, laid out on the 240 × 522 reference dialog.
 
+use crate::primitives::TooltipResponseExt as _;
 use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, text_entry, vector_button};
 use super::*;
 
@@ -178,7 +179,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                 );
                 if ui
                     .interact(rect, Id::new(("cp_pattern_tile", index)), Sense::click())
-                    .on_hover_text(if index == 0 { "Grid" } else { "Offset rows" })
+                    .lizard_tooltip(if index == 0 { "Grid" } else { "Offset rows" })
                     .clicked()
                 {
                     pattern.tile = tile;

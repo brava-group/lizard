@@ -2,6 +2,7 @@
 //! the title bar: its empty space drags the window (double-click maximises), and it carries the
 //! window buttons; the window's edges resize it.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
@@ -211,7 +212,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 Some(false) => trf("{name}, online, open only to you", &[("name", name)]),
                 None => name.clone(),
             };
-            let resp = if live.is_some() { resp.on_hover_text(&label) } else { resp };
+            let resp = if live.is_some() { resp.lizard_tooltip(&label) } else { resp };
             crate::a11y::tab(&resp, &label, active);
             let progress = open_progress(&opening, d.uid, now);
             let slide_x = -28.0 * (1.0 - progress).powi(2);

@@ -1,5 +1,6 @@
 //! Composable button styles. Callers own commands, menus, and toggle state.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{CONTROL_CHEVRON_SIZE, ControlWidth};
@@ -267,7 +268,7 @@ impl<'a> Button<'a> {
             } else if let Some(icon) = self.leading {
                 clip_icon(ui.painter(), icon, rect.center(), ink, size);
             }
-            return response.on_hover_text(self.label);
+            return response.lizard_tooltip(self.label);
         }
         let trailing = self.trailing.or(if matches!(self.behavior, ButtonBehavior::Select { .. }) { Some(Icon::Chevron) } else { None });
         let select = matches!(self.behavior, ButtonBehavior::Select { .. });

@@ -11,6 +11,7 @@
 //! when their tile first shows (a few per frame), are cached, and re-render only when their
 //! component's layers change (compared by the document's shared layer snapshots).
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -354,7 +355,7 @@ fn updates_banner(app: &mut LizardApp, ui: &mut Ui, w: f32, count: usize) {
     let r = Rect::from_min_max(pos2(row.min.x + 12.0, row.min.y + 4.0), pos2(row.max.x - 12.0, row.max.y - 4.0));
     ui.painter().rect_filled(r, CornerRadius::same(6), t.selected_row);
     let what = trn("{n} components and styles have newer versions", count, &[]);
-    ui.interact(r, Id::new("asset_updates"), Sense::hover()).on_hover_text(what);
+    ui.interact(r, Id::new("asset_updates"), Sense::hover()).lizard_tooltip(what);
     ui.painter().text(pos2(r.min.x + 10.0, r.center().y), Align2::LEFT_CENTER, tr("Library updates available"), semibold(11.0), t.text);
     let mut child =
         ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(r.max.x - 70.0, r.min.y + 6.0), pos2(r.max.x - 6.0, r.max.y))));
@@ -389,7 +390,7 @@ fn fold_title(ui: &mut Ui, w: f32, name: &str, open: bool, folder: bool) -> bool
         (true, true) => tr("Folder: click to collapse"),
         (true, false) => tr("Folder: click to expand"),
     };
-    resp.on_hover_text(tip).clicked()
+    resp.lizard_tooltip(tip).clicked()
 }
 
 /// Folders of tiles under their headings; a folded folder shows only its heading (all open while
@@ -489,7 +490,7 @@ fn tiles(ui: &mut Ui, w: f32, src: &Source, list: &[Tile], thumbs: &Thumbs, want
                     }
                 });
             }
-            let resp = resp.on_hover_text(trf(
+            let resp = resp.lizard_tooltip(trf(
                 "{name}\nDrag onto the canvas, or click to place in the middle of the view.\nHold Alt (Option) while dropping onto an instance to swap it.",
                 &[("name", &item.name)],
             ));
@@ -527,7 +528,7 @@ fn style_rows(ui: &mut Ui, w: f32, src: &Source, list: &[StyleRow], act: &mut Op
             icons::paint(ui.painter(), icon_rect, i, t.icon_secondary);
         }
         crate::bidi::paint_name(ui.painter(), pos2(r.min.x + 40.0, r.center().y), &s.name, regular(11.0), t.text, w - 40.0 - PAD);
-        if resp.on_hover_text(trf("{name}\nClick to apply to the selection", &[("name", &s.name)])).clicked() {
+        if resp.lizard_tooltip(trf("{name}\nClick to apply to the selection", &[("name", &s.name)])).clicked() {
             *act = Some(Act::Style(src.clone(), s.id.clone()));
         }
     }
@@ -1046,7 +1047,7 @@ fn enabled_libraries(app: &mut LizardApp, ui: &mut Ui, w: f32, doc: &Document) {
         let clip = Rect::from_min_size(pos2(r.min.x + PAD, r.min.y), vec2(text_w, r.height()));
         ui.painter().with_clip_rect(clip).galley(pos2(r.min.x + PAD, r.min.y + 6.0), name, t.text);
         ui.painter().with_clip_rect(clip).galley(pos2(r.min.x + PAD, r.min.y + 23.0), line, t.text_secondary);
-        ui.interact(clip, Id::new(("asset_lib_row", &l.id)), Sense::hover()).on_hover_text(shown_path(&l.path));
+        ui.interact(clip, Id::new(("asset_lib_row", &l.id)), Sense::hover()).lizard_tooltip(shown_path(&l.path));
         let x = Rect::from_center_size(pos2(r.max.x - 24.0, r.center().y), vec2(24.0, 24.0));
         let xr = ui.interact(x, Id::new(("asset_lib_remove", &l.id)), Sense::click()).tip(tr("Remove library from this file"));
         if xr.hovered() {

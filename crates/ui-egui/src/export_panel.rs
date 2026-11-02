@@ -3,6 +3,7 @@
 //! page's Export button, and the export actions and print options the Export dialog shares. Every
 //! change runs an `export.*` or `file.export*` command.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::BTreeSet;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -146,7 +147,7 @@ fn print_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Pri
         let label = ui.painter().layout(print_summary(p), regular(11.0), t.text_secondary, r.width() - 32.0);
         ui.painter().galley(pos2(r.min.x + 8.0, r.center().y - label.size().y / 2.0), label, t.text_secondary);
         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.max.x - 12.0, r.center().y), vec2(14.0, 14.0)), Icon::Dots, t.icon_secondary);
-        settings_panel(ui, open_id, r, resp.on_hover_text(tr("PDF print settings")).clicked(), tr("PDF print settings"), |ui| {
+        settings_panel(ui, open_id, r, resp.lizard_tooltip(tr("PDF print settings")).clicked(), tr("PDF print settings"), |ui| {
             if let Some(next) = print_options(ui, Id::new(("export_print_fields", i)), p) {
                 let mut params = print_params(&next);
                 params["ids"] = json!(ids);

@@ -2,6 +2,7 @@
 //! behaviour, overlay settings and prototype settings. Every edit runs a `proto.*` command or
 //! `node.set`.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_color::Paint;
 use lizard_doc::proto::{
@@ -420,7 +421,7 @@ fn flows_overview(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId
             let shown = widgets::elide(ui, d, w - indent - PAD);
             ui.painter().text(pos2(r.min.x + indent, r.min.y + 1.0), Align2::LEFT_TOP, &shown, regular(10.5), t.text_secondary);
             if shown != d {
-                resp.on_hover_text(d);
+                resp.lizard_tooltip(d);
             }
         }
     }
@@ -479,7 +480,7 @@ fn settings(app: &mut LizardApp, ui: &mut Ui, doc: &Document, page: NodeId) {
     }
     row(ui, 32.0, |ui| {
         let clicked = widgets::checkbox(ui, settings.responsive, tr("Responsive"));
-        ui.interact(ui.min_rect(), Id::new("proto_responsive_tip"), Sense::hover()).on_hover_text(tr(RESPONSIVE_TIP));
+        ui.interact(ui.min_rect(), Id::new("proto_responsive_tip"), Sense::hover()).lizard_tooltip(tr(RESPONSIVE_TIP));
         if clicked {
             app.run("proto.settings", json!({"responsive": !settings.responsive}));
         }

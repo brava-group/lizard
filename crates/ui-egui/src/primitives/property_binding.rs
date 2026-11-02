@@ -1,5 +1,6 @@
 //! A component property bound to a layer value. The parent owns navigation and detach commands.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, CornerRadius, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::a11y;
@@ -44,7 +45,7 @@ impl<'a> PropertyBinding<'a> {
 
         let locate = Rect::from_center_size(pos2(outer.right() - 48.0, outer.center().y), vec2(24.0, 24.0));
         let detach = Rect::from_center_size(pos2(outer.right() - 20.0, outer.center().y), vec2(24.0, 24.0));
-        let locate_response = ui.interact(locate, id.with("locate"), Sense::click()).on_hover_text(tr("Go to property"));
+        let locate_response = ui.interact(locate, id.with("locate"), Sense::click()).lizard_tooltip(tr("Go to property"));
         a11y::button(&locate_response, tr("Go to property"));
         if locate_response.hovered() {
             ui.painter().rect_filled(locate, CornerRadius::same(4), t.hover);

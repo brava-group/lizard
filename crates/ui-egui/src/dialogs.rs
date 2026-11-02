@@ -1,6 +1,7 @@
 //! Dialogs: About, Preferences, keyboard shortcuts, find & replace, rename layers, variables,
 //! export.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::path::Path;
 
 use egui::{Align, Align2, Color32, Context, CornerRadius, Id, Layout, Rect, RichText, Sense, Stroke, UiBuilder, pos2, vec2};
@@ -870,7 +871,7 @@ fn settings_sharing(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
             app.run("pref.publishServer", json!({"url": url}));
         }
         let usual = prefs.publish_server == lizard_engine::live::DEFAULT_SERVER;
-        if crate::widgets::button(ui, tr("Reset"), false, !usual).on_hover_text(tr("Clear saved server")).clicked() {
+        if crate::widgets::button(ui, tr("Reset"), false, !usual).lizard_tooltip(tr("Clear saved server")).clicked() {
             app.run("pref.publishServer", json!({}));
         }
     });

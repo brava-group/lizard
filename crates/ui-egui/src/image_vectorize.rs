@@ -1,5 +1,6 @@
 //! Non-destructive VTracer preview. Only the checkmark commits an engine command.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Duration;
@@ -245,7 +246,7 @@ pub(crate) fn toolbar(app: &mut LizardApp, ui: &mut Ui) {
                         .variant(if pending.settings.mode == mode { ButtonVariant::Secondary } else { ButtonVariant::Ghost })
                         .width(ControlWidth::Fixed(32.0))
                         .show(ui)
-                        .on_hover_text(title);
+                        .lizard_tooltip(title);
                     crate::a11y::named_button(&response, title);
                     paint_mode(ui, response.rect, mode);
                     if response.clicked() {

@@ -13,6 +13,7 @@
 //! and it fades a few seconds after the last change (frames are asked for only until then).
 //! Spotlight: your avatar's menu asks everyone to follow you; a banner says so and stops it.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -670,7 +671,7 @@ fn online_note(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, server: &str) {
         None if app.session.waiting_for(SERVER_INFO) => widgets::label(ui, tr("Asking the server…"), t.text_secondary),
         None => {
             let about = egui::Link::new(egui::RichText::new(tr("About this server")).font(regular(11.0)));
-            if ui.add(about).on_hover_text(tr("Who runs it, its terms and how long it keeps files")).clicked() {
+            if ui.add(about).lizard_tooltip(tr("Who runs it, its terms and how long it keeps files")).clicked() {
                 ask_server(app, &ui.ctx().clone(), server.to_string());
             }
         }
@@ -830,7 +831,7 @@ fn private_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
             || app.session.prefs.online_files.iter().any(|f| f.file == *file && lizard_engine::online::same_server(&f.server, server))
     });
     join_and_advanced(app, ui, t, |app, ui, t| {
-        if widgets::button(ui, tr("Leave session"), false, true).on_hover_text(tr("Your copy stays open; the file stays on the server")).clicked() {
+        if widgets::button(ui, tr("Leave session"), false, true).lizard_tooltip(tr("Your copy stays open; the file stays on the server")).clicked() {
             app.run("collab.leave", json!({}));
         }
         let Some((server, file)) = removable else { return };
@@ -881,7 +882,7 @@ fn share_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
             tr("Ends the session; everyone keeps their copy")
         };
         // The server is asked without the window waiting for it.
-        if widgets::button(ui, tr("Stop sharing"), false, !app.session.waiting_for(STOP)).on_hover_text(hint).clicked() {
+        if widgets::button(ui, tr("Stop sharing"), false, !app.session.waiting_for(STOP)).lizard_tooltip(hint).clicked() {
             app.run_background(&ui.ctx().clone(), STOP, json!({}), Box::new(|_, _, _| {}));
         }
     };
@@ -898,14 +899,14 @@ fn share_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
             ui.vertical_centered(|ui| {
                 ui.add_space(2.0);
                 ui.label(egui::RichText::new(&code).font(egui::FontId::monospace(crate::theme::ui_font_size(if online { 24.0 } else { 15.0 }))).color(t.text))
-                    .on_hover_text(tr("Others type this under Share ▸ Join with a code"));
+                    .lizard_tooltip(tr("Others type this under Share ▸ Join with a code"));
             });
             ui.horizontal(|ui| {
                 if widgets::button(ui, tr("Copy code"), true, true).clicked() {
                     app.services.clipboard_set_text(&code);
                     app.toast(tr("Join code copied"));
                 }
-                if widgets::button(ui, tr("Copy link"), false, true).on_hover_text(tr("An invite link that opens Lizard and joins")).clicked() {
+                if widgets::button(ui, tr("Copy link"), false, true).lizard_tooltip(tr("An invite link that opens Lizard and joins")).clicked() {
                     app.services.clipboard_set_text(&link);
                     app.toast(tr("Invite link copied"));
                 }
@@ -930,7 +931,7 @@ fn share_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
     };
     widgets::label(ui, who, t.text_secondary);
     let here = trf("Here: {names}", &[("names", &names.join(", "))]);
-    ui.label(egui::RichText::new(widgets::elide(ui, &here, ui.available_width())).font(regular(11.0)).color(t.text_secondary)).on_hover_text(here);
+    ui.label(egui::RichText::new(widgets::elide(ui, &here, ui.available_width())).font(regular(11.0)).color(t.text_secondary)).lizard_tooltip(here);
     if let Some(h) = &hosting {
         host_line(ui, t, &h.operator, &h.terms);
         expiry_line(ui, t, h.expires);
@@ -972,7 +973,7 @@ fn guest_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
         expiry_line(ui, t, h.expires);
     }
     widgets::label(ui, tr(if view { VIEW_NOTE } else { UNDO_NOTE }), t.text_secondary);
-    if widgets::button(ui, tr("Leave session"), false, true).on_hover_text(tr("Your copy of the file stays open")).clicked() {
+    if widgets::button(ui, tr("Leave session"), false, true).lizard_tooltip(tr("Your copy of the file stays open")).clicked() {
         app.run("collab.leave", json!({}));
     }
     // A server that takes reports said so (its hosting).
@@ -995,7 +996,7 @@ fn host_line(ui: &mut Ui, t: &Tokens, operator: &str, terms: &str) {
             if !operator.is_empty() {
                 widgets::label(ui, "·", t.text_secondary);
             }
-            ui.hyperlink_to(egui::RichText::new(tr("Terms")).font(regular(11.0)), terms).on_hover_text(terms);
+            ui.hyperlink_to(egui::RichText::new(tr("Terms")).font(regular(11.0)), terms).lizard_tooltip(terms);
         }
     });
 }
@@ -1011,7 +1012,7 @@ fn expiry_line(ui: &mut Ui, t: &Tokens, expires: Option<u64>) {
 /// Report the file you're in to the server's operator: a button, then a reason to send.
 fn report_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     let Some(mut reason) = app.ui.live.report.take() else {
-        if widgets::button(ui, tr("Report this file…"), false, true).on_hover_text(tr("Tell the server's operator what is wrong with it")).clicked()
+        if widgets::button(ui, tr("Report this file…"), false, true).lizard_tooltip(tr("Tell the server's operator what is wrong with it")).clicked()
         {
             app.ui.live.report = Some(String::new());
             app.ui.live.focus_report = true;
@@ -1058,7 +1059,7 @@ fn link_rows(app: &mut LizardApp, ui: &mut Ui, rows: &[(&str, &String, &str)]) {
                 widgets::label(ui, label, t.text_secondary);
                 ui.label(egui::RichText::new(widgets::elide(ui, value, w)).font(regular(10.5)).monospace());
             });
-            if widgets::button(ui, tr("Copy"), false, true).on_hover_text(trf("Copy the {label}", &[("label", &label.to_lowercase())])).clicked() {
+            if widgets::button(ui, tr("Copy"), false, true).lizard_tooltip(trf("Copy the {label}", &[("label", &label.to_lowercase())])).clicked() {
                 app.services.clipboard_set_text(value);
                 app.toast(*what);
             }

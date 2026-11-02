@@ -3,6 +3,7 @@
 //! build.rs from contributors/contributors.json (craftrules standards/contributors.md); nothing is
 //! read at run time.
 
+use crate::primitives::TooltipResponseExt as _;
 use std::cmp::Ordering;
 
 use egui::RichText;
@@ -276,7 +277,7 @@ fn contributors_in(ui: &mut egui::Ui, contributors: &[Contributor], total_commit
             v.ascending = key.default_ascending();
         }
         // egui's icon font has these arrows; the UI font may not have ▲/▼.
-        if ui.button(if v.ascending { "⏶" } else { "⏷" }).on_hover_text(tr("Reverse the order")).clicked() {
+        if ui.button(if v.ascending { "⏶" } else { "⏷" }).lizard_tooltip(tr("Reverse the order")).clicked() {
             v.ascending = !v.ascending;
         }
         ui.separator();
@@ -324,7 +325,7 @@ fn table_height(ui: &egui::Ui, rows: usize) -> f32 {
 }
 
 fn link(ui: &mut egui::Ui, c: &Contributor, names: NameMode) -> egui::Response {
-    ui.hyperlink_to(c.name(names), format!("https://github.com/{}", c.login)).on_hover_text(c.summary())
+    ui.hyperlink_to(c.name(names), format!("https://github.com/{}", c.login)).lizard_tooltip(c.summary())
 }
 
 fn text_width(ui: &egui::Ui, text: &str, font: &egui::FontId) -> f32 {
@@ -406,7 +407,7 @@ fn table(ui: &mut egui::Ui, list: &[&Contributor], v: &mut View, height: f32) {
                 header.col(|ui| {
                     let sort = (v.key == k).then_some(v.ascending);
                     let (long, short) = k.label();
-                    if header_cell(ui, &t, short, k.numeric(), Some(sort)).on_hover_text(long).clicked() {
+                    if header_cell(ui, &t, short, k.numeric(), Some(sort)).lizard_tooltip(long).clicked() {
                         if v.key == k {
                             v.ascending = !v.ascending;
                         } else {

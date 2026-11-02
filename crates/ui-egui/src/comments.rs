@@ -4,6 +4,7 @@
 //! in place of the Design panel while the Comment tool is active (search, filter, sort, keyboard
 //! navigation) and pins on a presented frame. Every change goes through a `comment.*` command.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Align2, Color32, CornerRadius, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
 use lizard_doc::{Comment, Message, NodeId, mention_ranges};
@@ -552,7 +553,7 @@ fn composer(ui: &mut Ui, id: Id, text: &mut String, hint: &str, people: &[String
             ui.painter().line_segment([c + vec2(0.0, 5.0), c + vec2(0.0, -5.0)], Stroke::new(1.6, col));
             ui.painter().line_segment([c + vec2(-4.0, -1.0), c + vec2(0.0, -5.0)], Stroke::new(1.6, col));
             ui.painter().line_segment([c + vec2(4.0, -1.0), c + vec2(0.0, -5.0)], Stroke::new(1.6, col));
-            if bresp.on_hover_text(tr("Post")).clicked() {
+            if bresp.lizard_tooltip(tr("Post")).clicked() {
                 submit = true;
             }
         });
@@ -631,7 +632,7 @@ fn hover_button(ui: &mut Ui, id: Id, icon: Icon, show: bool, tip: &str) -> egui:
         ui.painter().rect_filled(r, CornerRadius::same(4), t.hover);
     }
     icons::paint(ui.painter(), r.shrink(2.0), icon, t.icon_secondary);
-    resp.on_hover_text(tip)
+    resp.lizard_tooltip(tip)
 }
 
 /// What every message of a thread needs to know.
@@ -775,7 +776,7 @@ fn message(
                         ui.painter().rect_stroke(rect, cr, Stroke::new(1.0, Tokens::get(ui.ctx()).accent), StrokeKind::Inside);
                     }
                     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t.text);
-                    if resp.on_hover_text(r.users.join(", ")).clicked() {
+                    if resp.lizard_tooltip(r.users.join(", ")).clicked() {
                         let mut p = message_params(id, i);
                         p["emoji"] = json!(r.emoji);
                         *act = Some(Act::Run("comment.react", p));

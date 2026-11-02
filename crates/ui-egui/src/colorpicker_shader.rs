@@ -1,5 +1,6 @@
 //! Shader browser and parameter editor inside the existing colour picker flow.
 
+use crate::primitives::TooltipResponseExt as _;
 use super::custom::{self, BORDER, FIELD, MUTED, WIDTH, at, label_tab, paint_kind_button, panel, vector_button};
 use super::*;
 use lizard_color::ShaderFill;
@@ -213,7 +214,7 @@ pub(super) fn show_browser(app: &mut LizardApp, ctx: &egui::Context, target: &Pi
                                 regular(10.0),
                                 Color32::WHITE,
                             );
-                            if response.on_hover_text(&definition.description).clicked() {
+                            if response.lizard_tooltip(&definition.description).clicked() {
                                 chosen = Some(definition.clone());
                             }
                         }
@@ -320,7 +321,7 @@ pub(super) fn show_editor(app: &mut LizardApp, ctx: &egui::Context, target: &Pic
                 browser_now = true;
             }
             let more = at(origin, 192.0, 92.0, 24.0, 24.0);
-            if ui.interact(more, Id::new("cp_shader_code"), Sense::click()).on_hover_text("Edit WGSL").clicked()
+            if ui.interact(more, Id::new("cp_shader_code"), Sense::click()).lizard_tooltip("Edit WGSL").clicked()
                 && let Some(definition) = &definition
             {
                 ctx.data_mut(|data| {

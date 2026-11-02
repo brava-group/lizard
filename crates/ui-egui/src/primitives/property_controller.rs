@@ -1,5 +1,6 @@
 //! Compact summary of one component property. The parent owns its edit commands.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::a11y;
@@ -196,7 +197,7 @@ impl<'a> PropertyController<'a> {
         let mut delete_clicked = false;
         if actions_visible {
             let settings_rect = Rect::from_center_size(pos2(right - 36.0, card.center().y), vec2(22.0, 22.0));
-            let settings = ui.interact(settings_rect, id.with("settings"), Sense::click()).on_hover_text(crate::i18n::tr("Property settings"));
+            let settings = ui.interact(settings_rect, id.with("settings"), Sense::click()).lizard_tooltip(crate::i18n::tr("Property settings"));
             a11y::button(&settings, crate::i18n::tr("Property settings"));
             settings_clicked = settings.clicked();
             if settings.hovered() {
@@ -210,7 +211,7 @@ impl<'a> PropertyController<'a> {
                 ui.painter().circle_stroke(pos2(center.x + x, center.y + knob_y), 2.0, stroke);
             }
             let delete_rect = Rect::from_center_size(pos2(right - 12.0, card.center().y), vec2(22.0, 22.0));
-            let delete = ui.interact(delete_rect, id.with("delete"), Sense::click()).on_hover_text(crate::i18n::tr("Delete property"));
+            let delete = ui.interact(delete_rect, id.with("delete"), Sense::click()).lizard_tooltip(crate::i18n::tr("Delete property"));
             a11y::button(&delete, crate::i18n::tr("Delete property"));
             delete_clicked = delete.clicked();
             if delete.hovered() {
@@ -224,7 +225,7 @@ impl<'a> PropertyController<'a> {
         if self.unused {
             let icon = Rect::from_center_size(widgets::section_action_rect(outer, 0).center(), vec2(18.0, 18.0));
             let warning = ui.interact(icon, ui.id().with(("property_unused", self.name)), Sense::hover());
-            warning.on_hover_text(crate::i18n::tr("This property is not used in the component"));
+            warning.lizard_tooltip(crate::i18n::tr("This property is not used in the component"));
             let center = icon.center();
             let ink = t.icon_secondary;
             ui.painter().circle_stroke(center, 6.8, Stroke::new(1.1, ink));

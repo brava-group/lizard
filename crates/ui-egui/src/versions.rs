@@ -4,6 +4,7 @@
 //! (read-only, with a banner to restore it or go back); clicking Current version goes back. Above
 //! the history, the file's branches: create one, open one, review and merge, archive.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use lizard_engine::branches::BranchState;
 use serde_json::json;
@@ -399,7 +400,7 @@ fn current_row(ui: &mut Ui, more: bool, active: bool) -> bool {
     }
     timeline(ui, r, r.center().y, false, more, true);
     ui.painter().text(pos2(r.min.x + TEXT_X, r.center().y), Align2::LEFT_CENTER, tr("Current version"), semibold(11.0), t.text);
-    !active && resp.on_hover_text(tr("Back to the current version")).clicked()
+    !active && resp.lizard_tooltip(tr("Back to the current version")).clicked()
 }
 
 fn version_row(ui: &mut Ui, row: &Row, last: bool, previewing: bool) -> Option<Action> {
@@ -561,7 +562,7 @@ fn autosave_group(ui: &mut Ui, n: usize, open: bool, last: bool) -> bool {
     icons::paint(ui.painter(), chevron, if open { Icon::Chevron } else { Icon::ChevronRight }, t.icon_secondary);
     let label = trn("{n} autosave versions", n, &[]);
     ui.painter().text(pos2(chevron.max.x + 6.0, r.center().y), Align2::LEFT_CENTER, label, regular(11.0), t.text_secondary);
-    resp.on_hover_text(if open { tr("Fold autosaves") } else { tr("Show autosaves") }).clicked()
+    resp.lizard_tooltip(if open { tr("Fold autosaves") } else { tr("Show autosaves") }).clicked()
 }
 
 /// A row holding a form (rename, delete confirmation), with the timeline running past it.

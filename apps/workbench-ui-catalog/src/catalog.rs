@@ -5,10 +5,11 @@ use egui::{Color32, CornerRadius, Id, Layout, Rect, Sense, Stroke, StrokeKind, U
 use lizard_doc::NodeId;
 use lizard_engine::Session;
 use lizard_ui_egui::icons::{self, AgentIcon, AppearanceIcon, HeaderIcon, Icon, LayerIcon, LayoutIcon, NavIcon, PositionIcon, SizingIcon};
+use lizard_ui_egui::primitives::TooltipResponseExt as _;
+use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField, TextFieldWithPresets};
 use lizard_ui_egui::theme::{self, ALL_COLOR_ROLES, ColorRole, Tokens};
 use lizard_ui_egui::widgets::{self, Empty, FieldEdit, Lead};
 use lizard_ui_egui::{LeftTab, LizardApp, RightTab};
-use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField, TextFieldWithPresets};
 use serde_json::json;
 
 #[path = "cursor_playground.rs"]
@@ -2165,7 +2166,7 @@ fn iconography(ui: &mut Ui) {
                 let aliases: Vec<_> =
                     Icon::ALL.iter().filter(|other| **other != *icon && other.canonical() == *icon).map(|other| format!("{other:?}")).collect();
                 let caption = if aliases.is_empty() { format!("{icon:?}") } else { format!("{icon:?} · aliases: {}", aliases.join(", ")) };
-                response.on_hover_text(caption);
+                response.lizard_tooltip(caption);
             }
         });
     });
@@ -2176,7 +2177,7 @@ fn iconography(ui: &mut Ui) {
             for (index, name) in names.into_iter().enumerate() {
                 let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
                 icons::paint_toolbar(ui.painter(), rect.shrink(7.0), index, t.icon);
-                response.on_hover_text(name);
+                response.lizard_tooltip(name);
             }
         });
     });
@@ -2187,12 +2188,12 @@ fn iconography(ui: &mut Ui) {
                 for position in 0..3 {
                     let (rect, response) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
                     icons::paint_alignment(ui.painter(), rect.shrink(7.0), horizontal, position);
-                    response.on_hover_text(format!("{} alignment {position}", if horizontal { "Horizontal" } else { "Vertical" }));
+                    response.lizard_tooltip(format!("{} alignment {position}", if horizontal { "Horizontal" } else { "Vertical" }));
                 }
             }
             let (rect, response) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
             icons::paint_tab_document(ui.painter(), rect.shrink(7.0), t.icon);
-            response.on_hover_text("Document tab");
+            response.lizard_tooltip("Document tab");
         });
     });
 }
@@ -2209,7 +2210,7 @@ fn specialized_icons(ui: &mut Ui) {
                         ui.painter().rect_filled(rect, CornerRadius::same(5), t.hover);
                     }
                     paint(ui.painter(), rect.shrink(7.0), index);
-                    response.on_hover_text(format!("{name} · {}", label(index)));
+                    response.lizard_tooltip(format!("{name} · {}", label(index)));
                 }
             });
         };
@@ -2485,7 +2486,7 @@ fn token_value(ui: &mut Ui, role: ColorRole, dark: bool, recipe: ThemeRecipe) {
     ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, border), StrokeKind::Inside);
     let [red, green, blue, alpha] = color.to_array();
     let hex = if alpha == 255 { format!("#{red:02X}{green:02X}{blue:02X}") } else { format!("#{red:02X}{green:02X}{blue:02X}{alpha:02X}") };
-    if ui.small_button(&hex).on_hover_text("Copy color value").clicked() {
+    if ui.small_button(&hex).lizard_tooltip("Copy color value").clicked() {
         ui.ctx().copy_text(hex);
     }
 }

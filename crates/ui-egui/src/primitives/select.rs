@@ -1,5 +1,6 @@
 //! A selection control with a menu that can overlay its current value or sit beside the trigger.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Rect, RectAlign, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{CONTROL_CHEVRON_SIZE, ControlWidth, Menu, MenuItem, MenuPopup};
@@ -162,7 +163,7 @@ impl<'a> Select<'a> {
         select.paint_trigger(ui, rect, &response, value, t, a11y::menu_open(&response));
         let label_x = rect.left() + 8.0 + if lead.is_some() { 18.0 } else { 0.0 };
         let shown = widgets::elide(ui, value, (rect.right() - label_x - 20.0).max(0.0));
-        if shown != value { response.on_hover_text(value) } else { response }
+        if shown != value { response.lizard_tooltip(value) } else { response }
     }
 
     /// Use the Select menu placement with a composite trigger, such as a number field or

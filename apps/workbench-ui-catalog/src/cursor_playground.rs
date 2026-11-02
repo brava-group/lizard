@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use egui::{Color32, ColorImage, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, pos2, vec2};
+use lizard_ui_egui::primitives::TooltipResponseExt as _;
 
 struct CursorSample {
     key: &'static str,
@@ -145,7 +146,7 @@ pub fn show(ui: &mut Ui, state: &mut State) {
 fn preview_cell(ui: &mut Ui, background: Color32, side: f32) -> Rect {
     let (rect, response) = ui.allocate_exact_size(vec2(190.0, side + 24.0), Sense::hover());
     ui.painter().rect(rect, 8.0, background, Stroke::new(1.0, Color32::from_gray(95)), StrokeKind::Inside);
-    response.on_hover_text("Artwork at its intended cursor size");
+    response.lizard_tooltip("Artwork at its intended cursor size");
     rect
 }
 

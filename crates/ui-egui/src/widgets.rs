@@ -1,6 +1,7 @@
 //! Figma-style compact controls: number fields with scrub labels, text fields, dropdowns,
 //! segmented buttons, colour swatches and section headers.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::a11y::{self, Tip};
@@ -365,7 +366,7 @@ fn number_field_impl(
             let galley = crate::bidi::name_galley(ui.painter(), s, regular(11.0), t.text_secondary, lead_w - 12.0);
             // A label cut short shows whole on hover.
             if galley.elided {
-                lead_resp.clone().on_hover_text(s);
+                lead_resp.clone().lizard_tooltip(s);
             }
             ui.painter().galley(pos2(lead_rect.min.x + 8.0, rect.center().y - galley.size().y / 2.0), galley, t.text_secondary);
         }
@@ -724,7 +725,7 @@ fn bound_field_impl(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str, dis
     if dresp.clicked() {
         return Some(BindEvent::Detach);
     }
-    let resp = resp.on_hover_text(name);
+    let resp = resp.lizard_tooltip(name);
     resp.clicked().then(|| BindEvent::Open(rect.left_bottom()))
 }
 
@@ -1468,7 +1469,7 @@ pub fn sublabels(ui: &mut Ui, a: &str, b: Option<&str>) {
         let shown = elide_font(ui, text, max_w, regular(10.0));
         let at = ui.painter().text(pos2(r.min.x + x, r.max.y - 2.0), Align2::LEFT_BOTTOM, &shown, regular(10.0), t.text_secondary);
         if shown != text {
-            ui.interact(at, ui.id().with(("sublabel", i)), Sense::hover()).on_hover_text(text);
+            ui.interact(at, ui.id().with(("sublabel", i)), Sense::hover()).lizard_tooltip(text);
         }
     }
 }

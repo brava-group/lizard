@@ -3,6 +3,7 @@
 //! [`crate::online`]) and Templates (the starter templates as cards with thumbnails rendered from
 //! the documents themselves, searched and filtered by kind).
 
+use crate::primitives::TooltipResponseExt as _;
 use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -131,7 +132,7 @@ fn listed(ui: &mut Ui, t: &Tokens, id: Id, height: f32, row: &FileRow) -> bool {
     a11y::button(&resp, row.name);
     if file_row(ui, t, r, &resp, row) {
         // Cut to fit: in full on hover.
-        resp = resp.on_hover_text(format!("{}\n{}", row.name, row.detail));
+        resp = resp.lizard_tooltip(format!("{}\n{}", row.name, row.detail));
     }
     focus_ring(ui, t, r, &resp, 5);
     resp.clicked()
@@ -308,7 +309,7 @@ fn action_card(ui: &mut Ui, t: &Tokens, icon: Icon, title: &str, sub: &str) -> b
     let text_w = r.width() - 72.0;
     let (title_shown, sub_shown) = (widgets::elide_font(ui, title, text_w, semibold(12.0)), widgets::elide(ui, sub, text_w));
     if title_shown != title || sub_shown != sub {
-        resp = resp.on_hover_text(format!("{title}\n{sub}"));
+        resp = resp.lizard_tooltip(format!("{title}\n{sub}"));
     }
     card_frame(ui, t, r, &resp);
     let ir = Rect::from_min_size(pos2(r.min.x + 16.0, r.center().y - 16.0), vec2(32.0, 32.0));

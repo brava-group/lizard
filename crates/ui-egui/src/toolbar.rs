@@ -1,5 +1,6 @@
 //! The floating bottom toolbar (UI3): tool groups with flyouts, comments, actions.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_color::{ImageScaleMode, Paint, PaintKind};
 use lizard_doc::NodeId;
@@ -225,7 +226,7 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     ui.painter().rect_filled(seg, CornerRadius::same(5), if t.dark { Color32::from_rgb(0x44, 0x44, 0x44) } else { t.field });
     let mode_rect = |i: f32| Rect::from_min_size(pos2(seg.min.x + 2.0 + i * (MODE_CELL + MODE_GAP), seg.min.y + 2.0), vec2(MODE_CELL, MODE_CELL));
     let responses =
-        std::array::from_fn::<_, 3, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).on_hover_text(modes[i]));
+        std::array::from_fn::<_, 3, _>(|i| ui.interact(mode_rect(i as f32), ui.id().with(("mode", i)), Sense::click()).lizard_tooltip(modes[i]));
     for (i, resp) in responses.iter().enumerate() {
         if resp.hovered() && active != Some(i) {
             let r = mode_rect(i as f32);
@@ -336,7 +337,7 @@ fn view_only_toolbar(app: &mut LizardApp, ui: &mut Ui, why: &'static str) {
     }
     divider(ui, &t, x, cy);
     let badge = Rect::from_min_size(pos2(x + 12.0, cy - 13.0), vec2(badge_w, 26.0));
-    let resp = ui.interact(badge, ui.id().with("view_only"), Sense::hover()).on_hover_text(why);
+    let resp = ui.interact(badge, ui.id().with("view_only"), Sense::hover()).lizard_tooltip(why);
     a11y::status(&resp, label, why);
     ui.painter().rect_filled(badge, CornerRadius::same(13), t.field);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(badge.min.x + 12.0 + 7.0, cy), vec2(14.0, 14.0)), Icon::Eye, t.icon_secondary);
@@ -396,7 +397,7 @@ fn edit_toolbar(app: &mut LizardApp, ui: &mut Ui, current: VTool) {
                         .variant(if active { ButtonVariant::Primary } else { ButtonVariant::Ghost })
                         .width(ControlWidth::Fixed(width))
                         .show(ui)
-                        .on_hover_text(tip);
+                        .lizard_tooltip(tip);
                     if active {
                         a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
                     }
@@ -420,7 +421,7 @@ fn edit_toolbar(app: &mut LizardApp, ui: &mut Ui, current: VTool) {
                     }
                 });
                 vector_edit_separator(ui, &t);
-                if Button::icon(Icon::Close, tr("Done editing")).width(ControlWidth::Fixed(24.0)).show(ui).on_hover_text("Esc").clicked() {
+                if Button::icon(Icon::Close, tr("Done editing")).width(ControlWidth::Fixed(24.0)).show(ui).lizard_tooltip("Esc").clicked() {
                     app.run("vector.edit.end", json!({}));
                 }
             });
@@ -637,9 +638,7 @@ mod theme_recipe_tests {
 
 /// A square tool button: accent when active, tinted on hover; `tip` is its tooltip and name.
 fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Icon, active: bool, tip: &str) -> egui::Response {
-    let resp = ui.interact(r, ui.id().with(id), Sense::click()).on_hover_ui(|ui| {
-        ui.label(tip);
-    });
+    let resp = ui.interact(r, ui.id().with(id), Sense::click()).lizard_tooltip(tip);
     a11y::toggle(&resp, tip, active);
     let bg = if active {
         toolbar_accent(t)

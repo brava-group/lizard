@@ -1,5 +1,6 @@
 //! The right panel: Design, Prototype and Inspect tabs.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use lizard_color::{BlendMode, Paint, PaintKind};
 use lizard_doc::*;
@@ -783,7 +784,7 @@ fn position(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let nested = sel.iter().any(|i| lizard_engine::components::inside_instance(doc, *i));
     ui.add_enabled_ui(!nested, |ui| position_fields(app, ui, doc, sel))
         .response
-        .on_disabled_hover_text(tr("Layers in an instance take their position from the main component"));
+        .lizard_disabled_tooltip(tr("Layers in an instance take their position from the main component"));
     ui.add_space(12.0);
 }
 
@@ -832,7 +833,7 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
             let v = position_segments(ui, &items[3..], col).map(|i| i + 3);
             h.or(v)
         });
-        picked.response.on_disabled_hover_text(tr("A layer on its own aligns to its frame: select more layers, or one in a frame"));
+        picked.response.lizard_disabled_tooltip(tr("A layer on its own aligns to its frame: select more layers, or one in a frame"));
         if let Some(i) = picked.inner {
             app.run(cmds[i], json!({"ids": ids}));
         }
@@ -1304,7 +1305,7 @@ fn variable_modes(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
             let name = widgets::elide(ui, &c.name, name_w);
             ui.painter().text(pos2(rect.min.x, rect.center().y), Align2::LEFT_CENTER, &name, regular(11.0), t.text);
             if name != c.name || r.library.is_some() {
-                ui.interact(rect, Id::new(("var_mode_name", &c.id)), Sense::hover()).on_hover_text(&hover);
+                ui.interact(rect, Id::new(("var_mode_name", &c.id)), Sense::hover()).lizard_tooltip(&hover);
             }
             let width = ui.available_width();
             let resp = crate::primitives::Select::trigger(ui, &label, width, None);
@@ -2799,7 +2800,7 @@ fn fx_glass_slider(
     ui.painter().rect_filled(number, CornerRadius { nw: 0, ne: 5, sw: 0, se: 5 }, Color32::from_rgb(56, 56, 56));
     ui.painter().vline(number.min.x, number.min.y..=number.max.y, Stroke::new(1.0, Color32::from_rgb(38, 38, 38)));
     let track = Rect::from_min_size(slider.min + vec2(11.0, 9.0), vec2(58.0, 6.0));
-    let response = ui.interact(slider, Id::new(("fx_glass_slider", key, i)), Sense::click_and_drag()).on_hover_text(label);
+    let response = ui.interact(slider, Id::new(("fx_glass_slider", key, i)), Sense::click_and_drag()).lizard_tooltip(label);
     let picked = if response.clicked() || response.dragged() || response.drag_started() || response.drag_stopped() {
         response.interact_pointer_pos().map(|p| (f64::from((p.x - track.min.x) / track.width()).clamp(0.0, 1.0) * max).round())
     } else {

@@ -1,5 +1,6 @@
 //! The compact UI3 solid-colour picker. Coordinates follow the 240 × 513 reference dialog.
 
+use crate::primitives::TooltipResponseExt as _;
 use super::*;
 
 pub(super) const WIDTH: f32 = 240.0;
@@ -398,7 +399,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
                 let y = 456.0 + (i / 9) as f32 * 24.0;
                 let rect = at(origin, x, y, 16.0, 16.0);
                 widgets::paint_swatch(ui.painter(), rect, &Paint::solid(*swatch));
-                if ui.interact(rect, Id::new(("cp_swatch", i)), Sense::click()).on_hover_text(swatch.to_hex()).clicked() {
+                if ui.interact(rect, Id::new(("cp_swatch", i)), Sense::click()).lizard_tooltip(swatch.to_hex()).clicked() {
                     if let Some((index, _)) = stop {
                         if let PaintKind::Gradient(gradient) = &mut paint.kind
                             && let Some(current) = gradient.stops.get_mut(index)

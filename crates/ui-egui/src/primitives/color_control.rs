@@ -1,5 +1,6 @@
 //! The swatch, value, and opacity control shared by paint rows and effect settings.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_color::{Color, Hsb, Hsl, Paint, PaintKind};
 
@@ -106,7 +107,7 @@ impl<'a> ColorControl<'a> {
             widgets::paint_swatch(ui.painter(), swatch, self.paint);
             let open_picker = ui
                 .interact(swatch.expand(2.0), self.swatch_id.unwrap_or_else(|| self.id.with("swatch")), Sense::click())
-                .on_hover_text(tr("Edit colour"))
+                .lizard_tooltip(tr("Edit colour"))
                 .clicked();
             let value_rect = Rect::from_min_max(pos2(swatch.right() + 4.0, rect.top()), rect.max);
             let edited_hex = match self.value {
@@ -146,11 +147,11 @@ impl<'a> ColorControl<'a> {
 
         let open_picker = ui
             .interact(swatch.expand(2.0), self.swatch_id.unwrap_or_else(|| self.id.with("swatch")), Sense::click())
-            .on_hover_text(if matches!(&self.paint.kind, PaintKind::Shader(_)) { tr("Edit shader") } else { tr("Edit colour") })
+            .lizard_tooltip(if matches!(&self.paint.kind, PaintKind::Shader(_)) { tr("Edit shader") } else { tr("Edit colour") })
             .clicked();
         let mut result = ColorControlResponse { open_picker, ..Default::default() };
         if matches!(&self.paint.kind, PaintKind::Shader(_)) {
-            result.open_picker |= ui.interact(value_rect, self.id.with("shader_name"), Sense::click()).on_hover_text(tr("Edit shader")).clicked();
+            result.open_picker |= ui.interact(value_rect, self.id.with("shader_name"), Sense::click()).lizard_tooltip(tr("Edit shader")).clicked();
         }
 
         match self.value {
@@ -206,7 +207,7 @@ impl<'a> ColorControl<'a> {
 }
 
 fn show_style_name(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &str, t: Tokens) -> ColorControlResponse {
-    let response = ui.interact(rect, id.with("style"), Sense::click()).on_hover_text(name);
+    let response = ui.interact(rect, id.with("style"), Sense::click()).lizard_tooltip(name);
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     let swatch = Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(16.0, 16.0));
     if paint.solid_color().is_some() {
@@ -376,11 +377,11 @@ fn show_bound_variable(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &st
     let label_rect = Rect::from_min_max(pos2(swatch.max.x + 5.0, button.min.y), pos2(button.max.x - 4.0, button.max.y));
     let label = widgets::elide_font(ui, name, label_rect.width().max(0.0), medium(11.0));
     ui.painter().with_clip_rect(label_rect).text(pos2(label_rect.min.x, label_rect.center().y), Align2::LEFT_CENTER, label, medium(11.0), t.text);
-    let open_picker = ui.interact(button, id.with("bound"), Sense::click()).on_hover_text(name).clicked();
+    let open_picker = ui.interact(button, id.with("bound"), Sense::click()).lizard_tooltip(name).clicked();
     let mut response = ColorControlResponse { open_picker, ..Default::default() };
     if show_detach && rect.width() >= 80.0 {
         let detach = Rect::from_min_size(pos2(button.max.x + 4.0, rect.min.y), vec2(24.0, 24.0));
-        let detach_response = ui.interact(detach, id.with("detach"), Sense::click()).on_hover_text(tr("Detach variable"));
+        let detach_response = ui.interact(detach, id.with("detach"), Sense::click()).lizard_tooltip(tr("Detach variable"));
         if detach_response.hovered() {
             ui.painter().rect_filled(detach, CornerRadius::same(5), t.hover);
         }

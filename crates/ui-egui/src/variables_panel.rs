@@ -7,6 +7,7 @@
 //! variables JSON (or CSS). Everything goes through `variable.*` / `library.*` commands, so it's
 //! undoable and the same over MCP.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Context, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 use lizard_doc::{Collection, Document, PublishedLibrary, Variable, VariableType, VariableValue, Variables, scopes_for};
 use lizard_engine::library;
@@ -376,7 +377,7 @@ fn library_title(ui: &mut Ui, name: &str) {
     icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 22.0, r.center().y), vec2(12.0, 12.0)), Icon::Library, t.icon_secondary);
     let name_r = Rect::from_min_max(pos2(r.min.x + 34.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
     ui.painter().with_clip_rect(name_r).text(name_r.left_center(), Align2::LEFT_CENTER, name, semibold(11.0), t.text_secondary);
-    resp.on_hover_text(tr("Library: its variables are read-only here; edit them in the library file and publish it"));
+    resp.lizard_tooltip(tr("Library: its variables are read-only here; edit them in the library file and publish it"));
 }
 
 /// One collection in the sidebar (with its groups while selected).
@@ -809,7 +810,7 @@ fn value_cell(app: &mut LizardApp, ui: &mut Ui, view: &View, v: &Variable, coll:
     if let VariableValue::Alias(target) = val {
         let full = view.vars.get(target).map(|x| x.name.as_str()).unwrap_or(tr("Missing variable"));
         let resp = AliasValue::new(id.with("alias"), full).editable(editable).show_at(ui, body);
-        let resp = if editable { resp.on_hover_text(tr("Change alias")) } else { resp };
+        let resp = if editable { resp.lizard_tooltip(tr("Change alias")) } else { resp };
         if resp.clicked() {
             crate::variable_ui::open_alias(ui, &v.id, mode, v.kind, body.left_bottom());
         }

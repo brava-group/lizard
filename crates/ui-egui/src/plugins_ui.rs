@@ -4,6 +4,7 @@
 //! browse, install from and update from). Everything runs through the engine's `plugin.*`,
 //! `plugin.directory.*` and `widget.*` commands.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Context, Id, RichText, Ui};
 use lizard_engine::plugin_directory::{PluginEntry, installed_version, newer_version};
 use lizard_engine::plugins::{Access, InstalledPlugin, Param, ParamKind, WidgetFit};
@@ -639,7 +640,7 @@ fn figma_local_tab(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manag
         }
         if let Some(digest) = report["digest"].as_str() {
             ui.label(RichText::new(format!("SHA-256: {}…", digest.get(..24).unwrap_or(digest))).font(regular(11.0)).color(t.text_secondary))
-                .on_hover_text(digest);
+                .lizard_tooltip(digest);
         }
         if let Some(domains) = report["networkAccess"]["allowedDomains"].as_array() {
             let list = domains.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
@@ -890,7 +891,7 @@ fn community_tab(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) -> Option<Manage>
             ui.add_space(7.0);
             let name =
                 if entry.name.chars().count() > 43 { format!("{}…", entry.name.chars().take(42).collect::<String>()) } else { entry.name.clone() };
-            if widgets::button(ui, &name, state.community_selected.as_deref() == Some(&entry.plugin_id), true).on_hover_text(&entry.name).clicked() {
+            if widgets::button(ui, &name, state.community_selected.as_deref() == Some(&entry.plugin_id), true).lizard_tooltip(&entry.name).clicked() {
                 asked = Some(Manage::SelectCommunity(entry.plugin_id.clone()));
             }
             if !entry.tagline.is_empty() {
@@ -1374,7 +1375,7 @@ fn grid(ui: &mut Ui, salt: Id, p: &Param, values: &Map<String, Value>, t: &Token
                 let (rect, mut resp) = ui.allocate_exact_size(egui::vec2(cell, cell), egui::Sense::click());
                 let name = if item.label.is_empty() { item.value.as_str() } else { item.label.as_str() };
                 crate::a11y::image(&resp, name);
-                resp = resp.on_hover_text(name);
+                resp = resp.lizard_tooltip(name);
                 if ui.is_rect_visible(rect) {
                     if resp.hovered() {
                         ui.painter().rect_filled(rect, egui::CornerRadius::same(10), t.hover);

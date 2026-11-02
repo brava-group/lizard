@@ -1042,8 +1042,6 @@ impl Tip for Response {
         if self.sense.senses_click() {
             button(&self, tip.as_ref());
         }
-        self.on_hover_ui(move |ui| {
-            ui.label(tip.as_ref());
-        })
+        crate::primitives::TooltipResponseExt::lizard_tooltip(self, tip.as_ref())
     }
 }

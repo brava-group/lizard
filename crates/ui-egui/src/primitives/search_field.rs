@@ -1,5 +1,6 @@
 //! Search input shared by overlay compositions.
 
+use crate::primitives::TooltipResponseExt as _;
 use egui::{Align, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 
 use super::ControlWidth;
@@ -88,7 +89,7 @@ impl<'a> SearchField<'a> {
         );
         if show_clear {
             let clear = Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), vec2(18.0, 18.0));
-            let action = ui.interact(clear, self.id.with("clear"), Sense::click()).on_hover_text(tr("Clear search"));
+            let action = ui.interact(clear, self.id.with("clear"), Sense::click()).lizard_tooltip(tr("Clear search"));
             ui.painter().circle_stroke(clear.center(), 7.5, Stroke::new(1.0, t.icon_secondary));
             icons::paint(ui.painter(), Rect::from_center_size(clear.center(), vec2(10.0, 10.0)), Icon::Close, t.icon_secondary);
             if action.clicked() {
