@@ -5,7 +5,7 @@
 //! commands.
 
 use crate::primitives::TooltipResponseExt as _;
-use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use lizard_doc::*;
 use serde_json::json;
 
@@ -13,7 +13,7 @@ use crate::LizardApp;
 use crate::a11y::Tip;
 use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon, LayoutIcon, SizingIcon};
-use crate::primitives::{Button, ButtonBehavior, ControlWidth, Segment, SegmentedControl};
+use crate::primitives::{Button, ButtonBehavior, ControlWidth, Menu, MenuItem, Segment, SegmentedControl};
 use crate::right::{block, common, menu_item, menu_popup, row, row_rect};
 use crate::theme::{Tokens, regular};
 use crate::widgets::{self, FIELD_H, Lead};
@@ -263,40 +263,24 @@ const AXES: [Axis; 2] = [
 ];
 
 fn sizing_menu_option(ui: &mut Ui, label: &str, icon: SizingIcon, selected: bool, enabled: bool) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
-    crate::a11y::menu_item(&response, label, "", Some(selected));
-    crate::a11y::own_focus(&response);
-    let hovered = enabled && (response.hovered() || response.has_focus());
-    if hovered {
-        ui.painter().rect_filled(rect, CornerRadius::same(5), t.accent);
-    }
-    let color = if hovered {
-        Color32::WHITE
-    } else if enabled {
-        t.text
-    } else {
-        t.text_secondary
-    };
-    if selected {
-        icons::paint_sizing(ui.painter(), Rect::from_min_size(pos2(rect.min.x + 4.0, rect.min.y), vec2(18.0, 24.0)), SizingIcon::Check, color);
-    }
-    let art = Rect::from_center_size(
-        pos2(rect.min.x + 38.0, rect.center().y),
-        match icon {
-            SizingIcon::Minimum | SizingIcon::Maximum | SizingIcon::HeightMinimum | SizingIcon::HeightMaximum => vec2(16.0, 16.0),
-            SizingIcon::Variable => vec2(12.0, 12.0),
-            _ => vec2(18.0, 18.0),
-        },
-    );
-    icons::paint_sizing(ui.painter(), art, icon, color);
-    ui.painter().text(pos2(rect.min.x + 50.0, rect.center().y), Align2::LEFT_CENTER, label, regular(11.0), color);
-    enabled && response.clicked()
+    MenuItem::new(label)
+        .checked(selected)
+        .enabled(enabled)
+        .max_width(ui.available_width())
+        .show_with_parts(
+            ui,
+            24.0,
+            |painter, slot, color| {
+                icons::paint_sizing(painter, Rect::from_center_size(pos2(slot.left() + 10.0, slot.center().y), vec2(16.0, 16.0)), icon, color);
+            },
+            0.0,
+            |_, _, _| {},
+        )
+        .clicked()
 }
 
 fn sizing_menu_separator(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), Sense::hover());
-    ui.painter().hline(rect.x_range(), rect.min.y + 8.5, Stroke::new(1.0, Color32::from_gray(0x38)));
+    Menu::separator(ui, None);
 }
 
 /// A node's min (`is_min`) or max limit on one axis.
