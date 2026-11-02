@@ -777,18 +777,6 @@ impl Document {
         Ok(())
     }
 
-    /// Fit every group/boolean ancestor of `id` (innermost first).
-    pub fn fit_ancestors(&mut self, id: NodeId) {
-        for a in self.ancestors(id) {
-            let follows = self.node(a).is_some_and(|n| n.kind.bounds_follow_children());
-            if follows {
-                let _ = self.fit_to_children(a);
-            } else {
-                break;
-            }
-        }
-    }
-
     /// Deep-copy `id`'s subtree under `parent` (at `index`), returning the new root id. The copy
     /// keeps the original's local transform; ids are fresh.
     pub fn duplicate_into(&mut self, id: NodeId, parent: NodeId, index: Option<usize>) -> DocResult<NodeId> {

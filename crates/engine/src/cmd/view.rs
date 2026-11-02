@@ -1,6 +1,5 @@
 //! View menu, preferences and tools. View state is per document and drivable like everything else.
 
-use lizard_doc::*;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
@@ -569,9 +568,6 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
     ]
 }
-
-#[allow(dead_code)]
-fn unused(_: NodeId) {}
 
 #[cfg(test)]
 mod start_on_home_tests {

@@ -5,6 +5,6 @@ pub mod surface;
 pub mod theme_recipe;
 mod width;
 
-pub use surface::{Surface, SurfaceTheme, SurfaceVariant};
+pub use surface::{Surface, SurfaceTheme};
 pub use theme_recipe::{PrimaryScale, ThemeRecipe};
 pub use width::ControlWidth;

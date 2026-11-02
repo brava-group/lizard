@@ -43,6 +43,7 @@ pub struct GuestConfig {
     pub attempts: u32,
     /// Join as the client you were (an app that starts over after a crash): the first hello
     /// carries it, and a server that still knows the id gives it back.
+    #[cfg(not(target_arch = "wasm32"))]
     pub resume: Option<Resume>,
 }
 
@@ -57,6 +58,7 @@ impl GuestConfig {
             backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(10),
             attempts: 12,
+            #[cfg(not(target_arch = "wasm32"))]
             resume: None,
         }
     }

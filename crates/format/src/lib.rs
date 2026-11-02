@@ -34,7 +34,6 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use sha2::Digest;
 
-pub const EXTENSION: &str = "lizard";
 pub const FORMAT: &str = "lizard";
 pub const VERSION: u32 = 1;
 /// Largest archive member we read (guards against zip bombs).

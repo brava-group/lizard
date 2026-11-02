@@ -3,7 +3,6 @@ resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 # The plugin SDK and examples build for wasm32 in a workspace of their own (`cargo xtask plugins`).
 exclude = ["plugins", "vendor/egui-winit"]
-# default-members = ["crates/*", "apps/lizard", "apps/lizard-cli", "xtask"]
 
 [workspace.package]
 version = "0.9.0"
@@ -25,7 +24,6 @@ lizard-shader = { path = "crates/shader" }
 lizard-svg = { path = "crates/svg" }
 lizard-pdf = { path = "crates/pdf" }
 lizard-format = { path = "crates/format" }
-lizard-tools = { path = "crates/tools" }
 lizard-collab = { path = "crates/collab" }
 lizard-engine = { path = "crates/engine" }
 lizard-ui-egui = { path = "crates/ui-egui" }
@@ -94,9 +92,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 dbg_macro = "warn"
-# Style lints from newer toolchains that fight index-heavy pixel code.
+# Pixel routines intentionally index neighboring samples.
 needless_range_loop = "allow"
-chunks_exact_to_as_chunks = "allow"
 # Lizard never crashes: shipped code returns `Result`/`Option` instead of panicking (see
 # AGENTS.md › Never crash). Tests may unwrap (clippy.toml).
 unwrap_used = "deny"

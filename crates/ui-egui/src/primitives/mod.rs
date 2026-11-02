@@ -38,7 +38,7 @@ pub use segmented::{Segment, SegmentContent, SegmentSize, SegmentSizing, Segment
 pub use select::{Select, SelectLead, SelectPosition, SelectVariant};
 pub use shimmer::{ShimmerDirection, ShimmerText};
 pub use slider::{Slider, SliderKind, SliderResponse, SliderVariant};
-pub use surface::{Surface, SurfaceVariant};
+pub use surface::Surface;
 pub use switch::Switch;
 pub use tabs::{Tab, TabOverflow, Tabs};
 pub use text_field_with_presets::TextFieldWithPresets;

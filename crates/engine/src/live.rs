@@ -892,12 +892,6 @@ impl Session {
         ds.revision += 1;
     }
 
-    /// Your presence in the active document's session now: its page, selection, viewport and
-    /// edited text, and the pointer.
-    pub fn live_presence(&self) -> Presence {
-        self.presence_in(self.live())
-    }
-
     /// Your presence in `live` (nothing while another document than its own is in front).
     fn presence_in(&self, live: &Live) -> Presence {
         let Some(ds) = self.ds().ok().filter(|ds| live.tab == Some(ds.uid)) else { return Presence::default() };

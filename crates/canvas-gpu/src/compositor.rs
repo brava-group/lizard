@@ -87,20 +87,6 @@ pub struct Tile<'a> {
     pub image: &'a Pixmap,
 }
 
-pub struct GpuTile<'a> {
-    pub x: i32,
-    pub y: i32,
-    pub texture: &'a wgpu::Texture,
-}
-
-/// A cached tile with its own world-space extent. Later layers cover earlier ones.
-pub struct GpuTileLayer<'a> {
-    pub origin: (f32, f32),
-    pub span: f32,
-    pub min_zoom: f32,
-    pub texture: &'a wgpu::Texture,
-}
-
 pub struct Compositor {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -167,96 +153,6 @@ impl Compositor {
         let world = tile_size as f32 / scale;
         let positions: Vec<(f32, f32, f32, f32)> = tiles.iter().map(|tile| (tile.x as f32 * world, tile.y as f32 * world, world, 0.0)).collect();
         Self::build(width, height, tile_size, bleed, scale, device, queue, atlas, &positions)
-    }
-
-    pub fn from_gpu(
-        width: u32,
-        height: u32,
-        tile_size: u32,
-        bleed: u32,
-        scale: f32,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        tiles: &[GpuTile<'_>],
-    ) -> Result<Self, Box<dyn Error>> {
-        let first = tiles.first().ok_or("no GPU tiles to compose")?;
-        let side = first.texture.size().width;
-        if tiles.iter().any(|tile| {
-            tile.texture.size().width != side || tile.texture.size().height != side || tile.texture.format() != wgpu::TextureFormat::Rgba8Unorm
-        }) {
-            return Err("GPU tile sizes or formats differ".into());
-        }
-        let atlas = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Lizard benchmark GPU-generated atlas"),
-            size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: tiles.len() as u32 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("GPU tile atlas copy") });
-        for (layer, tile) in tiles.iter().enumerate() {
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo { texture: tile.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &atlas,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: layer as u32 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
-            );
-        }
-        queue.submit([encoder.finish()]);
-        let world = tile_size as f32 / scale;
-        let positions: Vec<(f32, f32, f32, f32)> = tiles.iter().map(|tile| (tile.x as f32 * world, tile.y as f32 * world, world, 0.0)).collect();
-        Self::build(width, height, tile_size, bleed, scale, device, queue, atlas, &positions)
-    }
-
-    pub fn from_gpu_layers(
-        width: u32,
-        height: u32,
-        tile_size: u32,
-        bleed: u32,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        layers: &[GpuTileLayer<'_>],
-    ) -> Result<Self, Box<dyn Error>> {
-        let first = layers.first().ok_or("no GPU layers to compose")?;
-        let side = first.texture.size().width;
-        if layers.iter().any(|layer| {
-            layer.texture.size().width != side || layer.texture.size().height != side || layer.texture.format() != wgpu::TextureFormat::Rgba8Unorm
-        }) {
-            return Err("GPU layer sizes or formats differ".into());
-        }
-        let atlas = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Lizard benchmark mixed-scale tile atlas"),
-            size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: layers.len() as u32 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mixed-scale atlas init") });
-        for (index, layer) in layers.iter().enumerate() {
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo { texture: layer.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &atlas,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: index as u32 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
-            );
-        }
-        queue.submit([encoder.finish()]);
-        let positions: Vec<(f32, f32, f32, f32)> = layers.iter().map(|layer| (layer.origin.0, layer.origin.1, layer.span, layer.min_zoom)).collect();
-        Self::build(width, height, tile_size, bleed, 1.0, device, queue, atlas, &positions)
     }
 
     /// Allocate a fixed-size atlas. Unassigned slots are clipped outside the viewport.
@@ -439,27 +335,6 @@ impl Compositor {
         })
     }
 
-    pub fn replace_gpu_tile(&self, layer: u32, source: &wgpu::Texture) -> Result<f64, Box<dyn Error>> {
-        if layer >= self.count || source.size().width != self.atlas.size().width || source.size().height != self.atlas.size().height {
-            return Err("invalid GPU atlas tile replacement".into());
-        }
-        let start = Instant::now();
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("GPU tile edit patch") });
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo { texture: source, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.atlas,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d { width: source.size().width, height: source.size().height, depth_or_array_layers: 1 },
-        );
-        self.queue.submit([encoder.finish()]);
-        self.device.poll(wgpu::PollType::wait_indefinitely())?;
-        Ok(start.elapsed().as_secs_f64() * 1000.0)
-    }
-
     /// Schedule an atlas patch in queue order; the next compose pass consumes it.
     pub fn enqueue_gpu_tile(&self, layer: u32, source: &wgpu::Texture) -> Result<(), Box<dyn Error>> {
         if layer >= self.count || source.size().width != self.atlas.size().width || source.size().height != self.atlas.size().height {
@@ -512,11 +387,6 @@ impl Compositor {
             wgpu::Extent3d { width: image.width(), height: image.height(), depth_or_array_layers: 1 },
         );
         self.hide_gpu_layer(layer)
-    }
-
-    /// Replace a damaged rectangle in a resident CPU tile without reallocating the atlas layer.
-    pub fn patch_cpu_layer(&self, layer: u32, x: u32, y: u32, image: &Pixmap) -> Result<(), Box<dyn Error>> {
-        self.patch_cpu_layer_region(layer, x, y, image, 0, 0, image.width(), image.height())
     }
 
     /// Upload a rectangle from a shared rendered patch into one atlas layer.

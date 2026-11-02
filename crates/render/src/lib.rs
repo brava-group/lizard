@@ -473,11 +473,6 @@ pub fn encode_jpeg(p: &Pixmap, background: Color, quality: u8) -> Result<Vec<u8>
     jpeg_with(p, background, quality, None)
 }
 
-/// Encode as lossless WebP.
-pub fn encode_webp(p: &Pixmap) -> Result<Vec<u8>, String> {
-    webp_with(p, None)
-}
-
 /// Encode an export in `format` (PNG, JPEG over white, WebP) tagged with the document's colour
 /// `profile`. An sRGB PNG gets an `sRGB` chunk; a Display P3 PNG gets the profile as `iCCP` plus
 /// `cICP` code points; Display P3 JPEG and WebP files embed the ICC profile (untagged files are read

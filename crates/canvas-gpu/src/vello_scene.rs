@@ -5951,10 +5951,6 @@ fn gpu_luminance_mask_supported(node: &Node) -> bool {
         }
 }
 
-pub fn make_scene(doc: &Document, page: NodeId, view: &View) -> Scene {
-    make_scene_with_images(doc, page, view, None)
-}
-
 /// Build outline mode as GPU strokes. Effects and fills do not participate in this view.
 pub fn make_outline_scene(doc: &Document, page: NodeId, view: &View, options: lizard_render::Outline) -> Scene {
     let roots = doc.node(page).map(|node| node.paint_order().collect::<Vec<_>>()).unwrap_or_default();
@@ -6313,14 +6309,6 @@ fn stroke_outline_node(scene: &mut Scene, doc: &Document, id: NodeId, camera: Af
             stroke_outline_node(scene, doc, child, camera, scale, options, depth + 1);
         }
     }
-}
-
-pub fn has_effects_in_view(doc: &Document, view: &View) -> bool {
-    has_matching_effects_in_view(doc, view, false, false, false)
-}
-
-pub fn has_unsupported_effects_in_view(doc: &Document, view: &View) -> bool {
-    has_matching_effects_in_view(doc, view, true, false, false)
 }
 
 pub fn has_unhandled_effects_in_view(doc: &Document, view: &View) -> bool {
@@ -7017,10 +7005,6 @@ fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> O
         u16::try_from((x1 - x0) as u32).ok()?,
         u16::try_from((y1 - y0) as u32).ok()?,
     ))
-}
-
-fn has_matching_effects_in_view(doc: &Document, view: &View, unsupported_only: bool, gpu_backdrop: bool, cached_noise: bool) -> bool {
-    has_matching_effects_excluding_in_view(doc, view, unsupported_only, gpu_backdrop, cached_noise, &HashSet::new())
 }
 
 fn has_matching_effects_excluding_in_view(
@@ -9093,11 +9077,6 @@ impl GpuCanvas {
 
     pub fn register_images(&mut self, doc: &Document) -> Result<usize, Box<dyn Error>> {
         self.register_images_at_scale(doc, 0.0, 1.0)
-    }
-
-    /// Upload the image frame visible at `time`; static renders use the first frame.
-    pub fn register_images_at(&mut self, doc: &Document, time: f64) -> Result<usize, Box<dyn Error>> {
-        self.register_images_at_scale(doc, time, 1.0)
     }
 
     /// Register image and shader paints at the current device scale. Shader resolution changes

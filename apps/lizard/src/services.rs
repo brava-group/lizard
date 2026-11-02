@@ -406,11 +406,11 @@ impl Services for Desktop {
         }
         if let Some(login) = &self.agent_login_events {
             for event in login.try_iter().take(20) {
-                if matches!(event, AgentEvent::LoginComplete) {
-                    if let Some(kind) = self.agent_login_kind {
-                        self.agent_signed_in[kind as usize] = true;
-                        self.agent_auth_checked[kind as usize] = Some(true);
-                    }
+                if matches!(event, AgentEvent::LoginComplete)
+                    && let Some(kind) = self.agent_login_kind
+                {
+                    self.agent_signed_in[kind as usize] = true;
+                    self.agent_auth_checked[kind as usize] = Some(true);
                 }
                 events.push(event);
             }

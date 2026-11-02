@@ -2,8 +2,6 @@
 //! coordinates; tools turn gestures into document edits through interactions (one undo step per
 //! gesture) and publish overlay hints (marquee, guides, size label, cursor) for the canvas.
 
-use std::collections::BTreeMap;
-
 use lizard_doc::geometry::select_target;
 use lizard_doc::*;
 use lizard_geom::{Affine, Point, Rect, Vec2};
@@ -624,7 +622,7 @@ pub fn selection_bounds(doc: &Document, sel: &[NodeId]) -> Option<Rect> {
     ))
 }
 
-fn subtract_base<'a>(doc: &'a Document, id: NodeId) -> Option<&'a lizard_doc::Node> {
+fn subtract_base(doc: &Document, id: NodeId) -> Option<&lizard_doc::Node> {
     let node = doc.node(id)?;
     if !matches!(node.kind, NodeKind::BooleanOp { op: BoolOp::Subtract }) {
         return None;
@@ -2604,9 +2602,6 @@ impl Session {
 fn shape_hint(doc: &Document, id: NodeId, handle: ShapeHandle, zoom: f64) -> Option<ShapeHint> {
     Some(ShapeHint { handle, value: crate::shape_handles::value(doc, id, handle)?, at: crate::shape_handles::handle_at(doc, id, handle, zoom)? })
 }
-
-#[allow(dead_code)]
-fn unused(_: BTreeMap<u8, u8>) {}
 
 /// An end point of a selected open vector within `tol` of page point `p`: (layer, point).
 fn selected_end_at(doc: &Document, sel: &[NodeId], p: Point, tol: f64) -> Option<(NodeId, usize)> {

@@ -137,14 +137,6 @@ pub fn part_at(doc: &Document, hit: NodeId, p: Point) -> Option<(NodeId, Part)> 
     Some((w, part))
 }
 
-/// The clickable part of a widget at page point `p`: the widget and its target.
-pub fn target_at(doc: &Document, hit: NodeId, p: Point) -> Option<(NodeId, String)> {
-    match part_at(doc, hit, p)? {
-        (w, Part::Target(t)) => Some((w, t)),
-        _ => None,
-    }
-}
-
 /// The front-most layer with a hover style at page point `p` of the widget `hit` is (or is in).
 pub fn hover_at(doc: &Document, hit: NodeId, p: Point) -> Option<NodeId> {
     layers_at(doc, hit, p)?.1.iter().rev().find(|n| n.plugin_data.contains_key(HOVER)).map(|n| n.id)

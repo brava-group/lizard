@@ -23,7 +23,6 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 # OS certificate store, no OpenSSL). Over our own split reader/writer stream (`tls.rs`), so not
 # tungstenite's single-owner TLS stream.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12", "logging"] }
-rustls-pki-types = { version = "1", features = ["std"] }
 webpki-roots = "1"
 getrandom = "0.4"
 base64 = { workspace = true }

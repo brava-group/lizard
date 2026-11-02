@@ -447,7 +447,6 @@ pub struct Hosting {
     open: Arc<AtomicUsize>,
     /// Bytes queued for every connection together, and in flight to the hub.
     queued: Arc<AtomicUsize>,
-    in_flight: InFlight,
     blocks: Blocks,
     reading: Arc<AtomicUsize>,
     hub_thread: Option<JoinHandle<()>>,
@@ -506,18 +505,7 @@ impl Hosting {
             }
         };
         log::info!("live session: listening on {addr}");
-        Ok(Hosting {
-            addr,
-            hub: hub_tx,
-            stop,
-            open,
-            queued,
-            in_flight,
-            blocks,
-            reading,
-            hub_thread: Some(hub_thread),
-            accept_thread: Some(accept_thread),
-        })
+        Ok(Hosting { addr, hub: hub_tx, stop, open, queued, blocks, reading, hub_thread: Some(hub_thread), accept_thread: Some(accept_thread) })
     }
 
     /// Bytes waiting to be sent to clients, all connections together.
@@ -534,11 +522,6 @@ impl Hosting {
     /// Bytes being read into messages not whole yet, all connections together.
     pub fn reading_bytes(&self) -> usize {
         self.reading.load(Ordering::Relaxed)
-    }
-
-    /// Bytes of messages read and not handled by the hub yet.
-    pub fn in_flight_bytes(&self) -> usize {
-        self.in_flight.0.load(Ordering::Relaxed)
     }
 
     /// Where it listens.

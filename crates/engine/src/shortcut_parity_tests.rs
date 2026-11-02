@@ -30,9 +30,6 @@ enum Ours {
     Gesture(&'static str),
     /// A tool key in vector edit mode.
     VectorTool(VTool),
-    /// No such behaviour yet (no row today; kept for the next documented shortcut).
-    #[allow(dead_code)]
-    Missing,
 }
 use Ours::*;
 
@@ -394,11 +391,10 @@ fn counts_match_the_docs() {
     let documented: Vec<&Row> = ROWS.iter().filter(|r| r.documented).collect();
     let bound = documented.iter().filter(|r| matches!(r.ours, Bound(_) | Gesture(_) | VectorTool(_))).count();
     let moved = documented.iter().filter(|r| matches!(r.ours, Moved(..))).count();
-    let missing = documented.iter().filter(|r| matches!(r.ours, Missing)).count();
     let reserved = documented.iter().filter(|r| !r.reserved.is_empty()).count();
     let pinned = ROWS.len() - documented.len();
     // docs/ui-parity.md quotes these.
-    assert_eq!((documented.len(), bound, moved, missing, reserved, pinned), (129, 128, 1, 0, 2, 49));
+    assert_eq!((documented.len(), bound, moved, reserved, pinned), (129, 128, 1, 2, 49));
 }
 
 #[test]

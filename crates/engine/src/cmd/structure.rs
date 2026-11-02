@@ -352,14 +352,6 @@ fn mask(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
-/// The outline of a node in its parent's space (shapes, text, booleans, groups).
-pub fn outline_in_parent(doc: &Document, id: NodeId) -> Option<BezPath> {
-    let n = doc.node(id)?;
-    let (mut p, _) = lizard_render::subtree_outline(doc, n, 0)?;
-    p.apply_affine(n.transform);
-    Some(p)
-}
-
 fn flatten(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets("vector.flatten", s, p)?;
     let doc = s.doc_mut()?;

@@ -1534,8 +1534,6 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         painter.rect(setup, CornerRadius::same(8), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
         let setup_title = if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {
             "Aguardando login no navegador…"
-        } else if !connection.installed {
-            "Conectar conta"
         } else if !connection.authenticated {
             "Conectar conta"
         } else {
@@ -1549,22 +1547,16 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             regular(11.0),
             secondary,
         );
-        let setup_hit = if app.ui.agent.login_pending {
-            Rect::from_min_max(setup.min, pos2(setup.right() - 100.0, setup.bottom()))
-        } else {
-            setup
-        };
-        if hit(ui, "agent_setup", setup_hit, setup_title).clicked() && !app.ui.agent.login_pending {
-            if !connection.authenticated {
-                match app.services.agent_login(app.ui.agent.agent) {
-                    Ok(()) => {
-                        app.ui.agent.login_pending = true;
-                        app.ui.agent.login_kind = Some(app.ui.agent.agent);
-                        app.ui.agent.login_error = None;
-                        app.ui.agent.login_instruction = None;
-                    }
-                    Err(error) => app.toast(error),
+        let setup_hit = if app.ui.agent.login_pending { Rect::from_min_max(setup.min, pos2(setup.right() - 100.0, setup.bottom())) } else { setup };
+        if hit(ui, "agent_setup", setup_hit, setup_title).clicked() && !app.ui.agent.login_pending && !connection.authenticated {
+            match app.services.agent_login(app.ui.agent.agent) {
+                Ok(()) => {
+                    app.ui.agent.login_pending = true;
+                    app.ui.agent.login_kind = Some(app.ui.agent.agent);
+                    app.ui.agent.login_error = None;
+                    app.ui.agent.login_instruction = None;
                 }
+                Err(error) => app.toast(error),
             }
         }
         if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {

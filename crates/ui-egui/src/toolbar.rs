@@ -611,31 +611,6 @@ fn toolbar_accent(t: &Tokens) -> Color32 {
     t.accent
 }
 
-#[cfg(test)]
-mod theme_recipe_tests {
-    use super::*;
-    use workbench_ui::ThemeRecipe;
-
-    #[test]
-    fn active_tool_renders_with_the_edited_primary() {
-        let ctx = egui::Context::default();
-        let palette = Tokens::from_recipe(true, ThemeRecipe { primary: [0xc5, 0x68, 0xff], ..ThemeRecipe::default() });
-        crate::theme::apply(&ctx, palette);
-        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(32.0, 32.0));
-        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0))), ..Default::default() };
-        let mut output = ctx.run_ui(input, |ui| {
-            tool_cell(ui, &palette, rect, "active_tool", Icon::Move, true, "Move");
-        });
-        assert!(
-            output
-                .shapes
-                .iter()
-                .any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect && shape.fill == palette.accent))
-        );
-        output.textures_delta.clear();
-    }
-}
-
 /// A square tool button: accent when active, tinted on hover; `tip` is its tooltip and name.
 fn tool_cell(ui: &mut Ui, t: &Tokens, r: Rect, id: impl egui::AsIdSalt, icon: Icon, active: bool, tip: &str) -> egui::Response {
     let resp = ui.interact(r, ui.id().with(id), Sense::click()).lizard_tooltip(tip);
@@ -732,4 +707,29 @@ fn flyout_id(key: &str) -> egui::Id {
 /// "Shift+Cmd+K" → "⇧⌘K" on macOS, "Ctrl+Shift+K" elsewhere.
 pub fn pretty_shortcut(s: &str) -> String {
     lizard_engine::keymap::display(s, crate::shortcuts::platform())
+}
+
+#[cfg(test)]
+mod theme_recipe_tests {
+    use super::*;
+    use workbench_ui::ThemeRecipe;
+
+    #[test]
+    fn active_tool_renders_with_the_edited_primary() {
+        let ctx = egui::Context::default();
+        let palette = Tokens::from_recipe(true, ThemeRecipe { primary: [0xc5, 0x68, 0xff], ..ThemeRecipe::default() });
+        crate::theme::apply(&ctx, palette);
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(32.0, 32.0));
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            tool_cell(ui, &palette, rect, "active_tool", Icon::Move, true, "Move");
+        });
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect && shape.fill == palette.accent))
+        );
+        output.textures_delta.clear();
+    }
 }

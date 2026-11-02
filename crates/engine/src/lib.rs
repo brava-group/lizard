@@ -1354,16 +1354,6 @@ impl Session {
     }
 }
 
-/// Nodes whose `Arc` differs from `before` (new or edited).
-pub fn changed_nodes(doc: &Document, before: &Document) -> Vec<NodeId> {
-    doc.ids()
-        .filter(|id| match (doc.node_arc(*id), before.node_arc(*id)) {
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        })
-        .collect()
-}
-
 /// Keep derived state consistent after edits: text boxes resize to their content, groups wrap
 /// their children, instances follow their main components, auto layout re-flows.
 pub fn normalize(doc: &mut Document, before: &Document) {

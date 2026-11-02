@@ -174,20 +174,9 @@ impl Client {
         std::mem::take(&mut self.notices)
     }
 
-    /// The most undo steps kept (at least one).
-    pub fn set_history_limit(&mut self, limit: usize) {
-        self.history_limit = limit.max(1);
-        self.trim_history();
-    }
-
     /// Undo steps, oldest first, by label.
     pub fn undo_labels(&self) -> impl DoubleEndedIterator<Item = &str> {
         self.undo.iter().map(|s| s.label.as_str())
-    }
-
-    /// Redo steps, the next one last, by label.
-    pub fn redo_labels(&self) -> impl DoubleEndedIterator<Item = &str> {
-        self.redo.iter().map(|s| s.label.as_str())
     }
 
     /// The user edited the document (`doc` is [`document`](Self::document) after a command): show

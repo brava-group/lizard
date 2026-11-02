@@ -687,6 +687,7 @@ impl FontDb {
     /// Offer the families of a later walk of the font folders: new families become pending, a
     /// family not loaded yet takes the walk's files, and a loaded family keeps its faces and gets
     /// the files it hasn't read (styles installed since) as pending, read when it is next used.
+    #[cfg(not(target_arch = "wasm32"))]
     fn merge_rescan(&mut self, found: BTreeMap<String, (String, Vec<Pending>)>) -> Rescan {
         let mut out = Rescan::default();
         for (k, (display, entries)) in found {
@@ -712,25 +713,9 @@ impl FontDb {
         }
         out
     }
-
-    /// Index the system font directories (desktop only): family names are read now, faces loaded
-    /// when first used. Safe to call more than once.
-    pub fn scan_system(&mut self) {
-        if self.system_scanned {
-            return;
-        }
-        self.system_scanned = true;
-        for dir in system_font_dirs() {
-            scan_dir(&dir, 0, &mut self.pending);
-        }
-        // Families already embedded win.
-        let embedded: Vec<String> = self.families.keys().cloned().collect();
-        for k in embedded {
-            self.pending.remove(&k);
-        }
-    }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn system_font_dirs() -> Vec<std::path::PathBuf> {
     #[allow(unused_mut)]
     let mut v: Vec<std::path::PathBuf> = Vec::new();
@@ -790,6 +775,7 @@ fn unix_user_font_dirs(home: Option<std::ffi::OsString>, data_home: Option<std::
     dirs
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn scan_dir(dir: &std::path::Path, depth: usize, out: &mut BTreeMap<String, (String, Vec<Pending>)>) {
     if depth > 6 {
         return;
@@ -834,6 +820,7 @@ pub const MAX_FONT_FILE: u64 = 256 * 1024 * 1024;
 
 /// The parts of a font file the scan reads: headers, table directories and `name` tables, at their
 /// offsets in a zeroed buffer of the file's length (reading whole files was most of the scan).
+#[cfg(not(target_arch = "wasm32"))]
 fn index_bytes(path: &std::path::Path, len: usize) -> Option<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).ok()?;
@@ -870,6 +857,7 @@ fn index_bytes(path: &std::path::Path, len: usize) -> Option<Vec<u8>> {
 
 /// (index, family, style) of each face in a font file: outline fonts and colour fonts (Apple Color
 /// Emoji draws most emoji from `sbix`, Noto Color Emoji has no outlines at all).
+#[cfg(not(target_arch = "wasm32"))]
 fn faces_in(bytes: &[u8]) -> Vec<(u32, String, String)> {
     let count = match FileRef::new(bytes) {
         Ok(FileRef::Collection(c)) => c.len(),

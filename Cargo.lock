@@ -3253,7 +3253,6 @@ dependencies = [
  "log",
  "proptest",
  "rustls",
- "rustls-pki-types",
  "serde_json",
  "tungstenite",
  "wasm-bindgen",
@@ -3267,7 +3266,6 @@ dependencies = [
 name = "lizard-color"
 version = "0.9.0"
 dependencies = [
- "kurbo",
  "serde",
  "serde_json",
 ]
@@ -3350,7 +3348,6 @@ name = "lizard-geom"
 version = "0.9.0"
 dependencies = [
  "kurbo",
- "serde",
 ]
 
 [[package]]
@@ -3465,7 +3462,6 @@ version = "0.9.0"
 dependencies = [
  "lizard-color",
  "lizard-doc",
- "log",
  "naga",
  "pollster 0.4.0",
  "wgpu",
@@ -3480,7 +3476,6 @@ dependencies = [
  "lizard-color",
  "lizard-doc",
  "lizard-geom",
- "lizard-pathops",
  "lizard-render",
  "lizard-text",
  "thiserror 2.0.21",
@@ -3494,7 +3489,6 @@ dependencies = [
  "harfrust 0.13.3",
  "lizard-doc",
  "lizard-geom",
- "log",
  "png 0.18.1",
  "skrifa 0.47.0",
  "unicode-bidi",

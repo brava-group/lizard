@@ -966,18 +966,6 @@ pub fn render_node_screen_pixels(doc: &Document, id: NodeId, scale: f64) -> Opti
     render_export_area_screen(doc, &[id], lizard_render::export_bounds(doc, id)?, scale)
 }
 
-/// Render an animated layer at presentation time, using the GPU for supported content.
-pub fn render_node_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) -> Option<lizard_render::Pixmap> {
-    #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(area) = lizard_render::export_bounds(doc, id)
-        && let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu_at(doc, &[id], area, scale, time)
-    {
-        return Some(pixmap);
-    }
-    lizard_render::render_node_at(doc, id, scale, time)
-}
-
 /// Screen-ready animated layer at presentation time.
 pub fn render_node_screen_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]

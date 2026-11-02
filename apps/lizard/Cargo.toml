@@ -31,8 +31,7 @@ lizard-collab-net = { workspace = true }
 lizard-format = { workspace = true }
 lizard-text = { workspace = true }
 # Shared decision of who draws the window frame on Linux (compositor vs. app), replacing the
-# bespoke Wayland xdg-decoration probe. See `[workspace.dependencies]`: pinned to the unmerged
-# craft-libs#217 branch and must be repointed to a merged `rev` before this PR is mergeable.
+# bespoke Wayland xdg-decoration probe.
 craft-window = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }

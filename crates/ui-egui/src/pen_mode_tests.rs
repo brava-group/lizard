@@ -80,15 +80,13 @@ fn the_mode_switcher_ends_the_pen_path_too() {
         press(&mut esc, Key::Escape, Modifiers::NONE);
         layers(&esc)
     };
-    for (label, tab) in [("Inspect", RightTab::Inspect)] {
-        let mut u = drawing();
-        let at = mode_button(&mut u, label);
-        click(&mut u, at);
-        assert_eq!(u.app.ui.right_tab, tab, "{label}");
-        assert!(u.app.session.tool.pen.is_none(), "{label}: the path is finished");
-        assert_eq!(u.app.session.tool.tool, ToolId::Move, "{label}: back to Move");
-        assert_eq!(layers(&u), finished, "{label}: the path is kept as Escape keeps it");
-    }
+    let mut u = drawing();
+    let at = mode_button(&mut u, "Inspect");
+    click(&mut u, at);
+    assert_eq!(u.app.ui.right_tab, RightTab::Inspect);
+    assert!(u.app.session.tool.pen.is_none(), "Inspect: the path is finished");
+    assert_eq!(u.app.session.tool.tool, ToolId::Move, "Inspect: back to Move");
+    assert_eq!(layers(&u), finished, "Inspect: the path is kept as Escape keeps it");
     // Design is already the mode while the pen draws: pressing it again leaves nothing, so the
     // path goes on.
     let mut u = drawing();

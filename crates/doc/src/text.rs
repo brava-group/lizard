@@ -142,11 +142,6 @@ impl TextCase {
             }
         }
     }
-
-    /// Whether the char at a position preceded by `prev` starts a word (for title case).
-    pub fn starts_word(prev: Option<char>) -> bool {
-        prev.is_none_or(|c| !is_word_char(c))
-    }
 }
 
 /// Letters, digits and apostrophes continue a word (so "don't" stays "Don't").

@@ -304,13 +304,13 @@ fn cmd_dragging_a_standalone_component_creates_its_second_variant() {
 }
 
 #[test]
-fn duplicating_a_variant_adds_a_variant_to_its_set() {
+fn duplicating_a_variant_creates_an_instance_outside_its_set() {
     let mut s = Session::new();
     let (set, _, hover) = button_set(&mut s);
     let copy = crate::params::id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [hover]}))["ids"][0]).unwrap();
-    assert!(matches!(node(&s, copy).kind, NodeKind::Component { .. }));
-    assert_eq!(node(&s, copy).parent, Some(set));
-    assert_eq!(kids(&s, set).len(), 3);
+    assert!(matches!(&node(&s, copy).kind, NodeKind::Instance { component, .. } if *component == hover));
+    assert_eq!(node(&s, copy).parent, node(&s, set).parent);
+    assert_eq!(kids(&s, set).len(), 2);
     // A whole set duplicates as a new set of variants.
     let set2 = crate::params::id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [set]}))["ids"][0]).unwrap();
     assert!(matches!(node(&s, set2).kind, NodeKind::ComponentSet { .. }));

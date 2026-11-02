@@ -30,7 +30,6 @@ fn rect(s: &mut Session, x: f64, y: f64, parent: Option<NodeId>) -> NodeId {
 }
 
 /// The layers of the scene, by name.
-#[allow(dead_code)]
 struct Scene {
     /// Top-level frame (0,0 400×300) holding: group `g` of `a` (20,20) and `b` (80,20); `c`
     /// (20,120); nested frame `n` (200,20 150×150) with `d` (220,40); boolean `u` of two

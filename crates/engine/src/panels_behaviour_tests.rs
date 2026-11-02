@@ -60,7 +60,6 @@ fn click(s: &mut Session, x: f64, y: f64) {
 /// Frame `f` (0,0 400×300) holding `a`, `b`, `c`, `d` bottom to top; the group `g` of `e` on the
 /// page; the auto layout frame `al` (500,0) of `x` and `y`; an instance `inst` (0,400) of a
 /// component; a section `sec` (900,0).
-#[allow(dead_code)]
 struct Scene {
     f: NodeId,
     a: NodeId,
@@ -68,7 +67,6 @@ struct Scene {
     c: NodeId,
     d: NodeId,
     g: NodeId,
-    e: NodeId,
     al: NodeId,
     x: NodeId,
     y: NodeId,
@@ -94,7 +92,7 @@ fn scene(s: &mut Session) -> Scene {
     let inst = id(&ex(s, "instance.create", json!({"component": comp, "x": 0, "y": 400})));
     let sec = id(&ex(s, "node.create", json!({"type": "section", "x": 900, "y": 0, "width": 300, "height": 300})));
     ex(s, "select.none", json!({}));
-    Scene { f, a, b, c, d, g, e, al, x, y, inst, sec }
+    Scene { f, a, b, c, d, g, al, x, y, inst, sec }
 }
 
 #[test]

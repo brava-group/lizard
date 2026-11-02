@@ -107,12 +107,6 @@ impl<'a> FloatingPanel<'a> {
         ctx.data_mut(|data| data.insert_temp(Self::workspace_bounds_id(), Some(bounds)));
     }
 
-    pub fn visible_panel_contains(ctx: &Context, position: Pos2) -> Option<bool> {
-        ctx.data(|data| data.get_temp::<Vec<Rect>>(Self::visible_panels_id()))
-            .filter(|rects| !rects.is_empty())
-            .map(|rects| rects.iter().any(|rect| rect.contains(position)))
-    }
-
     /// Toggle a property panel from its trigger without coupling the trigger to
     /// egui's selection-menu popup state.
     pub fn toggle(ctx: &Context, id: Id, clicked: bool) -> bool {

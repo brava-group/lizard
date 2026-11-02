@@ -16,13 +16,17 @@ pub use lizard_collab::message::PluginEntry;
 use lizard_collab::message::{PluginReply, PluginReq};
 pub use lizard_plugin::bundle;
 pub use lizard_plugin::bundle::newer as newer_version;
-use lizard_plugin::bundle::{Asset, Bundle, MAX_ASSETS, check_asset_name, compare_versions, newer, sha256_hex};
+#[cfg(not(target_arch = "wasm32"))]
+use lizard_plugin::bundle::{Asset, MAX_ASSETS, check_asset_name};
+use lizard_plugin::bundle::{Bundle, compare_versions, newer, sha256_hex};
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;
 use crate::live::{NetReply, NetRequest};
 use crate::params::{get, string};
-use crate::plugins::{InstalledPlugin, MANIFEST_FILE, Manifest, installed, register};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::plugins::MANIFEST_FILE;
+use crate::plugins::{InstalledPlugin, Manifest, installed, register};
 use crate::{EngineError, Result, Session, bad, spec};
 
 /// Why there's no plugin directory here (the browser build, sessions without the network).
@@ -30,7 +34,9 @@ pub const NO_DIRECTORY: &str = "plugin directories on a server need the desktop 
 /// Largest bundle downloaded or published (a server's own cap is at most this).
 pub const MAX_BUNDLE: usize = 32 << 20;
 /// The module's file name in an installed plugin's folder, and the folder its assets go in.
+#[cfg(not(target_arch = "wasm32"))]
 const MODULE: &str = "module.wasm";
+#[cfg(not(target_arch = "wasm32"))]
 const ASSETS: &str = "assets";
 
 /// A directory as it was listed last.

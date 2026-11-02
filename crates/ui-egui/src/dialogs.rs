@@ -444,8 +444,8 @@ pub(crate) fn batch_rename_params(b: &BatchRenameUi) -> serde_json::Value {
 
 fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
     let screen = ctx.content_rect();
-    let width = (screen.width() - 32.0).min(820.0).max(320.0);
-    let height = (screen.height() - 32.0).min(560.0).max(320.0);
+    let width = (screen.width() - 32.0).clamp(320.0, 820.0);
+    let height = (screen.height() - 32.0).clamp(320.0, 560.0);
     let sidebar_width = if width < 600.0 { 150.0 } else { 188.0 };
     let id = Id::new("settings_modal");
     let section_id = id.with("section");

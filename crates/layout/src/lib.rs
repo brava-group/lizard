@@ -150,17 +150,6 @@ pub fn layout_page(doc: &mut Document, page: NodeId, m: &dyn Measure) {
     }
 }
 
-/// Lay out the ancestors of `id` that are auto layout frames (innermost first), and `id` itself.
-pub fn layout_up(doc: &mut Document, id: NodeId, m: &dyn Measure) {
-    let mut chain = vec![id];
-    chain.extend(doc.ancestors(id));
-    for c in chain {
-        if doc.node(c).is_some_and(|n| n.layout.is_some() && n.kind.is_frame_like()) {
-            layout_frame(doc, c, m);
-        }
-    }
-}
-
 /// The children an auto layout frame places: visible and not ignoring auto layout.
 pub fn flow_children(doc: &Document, frame: NodeId) -> Vec<NodeId> {
     let Some(f) = doc.node(frame) else { return Vec::new() };

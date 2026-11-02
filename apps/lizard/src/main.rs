@@ -320,11 +320,10 @@ fn main() -> eframe::Result {
     }
     // Who draws the window frame is decided once, before the viewport is built, by the shared
     // craft-window crate (the rest of the Craft suite uses it too). On macOS the system frame is
-    // kept with Lizard's inset traffic lights; on Windows it is the system frame; on Linux the
+    // kept with Lizard's inset traffic lights; on Windows Lizard draws its custom title bar; on Linux the
     // decision follows the desktop: a Wayland compositor with server-side decorations (KDE, Sway,
     // Hyprland, COSMIC) or an X11 window manager keeps the native frame, while GNOME's Mutter —
-    // which draws no server-side frame — leaves it to the app's own custom title bar. This replaces
-    // the old bespoke xdg-decoration probe that always drew Lizard's custom title bar on KDE.
+    // which draws no server-side frame — leaves it to the app's own custom title bar.
     fig.ui.title_bar = desktop_title_bar();
     viewport = window_chrome(viewport, fig.ui.title_bar);
     if let Some(icon) = icon {
@@ -401,7 +400,7 @@ fn title_bar_for(frame: craft_window::Frame) -> lizard_ui_egui::TitleBar {
     use lizard_ui_egui::TitleBar;
     match frame {
         craft_window::Frame::Desktop if cfg!(target_os = "macos") => TitleBar::Inset,
-        // Windows kept Lizard's own title bar before this change; keep it.
+        // Windows uses Lizard's custom title bar.
         craft_window::Frame::Desktop if cfg!(target_os = "windows") => TitleBar::Custom,
         craft_window::Frame::Desktop => TitleBar::Native,
         // The app draws the frame (GNOME's Wayland session, or a `LIZARD_TITLEBAR=app` override).

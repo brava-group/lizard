@@ -80,14 +80,6 @@ impl NetLink {
         cfg
     }
 
-    /// The running host of session `session`, if it is hosted here.
-    pub fn host_handle(&self, session: SessionId) -> Option<&Host> {
-        match self.sessions.get(session) {
-            Some(Active::Host(h)) => Some(h),
-            _ => None,
-        }
-    }
-
     /// Session `session` started (one that had the id ends).
     fn started(&mut self, session: SessionId, active: Active, inbox: Inbox) {
         if let Some(old) = self.sessions.insert(session, active, inbox) {

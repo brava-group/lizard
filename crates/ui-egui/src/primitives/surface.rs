@@ -4,8 +4,6 @@ use crate::theme::Tokens;
 use egui::{Frame, InnerResponse, Painter, Rect, Ui};
 use workbench_ui::SurfaceTheme;
 
-pub use workbench_ui::SurfaceVariant;
-
 pub struct Surface(workbench_ui::Surface);
 
 impl Surface {

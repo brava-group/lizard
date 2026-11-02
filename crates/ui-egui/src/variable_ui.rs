@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use lizard_doc::{Collection, Document, ModeId, NodeId, PropDef, PublishedLibrary, Variable, VariableId, VariableType, VariableValue, Variables};
+use lizard_doc::{Collection, Document, ModeId, NodeId, PropDef, PublishedLibrary, Variable, VariableId, VariableType};
 use lizard_engine::library;
 use serde_json::json;
 
@@ -150,28 +150,6 @@ pub fn mode_rows<'a>(doc: &'a Document, libs: &'a [Arc<PublishedLibrary>]) -> Ve
     out
 }
 
-/// A picker row: the variable's swatch (colours) or icon, its name and (other types) its value in
-/// the default modes; true when clicked.
-pub fn variable_row(ui: &mut Ui, vars: &Variables, v: &Variable, width: f32) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(vec2(width, 26.0), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(r, CornerRadius::same(5), t.menu_hover);
-    }
-    let value = vars.resolve(&v.id, &std::collections::BTreeMap::new());
-    let lead = Rect::from_center_size(pos2(r.min.x + 12.0, r.center().y), vec2(14.0, 14.0));
-    match &value {
-        Some(VariableValue::Color(c)) => widgets::paint_swatch(ui.painter(), lead, &lizard_color::Paint::solid(*c)),
-        _ => icons::paint(ui.painter(), lead.shrink(1.0), Icon::Variable, t.menu_text),
-    }
-    let name_r = Rect::from_min_max(pos2(r.min.x + 26.0, r.min.y), pos2(r.max.x - 6.0, r.max.y));
-    if let Some(val) = value.filter(|v| !matches!(v, VariableValue::Color(_))) {
-        ui.painter().text(pos2(r.max.x - 6.0, r.center().y), Align2::RIGHT_CENTER, val.display(), regular(11.0), t.menu_dim);
-    }
-    ui.painter().with_clip_rect(name_r).text(name_r.left_center(), Align2::LEFT_CENTER, &v.name, regular(11.0), t.menu_text);
-    resp.clicked()
-}
-
 /// A group's caption: the collection's name, after its library's name for library variables.
 pub fn group_caption(ui: &mut Ui, lib: Option<&PublishedLibrary>, coll: &Collection) {
     let t = Tokens::get(ui.ctx());
@@ -217,12 +195,6 @@ pub fn open_alias(ui: &Ui, variable: &str, mode: &str, kind: VariableType, at: P
     let target = Target::Alias { variable: variable.to_string(), mode: mode.to_string() };
     let opened_frame = ui.ctx().cumulative_frame_nr();
     ui.data_mut(|d| d.insert_temp(picker_id(), Picker { target, kind: Some(kind), at, opened_frame, library_filter: 0 }));
-}
-
-/// Open the picker for `field` of `ids` under the pointer (from a section header button).
-pub fn open_at_pointer(ui: &Ui, ids: &[NodeId], field: &str, kind: VariableType) {
-    let at = ui.input(|i| i.pointer.interact_pos()).unwrap_or_default();
-    open(ui, ids, field, kind, at);
 }
 
 /// Act on a bound field's event: change the variable, or detach it.

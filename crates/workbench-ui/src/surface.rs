@@ -10,7 +10,7 @@ pub struct SurfaceTheme {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceVariant {
+enum SurfaceVariant {
     Menu,
     Palette,
 }
