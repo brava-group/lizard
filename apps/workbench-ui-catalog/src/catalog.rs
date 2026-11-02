@@ -329,6 +329,7 @@ pub struct Fixture {
     text: Option<u64>,
     vector: Option<u64>,
     component: Option<u64>,
+    layer_tree: Vec<u64>,
     mask_group: Option<u64>,
     effects: Option<u64>,
     effect_nodes: [Option<u64>; 6],
@@ -454,6 +455,16 @@ impl Fixture {
         if let Some(id) = add(session, "shape.rectangle", json!({"x": 1760, "y": 200, "width": 96, "height": 96, "name": "image"})) {
             let _ = session.execute("fill.set", &json!({"ids": [id], "paint": {"type": "image", "image": "catalog-sample"}}));
         }
+        let layer_tree = add(session, "frame.create", json!({"x": 1760, "y": 1850, "width": 160, "height": 80, "name": "Tree button"}))
+            .and_then(|frame| {
+                let text = add(session, "text.create", json!({"parent": frame, "x": 12, "y": 12, "text": "Button label", "name": "Button label"}))?;
+                let group = add(session, "object.group", json!({"ids": [text], "name": "Content"}))?;
+                let variant = add(session, "component.create", json!({"ids": [frame]}))?;
+                add(session, "component.addVariant", json!({"id": variant}))?;
+                let set = session.doc().ok()?.node(NodeId(variant))?.parent?;
+                Some(vec![set.0, variant, group])
+            })
+            .unwrap_or_default();
         let _ =
             session.execute("comment.add", &json!({"x": 110, "y": 100, "text": "Please review this spacing.", "author": "Matheus", "anchor": true}));
         let _ = session.execute("version.autosave", &json!({}));
@@ -468,6 +479,7 @@ impl Fixture {
             text,
             vector,
             component,
+            layer_tree,
             mask_group,
             effects,
             effect_nodes,
@@ -479,6 +491,7 @@ impl Fixture {
 
     fn ids(&self, page: Page) -> Vec<u64> {
         match page {
+            Page::Layers => self.layer_tree.first().copied().into_iter().collect(),
             Page::ColorControl => self.color.into_iter().collect(),
             Page::RectangleProperties
             | Page::StylePicker
@@ -546,6 +559,9 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
         Page::Layers => {
             if let Some(id) = fixture.mask_group {
                 fig.ui.expanded.insert(NodeId(id));
+            }
+            for id in &fixture.layer_tree {
+                fig.ui.expanded.insert(NodeId(*id));
             }
         }
         Page::Assets => fig.ui.left_tab = LeftTab::Assets,

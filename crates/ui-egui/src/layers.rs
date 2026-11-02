@@ -74,6 +74,87 @@ pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
     }
 }
 
+/// Children at any depth of a main component or variant keep the component colour.
+fn has_component_ancestor(doc: &Document, ancestors: &[NodeId]) -> bool {
+    ancestors.iter().any(|id| doc.node(*id).is_some_and(|node| matches!(node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. })))
+}
+
+fn layer_icon_color(t: &Tokens, component_member: bool, slot: bool, selected: bool, shown: bool, secondary: Color32) -> Color32 {
+    if component_member || slot {
+        ColorRole::IconComponent.value(t.dark).gamma_multiply(if shown { 1.0 } else { 0.5 })
+    } else if selected {
+        t.text
+    } else if shown {
+        secondary
+    } else {
+        t.text_tertiary
+    }
+}
+
+fn layer_name_color(t: &Tokens, component_member: bool, shown: bool) -> Color32 {
+    if component_member {
+        ColorRole::TextComponent.value(t.dark).gamma_multiply(if shown { 1.0 } else { 0.5 })
+    } else if shown {
+        t.text
+    } else {
+        t.text_tertiary
+    }
+}
+
+#[cfg(test)]
+mod component_color_tests {
+    use lizard_doc::NodeId;
+    use lizard_engine::Session;
+    use serde_json::json;
+
+    use super::{has_component_ancestor, layer_icon_color, layer_name_color};
+    use crate::theme::{ColorRole, Tokens};
+
+    fn id(value: serde_json::Value) -> NodeId {
+        NodeId(value["id"].as_u64().unwrap())
+    }
+
+    #[test]
+    fn nested_component_and_variant_children_keep_component_ancestry() {
+        let mut session = Session::new();
+        let frame = id(session.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 80})).unwrap());
+        let child = id(session.execute("shape.rectangle", &json!({"parent": frame, "x": 8, "y": 8, "width": 20, "height": 20})).unwrap());
+        let group = id(session.execute("object.group", &json!({"ids": [child]})).unwrap());
+        let ordinary = id(session.execute("frame.create", &json!({"x": 200, "y": 0, "width": 100, "height": 80})).unwrap());
+        let ordinary_child = id(session.execute("shape.rectangle", &json!({"parent": ordinary, "x": 8, "y": 8, "width": 20, "height": 20})).unwrap());
+
+        let doc = session.doc().unwrap();
+        assert!(!has_component_ancestor(doc, &doc.ancestors(group)));
+        assert!(!has_component_ancestor(doc, &doc.ancestors(child)));
+        assert!(!has_component_ancestor(doc, &doc.ancestors(ordinary_child)));
+
+        let component = id(session.execute("component.create", &json!({"ids": [frame]})).unwrap());
+        let doc = session.doc().unwrap();
+        assert_eq!(doc.node(group).unwrap().parent, Some(component));
+        assert!(has_component_ancestor(doc, &doc.ancestors(group)));
+        assert!(has_component_ancestor(doc, &doc.ancestors(child)));
+        assert!(!has_component_ancestor(doc, &doc.ancestors(ordinary_child)));
+
+        session.execute("component.addVariant", &json!({"id": component})).unwrap();
+        let doc = session.doc().unwrap();
+        assert!(has_component_ancestor(doc, &doc.ancestors(component)), "the variant belongs to its set");
+        assert!(has_component_ancestor(doc, &doc.ancestors(child)), "grandchildren belong to the variant");
+    }
+
+    #[test]
+    fn selected_component_descendants_use_pink_in_both_themes() {
+        for tokens in [Tokens::dark(), Tokens::light()] {
+            let icon = ColorRole::IconComponent.value(tokens.dark);
+            let text = ColorRole::TextComponent.value(tokens.dark);
+            for selected in [false, true] {
+                assert_eq!(layer_icon_color(&tokens, true, false, selected, true, tokens.icon_secondary), icon);
+                assert_eq!(layer_name_color(&tokens, true, true), text);
+            }
+            assert_eq!(layer_icon_color(&tokens, false, false, true, true, tokens.icon_secondary), tokens.text);
+        }
+    }
+}
+
 /// The slim icon rail at the far left: main menu, File, Agent, Assets, Variables.
 pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
@@ -903,12 +984,14 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
                 locked: n.locked,
             };
             a11y::tree_item(&resp, if n.name.is_empty() { tr(n.kind.label()) } else { &n.name }, &info);
-            let selected_ancestor = doc.ancestors(row.id).into_iter().find(|a| sel.contains(a));
+            let ancestors = doc.ancestors(row.id);
+            let selected_ancestor = ancestors.iter().copied().find(|a| sel.contains(a));
             let in_selected = !selected && selected_ancestor.is_some();
             let in_selected_component = selected_ancestor.is_some_and(|id| {
                 doc.node(id).is_some_and(|node| matches!(&node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. }))
             });
             let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. });
+            let component_member = is_comp || has_component_ancestor(&doc, &ancestors);
             let rr = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
             let hover_rect = Rect::from_min_max(pos2(r.min.x + 8.0, r.min.y + 4.0), pos2(r.max.x - 8.0, r.max.y - 4.0));
             a11y::ring_around(ui, rr, &resp);
@@ -962,16 +1045,7 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
             }
             let icon = node_icon(&doc, row.id);
             let shown = n.visible && !row.dimmed;
-            let icon_col = if is_comp || icon == Icon::Slot {
-                let purple = if t.dark && in_selected { Color32::from_rgb(0x7F, 0x69, 0x9B) } else { ColorRole::IconComponent.value(t.dark) };
-                purple.gamma_multiply(if shown { 1.0 } else { 0.5 })
-            } else if selected {
-                t.text
-            } else if shown {
-                layer_secondary
-            } else {
-                t.text_tertiary
-            };
+            let icon_col = layer_icon_color(&t, component_member, icon == Icon::Slot, selected, shown, layer_secondary);
             let icon_center = pos2(x0 + 20.0, r.center().y);
             let absolute = n.child_layout.absolute && n.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.layout.is_some());
             if absolute {
@@ -1020,13 +1094,7 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
                     rename_done = Some((row.id, new));
                 }
             } else {
-                let col = if is_comp {
-                    ColorRole::TextComponent.value(t.dark).gamma_multiply(if shown { 1.0 } else { 0.5 })
-                } else if shown {
-                    t.text
-                } else {
-                    t.text_tertiary
-                };
+                let col = layer_name_color(&t, component_member, shown);
                 let font = regular(11.0);
                 let name = if n.name.is_empty() { tr(n.kind.label()).to_string() } else { n.name.clone() };
                 // Room left of the lock and eye buttons.
