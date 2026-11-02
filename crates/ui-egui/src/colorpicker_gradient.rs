@@ -1,8 +1,8 @@
 //! Compact gradient editor, laid out on the 240 × 329 reference dialog.
 
-use crate::primitives::TooltipResponseExt as _;
-use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, label_tab, paint_kind_button, panel, vector_button};
+use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, paint_header, panel, vector_button};
 use super::*;
+use crate::primitives::TooltipResponseExt as _;
 
 const BASE_HEIGHT: f32 = 329.0;
 const MAX_STOPS: usize = 32;
@@ -245,20 +245,19 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
             let mut changed = false;
             let mut done = false;
             let mut selection: usize = ui.data(|d| d.get_temp(stop_id())).unwrap_or(0).min(visible_stops.saturating_sub(1));
-            label_tab(ui, at(origin, 8.0, 8.0, 91.609, 24.0), "cp_custom_tab", "Custom", true);
-            if label_tab(ui, at(origin, 103.609, 8.0, 74.914, 24.0), "cp_libraries_tab", "Libraries", false) {
+            let controls = paint_header(ui, origin, 0, Some(1), false);
+            if controls.tab == Some(1) {
                 library_tab::activate(ctx);
             }
-            if vector_button(ui, at(origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, "New style").clicked() {
+            if controls.create {
                 library_tab::create(ctx, paint.clone());
                 library_tab::activate(ctx);
             }
-            if vector_button(ui, at(origin, 208.0, 8.0, 24.0, 24.0), "cp_close", 9, false, "Close").clicked() {
+            if controls.close {
                 close_now = true;
             }
 
-            for index in 0..6 {
-                let Some(response) = paint_kind_button(ui, origin, index, index == 1) else { continue };
+            for (index, response) in controls.kinds {
                 if index == 5 && response.clicked() {
                     if super::shader_tab::supports(target) {
                         super::shader_tab::activate(ctx);

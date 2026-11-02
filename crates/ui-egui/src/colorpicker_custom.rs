@@ -1,7 +1,7 @@
 //! The compact UI3 solid-colour picker. Coordinates follow the 240 × 513 reference dialog.
 
-use crate::primitives::TooltipResponseExt as _;
 use super::*;
+use crate::primitives::TooltipResponseExt as _;
 
 pub(super) const WIDTH: f32 = 240.0;
 const HEIGHT: f32 = 513.0;
@@ -79,7 +79,7 @@ pub(super) fn label_tab(ui: &mut Ui, rect: Rect, id: &'static str, text: &str, a
     response.clicked()
 }
 
-pub(super) fn header_tabs(ui: &mut Ui, origin: Pos2, id: &'static str, selected: usize) -> Option<usize> {
+fn header_tabs(ui: &mut Ui, origin: Pos2, id: &'static str, selected: usize) -> Option<usize> {
     use crate::primitives::{ControlWidth, Tab, Tabs};
 
     let tabs = [Tab::new(tr("Custom")), Tab::new(tr("Libraries"))];
@@ -91,6 +91,32 @@ pub(super) fn header_tabs(ui: &mut Ui, origin: Pos2, id: &'static str, selected:
         .hover_fill(FIELD)
         .text_colors(Color32::WHITE, MUTED)
         .show(&mut tabs_ui)
+}
+
+/// The same two-row header serves every paint editor and the Libraries view. The editor for a
+/// paint kind owns only the response to a kind change; the tabs and hit areas remain identical.
+pub(super) struct PaintHeader {
+    pub(super) tab: Option<usize>,
+    pub(super) create: bool,
+    pub(super) close: bool,
+    pub(super) kinds: Vec<(usize, egui::Response)>,
+}
+
+pub(super) fn paint_header(ui: &mut Ui, origin: Pos2, selected_tab: usize, selected_kind: Option<usize>, stop: bool) -> PaintHeader {
+    let tab = header_tabs(ui, origin, if stop { "cp_stop_tabs" } else { "cp_tabs" }, selected_tab);
+    let create = !stop && vector_button(ui, at(origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, tr("New style")).clicked();
+    let close =
+        vector_button(ui, at(origin, 208.0, 8.0, 24.0, 24.0), if stop { "cp_stop_close" } else { "cp_close" }, 9, false, tr("Close")).clicked();
+    ui.painter().hline(origin.x..=origin.x + WIDTH, origin.y + 39.5, Stroke::new(1.0, BORDER));
+    let mut kinds = Vec::new();
+    if let Some(selected) = selected_kind {
+        for index in 0..6 {
+            if let Some(response) = paint_kind_button(ui, origin, index, index == selected) {
+                kinds.push((index, response));
+            }
+        }
+    }
+    PaintHeader { tab, create, close, kinds }
 }
 
 pub(super) fn field(ui: &Ui, rect: Rect, corners: CornerRadius, border: bool) {
@@ -268,31 +294,21 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
                     | PickerTarget::PluginField { .. }
             );
 
-            // 40 pt header: tabs, new style, close.
-            if header_tabs(ui, header_origin, if stop.is_some() { "cp_stop_tabs" } else { "cp_tabs" }, 0) == Some(1) {
+            let controls = paint_header(ui, header_origin, 0, stop.is_none().then_some(0), stop.is_some());
+            if controls.tab == Some(1) {
                 library_tab::activate(ctx);
             }
-            if stop.is_none() && vector_button(ui, at(header_origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, tr("New style")).clicked() {
+            if controls.create {
                 library_tab::create(ctx, paint.clone());
                 library_tab::activate(ctx);
             }
-            if vector_button(
-                ui,
-                at(header_origin, 208.0, 8.0, 24.0, 24.0),
-                if stop.is_some() { "cp_stop_close" } else { "cp_close" },
-                9,
-                false,
-                tr("Close"),
-            )
-            .clicked()
-            {
+            if controls.close {
                 close_now = true;
             }
 
             // 40 pt paint-type and colour-tool row, with the reference's 24 pt cells.
             if stop.is_none() {
-                for i in 0..6 {
-                    let Some(response) = paint_kind_button(ui, origin, i, i == 0) else { continue };
+                for (i, response) in controls.kinds {
                     if i == 5 && response.clicked() && paint_types_allowed {
                         if super::shader_tab::supports(target) {
                             super::shader_tab::activate(ctx);

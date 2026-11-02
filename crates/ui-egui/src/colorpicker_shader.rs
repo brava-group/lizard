@@ -1,8 +1,8 @@
 //! Shader browser and parameter editor inside the existing colour picker flow.
 
-use crate::primitives::TooltipResponseExt as _;
-use super::custom::{self, BORDER, FIELD, MUTED, WIDTH, at, label_tab, paint_kind_button, panel, vector_button};
+use super::custom::{self, BORDER, FIELD, MUTED, WIDTH, at, paint_header, panel, vector_button};
 use super::*;
+use crate::primitives::TooltipResponseExt as _;
 use lizard_color::ShaderFill;
 use lizard_doc::{ShaderDefinition, ShaderFloatParameter, ShaderParameterControl};
 
@@ -280,19 +280,18 @@ pub(super) fn show_editor(app: &mut LizardApp, ctx: &egui::Context, target: &Pic
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let origin = header.min;
             ui.allocate_exact_size(vec2(WIDTH, height - 40.0), Sense::hover());
-            label_tab(ui, at(origin, 8.0, 8.0, 91.609, 24.0), "cp_custom_tab", "Custom", true);
-            if label_tab(ui, at(origin, 103.609, 8.0, 74.914, 24.0), "cp_libraries_tab", "Libraries", false) {
+            let controls = paint_header(ui, origin, 0, Some(5), false);
+            if controls.tab == Some(1) {
                 library_tab::activate(ctx);
             }
-            if vector_button(ui, at(origin, 180.0, 8.0, 28.0, 24.0), "cp_new_style", 8, false, "New style").clicked() {
+            if controls.create {
                 library_tab::create(ctx, paint.clone());
                 library_tab::activate(ctx);
             }
-            if vector_button(ui, at(origin, 208.0, 8.0, 24.0, 24.0), "cp_close", 9, false, "Close").clicked() {
+            if controls.close {
                 close_now = true;
             }
-            for index in 0..6 {
-                let Some(response) = paint_kind_button(ui, origin, index, index == 5) else { continue };
+            for (index, response) in controls.kinds {
                 if response.clicked() {
                     if index == 5 {
                         browser_now = true;
@@ -583,11 +582,11 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
                 state.checked_draft = state.draft.clone();
             }
             let diagnostic = state.diagnostic.as_deref().unwrap_or("WGSL valid");
-            ui.label(egui::RichText::new(diagnostic.lines().take(2).collect::<Vec<_>>().join(" ")).size(crate::theme::ui_font_size(10.0)).color(if state.diagnostic.is_some() {
-                Color32::from_rgb(255, 130, 120)
-            } else {
-                Color32::from_rgb(125, 205, 150)
-            }));
+            ui.label(
+                egui::RichText::new(diagnostic.lines().take(2).collect::<Vec<_>>().join(" "))
+                    .size(crate::theme::ui_font_size(10.0))
+                    .color(if state.diagnostic.is_some() { Color32::from_rgb(255, 130, 120) } else { Color32::from_rgb(125, 205, 150) }),
+            );
             ui.horizontal(|ui| {
                 if crate::primitives::Button::new("Restore saved").show(ui).clicked() {
                     state.draft = definition.source.clone();

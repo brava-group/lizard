@@ -226,10 +226,11 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
             ui.allocate_exact_size(vec2(240.0, 387.0), Sense::hover());
             ui.painter().rect_filled(panel, CornerRadius::same(8), custom::panel(ui.ctx()));
             let o = panel.min;
-            if custom::header_tabs(ui, o, "cpl_tabs", 1) == Some(0) {
+            let controls = custom::paint_header(ui, o, 1, None, false);
+            if controls.tab == Some(0) {
                 custom = true;
             }
-            if icon_button(ui, custom::at(o, 180.0, 8.0, 28.0, 24.0), "cpl_add", 39, vec2(12.0, 12.0), tr("Create style or variable")) {
+            if controls.create {
                 s.create = Some(CreateKind::Style);
                 s.color = paint.preview_color().to_css_hex();
                 s.opacity = format!("{:.0}", paint.preview_color().a * 100.0);
@@ -237,10 +238,9 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
                 s.name.clear();
                 s.description.clear();
             }
-            if icon_button(ui, custom::at(o, 208.0, 8.0, 24.0, 24.0), "cpl_close", 40, vec2(10.0, 10.0), tr("Close")) {
+            if controls.close {
                 close = true;
             }
-            ui.painter().hline(o.x..=o.x + 240.0, o.y + 39.5, Stroke::new(1.0, custom::BORDER));
             let search = custom::at(o, 12.0, 48.0, 216.0, 24.0);
             custom::field(ui, search, CornerRadius::same(5), false);
             icons::paint_panel_reference(
