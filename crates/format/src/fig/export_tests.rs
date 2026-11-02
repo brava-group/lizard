@@ -795,6 +795,69 @@ fn round_trip(doc: &Document, what: &str) -> (Document, Vec<String>) {
 }
 
 #[test]
+fn slot_definition_settings_and_instance_content_round_trip() {
+    let mut doc = Document::new("Slots");
+    let page = doc.pages[0];
+    let preferred_component =
+        doc.create(page, NodeKind::Component { description: String::new(), props: BTreeMap::new() }, "Icon", 200.0, 0.0, 24.0, 24.0).unwrap();
+    let settings = SlotSettings {
+        description: "Place an icon here".into(),
+        min_layers: Some(1),
+        max_layers: Some(3),
+        only_preferred: false,
+        show_empty: true,
+        fill_counter_axis: true,
+    };
+    let main = doc
+        .create(
+            page,
+            NodeKind::Component {
+                description: String::new(),
+                props: BTreeMap::from([("Content".into(), PropDef::Slot { preferred: vec![preferred_component], settings: settings.clone() })]),
+            },
+            "Button",
+            0.0,
+            0.0,
+            100.0,
+            60.0,
+        )
+        .unwrap();
+    let main_slot = doc.create(main, NodeKind::Frame, "Content", 0.0, 0.0, 100.0, 60.0).unwrap();
+    doc.node_mut(main_slot).unwrap().prop_refs.insert("slot".into(), "Content".into());
+    doc.create(main_slot, NodeKind::Rectangle, "Default", 0.0, 0.0, 20.0, 20.0).unwrap();
+    for (i, empty) in [false, true].into_iter().enumerate() {
+        let instance =
+            doc.create(page, NodeKind::Instance { component: main, props: BTreeMap::new() }, "Button", 120.0 * i as f64, 80.0, 100.0, 60.0).unwrap();
+        let slot = doc.create(instance, NodeKind::Frame, "Content", 0.0, 0.0, 100.0, 60.0).unwrap();
+        let layer = doc.node_mut(slot).unwrap();
+        layer.source = Some(main_slot);
+        layer.overrides.insert("slot".into());
+        if !empty {
+            doc.create(slot, NodeKind::Rectangle, "Custom", 4.0, 5.0, 30.0, 30.0).unwrap();
+        }
+    }
+    let (bytes, warnings) = export(&doc, None).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let (back, warnings) = import(&bytes, "Slots").unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let restored_main =
+        back.ids().filter_map(|id| back.node(id)).find(|n| n.name == "Button" && matches!(n.kind, NodeKind::Component { .. })).unwrap();
+    let NodeKind::Component { props, .. } = &restored_main.kind else { panic!() };
+    let Some(PropDef::Slot { preferred, settings: restored_settings }) = props.get("Content") else { panic!() };
+    assert_eq!(restored_settings, &settings);
+    assert_eq!(preferred.len(), 1);
+    assert_eq!(back.node(preferred[0]).map(|n| n.name.as_str()), Some("Icon"));
+    let restored_slot = back.node(restored_main.children[0]).unwrap();
+    assert_eq!(restored_slot.prop_refs.get("slot"), Some(&"Content".to_string()));
+    let instances = back.ids().filter_map(|id| back.node(id)).filter(|n| matches!(n.kind, NodeKind::Instance { .. })).collect::<Vec<_>>();
+    assert_eq!(instances.len(), 2);
+    let slots = instances.iter().map(|instance| back.node(instance.children[0]).unwrap()).collect::<Vec<_>>();
+    assert!(slots.iter().all(|slot| slot.overrides.contains("slot")), "{slots:#?}");
+    assert_eq!(slots.iter().map(|slot| slot.children.len()).collect::<Vec<_>>(), vec![1, 0]);
+    assert_eq!(back.node(slots[0].children[0]).unwrap().name, "Custom");
+}
+
+#[test]
 fn generated_documents_round_trip() {
     for seed in 0..60 {
         let doc = generate(seed);

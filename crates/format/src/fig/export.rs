@@ -94,7 +94,7 @@ enum SourceDirectionality AUTO=0 LTR=1 RTL=2
 enum DocumentColorProfile LEGACY=0 SRGB=1 DISPLAY_P3=2
 enum EmojiImageSet APPLE=0 NOTO=1
 enum MaskType ALPHA=0 OUTLINE=1 LUMINANCE=2
-enum VariableResolvedDataType BOOLEAN=0 FLOAT=1 STRING=2 COLOR=4 SYMBOL_ID=6 TEXT_DATA=8
+enum VariableResolvedDataType BOOLEAN=0 FLOAT=1 STRING=2 COLOR=4 SYMBOL_ID=6 TEXT_DATA=8 SLOT_CONTENT_ID=12
 enum VectorMirror NONE=0 ANGLE=1 ANGLE_AND_LENGTH=2
 enum BooleanOperation UNION=0 INTERSECT=1 SUBTRACT=2 XOR=3
 enum LayoutGridType MIN=0 CENTER=1 STRETCH=2 MAX=3
@@ -102,9 +102,9 @@ enum LayoutGridPattern STRIPES=0 GRID=1
 enum Axis X=0 Y=1
 enum ImageType PNG=0 JPEG=1 SVG=2 PDF=3
 enum ExportConstraintType CONTENT_SCALE=0 CONTENT_WIDTH=1 CONTENT_HEIGHT=2
-enum ComponentPropType BOOL=0 TEXT=1 INSTANCE_SWAP=3 VARIANT=4
-enum VariableField MISSING=0 CORNER_RADIUS=1 PARAGRAPH_SPACING=2 PARAGRAPH_INDENT=3 STROKE_WEIGHT=4 STACK_SPACING=5 STACK_PADDING_LEFT=6 STACK_PADDING_TOP=7 STACK_PADDING_RIGHT=8 STACK_PADDING_BOTTOM=9 VISIBLE=10 TEXT_DATA=11 WIDTH=12 HEIGHT=13 RECTANGLE_TOP_LEFT_CORNER_RADIUS=14 RECTANGLE_TOP_RIGHT_CORNER_RADIUS=15 RECTANGLE_BOTTOM_LEFT_CORNER_RADIUS=16 RECTANGLE_BOTTOM_RIGHT_CORNER_RADIUS=17 BORDER_TOP_WEIGHT=18 BORDER_BOTTOM_WEIGHT=19 BORDER_LEFT_WEIGHT=20 BORDER_RIGHT_WEIGHT=21 STACK_COUNTER_SPACING=23 MIN_WIDTH=24 MAX_WIDTH=25 MIN_HEIGHT=26 MAX_HEIGHT=27 FONT_FAMILY=28 FONT_STYLE=29 OPACITY=31 FONT_SIZE=32 LETTER_SPACING=34 LINE_HEIGHT=36 OVERRIDDEN_SYMBOL_ID=37
-enum VariableDataType BOOLEAN=0 FLOAT=1 STRING=2 ALIAS=3 COLOR=4 PROP_REF=13
+enum ComponentPropType BOOL=0 TEXT=1 INSTANCE_SWAP=3 VARIANT=4 SLOT=7
+enum VariableField MISSING=0 CORNER_RADIUS=1 PARAGRAPH_SPACING=2 PARAGRAPH_INDENT=3 STROKE_WEIGHT=4 STACK_SPACING=5 STACK_PADDING_LEFT=6 STACK_PADDING_TOP=7 STACK_PADDING_RIGHT=8 STACK_PADDING_BOTTOM=9 VISIBLE=10 TEXT_DATA=11 WIDTH=12 HEIGHT=13 RECTANGLE_TOP_LEFT_CORNER_RADIUS=14 RECTANGLE_TOP_RIGHT_CORNER_RADIUS=15 RECTANGLE_BOTTOM_LEFT_CORNER_RADIUS=16 RECTANGLE_BOTTOM_RIGHT_CORNER_RADIUS=17 BORDER_TOP_WEIGHT=18 BORDER_BOTTOM_WEIGHT=19 BORDER_LEFT_WEIGHT=20 BORDER_RIGHT_WEIGHT=21 STACK_COUNTER_SPACING=23 MIN_WIDTH=24 MAX_WIDTH=25 MIN_HEIGHT=26 MAX_HEIGHT=27 FONT_FAMILY=28 FONT_STYLE=29 OPACITY=31 FONT_SIZE=32 LETTER_SPACING=34 LINE_HEIGHT=36 OVERRIDDEN_SYMBOL_ID=37 SLOT_CONTENT_ID=40
+enum VariableDataType BOOLEAN=0 FLOAT=1 STRING=2 ALIAS=3 COLOR=4 PROP_REF=13 SLOT_CONTENT_ID=18
 enum VariableScope ALL_SCOPES=0 TEXT_CONTENT=1 CORNER_RADIUS=2 WIDTH_HEIGHT=3 GAP=4 ALL_FILLS=5 FRAME_FILL=6 SHAPE_FILL=7 TEXT_FILL=8 STROKE=9 STROKE_FLOAT=10 EFFECT_FLOAT=11 EFFECT_COLOR=12 OPACITY=13 FONT_STYLE=14 FONT_FAMILY=15 FONT_SIZE=16 LINE_HEIGHT=17 LETTER_SPACING=18 PARAGRAPH_SPACING=19 PARAGRAPH_INDENT=20
 enum StyleType NONE=0 FILL=1 STROKE=2 TEXT=3 EFFECT=4 EXPORT=5 GRID=6
 enum InteractionType ON_CLICK=0 DRAG=9 ON_HOVER=4 ON_PRESS=7 MOUSE_IN=2 MOUSE_OUT=3 MOUSE_DOWN=5 MOUSE_UP=6 AFTER_TIMEOUT=1 ON_KEY_DOWN=10
@@ -148,10 +148,12 @@ message ExportSettings string suffix=1, ImageType imageType=2, ExportConstraint 
 message GUIDPath GUID[] guids=1
 message SymbolData GUID symbolID=1, NodeChange[] symbolOverrides=2, float uniformScaleFactor=3
 message ComponentPropValue bool boolValue=1, TextData textValue=2, GUID guidValue=3
-message ComponentPropDef GUID id=1, string name=2, ComponentPropValue initialValue=3, ComponentPropType type=6
-message ComponentPropAssignment GUID defID=1, ComponentPropValue value=2
+message SlotPropConfig bool stretchChildOnInsert=1, bool displayByDefault=2, uint minChildren=3, uint maxChildren=4, bool allowPreferredValuesOnly=5, GUID[] lizardPreferredComponents=6
+message ComponentPropDef GUID id=1, string name=2, ComponentPropValue initialValue=3, ComponentPropType type=6, SlotPropConfig slotPropConfig=11, string description=12
+message ComponentPropAssignment GUID defID=1, ComponentPropValue value=2, VariableData varValue=3
+message SlotContentId GUID guid=1
 message PropRefValue GUID defId=1
-message VariableAnyValue bool boolValue=1, string textValue=2, float floatValue=3, VariableID alias=4, Color colorValue=5, PropRefValue propRefValue=13
+message VariableAnyValue bool boolValue=1, string textValue=2, float floatValue=3, VariableID alias=4, Color colorValue=5, PropRefValue propRefValue=13, SlotContentId slotContentIdValue=18
 message VariableData VariableAnyValue value=1, VariableDataType dataType=2, VariableResolvedDataType resolvedDataType=3
 message VariableDataMapEntry uint nodeField=1, VariableData variableData=2, VariableField variableField=3
 message VariableDataMap VariableDataMapEntry[] entries=1
@@ -168,7 +170,7 @@ message PrototypeStartingPoint string name=1, string position=3
 message OverlayBackgroundAppearance OverlayBackgroundType backgroundType=1, Color backgroundColor=2
 message GUIDPositionMapEntry GUID id=1, string position=2
 message GUIDPositionMap GUIDPositionMapEntry[] entries=1
-message NodeChange GUID guid=1, NodePhase phase=2, ParentIndex parentIndex=3, NodeType type=4, string name=5, bool visible=6, bool locked=7, float opacity=8, BlendMode blendMode=9, Vector size=11, Matrix transform=12, bool mask=16, MaskType maskType=317, float backgroundOpacity=19, bool backgroundEnabled=15, bool internalOnly=142, string description=318, StyleType styleType=163, string sortPosition=320, StyleId styleIdForFill=332, StyleId styleIdForStrokeFill=333, StyleId styleIdForText=334, StyleId styleIdForEffect=335, StyleId styleIdForGrid=336, VariableDataMap variableConsumptionMap=307, VariableModeBySetMap variableModeBySetMap=316, VariableSetMode[] variableSetModes=312, VariableSetID variableSetID=313, VariableResolvedDataType variableResolvedType=314, VariableDataValues variableDataValues=315, VariableScope[] variableScopes=353, DocumentColorProfile documentColorProfile=349, Paint[] fillPaints=38, Paint[] strokePaints=39, float strokeWeight=26, StrokeAlign strokeAlign=29, StrokeJoin strokeJoin=31, StrokeCap strokeCap=30, float[] dashPattern=13, float miterLimit=25, bool borderStrokeWeightsIndependent=299, float borderTopWeight=295, float borderRightWeight=298, float borderBottomWeight=296, float borderLeftWeight=297, Effect[] effects=43, float cornerRadius=20, float cornerSmoothing=160, bool rectangleCornerRadiiIndependent=149, float rectangleTopLeftCornerRadius=145, float rectangleTopRightCornerRadius=146, float rectangleBottomRightCornerRadius=148, float rectangleBottomLeftCornerRadius=147, ConstraintType horizontalConstraint=28, ConstraintType verticalConstraint=37, bool frameMaskDisabled=115, bool resizeToFit=117, bool isStateGroup=225, bool sectionContentsHidden=283, Color backgroundColor=50, StackMode stackMode=105, float stackSpacing=107, float stackCounterSpacing=324, StackWrap stackWrap=323, StackCounterAlignContent stackCounterAlignContent=343, float stackHorizontalPadding=209, float stackVerticalPadding=210, float stackPaddingRight=233, float stackPaddingBottom=234, StackJustify stackPrimaryAlignItems=230, StackAlign stackCounterAlignItems=231, StackSize stackPrimarySizing=229, StackSize stackCounterSizing=221, bool bordersTakeSpace=294, bool stackReverseZIndex=271, float gridColumnGap=438, float gridRowGap=437, GUIDPositionMap gridColumns=436, GUIDPositionMap gridRows=435, float stackChildPrimaryGrow=232, StackCounterAlign stackChildAlignSelf=236, StackPositioning stackPositioning=269, OptionalVector minSize=325, OptionalVector maxSize=326, GUID gridColumnAnchor=440, GUID gridRowAnchor=439, uint gridColumnSpan=442, uint gridRowSpan=441, LayoutGrid[] layoutGrids=47, ExportSettings[] exportSettings=45, TextData textData=42, FontName fontName=41, float fontSize=21, Number lineHeight=40, Number letterSpacing=165, TextCase textCase=34, TextDecoration textDecoration=35, TextAlignHorizontal textAlignHorizontal=32, TextAlignVertical textAlignVertical=33, TextAutoResize textAutoResize=46, TextTruncation textTruncation=280, int maxLines=351, float paragraphSpacing=23, float paragraphIndent=22, Hyperlink hyperlink=223, bool autoRename=14, bool fontVariantCommonLigatures=127, bool fontVariantContextualLigatures=128, string fontVersion=202, uint textUserLayoutVersion=203, uint textExplicitLayoutVersion=396, uint textBidiVersion=279, float textTracking=27, bool textDecorationSkipInk=412, EmojiImageSet emojiImageSet=391, uint styleID=49, Path[] fillGeometry=51, Path[] strokeGeometry=52, VectorData vectorData=48, VectorMirror handleMirroring=44, uint count=10, float starInnerScale=24, ArcData arcData=195, BooleanOperation booleanOperation=36, string symbolDescription=144, VariableWidthPoint[] variableWidthPoints=447, PluginData[] pluginData=204, SymbolData symbolData=113, NodeChange[] derivedSymbolData=125, GUID overriddenSymbolID=143, ComponentPropDef[] componentPropDefs=266, ComponentPropAssignment[] componentPropAssignments=268, VariableDataMap parameterConsumptionMap=445, GUIDPath guidPath=111, PrototypeInteraction[] prototypeInteractions=226, PrototypeStartingPoint prototypeStartingPoint=249, ScrollDirection scrollDirection=159, ScrollBehavior scrollBehavior=186, OverlayPositionType overlayPositionType=198, OverlayBackgroundInteraction overlayBackgroundInteraction=200, OverlayBackgroundAppearance overlayBackgroundAppearance=201
+message NodeChange GUID guid=1, NodePhase phase=2, ParentIndex parentIndex=3, NodeType type=4, string name=5, bool visible=6, bool locked=7, float opacity=8, BlendMode blendMode=9, Vector size=11, Matrix transform=12, bool mask=16, MaskType maskType=317, float backgroundOpacity=19, bool backgroundEnabled=15, bool internalOnly=142, string description=318, StyleType styleType=163, string sortPosition=320, StyleId styleIdForFill=332, StyleId styleIdForStrokeFill=333, StyleId styleIdForText=334, StyleId styleIdForEffect=335, StyleId styleIdForGrid=336, VariableDataMap variableConsumptionMap=307, VariableModeBySetMap variableModeBySetMap=316, VariableSetMode[] variableSetModes=312, VariableSetID variableSetID=313, VariableResolvedDataType variableResolvedType=314, VariableDataValues variableDataValues=315, VariableScope[] variableScopes=353, DocumentColorProfile documentColorProfile=349, Paint[] fillPaints=38, Paint[] strokePaints=39, float strokeWeight=26, StrokeAlign strokeAlign=29, StrokeJoin strokeJoin=31, StrokeCap strokeCap=30, float[] dashPattern=13, float miterLimit=25, bool borderStrokeWeightsIndependent=299, float borderTopWeight=295, float borderRightWeight=298, float borderBottomWeight=296, float borderLeftWeight=297, Effect[] effects=43, float cornerRadius=20, float cornerSmoothing=160, bool rectangleCornerRadiiIndependent=149, float rectangleTopLeftCornerRadius=145, float rectangleTopRightCornerRadius=146, float rectangleBottomRightCornerRadius=148, float rectangleBottomLeftCornerRadius=147, ConstraintType horizontalConstraint=28, ConstraintType verticalConstraint=37, bool frameMaskDisabled=115, bool resizeToFit=117, bool isStateGroup=225, bool sectionContentsHidden=283, Color backgroundColor=50, StackMode stackMode=105, float stackSpacing=107, float stackCounterSpacing=324, StackWrap stackWrap=323, StackCounterAlignContent stackCounterAlignContent=343, float stackHorizontalPadding=209, float stackVerticalPadding=210, float stackPaddingRight=233, float stackPaddingBottom=234, StackJustify stackPrimaryAlignItems=230, StackAlign stackCounterAlignItems=231, StackSize stackPrimarySizing=229, StackSize stackCounterSizing=221, bool bordersTakeSpace=294, bool stackReverseZIndex=271, float gridColumnGap=438, float gridRowGap=437, GUIDPositionMap gridColumns=436, GUIDPositionMap gridRows=435, float stackChildPrimaryGrow=232, StackCounterAlign stackChildAlignSelf=236, StackPositioning stackPositioning=269, OptionalVector minSize=325, OptionalVector maxSize=326, GUID gridColumnAnchor=440, GUID gridRowAnchor=439, uint gridColumnSpan=442, uint gridRowSpan=441, LayoutGrid[] layoutGrids=47, ExportSettings[] exportSettings=45, TextData textData=42, FontName fontName=41, float fontSize=21, Number lineHeight=40, Number letterSpacing=165, TextCase textCase=34, TextDecoration textDecoration=35, TextAlignHorizontal textAlignHorizontal=32, TextAlignVertical textAlignVertical=33, TextAutoResize textAutoResize=46, TextTruncation textTruncation=280, int maxLines=351, float paragraphSpacing=23, float paragraphIndent=22, Hyperlink hyperlink=223, bool autoRename=14, bool fontVariantCommonLigatures=127, bool fontVariantContextualLigatures=128, string fontVersion=202, uint textUserLayoutVersion=203, uint textExplicitLayoutVersion=396, uint textBidiVersion=279, float textTracking=27, bool textDecorationSkipInk=412, EmojiImageSet emojiImageSet=391, uint styleID=49, Path[] fillGeometry=51, Path[] strokeGeometry=52, VectorData vectorData=48, VectorMirror handleMirroring=44, uint count=10, float starInnerScale=24, ArcData arcData=195, BooleanOperation booleanOperation=36, string symbolDescription=144, VariableWidthPoint[] variableWidthPoints=447, PluginData[] pluginData=204, SymbolData symbolData=113, NodeChange[] derivedSymbolData=125, GUID overriddenSymbolID=143, ComponentPropDef[] componentPropDefs=266, ComponentPropAssignment[] componentPropAssignments=268, bool isSlotContent=463, VariableDataMap parameterConsumptionMap=445, GUIDPath guidPath=111, PrototypeInteraction[] prototypeInteractions=226, PrototypeStartingPoint prototypeStartingPoint=249, ScrollDirection scrollDirection=159, ScrollBehavior scrollBehavior=186, OverlayPositionType overlayPositionType=198, OverlayBackgroundInteraction overlayBackgroundInteraction=200, OverlayBackgroundAppearance overlayBackgroundAppearance=201
 struct Blob byte[] bytes
 message Message MessageType type=1, uint sessionID=2, NodeChange[] nodeChanges=4, Blob[] blobs=6
 ";
@@ -398,6 +400,8 @@ struct Exporter<'d> {
     doc: &'d Document,
     /// Layer → local id of its GUID (session [`LAYERS`]).
     ids: BTreeMap<NodeId, u32>,
+    /// An instance slot frame → hidden content wrapper local id.
+    slot_contents: BTreeMap<NodeId, u32>,
     nodes: Vec<Kv<'static>>,
     /// Blob bytes → index (identical blobs are written once).
     blobs: BTreeMap<Vec<u8>, u32>,
@@ -441,6 +445,7 @@ impl<'d> Exporter<'d> {
         Self {
             doc,
             ids: BTreeMap::new(),
+            slot_contents: BTreeMap::new(),
             nodes: Vec::new(),
             blobs: BTreeMap::new(),
             blob_bytes: 0,
@@ -552,8 +557,43 @@ impl<'d> Exporter<'d> {
                 }
             }
         }
+        // Instance descendants normally come from the main. An edited slot is different: its
+        // children belong to this instance and need their own hidden content tree.
+        for id in doc.ids() {
+            let Some(slot) = doc.node(id) else { continue };
+            if !slot.overrides.contains("slot") || slot.source.is_none() {
+                continue;
+            }
+            let main = self.main_layer(id);
+            if doc.node(main).and_then(|n| n.prop_refs.get("slot")).is_none() {
+                continue;
+            }
+            let mut content = slot.children.iter().rev().copied().collect::<Vec<_>>();
+            while let Some(child) = content.pop() {
+                let Some(layer) = doc.node(child) else { continue };
+                if self.ids.contains_key(&child) {
+                    continue;
+                }
+                if self.ids.len() >= MAX_NODES {
+                    self.warn("slot content exceeded the .fig layer limit and was left out");
+                    break;
+                }
+                let local = u32::try_from(self.ids.len() + 1).unwrap_or(u32::MAX);
+                self.ids.insert(child, local);
+                let mirrored = matches!(&layer.kind, NodeKind::Instance { component, .. } if doc.node(*component).is_some_and(|c| matches!(c.kind, NodeKind::Component { .. })));
+                if !mirrored {
+                    content.extend(layer.children.iter().rev());
+                }
+            }
+            self.slot_contents.insert(id, 0);
+        }
+        let mut wrapper = u32::try_from(self.ids.len() + 1).unwrap_or(u32::MAX);
+        for local in self.slot_contents.values_mut() {
+            *local = wrapper;
+            wrapper = wrapper.saturating_add(1);
+        }
         // The page that holds styles and variables takes the next id, then their nodes.
-        let mut next = u32::try_from(self.ids.len() + 1).unwrap_or(u32::MAX);
+        let mut next = wrapper;
         let mut node = || {
             next = next.saturating_add(1);
             next
@@ -583,10 +623,10 @@ impl<'d> Exporter<'d> {
     /// collections and the variables, each a node of its own.
     fn assets(&mut self, pages: usize) {
         let doc = self.doc;
-        if self.style_ids.is_empty() && self.set_ids.is_empty() {
+        if self.style_ids.is_empty() && self.set_ids.is_empty() && self.slot_contents.is_empty() {
             return;
         }
-        let page = u32::try_from(self.ids.len() + 1).unwrap_or(u32::MAX);
+        let page = u32::try_from(self.ids.len() + self.slot_contents.len() + 1).unwrap_or(u32::MAX);
         let mut f: Fields = vec![
             ("guid", guid(LAYERS, page)),
             ("phase", e("CREATED")),
@@ -598,6 +638,25 @@ impl<'d> Exporter<'d> {
         f.push(("internalOnly", b(true)));
         self.nodes.push(o(f));
         let mut index = 0usize;
+        for (slot, local) in self.slot_contents.clone() {
+            index += 1;
+            let Some(frame) = doc.node(slot) else { continue };
+            let mut fields: Fields = vec![
+                ("guid", guid(LAYERS, local)),
+                ("phase", e("CREATED")),
+                ("parentIndex", o(vec![("guid", guid(LAYERS, page)), ("position", s(&position(index)))])),
+                ("type", e("FRAME")),
+                ("name", s("Slot content")),
+                ("isSlotContent", b(true)),
+                ("size", xy(frame.width, frame.height)),
+                ("transform", matrix(Affine::IDENTITY)),
+            ];
+            fields.extend(root_fields());
+            self.nodes.push(o(fields));
+            for (child_index, child) in frame.children.iter().enumerate() {
+                self.emit(*child, guid(LAYERS, local), child_index, Some(frame), 0);
+            }
+        }
         let mut head = |local: u32, ty: &'static str, name: &str| -> Fields {
             index += 1;
             vec![
@@ -956,9 +1015,6 @@ impl<'d> Exporter<'d> {
                 let defs: Vec<Kv> = props.iter().filter_map(|(name, d)| self.prop_def(name, d)).collect();
                 if !defs.is_empty() {
                     f.push(("componentPropDefs", arr(defs)));
-                }
-                if props.values().any(|d| matches!(d, PropDef::Slot { .. })) {
-                    self.warn("slot properties were left out");
                 }
                 if !description.is_empty() {
                     f.push(("symbolDescription", s(description)));
@@ -1818,6 +1874,7 @@ impl<'d> Exporter<'d> {
     fn prop_def(&mut self, name: &str, d: &PropDef) -> Option<Kv<'static>> {
         let ty = prop_type(d)?;
         let id = *self.defs.get(&(name.to_string(), ty))?;
+        let mut fields = vec![("id", guid(AUX, id)), ("name", s(name)), ("type", e(ty))];
         let value = match d {
             PropDef::Boolean { default } => o(vec![("boolValue", b(*default))]),
             PropDef::Text { default } => o(vec![("textValue", o(vec![("characters", s(default))]))]),
@@ -1827,9 +1884,31 @@ impl<'d> Exporter<'d> {
                 }
                 o(vec![("guidValue", self.guid_of(*default)?)])
             }
-            PropDef::Variant { .. } | PropDef::Slot { .. } => return None,
+            PropDef::Slot { preferred, settings } => {
+                let mut config = vec![
+                    ("stretchChildOnInsert", b(settings.fill_counter_axis)),
+                    ("displayByDefault", b(settings.show_empty)),
+                    ("allowPreferredValuesOnly", b(settings.only_preferred)),
+                ];
+                let preferred_guids: Vec<_> = preferred.iter().filter_map(|id| self.guid_of(*id)).collect();
+                if preferred_guids.len() != preferred.len() {
+                    self.warn("slot preferred components outside the file were left out");
+                }
+                if !preferred_guids.is_empty() {
+                    config.push(("lizardPreferredComponents", arr(preferred_guids)));
+                }
+                config.extend(settings.min_layers.map(|min| ("minChildren", u(min))));
+                config.extend(settings.max_layers.map(|max| ("maxChildren", u(max))));
+                fields.push(("slotPropConfig", o(config)));
+                if !settings.description.is_empty() {
+                    fields.push(("description", s(&settings.description)));
+                }
+                return Some(o(fields));
+            }
+            PropDef::Variant { .. } => return None,
         };
-        Some(o(vec![("id", guid(AUX, id)), ("name", s(name)), ("initialValue", value), ("type", e(ty))]))
+        fields.push(("initialValue", value));
+        Some(o(fields))
     }
 
     /// Which property controls a layer's `field`.
@@ -1838,8 +1917,9 @@ impl<'d> Exporter<'d> {
             "visible" => ("VISIBLE", "BOOL", "BOOLEAN"),
             "characters" => ("TEXT_DATA", "TEXT", "TEXT_DATA"),
             "mainComponent" => ("OVERRIDDEN_SYMBOL_ID", "INSTANCE_SWAP", "SYMBOL_ID"),
+            "slot" => ("SLOT_CONTENT_ID", "SLOT", "SLOT_CONTENT_ID"),
             _ => {
-                self.warn("slot layers were written as plain layers");
+                self.warn("component property bindings with unsupported fields were left out");
                 return None;
             }
         };
@@ -1887,7 +1967,9 @@ impl<'d> Exporter<'d> {
             if seen > MAX_NODES {
                 break;
             }
-            stack.extend(d.children.iter().rev().map(|c| (*c, id)));
+            if !self.slot_contents.contains_key(&id) {
+                stack.extend(d.children.iter().rev().map(|c| (*c, id)));
+            }
             let path = self.layer_path(d, n.id, main, 0);
             let guids: Option<Vec<Kv>> = path.and_then(|p| p.iter().map(|x| self.guid_of(*x)).collect());
             let (Some(guids), Some(src)) = (guids, d.source.and_then(|src| doc.node(src))) else {
@@ -1904,7 +1986,13 @@ impl<'d> Exporter<'d> {
                 _ => None,
             };
             let sized = matches!(d.kind, NodeKind::Instance { .. }) || d.overrides.contains("size");
-            rows.push(Row { path: o(vec![("guids", arr(guids))]), changed: changed(mine, &theirs), theirs, sized, swap });
+            let mut differences = changed(mine, &theirs);
+            if self.slot_contents.contains_key(&d.id) {
+                // The main's Slot binding still controls this frame in the instance. Its local
+                // copy has no prop_refs, but that absence must not clear the inherited map.
+                differences.retain(|(key, _)| *key != "parameterConsumptionMap");
+            }
+            rows.push(Row { path: o(vec![("guids", arr(guids))]), changed: differences, theirs, sized, swap });
         }
         // An instance scaled as a whole (the Scale tool) is `factor` times its main in every length:
         // sizes, places and stroke weights, its own and its layers'. A resized one keeps its weights.
@@ -1970,10 +2058,30 @@ impl<'d> Exporter<'d> {
                 assignments.push(o(vec![("defID", guid(AUX, id)), ("value", value)]));
             }
         }
+        for (slot, local) in &self.slot_contents {
+            if !doc.is_ancestor(n.id, *slot) {
+                continue;
+            }
+            let main_slot = self.main_layer(*slot);
+            let Some(name) = doc.node(main_slot).and_then(|layer| layer.prop_refs.get("slot")) else { continue };
+            let Some(&id) = self.defs.get(&(name.clone(), "SLOT")) else { continue };
+            assignments.push(o(vec![
+                ("defID", guid(AUX, id)),
+                ("value", o(Vec::new())),
+                (
+                    "varValue",
+                    o(vec![
+                        ("value", o(vec![("slotContentIdValue", o(vec![("guid", guid(LAYERS, *local))]))])),
+                        ("dataType", e("SLOT_CONTENT_ID")),
+                        ("resolvedDataType", e("SLOT_CONTENT_ID")),
+                    ]),
+                ),
+            ]));
+        }
         if !assignments.is_empty() {
             f.push(("componentPropAssignments", arr(assignments)));
         }
-        if n.children.iter().filter_map(|c| doc.node(*c)).any(|c| c.source.is_none()) {
+        if n.children.iter().filter_map(|c| doc.node(*c)).any(|c| c.source.is_none() && !self.slot_contents.contains_key(&c.id)) {
             self.warn("instance layers that don't come from their main component were left out");
         }
     }
@@ -2410,7 +2518,8 @@ fn prop_type(d: &PropDef) -> Option<&'static str> {
         PropDef::Boolean { .. } => Some("BOOL"),
         PropDef::Text { .. } => Some("TEXT"),
         PropDef::InstanceSwap { .. } => Some("INSTANCE_SWAP"),
-        PropDef::Variant { .. } | PropDef::Slot { .. } => None,
+        PropDef::Slot { .. } => Some("SLOT"),
+        PropDef::Variant { .. } => None,
     }
 }
 

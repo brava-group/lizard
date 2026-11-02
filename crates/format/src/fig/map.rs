@@ -1880,9 +1880,36 @@ impl<'a> Mapper<'a> {
                 },
                 "VARIANT" => json!({"type": "VARIANT"}),
                 "SLOT" => {
-                    self.warn_non_default_slot_config(d);
                     self.warn_dropped_slot_preferred_values(d);
-                    json!({"type": "SLOT"})
+                    let config = d.get("slotPropConfig");
+                    let mut settings = Obj::new();
+                    for (wire, rest) in [
+                        ("stretchChildOnInsert", "stretchChildOnInsert"),
+                        ("displayByDefault", "displayEmptyByDefault"),
+                        ("allowPreferredValuesOnly", "allowPreferredValuesOnly"),
+                    ] {
+                        if let Some(value) = config.and_then(|c| c.get(wire)).and_then(Kv::bool) {
+                            settings.insert(rest.into(), json!(value));
+                        }
+                    }
+                    for field in ["minChildren", "maxChildren"] {
+                        if let Some(value) = config.and_then(|c| c.get(field)).and_then(Kv::f64) {
+                            settings.insert(field.into(), json!(value));
+                        }
+                    }
+                    let mut slot = Obj::new();
+                    slot.insert("type".into(), json!("SLOT"));
+                    if !settings.is_empty() {
+                        slot.insert("slotSettings".into(), Value::Object(settings));
+                    }
+                    if let Some(description) = d.get("description").and_then(Kv::str) {
+                        slot.insert("description".into(), json!(description));
+                    }
+                    if let Some(preferred) = config.and_then(|c| c.get("lizardPreferredComponents")) {
+                        let ids: Vec<_> = preferred.list().iter().filter_map(guid).collect();
+                        slot.insert("lizardPreferredComponentIds".into(), json!(ids));
+                    }
+                    Value::Object(slot)
                 }
                 _ => {
                     self.warn(format!("{} component properties are not supported and were skipped", ty.to_ascii_lowercase()));
@@ -1906,25 +1933,6 @@ impl<'a> Mapper<'a> {
         let entries = def.get("preferredValues").and_then(|v| v.get("instanceSwapValues")).map(Kv::list).unwrap_or_default();
         if !entries.is_empty() {
             self.warn("preferred slot component keys cannot be resolved to file nodes and were skipped");
-        }
-    }
-
-    fn warn_non_default_slot_config(&mut self, def: &Kv<'a>) {
-        let Some(config) = def.get("slotPropConfig") else { return };
-        let non_default = [
-            ("stretchChildOnInsert", Some(false)),
-            ("displayByDefault", Some(false)),
-            ("minChildren", None),
-            ("maxChildren", None),
-            ("allowPreferredValuesOnly", Some(false)),
-        ]
-        .into_iter()
-        .any(|(field, bool_default)| {
-            let Some(value) = config.get(field) else { return false };
-            if let Some(default) = bool_default { value.bool() != Some(default) } else { value.f64() != Some(0.0) }
-        });
-        if non_default {
-            self.warn("non-default slot settings are not represented and were skipped");
         }
     }
 

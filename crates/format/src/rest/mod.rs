@@ -49,7 +49,8 @@ use std::sync::Arc;
 use lizard_doc::geom::{Affine, BezPath, Rect, Shape};
 use lizard_doc::proto::Flow;
 use lizard_doc::{
-    BoolOp, Document, ImageData, LayoutMode, Node, NodeId, NodeKind, PropDef, SlotSettings, Style, StyleKind, VariableType, VectorNetwork, WindingRule,
+    BoolOp, Document, ImageData, LayoutMode, Node, NodeId, NodeKind, PropDef, SlotSettings, Style, StyleKind, VariableType, VectorNetwork,
+    WindingRule,
 };
 use serde_json::Value;
 
@@ -387,6 +388,8 @@ pub(crate) struct Ctx<'a> {
     slots: Vec<(NodeId, &'a Value)>,
     /// Slot property defaults (the main's slot content id): (component or set, property) → value.
     slot_defaults: BTreeMap<(NodeId, String), &'a Value>,
+    /// Preferred component ids from Lizard's .fig extension, resolved after all nodes exist.
+    slot_preferred: Vec<(NodeId, String, Vec<String>)>,
     /// Instance-swap property defaults: (component or set, property, REST id of the default).
     swap_defaults: Vec<(NodeId, String, String)>,
     /// Property definitions of component sets, shared by their variants.
@@ -423,6 +426,7 @@ impl<'a> Ctx<'a> {
             instances: Vec::new(),
             slots: Vec::new(),
             slot_defaults: BTreeMap::new(),
+            slot_preferred: Vec::new(),
             swap_defaults: Vec::new(),
             set_defs: BTreeMap::new(),
             flows: Vec::new(),
@@ -785,16 +789,28 @@ impl<'a> Ctx<'a> {
                         self.slot_defaults.insert((owner, name.clone()), d);
                     }
                     self.slot_notes(d);
+                    let preferred: Vec<String> =
+                        list(d, "lizardPreferredComponentIds").iter().take(256).filter_map(Value::as_str).map(str::to_owned).collect();
+                    if !preferred.is_empty() {
+                        self.slot_preferred.push((owner, name.clone(), preferred));
+                    }
                     let slot = d.get("slotSettings");
-                    let limit = |key: &str| slot.and_then(|settings| num(settings, key)).filter(|value| value.is_finite() && *value >= 0.0 && value.fract() == 0.0 && *value <= u32::MAX as f64).map(|value| value as u32);
-                    PropDef::Slot { preferred: Vec::new(), settings: SlotSettings {
-                        description: text(d, "description").unwrap_or("").chars().take(1000).collect(),
-                        min_layers: limit("minChildren"),
-                        max_layers: limit("maxChildren"),
-                        only_preferred: slot.and_then(|settings| flag(settings, "allowPreferredValuesOnly")).unwrap_or(false),
-                        show_empty: slot.and_then(|settings| flag(settings, "displayEmptyByDefault")).unwrap_or(false),
-                        fill_counter_axis: slot.and_then(|settings| flag(settings, "stretchChildOnInsert")).unwrap_or(false),
-                    } }
+                    let limit = |key: &str| {
+                        slot.and_then(|settings| num(settings, key))
+                            .filter(|value| value.is_finite() && *value >= 0.0 && value.fract() == 0.0 && *value <= u32::MAX as f64)
+                            .map(|value| value as u32)
+                    };
+                    PropDef::Slot {
+                        preferred: Vec::new(),
+                        settings: SlotSettings {
+                            description: text(d, "description").unwrap_or("").chars().take(1000).collect(),
+                            min_layers: limit("minChildren"),
+                            max_layers: limit("maxChildren"),
+                            only_preferred: slot.and_then(|settings| flag(settings, "allowPreferredValuesOnly")).unwrap_or(false),
+                            show_empty: slot.and_then(|settings| flag(settings, "displayEmptyByDefault")).unwrap_or(false),
+                            fill_counter_axis: slot.and_then(|settings| flag(settings, "stretchChildOnInsert")).unwrap_or(false),
+                        },
+                    }
                 }
                 _ => {
                     self.warn("unknown component property types were skipped");
@@ -956,6 +972,7 @@ impl<'a> Ctx<'a> {
     /// Cross-references that need every layer imported first.
     fn finish(&mut self) {
         self.resolve_swap_defaults();
+        self.resolve_slot_preferred();
         // Variants share their set's property definitions.
         for (set, defs) in std::mem::take(&mut self.set_defs) {
             for v in self.doc.node(set).map(|s| s.children.clone()).unwrap_or_default() {
@@ -1013,6 +1030,28 @@ impl<'a> Ctx<'a> {
                 defs.insert(name, def);
             } else if let Some(NodeKind::Component { props, .. }) = self.doc.node_mut(owner).map(|n| &mut n.kind) {
                 props.insert(name, def);
+            }
+        }
+    }
+
+    fn resolve_slot_preferred(&mut self) {
+        for (owner, name, ids) in std::mem::take(&mut self.slot_preferred) {
+            let preferred: Vec<NodeId> = ids
+                .iter()
+                .filter_map(|id| self.ids.get(id).copied())
+                .filter(|id| self.doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. })))
+                .collect();
+            if preferred.len() != ids.len() {
+                self.warn("slot preferred components not found in the file were left out");
+            }
+            if let Some(defs) = self.set_defs.get_mut(&owner) {
+                if let Some(PropDef::Slot { preferred: values, .. }) = defs.get_mut(&name) {
+                    *values = preferred;
+                }
+            } else if let Some(NodeKind::Component { props, .. }) = self.doc.node_mut(owner).map(|n| &mut n.kind)
+                && let Some(PropDef::Slot { preferred: values, .. }) = props.get_mut(&name)
+            {
+                *values = preferred;
             }
         }
     }

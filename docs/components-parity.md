@@ -22,7 +22,7 @@ accounts).
 | Default variant: the top-left one (new instances, Assets thumbnail, generated code) | done | |
 | Variant property order (names rewritten), duplicate combinations reported | done | drag a property in the Properties section to reorder it, one undo step (#679), or `component.editProperty {index}` |
 | Properties: boolean, text, instance swap (preferred values), variant | done | |
-| Slots (preferred components, fill menu, kept across updates) | done | Create an unbound property, convert a nested frame or wrap sibling layers; slot settings, guidance warnings, clear/reset and persistent empty-slot outlines. `.fig` export still omits slot properties. |
+| Slots (preferred components, fill menu, kept across updates) | done | Create an unbound property, convert a nested frame or wrap sibling layers; slot settings, guidance warnings, clear/reset and persistent empty-slot outlines. `.fig` round trips Slot definitions, bindings, settings, preferred components and each instance's content, including empty overrides. Preferred components use a Lizard extension; Figma interoperability remains unverified. |
 | Exposed nested instances | done | hidden ones hide their properties |
 | Descriptions | done | |
 | Instance swap: panel, Alt-drop from Assets | done | the panel keeps overrides on same-named layers, an Alt-drop from Assets only text layers' |
