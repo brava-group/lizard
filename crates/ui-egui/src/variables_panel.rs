@@ -29,6 +29,7 @@ const SIDEBAR_W: f32 = 240.0;
 const NAME_W: f32 = 200.0;
 const MODE_W: f32 = 280.0;
 const ROW_H: f32 = 40.0;
+const EXPANDED_MARGIN: f32 = 16.0;
 const TYPES: [VariableType; 4] = [VariableType::Color, VariableType::Number, VariableType::String, VariableType::Boolean];
 
 /// What's being renamed inline.
@@ -59,6 +60,7 @@ pub struct Editor {
     group: Option<String>,
     kind_filter: Option<VariableType>,
     expanded: bool,
+    center_on_restore: bool,
 }
 
 impl Editor {
@@ -152,39 +154,56 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
     let available = vec2((screen.width() - 32.0).max(320.0), (screen.height() - 32.0).max(240.0));
-    let size = if st.expanded { available } else { vec2(1131.0_f32.min(available.x), 491.0_f32.min(available.y)) };
+    let expanded = canvas_window_rect(app.canvas.rect, screen);
+    let size = if st.expanded { expanded.size() } else { vec2(1131.0_f32.min(available.x), 491.0_f32.min(available.y)) };
+    let sidebar_w = SIDEBAR_W.min(size.x * 0.45).min((size.x - 1.0).max(0.0));
+    let center_on_restore = std::mem::take(&mut st.center_on_restore);
     let mut open = true;
-    egui::Window::new(tr("Variables"))
+    let window = egui::Window::new(tr("Variables"))
         .id(Id::new("variables_window"))
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
-        .fixed_size(size)
-        .pivot(Align2::CENTER_CENTER)
-        .default_pos(screen.center())
-        .frame(Surface::palette().frame(t).inner_margin(egui::Margin::same(0)))
-        .show(ctx, |ui| {
-            ui.set_min_size(size);
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            header(ui, &mut st, &mut open);
-            let h = (size.y - 40.0).max(160.0);
-            let top_down = egui::Layout::top_down(egui::Align::Min);
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(vec2(SIDEBAR_W, h), top_down, |ui| sidebar(app, ui, &views, &doc.variables, &mut st));
-                let (line, _) = ui.allocate_exact_size(vec2(1.0, h), Sense::hover());
-                ui.painter().rect_filled(line, CornerRadius::ZERO, t.border);
-                ui.allocate_ui_with_layout(vec2(size.x - SIDEBAR_W - 1.0, h), top_down, |ui| table(app, ui, view, &mut st));
-            });
-            Surface::palette().paint_top_highlight(ui.painter(), ui.max_rect());
+        .frame(Surface::palette().frame(t).inner_margin(egui::Margin::same(0)));
+    let window = if st.expanded {
+        window.fixed_rect(expanded).pivot(Align2::LEFT_TOP)
+    } else {
+        let window = window.fixed_size(size).pivot(Align2::CENTER_CENTER).default_pos(screen.center());
+        if center_on_restore { window.current_pos(screen.center()) } else { window }
+    };
+    window.show(ctx, |ui| {
+        ui.set_min_size(size);
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        header(ui, &mut st, &mut open, sidebar_w);
+        let h = (size.y - 40.0).max(0.0);
+        let top_down = egui::Layout::top_down(egui::Align::Min);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(vec2(sidebar_w, h), top_down, |ui| sidebar(app, ui, &views, &doc.variables, &mut st));
+            let (line, _) = ui.allocate_exact_size(vec2(1.0, h), Sense::hover());
+            ui.painter().rect_filled(line, CornerRadius::ZERO, t.border);
+            ui.allocate_ui_with_layout(vec2((size.x - sidebar_w - 1.0).max(0.0), h), top_down, |ui| table(app, ui, view, &mut st));
         });
+        Surface::palette().paint_top_highlight(ui.painter(), ui.max_rect());
+    });
     details(app, ctx, &doc.variables, &mut st);
     app.ui.variables = open.then_some(st);
 }
 
-fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool) {
+/// Keep the maximized editor inside the canvas, including when side panels or the viewport move.
+/// The standalone component catalog has no canvas yet, so it uses the available screen.
+fn canvas_window_rect(canvas: Rect, screen: Rect) -> Rect {
+    let visible = canvas.intersect(screen);
+    let bounds = if visible.width() > 0.0 && visible.height() > 0.0 { visible } else { screen };
+    let margin = vec2(EXPANDED_MARGIN.min((bounds.width() - 1.0).max(0.0) * 0.5), EXPANDED_MARGIN.min((bounds.height() - 1.0).max(0.0) * 0.5));
+    bounds.shrink2(margin)
+}
+
+fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool, sidebar_w: f32) {
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Variables"), semibold(11.0), t.text);
+    if r.width() >= 180.0 {
+        ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Variables"), semibold(11.0), t.text);
+    }
     let close = Rect::from_center_size(pos2(r.max.x - 20.0, r.center().y), vec2(24.0, 24.0));
     let expand = close.translate(vec2(-28.0, 0.0));
     let filter = close.translate(vec2(-56.0, 0.0));
@@ -223,13 +242,16 @@ fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool) {
         .show_at(ui, Id::new("vars_expand"), expand)
         .clicked()
     {
+        if st.expanded {
+            st.center_on_restore = true;
+        }
         st.expanded = !st.expanded;
     }
     if Button::icon(Icon::Close, tr("Close")).icon_size(14.0).show_at(ui, Id::new("vars_close"), close).clicked() {
         *open = false;
     }
     ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.border));
-    ui.painter().line_segment([pos2(r.min.x + SIDEBAR_W, r.min.y), pos2(r.min.x + SIDEBAR_W, r.max.y)], Stroke::new(1.0, t.border));
+    ui.painter().line_segment([pos2(r.min.x + sidebar_w, r.min.y), pos2(r.min.x + sidebar_w, r.max.y)], Stroke::new(1.0, t.border));
 }
 
 /// Export this file's collections through a save dialog, or as a download where the platform has
@@ -311,8 +333,11 @@ fn unique(base: &str, taken: impl Fn(&str) -> bool) -> String {
 
 fn sidebar(app: &mut LizardApp, ui: &mut Ui, views: &[View], local: &Variables, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
-    let (hr, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 40.0), Sense::hover());
-    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Collections"), semibold(11.0), t.text);
+    let sidebar_w = ui.available_width();
+    let (hr, _) = ui.allocate_exact_size(vec2(sidebar_w, 40.0), Sense::hover());
+    if sidebar_w >= 180.0 {
+        ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Collections"), semibold(11.0), t.text);
+    }
     let options = Button::icon(Icon::Adjust, tr("Collection options")).icon_size(14.0).show_at(
         ui,
         Id::new("vars_collection_options"),
@@ -356,10 +381,12 @@ fn sidebar(app: &mut LizardApp, ui: &mut Ui, views: &[View], local: &Variables, 
         }
     });
     ui.add_space(8.0);
-    let (divider, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 1.0), Sense::hover());
+    let (divider, _) = ui.allocate_exact_size(vec2(sidebar_w, 1.0), Sense::hover());
     ui.painter().rect_filled(divider, CornerRadius::ZERO, t.border);
-    let (groups_header, _) = ui.allocate_exact_size(vec2(SIDEBAR_W, 40.0), Sense::hover());
-    ui.painter().text(pos2(groups_header.min.x + 16.0, groups_header.center().y), Align2::LEFT_CENTER, tr("Groups"), semibold(11.0), t.text);
+    let (groups_header, _) = ui.allocate_exact_size(vec2(sidebar_w, 40.0), Sense::hover());
+    if sidebar_w >= 100.0 {
+        ui.painter().text(pos2(groups_header.min.x + 16.0, groups_header.center().y), Align2::LEFT_CENTER, tr("Groups"), semibold(11.0), t.text);
+    }
     egui::ScrollArea::vertical().id_salt("vars_groups").auto_shrink([false, false]).show(ui, |ui| {
         if let Some((view, coll)) = views.iter().find_map(|view| {
             view.is(st.library.as_deref()).then(|| st.collection.as_deref().and_then(|id| view.collection(id)).map(|coll| (view, coll))).flatten()
@@ -373,7 +400,7 @@ fn sidebar(app: &mut LizardApp, ui: &mut Ui, views: &[View], local: &Variables, 
 fn library_title(ui: &mut Ui, name: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(8.0);
-    let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 26.0), Sense::hover());
+    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
     icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 22.0, r.center().y), vec2(12.0, 12.0)), Icon::Library, t.icon_secondary);
     let name_r = Rect::from_min_max(pos2(r.min.x + 34.0, r.min.y), pos2(r.max.x - 8.0, r.max.y));
     ui.painter().with_clip_rect(name_r).text(name_r.left_center(), Align2::LEFT_CENTER, name, semibold(11.0), t.text_secondary);
@@ -383,7 +410,7 @@ fn library_title(ui: &mut Ui, name: &str) {
 /// One collection in the sidebar (with its groups while selected).
 fn collection_row(app: &mut LizardApp, ui: &mut Ui, view: &View, c: &Collection, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 32.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
     let r = r.shrink2(vec2(10.0, 4.0));
     let selected = view.is(st.library.as_deref()) && st.collection.as_deref() == Some(c.id.as_str());
     if selected {
@@ -461,7 +488,7 @@ fn group_rows(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
     let list = groups(names.iter().copied());
     let rows = std::iter::once(None).chain(list.iter().map(Some));
     for g in rows {
-        let (r, resp) = ui.allocate_exact_size(vec2(SIDEBAR_W, 32.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
         let r = r.shrink2(vec2(10.0, 4.0));
         let on = st.group.as_ref() == g;
         if on {
@@ -1017,12 +1044,55 @@ fn details(app: &mut LizardApp, ctx: &Context, vars: &Variables, st: &mut Editor
 
 #[cfg(test)]
 mod tests {
-    use super::groups;
+    use super::{Editor, canvas_window_rect, groups};
+    use crate::{LizardApp, NoServices};
+    use egui::{Id, Pos2, RawInput, Rect, vec2};
+    use lizard_engine::Session;
+    use serde_json::json;
 
     #[test]
     fn groups_include_parents_once_and_sorted() {
         let names = ["space/sm", "space/md", "color/brand/blue", "color/text", "plain", "color/brand/red"];
         assert_eq!(groups(names.into_iter()), ["color", "color/brand", "space"]);
         assert!(groups(["a", "b"].into_iter()).is_empty());
+    }
+
+    #[test]
+    fn maximized_variables_window_follows_canvas_bounds() {
+        let mut session = Session::new();
+        session.execute("variable.createCollection", &json!({"name": "Theme"})).unwrap();
+        let mut app = LizardApp::new(session, Box::new(NoServices));
+        let mut editor = Editor::on(None);
+        editor.expanded = true;
+        app.ui.variables = Some(editor);
+        let ctx = egui::Context::default();
+        for (frame, width) in [1440.0, 1200.0, 800.0].into_iter().enumerate() {
+            if width == 800.0 {
+                app.set_panel_widths(480.0, 480.0);
+            }
+            for tick in 0..3 {
+                let input = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 900.0))),
+                    time: Some((frame * 3 + tick) as f64 / 60.0),
+                    ..Default::default()
+                };
+                ctx.run_ui(input, |ui| app.ui(ui)).textures_delta.clear();
+            }
+            let actual = ctx.memory(|memory| memory.area_rect(Id::new("variables_window"))).unwrap();
+            let canvas = app.canvas.rect;
+            let expected = canvas_window_rect(canvas, ctx.content_rect());
+            assert!(actual.min.x >= canvas.min.x && actual.max.x <= canvas.max.x, "{actual:?} must stay inside {canvas:?}");
+            assert!(actual.min.y >= canvas.min.y && actual.max.y <= canvas.max.y, "{actual:?} must stay inside {canvas:?}");
+            assert!((actual.min.x - expected.min.x).abs() < 1.0 && (actual.min.y - expected.min.y).abs() < 1.0);
+            assert!((actual.width() - expected.width()).abs() < 1.0 && (actual.height() - expected.height()).abs() < 1.0);
+        }
+        let editor = app.ui.variables.as_mut().unwrap();
+        editor.expanded = false;
+        editor.center_on_restore = true;
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 900.0))), time: Some(9.0 / 60.0), ..Default::default() };
+        ctx.run_ui(input, |ui| app.ui(ui)).textures_delta.clear();
+        let restored = ctx.memory(|memory| memory.area_rect(Id::new("variables_window"))).unwrap();
+        assert!((restored.center().x - ctx.content_rect().center().x).abs() < 1.0);
+        assert!((restored.center().y - ctx.content_rect().center().y).abs() < 1.0);
     }
 }
