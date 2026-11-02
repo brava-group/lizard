@@ -30,6 +30,7 @@ enum Page {
     Paint,
     ColorControl,
     PropertyController,
+    Tooltip,
     Sliders,
     PrimitiveTabs,
     Shimmer,
@@ -118,6 +119,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::Paint, "Primitives", "Paint", "swatch · checker"),
     (Page::ColorControl, "Primitives", "Color control", "primitives::ColorControl · swatch / models / opacity · width"),
     (Page::PropertyController, "Primitives", "Property controller", "primitives::PropertyController · component properties · usage indicator"),
+    (Page::Tooltip, "Primitives", "Tooltip", "primitives::Tooltip · title · shortcut · description"),
     (Page::Sliders, "Primitives", "Sliders", "slider · progress_bar"),
     (Page::PrimitiveTabs, "Primitives", "Tabs", "primitives::Tabs · selection · content · overflow"),
     (Page::Shimmer, "Primitives", "Shimmer text", "primitives::ShimmerText · direction · duration · playing"),
@@ -241,6 +243,8 @@ pub struct State {
     disclosure: bool,
     menu_choice: usize,
     property_selection: Option<usize>,
+    property_binding_attached: bool,
+    property_binding_located: bool,
     property_names: [String; 7],
     property_visible: [bool; 7],
     cursor_playground: cursor_playground::State,
@@ -294,6 +298,8 @@ impl Default for State {
             disclosure: true,
             menu_choice: 0,
             property_selection: None,
+            property_binding_attached: true,
+            property_binding_located: false,
             property_names: ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()],
             property_visible: [true; 7],
             cursor_playground: cursor_playground::State::default(),
@@ -779,6 +785,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::Paint => paint(ui),
                     Page::ColorControl => color_control(ui, state, fig, fixture),
                     Page::PropertyController => property_controllers(ui, state),
+                    Page::Tooltip => tooltips(ui),
                     Page::Sliders => sliders(ui, state),
                     Page::PrimitiveTabs => primitive_tabs(ui, state),
                     Page::Shimmer => shimmer(ui, state),
@@ -1443,7 +1450,7 @@ fn floating_panels(ui: &mut Ui, state: &mut State) {
 }
 
 fn property_controllers(ui: &mut Ui, state: &mut State) {
-    use lizard_ui_egui::primitives::{PropertyController, PropertyControllerKind as Kind};
+    use lizard_ui_egui::primitives::{PropertyBinding, PropertyController, PropertyControllerKind as Kind};
 
     example(ui, "Component properties", "Hover for settings and delete. Click a row to rename it; Enter saves and Escape cancels.", |ui| {
         ui.allocate_ui_with_layout(vec2(320.0, 200.0), Layout::top_down(egui::Align::Min), |ui| {
@@ -1502,11 +1509,56 @@ fn property_controllers(ui: &mut Ui, state: &mut State) {
             }
         });
     });
+    example(ui, "Applied property", "A layer value bound to a component property. Use the target to find the property or unlink it.", |ui| {
+        ui.allocate_ui_with_layout(vec2(320.0, 88.0), Layout::top_down(egui::Align::Min), |ui| {
+            if state.property_binding_attached {
+                let response = PropertyBinding::new(Kind::Text, "Texto").show(ui);
+                if response.locate_clicked {
+                    state.property_binding_located = true;
+                }
+                if response.detach_clicked {
+                    state.property_binding_attached = false;
+                    state.property_binding_located = false;
+                }
+                if state.property_binding_located {
+                    ui.label("Property selected");
+                }
+            } else if Button::new("Bind Texto").variant(ButtonVariant::Secondary).show(ui).clicked() {
+                state.property_binding_attached = true;
+            }
+        });
+    });
     if Button::new("Reset examples").variant(ButtonVariant::Secondary).show(ui).clicked() {
         state.property_names = ["Property 1".into(), "Text".into(), "Boolean".into(), "Instance".into(), "Slot".into(), "Label".into(), "Content".into()];
         state.property_visible = [true; 7];
         state.property_selection = None;
+        state.property_binding_attached = true;
+        state.property_binding_located = false;
     }
+}
+
+fn tooltips(ui: &mut Ui) {
+    use lizard_ui_egui::primitives::Tooltip;
+
+    example(ui, "Live tooltips", "Hover the controls to inspect timing, position, surface and text.", |ui| {
+        ui.horizontal(|ui| {
+            let simple = Button::new("Simple tooltip").variant(ButtonVariant::Secondary).show(ui);
+            Tooltip::new("Create component").show_for(&simple);
+            let shortcut = Button::new("With shortcut").variant(ButtonVariant::Secondary).show(ui);
+            Tooltip::new("Duplicate selection").shortcut("⌘D").show_for(&shortcut);
+            let detailed = Button::new("With description").variant(ButtonVariant::Secondary).show(ui);
+            Tooltip::new("Apply variable").description("Bind this value to a variable or component property.").show_for(&detailed);
+        });
+    });
+    example(ui, "Tooltip specimens", "Always visible previews use the same primitive as the hover tooltips.", |ui| {
+        ui.horizontal(|ui| {
+            Tooltip::new("Create component").preview(ui);
+            ui.add_space(12.0);
+            Tooltip::new("Duplicate selection").shortcut("⌘D").preview(ui);
+        });
+        ui.add_space(16.0);
+        Tooltip::new("Apply variable").description("Bind this value to a variable or component property.").preview(ui);
+    });
 }
 
 fn segmented(ui: &mut Ui, state: &mut State) {

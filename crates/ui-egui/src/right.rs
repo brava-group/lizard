@@ -649,7 +649,7 @@ fn header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         if let [id] = sel
             && let Some(node) = doc.node(*id)
         {
-            crate::component_panel::text_value_ui(app, ui, node);
+            crate::component_panel::text_value_ui(app, ui, doc, node);
         }
         crate::component_panel::instance_section(app, ui, doc, sel);
         return;

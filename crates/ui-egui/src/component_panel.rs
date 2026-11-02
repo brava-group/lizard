@@ -23,7 +23,7 @@ use crate::LizardApp;
 use crate::i18n::{tr, trn};
 use crate::icons::{self, HeaderIcon, Icon};
 use crate::list_drag::ListDrag;
-use crate::primitives::{Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyController, PropertyControllerKind, Select, Switch, TextFieldWithPresets};
+use crate::primitives::{Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyBinding, PropertyController, PropertyControllerKind, Select, Switch, TextFieldWithPresets};
 use crate::right::{menu_item, menu_popup, row, row_rect};
 use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
@@ -701,8 +701,25 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
 }
 
 /// The selected text layer's value and binding action, directly below its name and actions.
-pub(crate) fn text_value_ui(app: &mut LizardApp, ui: &mut Ui, n: &Node) {
+pub(crate) fn text_value_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     let Some(text) = n.kind.text() else { return };
+    if let Some(property) = n.prop_refs.get("characters") {
+        let response = PropertyBinding::new(PropertyControllerKind::Text, property).show(ui);
+        if response.row.clicked() {
+            crate::variable_ui::open(ui, &[n.id], "characters", VariableType::String, response.row.rect.left_bottom());
+        }
+        if response.locate_clicked
+            && let Some(owner) = owning_component(doc, n.id)
+        {
+            let target = lizard_engine::components::variant_set(doc, owner).unwrap_or(owner);
+            app.run("select.set", json!({"ids": [target]}));
+        }
+        if response.detach_clicked {
+            app.run("component.bindProperty", json!({"layer": n.id, "field": "characters", "property": null}));
+        }
+        ui.add_space(8.0);
+        return;
+    }
     let value = text.characters.as_str();
     let rect = crate::right::row_rect(ui, 40.0, |ui| {
         let width = ui.available_width();
