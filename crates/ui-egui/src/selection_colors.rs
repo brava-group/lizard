@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use egui::{Align2, Color32, Id, Rect, Sense, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_color::Color;
 use lizard_doc::{Document, NodeId, StyleKind};
 use lizard_engine::selection_colors::{PaintTarget, SelectionColor, collect};
@@ -15,6 +15,8 @@ use crate::colorpicker::PickerTarget;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
+use crate::primitives::{ColorControl, ColorValue};
+use crate::widgets::FieldEdit;
 use crate::{LizardApp, widgets};
 
 fn header(ui: &mut Ui, colors: &[SelectionColor], open: bool) -> bool {
@@ -100,73 +102,95 @@ pub fn section(app: &mut LizardApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[Nod
     // Bound the panel's height; a document with many distinct colors stays scrollable.
     ui.add_enabled_ui(!interacting, |ui| {
         egui::ScrollArea::vertical().id_salt("selection_colors_rows").max_height(240.0).show_rows(ui, 32.0, colors.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             for group in &colors[range] {
                 ui.push_id((&group.targets, "selection_color"), |ui| {
-                    crate::right::row(ui, 32.0, |ui| {
-                        let swatch = widgets::swatch(ui, &group.paint, 24.0).tip(tr("Edit colour"));
-                        if swatch.clicked() {
-                            open_picker(app, group.targets.clone());
-                        }
-                        let width = (ui.available_width() - 116.0).max(40.0);
-                        let linked_name = group
-                            .style
-                            .as_ref()
-                            .and_then(|id| doc.style(id).map(|s| s.name.as_str()))
-                            .or_else(|| group.variable.as_ref().and_then(|id| doc.variables.get(id).map(|v| v.name.as_str())));
-                        if let Some(name) = linked_name {
-                            if crate::primitives::Select::trigger(ui, name, width, None).clicked() {
-                                open_picker(app, group.targets.clone());
-                            }
-                        } else if let Some(color) = group.paint.solid_color() {
-                            if let Some(hex) = widgets::text_field_named(ui, ui.id().with("hex"), &color.to_hex(), width, tr("Color")) {
-                                if let Some(color) = Color::from_hex(&hex) {
-                                    let mut paint = group.paint.clone();
-                                    paint.kind = lizard_color::PaintKind::Solid { color: color.with_alpha(1.0) };
-                                    if color.a < 1.0 {
-                                        paint.opacity = color.a;
-                                    }
-                                    app.run("selection.setPaint", json!({"targets": group.targets, "paint": paint}));
-                                } else {
-                                    app.toast(tr("Invalid color"));
-                                }
-                            }
-                        } else {
-                            let response = crate::primitives::Select::trigger(ui, &widgets::paint_name(&group.paint), width, None);
-                            if response.clicked() {
-                                open_picker(app, group.targets.clone());
-                            }
-                        }
-                        let alpha = format!("{}%", lizard_doc::trim_num(f64::from(group.paint.opacity) * 100.0));
-                        if let Some(value) = widgets::text_field_named(ui, ui.id().with("opacity"), &alpha, 44.0, tr("Opacity"))
-                            && let Ok(value) = value.trim().trim_end_matches('%').parse::<f32>()
-                            && value.is_finite()
-                        {
+                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+                    let control = Rect::from_min_size(pos2(row.left() + 16.0, row.top() + 4.0), vec2((row.width() - 84.0).max(64.0), 24.0));
+                    let linked_name = group
+                        .style
+                        .as_ref()
+                        .and_then(|id| doc.style(id).map(|s| s.name.as_str()))
+                        .or_else(|| group.variable.as_ref().and_then(|id| doc.variables.get(id).map(|v| v.name.as_str())));
+                    let hex = group.paint.solid_color().map(|color| color.to_hex());
+                    let paint_name = widgets::paint_name(&group.paint);
+                    let value = match (linked_name, hex.as_deref()) {
+                        (Some(name), _) => ColorValue::Label(name),
+                        (None, Some(hex)) => ColorValue::EditableHex(hex),
+                        (None, None) => ColorValue::Label(&paint_name),
+                    };
+                    let change = ColorControl::new(ui.id().with("control"), &group.paint, value, f64::from(group.paint.opacity) * 100.0)
+                        .label_opens_picker()
+                        .show_at(ui, control);
+                    if change.open_picker {
+                        open_picker(app, group.targets.clone());
+                    }
+                    if let Some(hex) = change.edited_hex {
+                        if let Some(color) = Color::from_hex(&hex) {
                             let mut paint = group.paint.clone();
-                            paint.opacity = (value / 100.0).clamp(0.0, 1.0);
+                            paint.kind = lizard_color::PaintKind::Solid { color: color.with_alpha(1.0) };
+                            if color.a < 1.0 {
+                                paint.opacity = color.a;
+                            }
                             app.run("selection.setPaint", json!({"targets": group.targets, "paint": paint}));
+                        } else {
+                            app.toast(tr("Invalid color"));
                         }
-                        let styles = icons::button(ui, Icon::Styles, 24.0, false, tr("Color styles"));
-                        crate::right::menu_popup(&styles).show(|ui| {
-                            let mut any = false;
-                            for style in &doc.styles {
-                                if !matches!(style.kind, StyleKind::Paint { .. }) {
-                                    continue;
+                    }
+                    if let Some(edit) = change.opacity_edit {
+                        let (value, done) = match edit {
+                            FieldEdit::Set(value) => (value, None),
+                            FieldEdit::Scrub(value, done) => (value, Some(done)),
+                        };
+                        if value.is_finite() {
+                            let mut paint = group.paint.clone();
+                            paint.opacity = (value / 100.0).clamp(0.0, 1.0) as f32;
+                            let params = json!({"targets": group.targets, "paint": paint});
+                            if let Some(done) = done {
+                                let _ = app.session.begin_interaction("Opacity");
+                                let _ = app.session.execute("selection.setPaint", &params);
+                                if done {
+                                    let _ = app.session.commit_interaction();
                                 }
-                                any = true;
-                                if crate::right::menu_item(ui, &style.name, "") {
-                                    app.run("selection.applyColorStyle", json!({"targets": group.targets, "style": style.id}));
-                                    app.ui.picker = None;
-                                    ui.close();
-                                }
+                            } else {
+                                app.run("selection.setPaint", params);
                             }
-                            if !any {
-                                widgets::label(ui, tr("No color styles"), t.text_secondary);
+                        }
+                    }
+                    let styles_rect = Rect::from_min_size(pos2(row.right() - 60.0, control.top()), vec2(24.0, 24.0));
+                    let select_rect = Rect::from_min_size(pos2(row.right() - 32.0, control.top()), vec2(24.0, 24.0));
+                    let styles = ui.interact(styles_rect, ui.id().with("styles"), Sense::click()).tip(tr("Color styles"));
+                    let select = ui.interact(select_rect, ui.id().with("select_layers"), Sense::click()).tip(tr("Select layers with this color"));
+                    a11y::button(&styles, tr("Color styles"));
+                    a11y::button(&select, tr("Select layers with this color"));
+                    if ui.rect_contains_pointer(row) || styles.has_focus() || select.has_focus() {
+                        for (rect, response, icon) in [(styles_rect, &styles, Icon::Styles), (select_rect, &select, Icon::Move)] {
+                            if response.hovered() {
+                                ui.painter().rect_filled(rect, CornerRadius::same(5), t.hover);
                             }
-                        });
-                        if icons::button(ui, Icon::Move, 24.0, false, tr("Select layers with this color")).clicked() {
-                            app.run("selection.selectColor", json!({"targets": group.targets}));
+                            icons::paint(ui.painter(), rect.shrink(4.0), icon, t.icon);
+                        }
+                    }
+                    crate::right::menu_popup(&styles).show(|ui| {
+                        let mut any = false;
+                        for style in &doc.styles {
+                            if !matches!(style.kind, StyleKind::Paint { .. }) {
+                                continue;
+                            }
+                            any = true;
+                            if crate::right::menu_item(ui, &style.name, "") {
+                                app.run("selection.applyColorStyle", json!({"targets": group.targets, "style": style.id}));
+                                app.ui.picker = None;
+                                ui.close();
+                            }
+                        }
+                        if !any {
+                            widgets::label(ui, tr("No color styles"), t.text_secondary);
                         }
                     });
+                    if select.clicked() {
+                        app.run("selection.selectColor", json!({"targets": group.targets}));
+                    }
                 });
             }
         });
@@ -306,7 +330,7 @@ mod tests {
         let (mut p, a, _) = Panel::new();
         p.expand();
         let red = p.frame(vec![]).into_iter().find(|(s, _)| s == "FF0000").unwrap().1;
-        p.click(Pos2::new(220.0, red.y));
+        p.click(Pos2::new(260.0, red.y));
         assert_eq!(p.app.session.selection(), [a]);
         assert!(p.app.ui.last_error.is_none());
     }
@@ -320,6 +344,9 @@ mod tests {
         let texts = p.frame(vec![]);
         assert!(texts.iter().any(|(s, _)| s == "Brand"));
         assert!(texts.iter().any(|(s, _)| s == "0000FF"));
+        let linked = texts.iter().find(|(s, _)| s == "Brand").unwrap().1;
+        p.click(linked);
+        assert!(matches!(p.app.ui.picker, Some(PickerTarget::SelectionColor { .. })));
         let colors = collect(p.app.session.doc().unwrap(), &[a, b]);
         assert_eq!(colors.len(), 2);
     }

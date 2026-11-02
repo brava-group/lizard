@@ -51,11 +51,12 @@ pub struct ColorControl<'a> {
     swatch_id: Option<Id>,
     inline: bool,
     opacity_editable: bool,
+    label_opens_picker: bool,
 }
 
 impl<'a> ColorControl<'a> {
     pub fn new(id: Id, paint: &'a Paint, value: ColorValue<'a>, opacity_percent: f64) -> Self {
-        Self { id, paint, value, opacity_percent, swatch_id: None, inline: false, opacity_editable: true }
+        Self { id, paint, value, opacity_percent, swatch_id: None, inline: false, opacity_editable: true, label_opens_picker: false }
     }
 
     /// Keep an existing swatch's egui identity when migrating a production row.
@@ -73,6 +74,12 @@ impl<'a> ColorControl<'a> {
     /// Show a read-only alpha value for colours that cannot store transparency.
     pub fn opacity_editable(mut self, editable: bool) -> Self {
         self.opacity_editable = editable;
+        self
+    }
+
+    /// Let a read-only value open the same picker as its swatch.
+    pub fn label_opens_picker(mut self) -> Self {
+        self.label_opens_picker = true;
         self
     }
 
@@ -168,6 +175,9 @@ impl<'a> ColorControl<'a> {
                     medium(11.0),
                     t.text,
                 );
+                if self.label_opens_picker {
+                    result.open_picker |= ui.interact(value_rect, self.id.with("label"), Sense::click()).lizard_tooltip(tr("Edit colour")).clicked();
+                }
             }
             ColorValue::StyleName(_) | ColorValue::BoundVariable(_) => {}
             ColorValue::Model(_) => {}
