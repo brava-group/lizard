@@ -30,6 +30,21 @@ pub trait CanvasGpuBackend {
         ctx: &egui::Context,
     ) -> Option<egui::TextureId>;
 
+    /// The document area held by a GPU texture with pan overscan.
+    fn source_view(&self) -> Option<lizard_render::View> {
+        None
+    }
+
+    /// Finished GPU regions to compose in document coordinates when a pan spans cached views.
+    fn presented_tiles(&self) -> Vec<(egui::TextureId, lizard_render::View)> {
+        Vec::new()
+    }
+
+    /// Time spent preparing the last GPU canvas update on the UI thread.
+    fn last_render_ms(&self) -> Option<f64> {
+        None
+    }
+
     /// Rasterize the editor's outline view as GPU strokes when supported.
     fn outline_texture(
         &mut self,
@@ -299,6 +314,9 @@ impl CanvasState {
     /// Device pixels without any current image source. This measures texture coverage, including
     /// the retained wide view, before the page background is painted underneath it.
     pub(crate) fn uncovered_pixels(&self, ds: &lizard_engine::DocState) -> Option<u64> {
+        if self.gpu_presented {
+            return Some(0);
+        }
         let visible = self.visible_view.as_ref()?;
         let current = self
             .tex_view
@@ -1212,6 +1230,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     app.canvas.visible_view = app.session.ds().ok().map(|ds| visible_view_for(&ds.view, rect, ppp));
     // Ask the shared-device renderer first. A resident GPU texture already contains this camera
     // and document; scheduling the CPU worker as well duplicates the most expensive work.
+    let mut gpu_source_view = None;
+    let mut gpu_tiles = Vec::new();
     let gpu_texture = if !composing_drag
         && shown.is_some()
         && let Ok(ds) = app.session.ds()
@@ -1270,8 +1290,14 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
         } else if ds.view.pixel_preview_scale().is_some() {
             backend.pixel_texture(gpu_doc, ds.page, &view, clear, ds.view.proof_srgb, &ctx)
         } else {
-            backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging, ds.view.proof_srgb, &ctx)
+            backend.texture(gpu_doc, ds.page, &view, clear, app.canvas.dragging || app.canvas.middle_pan.is_some(), ds.view.proof_srgb, &ctx)
         };
+        if ds.focused().is_none() && !ds.view.outlines && !ds.view.outlines_selection && ds.view.pixel_preview_scale().is_none() {
+            gpu_source_view = backend.source_view();
+            if texture.is_some() {
+                gpu_tiles = backend.presented_tiles();
+            }
+        }
         app.gpu_canvas = Some(backend);
         texture
     } else {
@@ -1335,8 +1361,34 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
             painter.image(tile.texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
-    if !painted_drag && let Some(texture) = gpu_texture {
-        painter.image(texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    if !painted_drag && gpu_texture.is_some() && !gpu_tiles.is_empty() {
+        let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
+        for (texture, view) in gpu_tiles {
+            let tl = app.to_screen(view.origin.0, view.origin.1);
+            let image_rect = presented_image_rect(tl, &view, zoom, ppp, false);
+            painter.with_clip_rect(image_rect.shrink(16.0 / ppp)).image(
+                texture,
+                image_rect,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    } else if !painted_drag && let Some(texture) = gpu_texture {
+        let image_rect = app
+            .session
+            .ds()
+            .ok()
+            .and_then(|ds| {
+                let view = gpu_source_view.as_ref().or(app.canvas.visible_view.as_ref())?;
+                if ds.view.pixel_preview_scale().is_some() {
+                    Some(rect)
+                } else {
+                    let tl = app.to_screen(view.origin.0, view.origin.1);
+                    Some(presented_image_rect(tl, view, ds.view.zoom, ppp, false))
+                }
+            })
+            .unwrap_or(rect);
+        painter.image(texture, image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
     if !painted_drag {
         paint_pending_layer(app, &painter, &ctx, ppp);
@@ -2163,23 +2215,28 @@ fn slot_badges(app: &LizardApp, painter: &egui::Painter, doc: &Document, sel: &[
     let mut slots: Vec<(NodeId, String)> = roots.iter().flat_map(|r| slots_of(doc, *r)).collect();
     let key = app.session.ds().map(|state| (state.uid, state.revision, doc.current_page)).unwrap_or_default();
     let cache_id = egui::Id::new("slot_badges_empty_instances");
-    let empty = painter.ctx().data(|data| data.get_temp::<EmptyCache>(cache_id)).filter(|(cached, _)| *cached == key).map(|(_, slots)| slots).unwrap_or_else(|| {
-        let mut found = Vec::new();
-        if let Some(page) = doc.current_page {
-            for id in doc.subtree(page) {
-                if !doc.node(id).is_some_and(|node| matches!(node.kind, NodeKind::Frame) && node.children.is_empty()) || owning_instance(doc, id).is_none() {
-                    continue;
+    let empty =
+        painter.ctx().data(|data| data.get_temp::<EmptyCache>(cache_id)).filter(|(cached, _)| *cached == key).map(|(_, slots)| slots).unwrap_or_else(
+            || {
+                let mut found = Vec::new();
+                if let Some(page) = doc.current_page {
+                    for id in doc.subtree(page) {
+                        if !doc.node(id).is_some_and(|node| matches!(node.kind, NodeKind::Frame) && node.children.is_empty())
+                            || owning_instance(doc, id).is_none()
+                        {
+                            continue;
+                        }
+                        if let Some((name, _, settings)) = slot_metadata(doc, id)
+                            && settings.show_empty
+                        {
+                            found.push((id, name.to_string()));
+                        }
+                    }
                 }
-                if let Some((name, _, settings)) = slot_metadata(doc, id)
-                    && settings.show_empty
-                {
-                    found.push((id, name.to_string()));
-                }
-            }
-        }
-        painter.ctx().data_mut(|data| data.insert_temp(cache_id, (key, found.clone())));
-        found
-    });
+                painter.ctx().data_mut(|data| data.insert_temp(cache_id, (key, found.clone())));
+                found
+            },
+        );
     for item in empty {
         if !slots.iter().any(|(id, _)| *id == item.0) {
             slots.push(item);
@@ -3069,7 +3126,13 @@ fn ruler_major_step(zoom: f64) -> f64 {
     while step * zoom < 85.0 {
         let base = 10.0_f64.powf(step.log10().floor());
         let part = step / base;
-        step = if part < 1.5 { 2.0 * base } else if part < 3.5 { 5.0 * base } else { 10.0 * base };
+        step = if part < 1.5 {
+            2.0 * base
+        } else if part < 3.5 {
+            5.0 * base
+        } else {
+            10.0 * base
+        };
     }
     step
 }

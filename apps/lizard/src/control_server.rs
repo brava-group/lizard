@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lizard_ui_egui::ControlRequest;
 use serde_json::{Value, json};
@@ -140,7 +140,14 @@ fn serve_guarded(
             Ok(v) => {
                 let id = v.get("id").cloned().unwrap_or(Value::Null);
                 let method = v.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+                let method_name = method.clone();
                 let mut params = v.get("params").cloned().unwrap_or(json!({}));
+                if std::env::var_os("LIZARD_CONTROL_PROFILE").is_some()
+                    && let Ok(since_epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                    && let Some(object) = params.as_object_mut()
+                {
+                    object.insert("__profile_queued_ns".into(), json!(since_epoch.as_nanos() as u64));
+                }
                 if let Some((document, agent_index, enabled)) = &guard {
                     if !enabled.load(Ordering::Acquire) {
                         writeln!(out, "{}", json!({"id": id, "ok": false, "error": "A sessão do agente foi encerrada"}))?;
@@ -169,10 +176,15 @@ fn serve_guarded(
                     agent_guard: guard.as_ref().map(|(_, _, flag)| flag.clone()),
                 });
                 drop(pending);
+                let queued_at = Instant::now();
                 if let Some(c) = ctx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
                     c.request_repaint();
                 }
-                match rx.recv_timeout(timeout) {
+                let response = rx.recv_timeout(timeout);
+                if std::env::var_os("LIZARD_CONTROL_PROFILE").is_some() {
+                    eprintln!("control_profile id={id} method={method_name} response_ms={:.2}", queued_at.elapsed().as_secs_f64() * 1000.0);
+                }
+                match response {
                     Ok(r) => match r.result {
                         Ok(res) => json!({"id": r.id, "ok": true, "result": res}),
                         Err(e) => json!({"id": r.id, "ok": false, "error": e}),

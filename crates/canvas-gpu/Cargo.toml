@@ -27,3 +27,4 @@ web-time = "1"
 
 [dev-dependencies]
 image = { workspace = true }
+lizard-format = { workspace = true }

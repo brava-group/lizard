@@ -77,6 +77,40 @@ fn normals(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(normal_out, xy, vec4<f32>(clamp(vec2<f32>(gx, gy) * 0.25 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0, 1.0));
 }
 
+struct RoundedRectParams {
+    rect: vec4<f32>,
+    shape: vec4<f32>,
+};
+@group(0) @binding(16) var<uniform> rounded: RoundedRectParams;
+@group(0) @binding(17) var rounded_distance: texture_storage_2d<r32float, write>;
+@group(0) @binding(18) var rounded_normals: texture_storage_2d<rgba8unorm, write>;
+fn rounded_rect_data(point: vec2<f32>) -> vec3<f32> {
+    let center = (rounded.rect.xy + rounded.rect.zw) * 0.5;
+    let half = max((rounded.rect.zw - rounded.rect.xy) * 0.5, vec2<f32>(0.001));
+    let radius = clamp(rounded.shape.x, 0.0, min(half.x, half.y));
+    let q = abs(point - center) - (half - vec2<f32>(radius));
+    let corner = max(q, vec2<f32>(0.0));
+    let signed_distance = length(corner) + min(max(q.x, q.y), 0.0) - radius;
+    let distance = -signed_distance;
+    var inward = vec2<f32>(0.0);
+    if length(corner) > 0.0001 {
+        inward = -normalize(sign(point - center) * corner);
+    } else if q.x > q.y {
+        inward.x = -sign(point.x - center.x);
+    } else {
+        inward.y = -sign(point.y - center.y);
+    }
+    return vec3<f32>(distance, inward);
+}
+@compute @workgroup_size(16, 16)
+fn rounded_rect_geometry(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(rounded_distance);
+    if id.x >= size.x || id.y >= size.y { return; }
+    let data = rounded_rect_data(vec2<f32>(id.xy) + vec2<f32>(0.5));
+    textureStore(rounded_distance, vec2<i32>(id.xy), vec4<f32>(data.x, 0.0, 0.0, 0.0));
+    textureStore(rounded_normals, vec2<i32>(id.xy), vec4<f32>(data.yz * 0.5 + vec2<f32>(0.5), 0.0, 1.0));
+}
+
 struct GlassParams {
     dimensions: vec4<u32>,
     lens: vec4<f32>,
@@ -105,18 +139,9 @@ fn sample_backdrop(at: vec2<f32>) -> vec4<f32> {
     return mix(mix(samples[0], samples[1], fraction.x), mix(samples[2], samples[3], fraction.x), fraction.y);
 }
 
-@compute @workgroup_size(16, 16)
-fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x >= glass.dimensions.x || id.y >= glass.dimensions.y { return; }
-    let xy = vec2<i32>(id.xy);
-    let coverage = textureLoad(glass_mask, xy, 0).a;
-    if coverage <= 0.0 { textureStore(glass_out, xy, vec4<f32>(0.0)); return; }
-    let d = textureLoad(glass_distance, xy, 0).r;
-    let n = textureLoad(glass_normals, xy, 0).xy * 2.0 - vec2<f32>(1.0);
-    var inward = vec2<f32>(0.0);
-    if dot(n, n) > 0.00001 { inward = normalize(n); }
+fn shade_glass(point: vec2<f32>, d: f32, coverage: f32, inward: vec2<f32>) -> vec4<f32> {
+    if coverage <= 0.0 { return vec4<f32>(0.0); }
     let bend = glass.lens.y * pow(1.0 - min(d / glass.lens.x, 1.0), 2.0);
-    let point = vec2<f32>(id.xy) + vec2<f32>(0.5);
     var base = sample_backdrop(point);
     if bend > 0.0 {
         let red = sample_backdrop(point + inward * bend * (1.0 - glass.lens.z));
@@ -131,7 +156,30 @@ fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
         let spec = pow(max(facing, 0.0), glass.light.w) + 0.5 * pow(max(-facing, 0.0), glass.light.w);
         highlight = clamp(glass.light.z * spec * (exp(-d / glass.lens.w) - glass.falloff.y) / glass.falloff.z, 0.0, 1.0);
     }
-    textureStore(glass_out, xy, mix(base, vec4<f32>(1.0), highlight) * coverage);
+    return mix(base, vec4<f32>(1.0), highlight) * coverage;
+}
+
+@compute @workgroup_size(16, 16)
+fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= glass.dimensions.x || id.y >= glass.dimensions.y { return; }
+    let xy = vec2<i32>(id.xy);
+    let d = textureLoad(glass_distance, xy, 0).r;
+    let coverage = select(textureLoad(glass_mask, xy, 0).a, clamp(d + 0.5, 0.0, 1.0), glass.dimensions.z != 0u);
+    let n = textureLoad(glass_normals, xy, 0).xy * 2.0 - vec2<f32>(1.0);
+    var inward = vec2<f32>(0.0);
+    if dot(n, n) > 0.00001 { inward = normalize(n); }
+    textureStore(glass_out, xy, shade_glass(vec2<f32>(id.xy) + vec2<f32>(0.5), d, coverage, inward));
+}
+
+@compute @workgroup_size(16, 16)
+fn composite_rounded(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= glass.dimensions.x || id.y >= glass.dimensions.y { return; }
+    let point = vec2<f32>(id.xy) + vec2<f32>(0.5);
+    let data = rounded_rect_data(point);
+    let coverage = clamp(data.x + 0.5, 0.0, 1.0);
+    var inward = vec2<f32>(0.0);
+    if dot(data.yz, data.yz) > 0.00001 { inward = normalize(data.yz); }
+    textureStore(glass_out, vec2<i32>(id.xy), shade_glass(point, data.x, coverage, inward));
 }
 "#;
 
@@ -140,7 +188,9 @@ pub struct GpuGlass {
     propagate: wgpu::ComputePipeline,
     distances: wgpu::ComputePipeline,
     normals: wgpu::ComputePipeline,
+    rounded_rect: wgpu::ComputePipeline,
     composite: wgpu::ComputePipeline,
+    composite_rounded: wgpu::ComputePipeline,
     layouts: Vec<wgpu::BindGroupLayout>,
 }
 
@@ -180,6 +230,8 @@ impl GpuGlass {
             vec![texture(5, i), texture(6, f), storage(7, wgpu::TextureFormat::R32Float)],
             vec![texture(8, f), storage(9, wgpu::TextureFormat::Rgba8Unorm)],
             vec![texture(10, f), texture(11, f), texture(12, f), texture(13, f), storage(14, wgpu::TextureFormat::Rgba8Unorm), uniform(15)],
+            vec![uniform(16), storage(17, wgpu::TextureFormat::R32Float), storage(18, wgpu::TextureFormat::Rgba8Unorm)],
+            vec![texture(10, f), storage(14, wgpu::TextureFormat::Rgba8Unorm), uniform(15), uniform(16)],
         ];
         let layouts: Vec<_> = specs
             .iter()
@@ -217,7 +269,9 @@ impl GpuGlass {
             propagate: pipeline(1, "propagate"),
             distances: pipeline(2, "distances"),
             normals: pipeline(3, "normals"),
+            rounded_rect: pipeline(5, "rounded_rect_geometry"),
             composite: pipeline(4, "composite"),
+            composite_rounded: pipeline(6, "composite_rounded"),
             layouts,
         }
     }
@@ -231,6 +285,34 @@ impl GpuGlass {
         mask: &wgpu::Texture,
         effect: &Glass,
         scale: f64,
+    ) -> wgpu::Texture {
+        self.submit_with_shape(device, queue, blur, backdrop, mask, effect, scale, None)
+    }
+
+    pub fn submit_rounded_rect(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        blur: &GpuBlur,
+        backdrop: &wgpu::Texture,
+        effect: &Glass,
+        scale: f64,
+        rect: [f32; 4],
+        radius: f32,
+    ) -> wgpu::Texture {
+        self.submit_with_shape(device, queue, blur, backdrop, backdrop, effect, scale, Some((rect, radius)))
+    }
+
+    fn submit_with_shape(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        blur: &GpuBlur,
+        backdrop: &wgpu::Texture,
+        mask: &wgpu::Texture,
+        effect: &Glass,
+        scale: f64,
+        rounded_rect: Option<([f32; 4], f32)>,
     ) -> wgpu::Texture {
         let g = effect.sanitized();
         let size = backdrop.size();
@@ -246,12 +328,8 @@ impl GpuGlass {
                 view_formats: &[],
             })
         };
-        let seed_a = make("Lizard glass seeds A", wgpu::TextureFormat::Rg32Sint);
-        let seed_b = make("Lizard glass seeds B", wgpu::TextureFormat::Rg32Sint);
-        let field = make("Lizard glass distance field", wgpu::TextureFormat::R32Float);
-        let gradients = make("Lizard glass gradients", wgpu::TextureFormat::Rgba8Unorm);
         let result = make("Lizard glass output", wgpu::TextureFormat::Rgba8Unorm);
-        let frost = if g.frost > 0.0 { blur.submit(device, queue, backdrop, (g.frost * scale / 2.0) as f32, 1, None) } else { backdrop.clone() };
+        let frost = if g.frost > 0.0 { blur.submit_frost(device, queue, backdrop, (g.frost * scale / 2.0) as f32) } else { backdrop.clone() };
         let depth = (g.depth * scale).clamp(1.0, 1024.0) as f32;
         let smooth_radius = (depth * 0.1).clamp(1.0, 8.0);
         let make_group = |index: usize, textures: &[(&wgpu::Texture, u32)], uniform: Option<(&wgpu::Buffer, u32)>| {
@@ -270,12 +348,8 @@ impl GpuGlass {
                 entries: &entries,
             })
         };
-        let group_init = make_group(0, &[(mask, 0), (&seed_a, 1)], None);
-        let group_distance_a = make_group(2, &[(&seed_a, 5), (mask, 6), (&field, 7)], None);
-        let group_distance_b = make_group(2, &[(&seed_b, 5), (mask, 6), (&field, 7)], None);
-        let group_normals = make_group(3, &[(&field, 8), (&gradients, 9)], None);
         let mut params = Vec::with_capacity(64);
-        for v in [size.width, size.height, 0, 0] {
+        for v in [size.width, size.height, u32::from(rounded_rect.is_some()), 0] {
             params.extend_from_slice(&v.to_le_bytes());
         }
         let band = (depth * (0.15 + 0.35 * g.splay as f32)).max(1.0);
@@ -304,27 +378,72 @@ impl GpuGlass {
             pass.set_bind_group(0, group, &[]);
             pass.dispatch_workgroups(size.width.div_ceil(16), size.height.div_ceil(16), 1);
         };
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass encoder") });
-        dispatch(&mut encoder, &self.initialize, &group_init);
-        let mut current_a = true;
-        let mut stride = size.width.max(size.height).next_power_of_two() / 2;
-        while stride > 0 {
-            let bytes: Vec<u8> = [stride, 0, 0, 0].into_iter().flat_map(u32::to_le_bytes).collect();
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Lizard glass flood step"),
+        if let Some((rect, radius)) = rounded_rect
+            && std::env::var("LIZARD_GPU_GLASS_FUSED").ok().as_deref() != Some("0")
+        {
+            let bytes: Vec<u8> = rect.into_iter().chain([radius, 0.0, 0.0, 0.0]).flat_map(f32::to_le_bytes).collect();
+            let rounded_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Lizard glass rounded rectangle"),
                 contents: &bytes,
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-            let (from, to) = if current_a { (&seed_a, &seed_b) } else { (&seed_b, &seed_a) };
-            let group = make_group(1, &[(from, 2), (to, 3)], Some((&buffer, 4)));
-            dispatch(&mut encoder, &self.propagate, &group);
-            current_a = !current_a;
-            stride /= 2;
+            let backdrop_view = frost.create_view(&wgpu::TextureViewDescriptor::default());
+            let result_view = result.create_view(&wgpu::TextureViewDescriptor::default());
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Lizard fused rounded glass bindings"),
+                layout: &self.layouts[6],
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&backdrop_view) },
+                    wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&result_view) },
+                    wgpu::BindGroupEntry { binding: 15, resource: composite_uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 16, resource: rounded_uniform.as_entire_binding() },
+                ],
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard fused rounded glass encoder") });
+            dispatch(&mut encoder, &self.composite_rounded, &group);
+            queue.submit([encoder.finish()]);
+            return result;
         }
-        dispatch(&mut encoder, &self.distances, if current_a { &group_distance_a } else { &group_distance_b });
-        dispatch(&mut encoder, &self.normals, &group_normals);
+        let field = make("Lizard glass distance field", wgpu::TextureFormat::R32Float);
+        let gradients = make("Lizard glass gradients", wgpu::TextureFormat::Rgba8Unorm);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass geometry encoder") });
+        if let Some((rect, radius)) = rounded_rect {
+            let bytes: Vec<u8> = rect.into_iter().chain([radius, 0.0, 0.0, 0.0]).flat_map(f32::to_le_bytes).collect();
+            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Lizard glass rounded rectangle"),
+                contents: &bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let group = make_group(5, &[(&field, 17), (&gradients, 18)], Some((&uniform, 16)));
+            dispatch(&mut encoder, &self.rounded_rect, &group);
+        } else {
+            let seed_a = make("Lizard glass seeds A", wgpu::TextureFormat::Rg32Sint);
+            let seed_b = make("Lizard glass seeds B", wgpu::TextureFormat::Rg32Sint);
+            let group_init = make_group(0, &[(mask, 0), (&seed_a, 1)], None);
+            let group_distance_a = make_group(2, &[(&seed_a, 5), (mask, 6), (&field, 7)], None);
+            let group_distance_b = make_group(2, &[(&seed_b, 5), (mask, 6), (&field, 7)], None);
+            let group_normals = make_group(3, &[(&field, 8), (&gradients, 9)], None);
+            dispatch(&mut encoder, &self.initialize, &group_init);
+            let mut current_a = true;
+            let mut stride = size.width.max(size.height).next_power_of_two() / 2;
+            while stride > 0 {
+                let bytes: Vec<u8> = [stride, 0, 0, 0].into_iter().flat_map(u32::to_le_bytes).collect();
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Lizard glass flood step"),
+                    contents: &bytes,
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let (from, to) = if current_a { (&seed_a, &seed_b) } else { (&seed_b, &seed_a) };
+                let group = make_group(1, &[(from, 2), (to, 3)], Some((&buffer, 4)));
+                dispatch(&mut encoder, &self.propagate, &group);
+                current_a = !current_a;
+                stride /= 2;
+            }
+            dispatch(&mut encoder, &self.distances, if current_a { &group_distance_a } else { &group_distance_b });
+            dispatch(&mut encoder, &self.normals, &group_normals);
+        }
         queue.submit([encoder.finish()]);
-        let smoothed = blur.submit(device, queue, &gradients, smooth_radius, 1, None);
+        let smoothed = if rounded_rect.is_some() { gradients } else { blur.submit(device, queue, &gradients, smooth_radius, 1, None) };
         let group_composite =
             make_group(4, &[(&frost, 10), (mask, 11), (&field, 12), (&smoothed, 13), (&result, 14)], Some((&composite_uniform, 15)));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass composite encoder") });

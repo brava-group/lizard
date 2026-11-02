@@ -129,7 +129,22 @@ pub fn drain(app: &mut LizardApp, ctx: &Context) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             continue;
         }
+        let handled_at = std::time::Instant::now();
+        if std::env::var_os("LIZARD_CONTROL_PROFILE").is_some()
+            && let Some(queued_ns) = r.params.get("__profile_queued_ns").and_then(Value::as_u64)
+            && let Ok(since_epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            eprintln!(
+                "control_profile id={} method={} queue_ms={:.2}",
+                r.id,
+                r.method,
+                (since_epoch.as_nanos() as u64).saturating_sub(queued_ns) as f64 / 1_000_000.0
+            );
+        }
         let res = handle(app, ctx, &r.method, &r.params);
+        if std::env::var_os("LIZARD_CONTROL_PROFILE").is_some() {
+            eprintln!("control_profile id={} method={} handler_ms={:.2}", r.id, r.method, handled_at.elapsed().as_secs_f64() * 1000.0);
+        }
         let _ = r.reply.send(ControlReply { id: r.id, result: res });
         ctx.request_repaint();
     }
@@ -471,10 +486,10 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             let mut events = Vec::new();
             let mut pads = Vec::new();
             for e in list.iter().take(256) {
-                let button = if e.get("button").and_then(Value::as_str) == Some("secondary") {
-                    egui::PointerButton::Secondary
-                } else {
-                    egui::PointerButton::Primary
+                let button = match e.get("button").and_then(Value::as_str) {
+                    Some("secondary") => egui::PointerButton::Secondary,
+                    Some("middle") => egui::PointerButton::Middle,
+                    _ => egui::PointerButton::Primary,
                 };
                 let command = b(e, "cmd") || b(e, "ctrl");
                 let mods = egui::Modifiers { alt: b(e, "alt"), ctrl: command, shift: b(e, "shift"), mac_cmd: false, command };

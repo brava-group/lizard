@@ -80,12 +80,28 @@ fn downsample(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     textureStore(destination, vec2<i32>(id.xy), sum / count);
 }
+
+@compute @workgroup_size(16, 16)
+fn upsample(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= params.width || id.y >= params.height { return; }
+    let small = vec2<i32>(textureDimensions(source));
+    let full = vec2<f32>(f32(params.width), f32(params.height));
+    let position = (vec2<f32>(id.xy) + vec2<f32>(0.5)) * vec2<f32>(small) / full - vec2<f32>(0.5);
+    let lower = vec2<i32>(floor(position));
+    let fraction = fract(position);
+    let a = textureLoad(source, clamp(lower, vec2<i32>(0), small - vec2<i32>(1)), 0);
+    let b = textureLoad(source, clamp(lower + vec2<i32>(1, 0), vec2<i32>(0), small - vec2<i32>(1)), 0);
+    let c = textureLoad(source, clamp(lower + vec2<i32>(0, 1), vec2<i32>(0), small - vec2<i32>(1)), 0);
+    let d = textureLoad(source, clamp(lower + vec2<i32>(1, 1), vec2<i32>(0), small - vec2<i32>(1)), 0);
+    textureStore(destination, vec2<i32>(id.xy), mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y));
+}
 "#;
 
 pub struct GpuBlur {
     pipeline: wgpu::ComputePipeline,
     box_pipeline: wgpu::ComputePipeline,
     downsample_pipeline: wgpu::ComputePipeline,
+    upsample_pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
 }
 
@@ -155,7 +171,15 @@ impl GpuBlur {
             compilation_options: Default::default(),
             cache: None,
         });
-        Self { pipeline, box_pipeline, downsample_pipeline, layout }
+        let upsample_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Lizard blur upsample"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("upsample"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        Self { pipeline, box_pipeline, downsample_pipeline, upsample_pipeline, layout }
     }
 
     fn box_radii(sigma: f32) -> [u32; 3] {
@@ -282,5 +306,73 @@ impl GpuBlur {
         }
         queue.submit([encoder.finish()]);
         result
+    }
+
+    /// Blur at a smaller resolution, then reconstruct a native-size result for compositing.
+    /// Large smooth kernels retain their shape while avoiding a full-resolution sample loop.
+    pub fn submit_upsampled(&self, device: &wgpu::Device, queue: &wgpu::Queue, source: &wgpu::Texture, sigma: f32, scale: u32) -> wgpu::Texture {
+        let scale = scale.max(1);
+        if scale == 1 {
+            return self.submit(device, queue, source, sigma, 1, None);
+        }
+        let small = self.submit(device, queue, source, sigma, scale, None);
+        let size = source.size();
+        let result = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Lizard blur native-resolution result"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let mut params = Vec::with_capacity(48);
+        for value in [size.width, size.height, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] {
+            params.extend_from_slice(&value.to_le_bytes());
+        }
+        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Lizard blur upsample params"),
+            contents: &params,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Lizard blur upsample bindings"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&small.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&result.create_view(&wgpu::TextureViewDescriptor::default())),
+                },
+                wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard blur upsample encoder") });
+        {
+            let mut pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Lizard blur upsample pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.upsample_pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(size.width.div_ceil(16), size.height.div_ceil(16), 1);
+        }
+        queue.submit([encoder.finish()]);
+        result
+    }
+
+    pub fn submit_frost(&self, device: &wgpu::Device, queue: &wgpu::Queue, source: &wgpu::Texture, sigma: f32) -> wgpu::Texture {
+        let scale = if sigma >= 32.0 {
+            8
+        } else if sigma >= 12.0 {
+            4
+        } else if sigma >= 6.0 {
+            2
+        } else {
+            1
+        };
+        self.submit_upsampled(device, queue, source, sigma, scale)
     }
 }

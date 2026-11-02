@@ -2,6 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 use std::sync::mpsc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -16,7 +19,7 @@ use lizard_render::{FillRule, View, draw};
 use lizard_render::{Options, render_view};
 use vello_common::TextureId;
 use vello_common::filter_effects::{EdgeMode, Filter, FilterFunction, FilterPrimitive};
-use vello_common::geometry::RectU16;
+use vello_common::geometry::{RectU16, SizeU16};
 use vello_common::paint::{Image, ImageSource};
 use vello_common::peniko::{self, Fill};
 use vello_gpu::{RenderSize, RenderTargetConfig, Scene, TargetInit, TextureBindings};
@@ -4806,8 +4809,9 @@ pub struct ImageInfo {
     pub id: TextureId,
     pub width: u16,
     pub height: u16,
-    /// Screen-space placement for cropped backdrop textures; ordinary images use `None`.
-    pub region: Option<(u16, u16, u16, u16)>,
+    /// Screen-space placement for cropped backdrop textures; fractional offsets preserve
+    /// native-resolution sampling while the camera moves between physical pixel boundaries.
+    pub region: Option<(f64, f64, u16, u16)>,
 }
 
 /// Rebuild when document geometry or effect properties change.
@@ -4836,6 +4840,10 @@ pub fn focused_document(doc: &Document, page: NodeId, focus: NodeId) -> Option<D
 }
 
 impl BackdropIndex {
+    pub fn is_empty(&self) -> bool {
+        self.candidates.is_empty()
+    }
+
     pub fn new(doc: &Document, page: NodeId) -> Self {
         let mut paint_order = Vec::new();
         collect_paint_order(doc, page, &mut paint_order);
@@ -4875,7 +4883,11 @@ fn backdrop_requires_cpu(doc: &Document, id: NodeId, page: NodeId) -> bool {
         if (current != id && node.opacity < 0.999)
             || translucent_glass
             || node.children.iter().any(|child| doc.node(*child).is_some_and(|child| child.is_mask))
-            || (node.clip && (xf[1].abs() > 1e-6 || xf[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0)))
+            || (node.clip
+                && !(current == id
+                    && matches!(node.kind, NodeKind::Frame)
+                    && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_))))
+                && (xf[1].abs() > 1e-6 || xf[2].abs() > 1e-6 || node.corners.uniform().is_none_or(|radius| radius > 0.0)))
         {
             return true;
         }
@@ -5257,9 +5269,9 @@ fn draw_content(
     {
         path.apply_affine(transform);
         scene.set_transform(Affine::IDENTITY);
-        let (x, y, width, height) = info.region.unwrap_or((0, 0, size.0, size.1));
+        let (x, y, width, height) = info.region.unwrap_or((0.0, 0.0, size.0, size.1));
         scene.set_paint_transform(
-            Affine::translate((f64::from(x), f64::from(y)))
+            Affine::translate((x, y))
                 * Affine::scale_non_uniform(f64::from(width) / f64::from(info.width), f64::from(height) / f64::from(info.height)),
         );
         set_rule(scene, rule);
@@ -5454,6 +5466,24 @@ pub fn gpu_drop_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -
         && shadow.spread >= 0.0
 }
 
+/// A clipped, painted glass frame casts its shadow from the rounded frame outline.
+/// Its children stay inside that outline and are drawn after the backdrop effect.
+fn gpu_glass_frame_shadow_supported(node: &Node, shadow: &Shadow) -> bool {
+    matches!(node.kind, NodeKind::Frame)
+        && node.clip
+        && node.fills.iter().any(|paint| paint.visible && paint.opacity > 0.0)
+        && node.corners.uniform().is_some()
+        && node.corners.smoothing.abs() < 1e-6
+        && node.width > 0.0
+        && node.height > 0.0
+        && shadow.blend == BlendMode::Normal
+        && [shadow.radius, shadow.spread, shadow.offset.0, shadow.offset.1].into_iter().all(f64::is_finite)
+        && (0.0..=128.0).contains(&shadow.radius)
+        && (-32.0..=32.0).contains(&shadow.spread)
+        && node.width + 2.0 * shadow.spread > 0.0
+        && node.height + 2.0 * shadow.spread > 0.0
+}
+
 /// The generic Vello filter matches simple opaque path shadows with small positive spread.
 /// Translucent fills, stroke geometry, and mixed effect stacks use other guarded paths.
 fn gpu_vector_drop_shadow_supported(node: &Node, shadow: &Shadow) -> bool {
@@ -5493,7 +5523,7 @@ fn draw_shadow(scene: &mut Scene, doc: &Document, node: &Node, camera: Affine) {
             continue;
         }
         let shadow_transform = camera * Affine::translate(shadow.offset) * doc.world_transform(node.id);
-        if gpu_drop_shadow_supported(doc, node, shadow)
+        if (gpu_drop_shadow_supported(doc, node, shadow) || gpu_glass_frame_shadow_supported(node, shadow))
             && let Some(radius) = node.corners.uniform()
         {
             let spread = shadow.spread;
@@ -5510,7 +5540,7 @@ fn draw_shadow(scene: &mut Scene, doc: &Document, node: &Node, camera: Affine) {
                 scene.push_clip_path(&clip);
             }
             scene.set_transform(shadow_transform);
-            scene.fill_blurred_rounded_rect(&rect, (radius + spread) as f32, (shadow.radius / 2.0) as f32, false);
+            scene.fill_blurred_rounded_rect(&rect, (radius + spread).max(0.0) as f32, (shadow.radius / 2.0) as f32, false);
             if !shadow.show_behind {
                 scene.pop_clip();
             }
@@ -6622,7 +6652,8 @@ fn gpu_glass_stack_supported(doc: &Document, node: &Node) -> bool {
             EffectKind::LayerBlur(blur) => !blur.is_progressive() && blur.radius.is_finite() && (0.0..=32.0).contains(&blur.radius),
             EffectKind::Noise(noise) => noise.blend == BlendMode::Normal && noise.density.is_finite() && noise.opacity.is_finite(),
             EffectKind::DropShadow(shadow) => {
-                gpu_drop_shadow_supported(doc, node, shadow) && (0.0..=32.0).contains(&shadow.radius) && (0.0..=32.0).contains(&shadow.spread)
+                (gpu_drop_shadow_supported(doc, node, shadow) && (0.0..=32.0).contains(&shadow.radius) && (0.0..=32.0).contains(&shadow.spread))
+                    || gpu_glass_frame_shadow_supported(node, shadow)
             }
             _ => false,
         })
@@ -6641,10 +6672,15 @@ fn gpu_glass_shadow_supported(doc: &Document, node: &Node) -> bool {
     visible.len() >= 2
         && visible.iter().any(|effect| matches!(effect.kind, EffectKind::Glass(_)))
         && visible.iter().any(|effect| match &effect.kind {
-            EffectKind::DropShadow(shadow) => gpu_drop_shadow_supported(doc, node, shadow),
+            EffectKind::DropShadow(shadow) => gpu_drop_shadow_supported(doc, node, shadow) || gpu_glass_frame_shadow_supported(node, shadow),
             _ => false,
         })
         && (visible.len() == 2 || gpu_glass_stack_supported(doc, node))
+}
+
+fn gpu_glass_prefix_shadow_supported(doc: &Document, node: &Node) -> bool {
+    gpu_glass_shadow_supported(doc, node)
+        && node.effects.iter().any(|effect| effect.visible && matches!(&effect.kind, EffectKind::DropShadow(shadow) if shadow.show_behind))
 }
 
 fn gpu_multiple_drop_shadows_supported(doc: &Document, node: &Node) -> bool {
@@ -6702,6 +6738,32 @@ fn gpu_cached_drop_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow
         && shadow.offset.1.is_finite()
         && shadow.blend == BlendMode::Normal
         && gpu_cached_shadow_bounds_supported(doc, node)
+}
+
+/// The Vello shadow filter uses the shape outline at the current view scale, keeping
+/// gradient-filled icons sharp during zoom. Boolean operands define the result outline.
+fn gpu_gradient_path_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Ellipse { .. } | NodeKind::Polygon { .. } | NodeKind::Star { .. } | NodeKind::Vector { .. } | NodeKind::BooleanOp { .. }
+    ) && (node.children.is_empty() || matches!(node.kind, NodeKind::BooleanOp { .. }))
+        && node.strokes.is_empty()
+        && node.opacity >= 0.999
+        && node.blend == BlendMode::Normal
+        && node.effects.iter().filter(|effect| effect.visible).count() == 1
+        && node.fills.iter().any(|paint| paint.visible)
+        && node.fills.iter().all(|paint| {
+            !paint.visible
+                || paint.blend == BlendMode::Normal
+                    && match &paint.kind {
+                        PaintKind::Gradient(gradient) => paint.opacity >= 0.999 && gradient.stops.iter().all(|stop| stop.color.a >= 0.999),
+                        PaintKind::Solid { color } => color.a * paint.opacity >= 0.999,
+                        _ => false,
+                    }
+        })
+        && shadow.spread == 0.0
+        && (0.0..=64.0).contains(&shadow.radius)
+        && draw::node_outline(doc, node).is_some()
 }
 
 fn gpu_stroked_shape_shadow_supported(doc: &Document, node: &Node, shadow: &Shadow) -> bool {
@@ -6944,12 +7006,13 @@ fn gpu_progressive_layer_blur_supported(doc: &Document, node: &Node, blur: &Blur
 }
 
 fn gpu_glass_supported(doc: &Document, node: &Node, view: &View, glass: &Glass) -> bool {
-    if !matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Vector { .. })
-        || !node.children.is_empty()
+    if !matches!(node.kind, NodeKind::Rectangle | NodeKind::Ellipse { .. } | NodeKind::Vector { .. } | NodeKind::Frame)
+        || (!matches!(node.kind, NodeKind::Frame) && !node.children.is_empty())
         || (node.effects.iter().filter(|effect| effect.visible).count() != 1
             && !gpu_glass_stack_supported(doc, node)
             && !gpu_glass_shadow_supported(doc, node))
-        || (node.blend != BlendMode::Normal && !(gpu_glass_stack_supported(doc, node) && gpu_node_blend(node).is_some()))
+        || !(matches!(node.blend, BlendMode::Normal | BlendMode::PassThrough)
+            || gpu_glass_stack_supported(doc, node) && gpu_node_blend(node).is_some())
         || draw::node_outline(doc, node).is_none()
     {
         return false;
@@ -6957,8 +7020,7 @@ fn gpu_glass_supported(doc: &Document, node: &Node, view: &View, glass: &Glass) 
     gpu_glass_region(doc, node.id, view, glass).is_some()
 }
 
-fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> Option<(u16, u16, u16, u16)> {
-    let bounds = lizard_render::backdrop::shape_bounds(doc, id)?;
+fn gpu_glass_margin_px(doc: &Document, id: NodeId, scale: f64, glass: &Glass) -> Option<f64> {
     let safe = glass.sanitized();
     let layer_blur_reach = doc.node(id).map_or(0.0, |node| {
         node.effects
@@ -6970,17 +7032,33 @@ fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> O
             })
             .sum::<f64>()
     });
-    let shadow_reach = doc.node(id).map_or(0.0, |node| {
-        node.effects
-            .iter()
-            .filter(|effect| effect.visible)
-            .filter_map(|effect| match &effect.kind {
-                EffectKind::DropShadow(shadow) => Some(shadow.radius * 3.0 + shadow.spread.abs() + shadow.offset.0.abs().max(shadow.offset.1.abs())),
-                _ => None,
-            })
-            .fold(0.0, f64::max)
-    });
-    let margin = ((safe.max_bend() + safe.frost * 3.0 + layer_blur_reach + shadow_reach) * view.scale + 24.0).ceil();
+    // A separate drop shadow does not sample the glass texture outside the pane.
+    // Only the composited Glass+layer stack needs the shadow's full footprint here.
+    let shadow_reach = doc
+        .node(id)
+        .filter(|node| {
+            gpu_glass_stack_supported(doc, node)
+                && node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+        })
+        .map_or(0.0, |node| {
+            node.effects
+                .iter()
+                .filter(|effect| effect.visible)
+                .filter_map(|effect| match &effect.kind {
+                    EffectKind::DropShadow(shadow) => {
+                        Some(shadow.radius * 3.0 + shadow.spread.abs() + shadow.offset.0.abs().max(shadow.offset.1.abs()))
+                    }
+                    _ => None,
+                })
+                .fold(0.0, f64::max)
+        });
+    let margin = ((safe.max_bend() + safe.frost * 3.0 + layer_blur_reach + shadow_reach) * scale + 24.0).ceil();
+    (margin.is_finite() && margin >= 0.0).then_some(margin)
+}
+
+fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> Option<(u16, u16, u16, u16)> {
+    let bounds = lizard_render::backdrop::shape_bounds(doc, id)?;
+    let margin = gpu_glass_margin_px(doc, id, view.scale, glass)?;
     let requested = [
         ((bounds.x0 - view.origin.0) * view.scale - margin).floor(),
         ((bounds.y0 - view.origin.1) * view.scale - margin).floor(),
@@ -7004,6 +7082,26 @@ fn gpu_glass_region(doc: &Document, id: NodeId, view: &View, glass: &Glass) -> O
         u16::try_from(y0 as u32).ok()?,
         u16::try_from((x1 - x0) as u32).ok()?,
         u16::try_from((y1 - y0) as u32).ok()?,
+    ))
+}
+
+fn gpu_background_blur_region(doc: &Document, id: NodeId, view: &View, radius: f64) -> Option<(u16, u16, u16, u16)> {
+    let bounds = lizard_render::backdrop::shape_bounds(doc, id)?;
+    // The filter kernel reaches about three sigma beyond the shape. Four sigma also
+    // covers the interpolation footprint at fractional zoom without a visible seam.
+    let margin = (radius * view.scale * 2.0 + 4.0).ceil();
+    let left = ((bounds.x0 - view.origin.0) * view.scale - margin).floor().clamp(0.0, f64::from(view.width));
+    let top = ((bounds.y0 - view.origin.1) * view.scale - margin).floor().clamp(0.0, f64::from(view.height));
+    let right = ((bounds.x1 - view.origin.0) * view.scale + margin).ceil().clamp(0.0, f64::from(view.width));
+    let bottom = ((bounds.y1 - view.origin.1) * view.scale + margin).ceil().clamp(0.0, f64::from(view.height));
+    if ![left, top, right, bottom].into_iter().all(f64::is_finite) || right <= left || bottom <= top {
+        return None;
+    }
+    Some((
+        u16::try_from(left as u32).ok()?,
+        u16::try_from(top as u32).ok()?,
+        u16::try_from((right - left) as u32).ok()?,
+        u16::try_from((bottom - top) as u32).ok()?,
     ))
 }
 
@@ -7039,6 +7137,7 @@ fn has_matching_effects_excluding_in_view(
                             EffectKind::DropShadow(shadow) => {
                                 !(gpu_drop_shadow_supported(doc, node, shadow)
                                     || gpu_vector_drop_shadow_supported(node, shadow)
+                                    || gpu_gradient_path_shadow_supported(doc, node, shadow)
                                     || gpu_backdrop && gpu_glass_shadow_supported(doc, node)
                                     || cached_noise && gpu_stacked_blur_noise_supported(doc, node)
                                     || cached_noise && gpu_stacked_blur_texture_supported(doc, node)
@@ -7142,9 +7241,12 @@ pub struct GpuCanvas {
     gpu_shadow_clip: Option<GpuShadowClip>,
     gpu_shader: Option<GpuShader>,
     gpu_silhouette_shadow: Option<GpuSilhouetteShadow>,
-    glass_prefix_canvas: Option<Box<GpuCanvas>>,
+    glass_prefix_canvases: Vec<GpuCanvas>,
     glass_mask_canvas: Option<Box<GpuCanvas>>,
     glass_content_canvas: Option<Box<GpuCanvas>>,
+    backdrop_cache_document: Option<Arc<Document>>,
+    backdrop_cache_scale: Option<f64>,
+    backdrop_cache: Vec<CachedBackdropResult>,
     layer_blurs: HashMap<NodeId, CachedLayerBlur>,
     layer_blurs_1x: HashMap<NodeId, CachedLayerBlur>,
     drop_shadows: HashMap<NodeId, CachedLayerBlur>,
@@ -7162,6 +7264,19 @@ struct CachedLayerBlur {
     height: u16,
     bounds: Rect,
     placement: Affine,
+}
+
+struct CachedBackdropResult {
+    node: NodeId,
+    page: NodeId,
+    scale: f64,
+    origin: (f64, f64),
+    width: u16,
+    height: u16,
+    display_width: u16,
+    display_height: u16,
+    id: TextureId,
+    _texture: wgpu::Texture,
 }
 
 struct GrainCacheState {
@@ -8143,6 +8258,15 @@ impl GpuCanvas {
         }
     }
 
+    fn renderer_settings(device: &wgpu::Device) -> vello_gpu::RenderSettings {
+        let mut settings = vello_gpu::RenderSettings::default();
+        // Vello defaults to a 4096 px intermediate limit even on larger devices.
+        // Filters can need padding beyond the viewport during Retina zoom/pan.
+        let dimension = u16::try_from(device.limits().max_texture_dimension_2d).unwrap_or(u16::MAX);
+        settings.memory_settings.layers_config.max_texture_size = SizeU16::new(dimension);
+        settings
+    }
+
     pub fn new(width: u32, height: u32) -> Result<Self, Box<dyn Error>> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -8177,7 +8301,7 @@ impl GpuCanvas {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let config = RenderTargetConfig { format: texture.format(), width: width as u16, height: height as u16 };
-        let (renderer, resources) = vello_gpu::Renderer::new(&self.device, &config);
+        let (renderer, resources) = vello_gpu::Renderer::new_with(&self.device, &config, Self::renderer_settings(&self.device));
         let depth = vello_gpu::Renderer::create_depth_texture_view(&self.device, &RenderSize { width: width as u16, height: height as u16 });
         self.texture = texture;
         self.view = view;
@@ -8203,7 +8327,7 @@ impl GpuCanvas {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let config = RenderTargetConfig { format: texture.format(), width: width as u16, height: height as u16 };
-        let (renderer, resources) = vello_gpu::Renderer::new(&device, &config);
+        let (renderer, resources) = vello_gpu::Renderer::new_with(&device, &config, Self::renderer_settings(&device));
         let depth = vello_gpu::Renderer::create_depth_texture_view(&device, &RenderSize { width: width as u16, height: height as u16 });
         Self {
             adapter_name,
@@ -8238,9 +8362,12 @@ impl GpuCanvas {
             gpu_shadow_clip: None,
             gpu_shader: None,
             gpu_silhouette_shadow: None,
-            glass_prefix_canvas: None,
+            glass_prefix_canvases: Vec::new(),
             glass_mask_canvas: None,
             glass_content_canvas: None,
+            backdrop_cache_document: None,
+            backdrop_cache_scale: None,
+            backdrop_cache: Vec::new(),
             layer_blurs: HashMap::new(),
             layer_blurs_1x: HashMap::new(),
             drop_shadows: HashMap::new(),
@@ -8254,6 +8381,425 @@ impl GpuCanvas {
 
     pub fn image_info(&self) -> &HashMap<String, ImageInfo> {
         &self.image_info
+    }
+
+    /// An Arc keeps the document generation alive, so a new edit cannot accidentally reuse
+    /// an old backdrop even if its allocation later receives the same address.
+    pub fn set_backdrop_cache_document(&mut self, doc: Option<Arc<Document>>, scale: f64) {
+        let unchanged = match (&self.backdrop_cache_document, &doc) {
+            (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+            (None, None) => true,
+            _ => false,
+        };
+        if unchanged && self.backdrop_cache_scale.is_some_and(|cached| cached.to_bits() == scale.to_bits()) {
+            return;
+        }
+        for entry in self.backdrop_cache.drain(..) {
+            self.image_bindings.remove(entry.id);
+        }
+        self.backdrop_cache_document = doc;
+        self.backdrop_cache_scale = Some(scale);
+    }
+
+    /// A narrow pan strip is valid only when every visible effect that samples neighboring
+    /// pixels already has a document-space result. Rounded Glass frame shadows are analytic
+    /// and can be evaluated independently at any strip origin.
+    pub fn pan_strip_safe(&self, doc: &Document, page: NodeId, view: &View) -> bool {
+        let world = Rect::new(
+            view.origin.0,
+            view.origin.1,
+            view.origin.0 + f64::from(view.width) / view.scale,
+            view.origin.1 + f64::from(view.height) / view.scale,
+        );
+        for node in doc.nodes() {
+            if !node.visible || has_hidden_ancestor(doc, node) || doc.page_of(node.id) != Some(page) {
+                continue;
+            }
+            let visible_effects: Vec<_> = node.effects.iter().filter(|effect| effect.visible).collect();
+            if visible_effects.is_empty() {
+                continue;
+            }
+            let Some(bounds) = lizard_render::raster_bounds(doc, node.id) else { return false };
+            if bounds.intersect(world).area() <= 0.0 {
+                continue;
+            }
+            if visible_effects.iter().filter(|effect| matches!(&effect.kind, EffectKind::Glass(_) | EffectKind::BackgroundBlur(_))).count() > 1 {
+                return false;
+            }
+            for effect in visible_effects {
+                let ready = match &effect.kind {
+                    EffectKind::Glass(_) | EffectKind::BackgroundBlur(_) => self.cached_backdrop_info(doc, page, node.id, view).is_some(),
+                    EffectKind::LayerBlur(_) => self.layer_blurs.contains_key(&node.id) || self.layer_blurs_1x.contains_key(&node.id),
+                    EffectKind::DropShadow(shadow) => {
+                        self.drop_shadows.contains_key(&node.id)
+                            || self.layer_blurs.contains_key(&node.id)
+                            || gpu_glass_frame_shadow_supported(node, shadow)
+                    }
+                    EffectKind::InnerShadow(_) => self.inner_shadows.contains_key(&node.id),
+                    EffectKind::Noise(_) => self.noise_effects.contains_key(&node.id) || self.grain_cache.contains_key(&node.id),
+                    EffectKind::Texture(_) => self.texture_effects.contains_key(&node.id) || self.texture_effects_1x.contains_key(&node.id),
+                };
+                if !ready {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Fill document-space backdrops needed by uncovered pan strips without drawing the
+    /// entire viewport again. The caller still checks every strip before presenting it.
+    pub fn prepare_backdrops_for_pan_strips(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        view: &View,
+        strips: &[View],
+        clear: [f32; 3],
+        index: &BackdropIndex,
+    ) -> Result<bool, Box<dyn Error>> {
+        if !self.backdrop_cache_document.as_ref().is_some_and(|cached| std::ptr::eq(cached.as_ref(), doc))
+            || self.backdrop_cache_scale != Some(view.scale)
+        {
+            return Ok(false);
+        }
+        let intersects_strip = |bounds: &Rect| {
+            strips.iter().any(|strip| {
+                let world = Rect::new(
+                    strip.origin.0,
+                    strip.origin.1,
+                    strip.origin.0 + f64::from(strip.width) / strip.scale,
+                    strip.origin.1 + f64::from(strip.height) / strip.scale,
+                );
+                bounds.intersect(world).area() > 0.0
+            })
+        };
+        let last_needed = index.candidates.iter().rposition(|(_, _, bounds, _)| intersects_strip(bounds));
+        let Some(last_needed) = last_needed else {
+            return Ok(strips.iter().all(|strip| self.pan_strip_safe(doc, page, strip)));
+        };
+        let mut backdrops = HashMap::new();
+        let clear = [clear[0], clear[1], clear[2], 1.0];
+        for (id, radius, _, _) in index.candidates.iter().take(last_needed + 1) {
+            if let Some(info) = self.cached_backdrop_info(doc, page, *id, view) {
+                backdrops.insert(*id, info);
+                continue;
+            }
+            let Some(node) = doc.node(*id) else { continue };
+            let glass = node.effects.iter().find_map(|effect| match &effect.kind {
+                EffectKind::Glass(glass) if effect.visible => Some(glass),
+                _ => None,
+            });
+            let info = if let Some(glass) = glass {
+                self.render_and_cache_glass(doc, page, *id, view, glass, clear, index)?
+            } else if node
+                .effects
+                .iter()
+                .any(|effect| effect.visible && matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
+            {
+                self.render_and_cache_background_blur(doc, page, *id, view, *radius, clear, &backdrops, index)?
+            } else {
+                None
+            };
+            if let Some(info) = info {
+                backdrops.insert(*id, info);
+                if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+                    eprintln!("gpu_backdrop_cache pan_prepare id={} scale={:.2}", id.0, view.scale);
+                }
+            }
+        }
+        Ok(strips.iter().all(|strip| self.pan_strip_safe(doc, page, strip)))
+    }
+
+    fn cached_backdrop_info(&self, doc: &Document, page: NodeId, node: NodeId, view: &View) -> Option<ImageInfo> {
+        if !self.backdrop_cache_document.as_ref().is_some_and(|cached| std::ptr::eq(cached.as_ref(), doc)) {
+            return None;
+        }
+        let entry =
+            self.backdrop_cache.iter().find(|entry| entry.page == page && entry.node == node && entry.scale.to_bits() == view.scale.to_bits())?;
+        let left = (entry.origin.0 - view.origin.0) * view.scale;
+        let top = (entry.origin.1 - view.origin.1) * view.scale;
+        if ![left, top].into_iter().all(|value| value.is_finite() && value >= f64::from(i32::MIN) && value <= f64::from(i32::MAX)) {
+            return None;
+        }
+        Some(ImageInfo {
+            id: entry.id,
+            width: entry.width,
+            height: entry.height,
+            region: Some((left, top, entry.display_width, entry.display_height)),
+        })
+    }
+
+    fn full_glass_cache_view(&self, doc: &Document, id: NodeId, view: &View, effect: &Glass) -> Option<View> {
+        if !self.backdrop_cache_document.as_ref().is_some_and(|cached| std::ptr::eq(cached.as_ref(), doc)) {
+            return None;
+        }
+        let node = doc.node(id)?;
+        if !matches!(node.kind, NodeKind::Frame | NodeKind::Rectangle)
+            || node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::LayerBlur(_) | EffectKind::Noise(_)))
+            || node.effects.iter().any(|effect| effect.visible && matches!(&effect.kind, EffectKind::DropShadow(shadow) if shadow.show_behind))
+        {
+            return None;
+        }
+        let bounds = lizard_render::backdrop::shape_bounds(doc, id)?;
+        let margin = gpu_glass_margin_px(doc, id, view.scale, effect)? + 2.0;
+        let full = self.full_backdrop_cache_view(bounds, margin, view, 48_000_000)?;
+        Self::rounded_glass_shape(doc, id, &full, (0, 0, full.width as u16, full.height as u16))?;
+        Some(full)
+    }
+
+    fn full_backdrop_cache_view(&self, bounds: Rect, margin: f64, view: &View, max_pixels: u64) -> Option<View> {
+        let phase_x = (view.origin.0 * view.scale).rem_euclid(1.0);
+        let phase_y = (view.origin.1 * view.scale).rem_euclid(1.0);
+        let left = (bounds.x0 * view.scale - margin - phase_x).floor() + phase_x;
+        let top = (bounds.y0 * view.scale - margin - phase_y).floor() + phase_y;
+        let right = (bounds.x1 * view.scale + margin - phase_x).ceil() + phase_x;
+        let bottom = (bounds.y1 * view.scale + margin - phase_y).ceil() + phase_y;
+        let width = right - left;
+        let height = bottom - top;
+        let limit = f64::from(self.device.limits().max_texture_dimension_2d.min(u32::from(u16::MAX)));
+        if ![left, top, width, height].into_iter().all(f64::is_finite)
+            || width <= 0.0
+            || height <= 0.0
+            || width > limit
+            || height > limit
+            || width * height > max_pixels as f64
+        {
+            return None;
+        }
+        Some(View { origin: (left / view.scale, top / view.scale), scale: view.scale, width: width as u32, height: height as u32 })
+    }
+
+    fn insert_cached_backdrop(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        node: NodeId,
+        view: &View,
+        full: &View,
+        result: wgpu::Texture,
+    ) -> Option<ImageInfo> {
+        let ratio = view.scale / full.scale;
+        let display_width = u16::try_from((f64::from(full.width) * ratio).round() as u32).ok()?;
+        let display_height = u16::try_from((f64::from(full.height) * ratio).round() as u32).ok()?;
+        let texture_id = TextureId(self.next_external_id);
+        self.next_external_id += 1;
+        self.image_bindings.insert(texture_id, result.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.backdrop_cache.push(CachedBackdropResult {
+            node,
+            page,
+            scale: view.scale,
+            origin: full.origin,
+            width: full.width as u16,
+            height: full.height as u16,
+            display_width,
+            display_height,
+            id: texture_id,
+            _texture: result,
+        });
+        self.cached_backdrop_info(doc, page, node, view)
+    }
+
+    fn prune_backdrop_cache_after_submit(&mut self, max_pixels: u64) {
+        // Earlier backdrops can still be referenced by the scene under construction. Remove
+        // their bindings only after that scene has been encoded and submitted to the queue.
+        while self.backdrop_cache.iter().map(|entry| u64::from(entry.width) * u64::from(entry.height)).sum::<u64>() > max_pixels {
+            let expired = self.backdrop_cache.remove(0);
+            self.image_bindings.remove(expired.id);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn profile_backdrop_queue(&self, stage: &'static str, node: NodeId) {
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_none() {
+            return;
+        }
+        static EPOCH: OnceLock<Instant> = OnceLock::new();
+        let epoch = *EPOCH.get_or_init(Instant::now);
+        let submitted_at = Instant::now();
+        eprintln!("gpu_backdrop_queue submit stage={stage} node={} t_ms={:.2}", node.0, submitted_at.duration_since(epoch).as_secs_f64() * 1000.0);
+        self.queue.on_submitted_work_done(move || {
+            let done_at = Instant::now();
+            eprintln!(
+                "gpu_backdrop_queue done stage={stage} node={} t_ms={:.2} elapsed_ms={:.2}",
+                node.0,
+                done_at.duration_since(epoch).as_secs_f64() * 1000.0,
+                done_at.duration_since(submitted_at).as_secs_f64() * 1000.0
+            );
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn profile_backdrop_queue(&self, _stage: &'static str, _node: NodeId) {}
+
+    fn cache_prefix_is_complete(index: &BackdropIndex, node: NodeId, full: &View, backdrops: &HashMap<NodeId, ImageInfo>) -> bool {
+        let world = Rect::new(
+            full.origin.0,
+            full.origin.1,
+            full.origin.0 + f64::from(full.width) / full.scale,
+            full.origin.1 + f64::from(full.height) / full.scale,
+        );
+        index
+            .candidates
+            .iter()
+            .take_while(|(id, _, _, _)| *id != node)
+            .all(|(id, _, bounds, _)| bounds.intersect(world).area() <= 0.0 || backdrops.contains_key(id))
+    }
+
+    fn render_and_cache_glass(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        id: NodeId,
+        view: &View,
+        effect: &Glass,
+        clear: [f32; 4],
+        index: &BackdropIndex,
+    ) -> Result<Option<ImageInfo>, Box<dyn Error>> {
+        let Some(full) = self.full_glass_cache_view(doc, id, view, effect) else { return Ok(None) };
+        if !Self::cache_prefix_is_complete(index, id, &full, &HashMap::new()) {
+            return Ok(None);
+        }
+        let factor = if view.scale >= 4.0 && effect.sanitized().frost >= 12.0 {
+            std::env::var("LIZARD_GPU_GLASS_CACHE_FACTOR")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|factor| matches!(factor, 1 | 2 | 4 | 8))
+                .unwrap_or(if view.scale >= 8.0 { 8 } else { 4 })
+        } else {
+            1
+        };
+        let render_view = View {
+            origin: full.origin,
+            scale: view.scale / f64::from(factor),
+            width: full.width.div_ceil(factor),
+            height: full.height.div_ceil(factor),
+        };
+        let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing for Glass cache")?;
+        let mut beneath = doc.clone();
+        lizard_render::backdrop::hide_above(&mut beneath, id, roots);
+        let prefix = self.make_scene_document_with_backdrops_and_outlines(&beneath, page, &render_view, None, &[], lizard_render::Outline::default());
+        let size = (render_view.width, render_view.height);
+        let mut surface = self
+            .glass_prefix_canvases
+            .iter()
+            .position(|surface| (surface.texture.width(), surface.texture.height()) == size)
+            .map(|position| self.glass_prefix_canvases.remove(position))
+            .unwrap_or_else(|| Self::shared_with(self, size.0, size.1));
+        surface.image_bindings = self.image_bindings.clone();
+        surface.render_submit_with_clear_rgba(&prefix, clear)?;
+        let source = surface.snapshot_submit();
+        self.glass_prefix_canvases.push(surface);
+        self.profile_backdrop_queue("glass_prefix", id);
+        if self.glass_prefix_canvases.len() > 4 {
+            self.glass_prefix_canvases.remove(0);
+        }
+        let region = (0, 0, u16::try_from(render_view.width)?, u16::try_from(render_view.height)?);
+        let result = self.render_glass_region(doc, id, &render_view, region, &source, true, effect)?;
+        self.profile_backdrop_queue("glass_effect", id);
+        let info = self.insert_cached_backdrop(doc, page, id, view, &render_view, result);
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!(
+                "gpu_backdrop_cache fill glass={} size={}x{} display={}x{} scale={:.2} factor={factor}",
+                id.0, render_view.width, render_view.height, full.width, full.height, view.scale
+            );
+        }
+        Ok(info)
+    }
+
+    fn render_and_cache_background_blur(
+        &mut self,
+        doc: &Document,
+        page: NodeId,
+        id: NodeId,
+        view: &View,
+        radius: f64,
+        clear: [f32; 4],
+        backdrops: &HashMap<NodeId, ImageInfo>,
+        index: &BackdropIndex,
+    ) -> Result<Option<ImageInfo>, Box<dyn Error>> {
+        if !self.backdrop_cache_document.as_ref().is_some_and(|cached| std::ptr::eq(cached.as_ref(), doc)) {
+            return Ok(None);
+        }
+        // A prefix can extend outside the current viewport. Only persistent world-space
+        // predecessors cover that larger region; a viewport-cropped predecessor cannot.
+        if !backdrops.values().all(|info| self.backdrop_cache.iter().any(|cached| cached.id == info.id)) {
+            return Ok(None);
+        }
+        let bounds = match lizard_render::backdrop::shape_bounds(doc, id) {
+            Some(bounds) => bounds,
+            None => return Ok(None),
+        };
+        let margin = (radius * view.scale * 2.0 + 6.0).ceil();
+        let Some(full) = self.full_backdrop_cache_view(bounds, margin, view, 24_000_000) else { return Ok(None) };
+        if !Self::cache_prefix_is_complete(index, id, &full, backdrops) {
+            return Ok(None);
+        }
+        let factor = if view.scale >= 4.0 && radius >= 16.0 {
+            std::env::var("LIZARD_GPU_BLUR_CACHE_FACTOR")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|factor| matches!(factor, 1 | 2 | 4 | 8))
+                .unwrap_or(if view.scale >= 8.0 { 8 } else { 4 })
+        } else {
+            1
+        };
+        let render_view = View {
+            origin: full.origin,
+            scale: view.scale / f64::from(factor),
+            width: full.width.div_ceil(factor),
+            height: full.height.div_ceil(factor),
+        };
+        let roots = doc.node(page).map(|node| node.children.as_slice()).ok_or("page missing for BackgroundBlur cache")?;
+        let mut beneath = doc.clone();
+        lizard_render::backdrop::hide_above(&mut beneath, id, roots);
+        let dx = (view.origin.0 - render_view.origin.0) * render_view.scale;
+        let dy = (view.origin.1 - render_view.origin.1) * render_view.scale;
+        let source_to_render = render_view.scale / view.scale;
+        let mut local_backdrops = HashMap::new();
+        for (node, info) in backdrops {
+            let (x, y, width, height) = info.region.unwrap_or((0.0, 0.0, view.width as u16, view.height as u16));
+            let region_width = u16::try_from((f64::from(width) * source_to_render).round() as u32)?;
+            let region_height = u16::try_from((f64::from(height) * source_to_render).round() as u32)?;
+            local_backdrops.insert(
+                *node,
+                ImageInfo { region: Some((x * source_to_render + dx, y * source_to_render + dy, region_width, region_height)), ..*info },
+            );
+        }
+        let prefix = self.make_scene_document_with_backdrops_and_outlines(
+            &beneath,
+            page,
+            &render_view,
+            (!local_backdrops.is_empty()).then_some(&local_backdrops),
+            &[],
+            lizard_render::Outline::default(),
+        );
+        let size = (render_view.width, render_view.height);
+        let mut surface = self
+            .glass_prefix_canvases
+            .iter()
+            .position(|surface| (surface.texture.width(), surface.texture.height()) == size)
+            .map(|position| self.glass_prefix_canvases.remove(position))
+            .unwrap_or_else(|| Self::shared_with(self, size.0, size.1));
+        surface.image_bindings = self.image_bindings.clone();
+        surface.render_submit_with_clear_rgba(&prefix, clear)?;
+        let source = surface.snapshot_submit();
+        self.glass_prefix_canvases.push(surface);
+        self.profile_backdrop_queue("blur_prefix", id);
+        if self.glass_prefix_canvases.len() > 4 {
+            self.glass_prefix_canvases.remove(0);
+        }
+        let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+        let result = blur.submit_frost(&self.device, &self.queue, &source, (radius * render_view.scale / 2.0) as f32);
+        self.profile_backdrop_queue("blur_effect", id);
+        let info = self.insert_cached_backdrop(doc, page, id, view, &render_view, result);
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!(
+                "gpu_backdrop_cache fill blur={} size={}x{} display={}x{} scale={:.2} factor={factor}",
+                id.0, render_view.width, render_view.height, full.width, full.height, view.scale
+            );
+        }
+        Ok(info)
     }
 
     pub fn has_scale_dependent_paints(&self) -> bool {
@@ -8338,6 +8884,26 @@ impl GpuCanvas {
         self.render_outline_mask(doc, id, width, height, camera)
     }
 
+    /// A simple rounded rectangle has an exact signed distance in screen space. Use it to
+    /// avoid the jump-flood passes needed for arbitrary vector outlines.
+    fn rounded_glass_shape(doc: &Document, id: NodeId, view: &View, region: (u16, u16, u16, u16)) -> Option<([f32; 4], f32)> {
+        let node = doc.node(id)?;
+        if !matches!(&node.kind, NodeKind::Rectangle | NodeKind::Frame) || node.corners.smoothing.abs() > 1e-6 {
+            return None;
+        }
+        let radius = node.corners.uniform()?;
+        let [a, b, c, d, tx, ty] = doc.world_transform(id).as_coeffs();
+        if a <= 0.0 || d <= 0.0 || b.abs() > 1e-6 || c.abs() > 1e-6 || (a - d).abs() > 1e-6 * a.max(d).max(1.0) {
+            return None;
+        }
+        let scale = view.scale * a;
+        let left = (tx - view.origin.0) * view.scale - f64::from(region.0);
+        let top = (ty - view.origin.1) * view.scale - f64::from(region.1);
+        let rect = [left as f32, top as f32, (left + node.width * scale) as f32, (top + node.height * scale) as f32];
+        let radius = (radius * scale) as f32;
+        (rect.into_iter().all(f32::is_finite) && radius.is_finite() && radius >= 0.0).then_some((rect, radius))
+    }
+
     fn render_glass_region(
         &mut self,
         doc: &Document,
@@ -8352,10 +8918,15 @@ impl GpuCanvas {
         let source = if backdrop_is_region { backdrop.clone() } else { self.crop_texture(backdrop, region) };
         let area = u32::from(width) * u32::from(height);
         if area <= 2_000_000 {
-            let mask = self.render_glass_mask(doc, id, view, region)?;
+            let shape = Self::rounded_glass_shape(doc, id, view, region);
+            let mask = if shape.is_none() { Some(self.render_glass_mask(doc, id, view, region)?) } else { None };
             let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
             let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-            return Ok(glass.submit(&self.device, &self.queue, blur, &source, &mask, effect, view.scale));
+            return Ok(if let Some((rect, radius)) = shape {
+                glass.submit_rounded_rect(&self.device, &self.queue, blur, &source, effect, view.scale, rect, radius)
+            } else {
+                glass.submit(&self.device, &self.queue, blur, &source, mask.as_ref().ok_or("glass mask missing")?, effect, view.scale)
+            });
         }
 
         let safe = effect.sanitized();
@@ -8364,17 +8935,24 @@ impl GpuCanvas {
         let k = 510.0 * safe.light_intensity;
         let highlight = if k > 1.0 { (band * k.ln()).min(512.0) } else { 0.0 };
         let halo = (depth.max(highlight) + safe.max_bend() * view.scale + 12.0).ceil() as u32;
-        if halo > 256 {
-            let mask = self.render_glass_mask(doc, id, view, region)?;
+        // Rounded rectangles use analytic coverage, so larger halos can still be stitched
+        // safely in bounded tiles. Arbitrary paths retain the previous conservative limit.
+        if halo > 512 || (halo > 256 && Self::rounded_glass_shape(doc, id, view, region).is_none()) {
+            let shape = Self::rounded_glass_shape(doc, id, view, region);
+            let mask = if shape.is_none() { Some(self.render_glass_mask(doc, id, view, region)?) } else { None };
             let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
             let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-            return Ok(glass.submit(&self.device, &self.queue, blur, &source, &mask, effect, view.scale));
+            return Ok(if let Some((rect, radius)) = shape {
+                glass.submit_rounded_rect(&self.device, &self.queue, blur, &source, effect, view.scale, rect, radius)
+            } else {
+                glass.submit(&self.device, &self.queue, blur, &source, mask.as_ref().ok_or("glass mask missing")?, effect, view.scale)
+            });
         }
 
         // Frost is applied once across the whole source so tile edges cannot acquire blur seams.
         let frosted = if safe.frost > 0.0 {
             let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
-            blur.submit(&self.device, &self.queue, &source, (safe.frost * view.scale / 2.0) as f32, 1, None)
+            blur.submit_frost(&self.device, &self.queue, &source, (safe.frost * view.scale / 2.0) as f32)
         } else {
             source
         };
@@ -8407,10 +8985,23 @@ impl GpuCanvas {
                 );
                 let tile_source = self.crop_texture(&frosted, expanded);
                 let tile_region = (u16::try_from(u32::from(x) + expanded_left)?, u16::try_from(u32::from(y) + expanded_top)?, expanded.2, expanded.3);
-                let tile_mask = self.render_glass_mask(doc, id, view, tile_region)?;
+                let shape = Self::rounded_glass_shape(doc, id, view, tile_region);
+                let tile_mask = if shape.is_none() { Some(self.render_glass_mask(doc, id, view, tile_region)?) } else { None };
                 let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                 let glass = self.gpu_glass.get_or_insert_with(|| GpuGlass::new(&self.device));
-                let tile = glass.submit(&self.device, &self.queue, blur, &tile_source, &tile_mask, &tile_effect, view.scale);
+                let tile = if let Some((rect, radius)) = shape {
+                    glass.submit_rounded_rect(&self.device, &self.queue, blur, &tile_source, &tile_effect, view.scale, rect, radius)
+                } else {
+                    glass.submit(
+                        &self.device,
+                        &self.queue,
+                        blur,
+                        &tile_source,
+                        tile_mask.as_ref().ok_or("glass tile mask missing")?,
+                        &tile_effect,
+                        view.scale,
+                    )
+                };
                 let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass tile stitch") });
                 encoder.copy_texture_to_texture(
                     wgpu::TexelCopyTextureInfo {
@@ -8452,7 +9043,7 @@ impl GpuCanvas {
     ) -> Result<wgpu::Texture, Box<dyn Error>> {
         let (x, y, width, height) = region;
         let glass_id = self.register_external_texture(glass);
-        let backdrop = HashMap::from([(id, ImageInfo { id: glass_id, width, height, region: Some((0, 0, width, height)) })]);
+        let backdrop = HashMap::from([(id, ImageInfo { id: glass_id, width, height, region: Some((0.0, 0.0, width, height)) })]);
         let origin = (view.origin.0 + f64::from(x) / view.scale, view.origin.1 + f64::from(y) / view.scale);
         let world = Rect::new(origin.0, origin.1, origin.0 + f64::from(width) / view.scale, origin.1 + f64::from(height) / view.scale);
         let camera = Affine::scale(view.scale) * Affine::translate((-origin.0, -origin.1));
@@ -8555,12 +9146,18 @@ impl GpuCanvas {
             } else {
                 self.make_scene_document_with_backdrops_and_outlines(doc, page, view, None, outlined, options)
             };
-            self.render_with_clear_rgba(&scene, clear)?;
+            self.render_submit_with_clear_rgba(&scene, clear)?;
             self.release_temporary_textures();
             return Ok((started.elapsed().as_secs_f64() * 1000.0, 0));
         }
         if let Some((group, opacity)) = isolated_group_for_backdrop(doc, candidates[0].0, page)
             && isolated_group_backdrop_supported(doc, candidates[0].0, page, view)
+            // Opaque Glass can use the regular path and its document-space cache.
+            // Isolating it would redraw several full viewports for every pan strip.
+            && !(opacity >= 0.999
+                && candidates.len() == 1
+                && !backdrop_requires_cpu(doc, candidates[0].0, page)
+                && doc.node(candidates[0].0).is_some_and(|node| node.effects.iter().any(|effect| effect.visible && matches!(effect.kind, EffectKind::Glass(_)))))
         {
             let context = BackdropRenderContext { doc, page, view, clear, outlined, options };
             let result = self.render_isolated_group_backdrop(&context, &candidates, group, opacity, None, true);
@@ -8579,7 +9176,7 @@ impl GpuCanvas {
             self.release_temporary_textures();
             return result;
         }
-        let mut backdrops = HashMap::new();
+        let mut backdrops: HashMap<NodeId, ImageInfo> = HashMap::new();
         let mut dynamic_glass_layers = Vec::new();
         let mut prefix_ms = 0.0;
         let mut blur_ms = 0.0;
@@ -8591,44 +9188,143 @@ impl GpuCanvas {
                     _ => None,
                 })
             });
+            if let Some(effect) = glass
+                && backdrops.is_empty()
+                && outlined.is_empty()
+                && std::env::var_os("LIZARD_GPU_NO_BACKDROP_CACHE").is_none()
+            {
+                if let Some(info) = self.cached_backdrop_info(doc, page, id, view) {
+                    if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+                        eprintln!("gpu_backdrop_cache hit glass={} scale={:.2}", id.0, view.scale);
+                    }
+                    backdrops.insert(id, info);
+                    continue;
+                }
+                if let Some(info) = self.render_and_cache_glass(doc, page, id, view, effect, clear, index)? {
+                    backdrops.insert(id, info);
+                    continue;
+                }
+            }
             let glass_region = glass.and_then(|effect| gpu_glass_region(doc, id, view, effect));
-            let cropped_prefix = glass_region.is_some() && backdrops.is_empty();
+            let regular_blur = glass.is_none()
+                && doc.node(id).is_some_and(|node| {
+                    node.effects
+                        .iter()
+                        .any(|effect| effect.visible && matches!(&effect.kind, EffectKind::BackgroundBlur(blur) if !blur.is_progressive()))
+                });
+            let blur_region = regular_blur
+                .then(|| gpu_background_blur_region(doc, id, view, radius))
+                .flatten()
+                .filter(|(_, _, width, height)| u64::from(*width) * u64::from(*height) * 4 < u64::from(view.width) * u64::from(view.height) * 3);
+            if regular_blur
+                && outlined.is_empty()
+                && std::env::var_os("LIZARD_GPU_NO_BACKDROP_CACHE").is_none()
+                && std::env::var_os("LIZARD_GPU_BLUR_METHOD").is_none()
+                && backdrops.values().all(|info| self.backdrop_cache.iter().any(|cached| cached.id == info.id))
+            {
+                if let Some(info) = self.cached_backdrop_info(doc, page, id, view) {
+                    if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+                        eprintln!("gpu_backdrop_cache hit blur={} scale={:.2}", id.0, view.scale);
+                    }
+                    backdrops.insert(id, info);
+                    continue;
+                }
+                if blur_region.is_some()
+                    && let Some(info) = self.render_and_cache_background_blur(doc, page, id, view, radius, clear, &backdrops, index)?
+                {
+                    backdrops.insert(id, info);
+                    continue;
+                }
+            }
+            let cropped_region =
+                glass_region.filter(|_| backdrops.is_empty() && std::env::var_os("LIZARD_GPU_FULL_PREFIX").is_none()).or(blur_region);
+            let cropped_prefix = cropped_region.is_some();
+            let prefix_clone_started = Instant::now();
             let mut beneath = doc.clone();
             lizard_render::backdrop::hide_above(&mut beneath, id, roots);
-            let prefix_texture = if let Some((x, y, width, height)) = glass_region.filter(|_| cropped_prefix) {
+            let prefix_clone_ms = prefix_clone_started.elapsed().as_secs_f64() * 1000.0;
+            let prefix_texture = if let Some((x, y, width, height)) = cropped_region {
                 let cropped_view = View {
                     origin: (view.origin.0 + f64::from(x) / view.scale, view.origin.1 + f64::from(y) / view.scale),
                     scale: view.scale,
                     width: u32::from(width),
                     height: u32::from(height),
                 };
-                let prefix = self.make_scene_document_with_backdrops_and_outlines(&beneath, page, &cropped_view, None, outlined, options);
-                let mut surface =
-                    self.glass_prefix_canvas.take().unwrap_or_else(|| Box::new(Self::shared_with(self, u32::from(width), u32::from(height))));
-                if surface.texture.width() != u32::from(width) || surface.texture.height() != u32::from(height) {
-                    surface.resize(u32::from(width), u32::from(height));
-                }
+                let prefix_scene_started = Instant::now();
+                let local_backdrops: HashMap<_, _> = backdrops
+                    .iter()
+                    .map(|(id, info)| {
+                        let (left, top, placement_width, placement_height) = info.region.unwrap_or((0.0, 0.0, view.width as u16, view.height as u16));
+                        (*id, ImageInfo { region: Some((left - f64::from(x), top - f64::from(y), placement_width, placement_height)), ..*info })
+                    })
+                    .collect();
+                let prefix = self.make_scene_document_with_backdrops_and_outlines(
+                    &beneath,
+                    page,
+                    &cropped_view,
+                    (!local_backdrops.is_empty()).then_some(&local_backdrops),
+                    outlined,
+                    options,
+                );
+                let prefix_scene_ms = prefix_scene_started.elapsed().as_secs_f64() * 1000.0;
+                let prefix_surface_started = Instant::now();
+                let size = (u32::from(width), u32::from(height));
+                let mut surface = self
+                    .glass_prefix_canvases
+                    .iter()
+                    .position(|surface| (surface.texture.width(), surface.texture.height()) == size)
+                    .map(|position| self.glass_prefix_canvases.remove(position))
+                    .unwrap_or_else(|| Self::shared_with(self, size.0, size.1));
                 surface.image_bindings = self.image_bindings.clone();
+                let prefix_surface_ms = prefix_surface_started.elapsed().as_secs_f64() * 1000.0;
+                let prefix_submit_started = Instant::now();
                 surface.render_submit_with_clear_rgba(&prefix, clear)?;
-                if let Some(node) = doc.node(id).filter(|node| gpu_glass_shadow_supported(doc, node)) {
+                if glass.is_some()
+                    && let Some(node) = doc.node(id).filter(|node| gpu_glass_prefix_shadow_supported(doc, node))
+                {
                     let mut shadow_scene = Scene::new(width, height);
                     let camera = Affine::scale(view.scale) * Affine::translate((-cropped_view.origin.0, -cropped_view.origin.1));
                     draw_shadow(&mut shadow_scene, doc, node, camera);
                     surface.render_submit_with_target(&shadow_scene, TargetInit::SrcOver)?;
                 }
                 let texture = surface.snapshot_submit();
-                self.glass_prefix_canvas = Some(surface);
+                if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+                    eprintln!(
+                        "gpu_stage prefix id={} cropped=true size={}x{} clone_ms={prefix_clone_ms:.2} scene_ms={prefix_scene_ms:.2} surface_ms={prefix_surface_ms:.2} submit_snapshot_ms={:.2}",
+                        id.0,
+                        width,
+                        height,
+                        prefix_submit_started.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+                self.glass_prefix_canvases.push(surface);
+                if self.glass_prefix_canvases.len() > 4 {
+                    self.glass_prefix_canvases.remove(0);
+                }
                 texture
             } else {
+                let prefix_scene_started = Instant::now();
                 let prefix = self.make_scene_document_with_backdrops_and_outlines(&beneath, page, view, Some(&backdrops), outlined, options);
+                let prefix_scene_ms = prefix_scene_started.elapsed().as_secs_f64() * 1000.0;
+                let prefix_submit_started = Instant::now();
                 self.render_submit_with_clear_rgba(&prefix, clear)?;
-                if let Some(node) = doc.node(id).filter(|node| gpu_glass_shadow_supported(doc, node)) {
+                if let Some(node) = doc.node(id).filter(|node| gpu_glass_prefix_shadow_supported(doc, node)) {
                     let mut shadow_scene = Scene::new(view.width as u16, view.height as u16);
                     let camera = Affine::scale(view.scale) * Affine::translate((-view.origin.0, -view.origin.1));
                     draw_shadow(&mut shadow_scene, doc, node, camera);
                     self.render_submit_with_target(&shadow_scene, TargetInit::SrcOver)?;
                 }
-                self.snapshot_submit()
+                let texture = self.snapshot_submit();
+                if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+                    eprintln!(
+                        "gpu_stage prefix id={} cropped=false size={}x{} clone_ms={prefix_clone_ms:.2} scene_ms={prefix_scene_ms:.2} submit_snapshot_ms={:.2}",
+                        id.0,
+                        view.width,
+                        view.height,
+                        prefix_submit_started.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+                texture
             };
             prefix_ms += stage.elapsed().as_secs_f64() * 1000.0;
 
@@ -8722,6 +9418,9 @@ impl GpuCanvas {
                 mix.submit(&self.device, &self.queue, blur, &prefix_texture, effect, view.scale, start, end)
             } else if method == "copy" {
                 prefix_texture
+            } else if blur_region.is_some() {
+                let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
+                blur.submit_frost(&self.device, &self.queue, &prefix_texture, (radius * view.scale / 2.0) as f32)
             } else if method == "compute" {
                 let blur = self.gpu_blur.get_or_insert_with(|| GpuBlur::new(&self.device));
                 let scale = std::env::var("LIZARD_GPU_BLUR_SCALE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).clamp(1, 4);
@@ -8743,19 +9442,29 @@ impl GpuCanvas {
             };
             let (Ok(width), Ok(height)) = (u16::try_from(blurred.width()), u16::try_from(blurred.height())) else { continue };
             let texture_id = self.register_external_texture(blurred);
-            backdrops.insert(id, ImageInfo { id: texture_id, width, height, region: glass_region });
+            let region = glass_region.or(blur_region).map(|(x, y, width, height)| (f64::from(x), f64::from(y), width, height));
+            backdrops.insert(id, ImageInfo { id: texture_id, width, height, region });
             blur_ms += stage.elapsed().as_secs_f64() * 1000.0;
         }
         let stage = Instant::now();
         let scene = self.make_scene_document_with_backdrops_and_outlines(doc, page, view, Some(&backdrops), outlined, options);
-        let final_result = self.render_with_clear_rgba(&scene, clear);
+        let scene_ms = stage.elapsed().as_secs_f64() * 1000.0;
+        // The presentation pass samples this target later on the same queue. A CPU fence here
+        // stalls input for the entire GPU scene even though queue submission preserves order.
+        let final_result = self.render_submit_with_clear_rgba(&scene, clear);
         for id in dynamic_glass_layers {
             self.layer_blurs.remove(&id);
         }
         final_result?;
         self.release_temporary_textures();
+        self.prune_backdrop_cache_after_submit(60_000_000);
         let final_ms = stage.elapsed().as_secs_f64() * 1000.0;
-        println!("backdrop_gpu_stages count={} prefix_ms={prefix_ms:.2} blur_ms={blur_ms:.2} final_ms={final_ms:.2}", backdrops.len());
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!("gpu_stage final_scene_ms={scene_ms:.2} final_encode_submit_ms={:.2}", final_ms - scene_ms);
+        }
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!("backdrop_gpu_stages count={} prefix_ms={prefix_ms:.2} blur_ms={blur_ms:.2} final_ms={final_ms:.2}", backdrops.len());
+        }
         Ok((started.elapsed().as_secs_f64() * 1000.0, backdrops.len()))
     }
 
@@ -8826,7 +9535,7 @@ impl GpuCanvas {
         let rest = make_scene_with_backdrops(&suffix, page, view, Some(&self.image_info), Some(&backdrops));
         let suffix_prepare_ms = stage.elapsed().as_secs_f64() * 1000.0;
         let stage = Instant::now();
-        self.render_with_load(&rest)?;
+        self.render_submit_with_target(&rest, TargetInit::SrcOver)?;
         let suffix_render_ms = stage.elapsed().as_secs_f64() * 1000.0;
         if std::env::var_os("LIZARD_PROFILE_EFFECT_STAGES").is_some() {
             println!(
@@ -8872,7 +9581,7 @@ impl GpuCanvas {
             }
         }
         let scene = self.make_scene_document_with_backdrops_and_outlines(&segment, page, view, None, outlined, options);
-        self.render_with_load(&scene)?;
+        self.render_submit_with_target(&scene, TargetInit::SrcOver)?;
         Ok(())
     }
 
@@ -8945,7 +9654,7 @@ impl GpuCanvas {
             let prefix_scene = self.make_scene_document_with_backdrops_and_outlines(&prefix_doc, page, view, Some(&backdrops), outlined, options);
             if let Some(previous) = previous {
                 self.render_texture_as_base(previous, view)?;
-                self.render_with_load(&prefix_scene)?;
+                self.render_submit_with_target(&prefix_scene, TargetInit::SrcOver)?;
             } else {
                 self.render_submit_with_clear_rgba(&prefix_scene, clear)?;
             }
@@ -9027,7 +9736,10 @@ impl GpuCanvas {
             };
             let (width, height) = (u16::try_from(blurred.width())?, u16::try_from(blurred.height())?);
             let blur_id = self.register_external_texture(blurred);
-            backdrops.insert(id, ImageInfo { id: blur_id, width, height, region });
+            backdrops.insert(
+                id,
+                ImageInfo { id: blur_id, width, height, region: region.map(|(x, y, width, height)| (f64::from(x), f64::from(y), width, height)) },
+            );
         }
 
         let mut group_doc = doc.clone();
@@ -9067,7 +9779,7 @@ impl GpuCanvas {
             node.visible = false;
         }
         let after_scene = self.make_scene_document_with_backdrops_and_outlines(&after_doc, page, view, None, outlined, options);
-        let after_result = self.render_with_load(&after_scene);
+        let after_result = self.render_submit_with_target(&after_scene, TargetInit::SrcOver);
         for id in composited_glass_layers {
             self.layer_blurs.remove(&id);
         }
@@ -9324,12 +10036,6 @@ impl GpuCanvas {
         Ok(ms)
     }
 
-    fn render_with_clear_rgba(&mut self, scene: &Scene, clear: [f32; 4]) -> Result<f64, Box<dyn Error>> {
-        let ms = self.render_submit_with_clear_rgba(scene, clear)?;
-        self.wait()?;
-        Ok(ms)
-    }
-
     pub fn render_with_load(&mut self, scene: &Scene) -> Result<f64, Box<dyn Error>> {
         let ms = self.render_submit_with_target(scene, TargetInit::SrcOver)?;
         self.wait()?;
@@ -9365,12 +10071,20 @@ impl GpuCanvas {
             &self.image_bindings,
             init,
         )?;
+        let encode_ms = started.elapsed().as_secs_f64() * 1000.0;
         self.queue.submit([encoder.finish()]);
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!("gpu_stage vello_encode_ms={encode_ms:.2} queue_submit_ms={:.2}", started.elapsed().as_secs_f64() * 1000.0 - encode_ms);
+        }
         Ok(started.elapsed().as_secs_f64() * 1000.0)
     }
 
     pub fn wait(&self) -> Result<(), Box<dyn Error>> {
+        let started = Instant::now();
         self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        if std::env::var_os("LIZARD_GPU_PROFILE").is_some() {
+            eprintln!("gpu_stage device_wait_ms={:.2}", started.elapsed().as_secs_f64() * 1000.0);
+        }
         Ok(())
     }
 
@@ -9522,6 +10236,119 @@ mod pixel_sample_tests {
         assert!(middle.get(160..163).is_some_and(|rgb| rgb[0] > 190 && rgb[1] > 40 && rgb[2] > 15));
         assert_eq!(corner.get(0..4), Some([0, 0, 0, 0].as_slice()));
         assert!(corner.get(160..164).is_some_and(|rgba| rgba[0] > 190 && rgba[3] == 255));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod saved_example_tests {
+    use super::*;
+
+    #[test]
+    fn glass_and_vectors_keeps_all_effects_on_gpu() -> Result<(), Box<dyn Error>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/glass-and-vectors.lizard");
+        let (doc, _) = lizard_format::load_file(&path)?;
+        let page = doc.current_page.ok_or("example page missing")?;
+        let view = View { origin: (0.0, 0.0), scale: 0.5, width: 1100, height: 400 };
+        assert!(!has_unhandled_effects_on_page_in_view(&doc, page, &view, true));
+        Ok(())
+    }
+
+    #[test]
+    fn glass_and_vectors_pan_back_to_same_pixels() -> Result<(), Box<dyn Error>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/glass-and-vectors.lizard");
+        let (doc, _) = lizard_format::load_file(&path)?;
+        let page = doc.current_page.ok_or("example page missing")?;
+        let mut gpu = GpuCanvas::new(1000, 700)?;
+        gpu.register_images_at_scale(&doc, 0.0, 0.81)?;
+        gpu.prepare_static_effects(&doc)?;
+        let index = BackdropIndex::new(&doc, page);
+        let view = View { origin: (200.0, 50.0), scale: 0.81, width: 1000, height: 700 };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [30.0 / 255.0; 3], &index)?;
+        let first = gpu.pixels()?;
+        let shifted = View { origin: (440.0, 90.0), ..view };
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &shifted, [30.0 / 255.0; 3], &index)?;
+        gpu.render_with_backdrop_blurs_indexed(&doc, page, &view, [30.0 / 255.0; 3], &index)?;
+        assert_eq!(first, gpu.pixels()?, "panning away and back changed a static GPU canvas");
+        Ok(())
+    }
+
+    #[test]
+    fn glass_backdrop_cache_matches_uncached_pan_pixels() -> Result<(), Box<dyn Error>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/glass-and-vectors.lizard");
+        let (doc, _) = lizard_format::load_file(&path)?;
+        let doc = Arc::new(doc);
+        let page = doc.current_page.ok_or("example page missing")?;
+        let index = BackdropIndex::new(&doc, page);
+        let view = View { origin: (200.0, 50.0), scale: 0.81, width: 1000, height: 700 };
+        let shifted = View { origin: (view.origin.0 + 100.375 / view.scale, view.origin.1 + 40.625 / view.scale), ..view };
+        let clear = [30.0 / 255.0; 3];
+
+        let mut cached = GpuCanvas::new(view.width, view.height)?;
+        cached.register_images_at_scale(&doc, 0.0, view.scale)?;
+        cached.prepare_static_effects(&doc)?;
+        cached.set_backdrop_cache_document(Some(doc.clone()), view.scale);
+        assert!(!cached.pan_strip_safe(&doc, page, &view), "the full view includes uncached backdrop effects");
+        let clear_strip = View { origin: (1200.0, 600.0), scale: view.scale, width: 32, height: 64 };
+        assert!(cached.pan_strip_safe(&doc, page, &clear_strip), "an unaffected strip should render before distant backdrop caches fill");
+        let glass_strip = View { origin: (420.0, 200.0), scale: view.scale, width: 64, height: 64 };
+        assert!(!cached.pan_strip_safe(&doc, page, &glass_strip));
+        assert!(
+            cached.prepare_backdrops_for_pan_strips(&doc, page, &view, &[glass_strip], clear, &index)?,
+            "a Glass strip should become safe after preparing its document-space effect"
+        );
+        cached.render_with_backdrop_blurs_indexed(&doc, page, &view, clear, &index)?;
+        assert_eq!(cached.backdrop_cache.len(), 4, "Glass and three BackgroundBlur results did not fill");
+        assert!(cached.pan_strip_safe(&doc, page, &view), "cached example should permit a narrow native-resolution pan strip");
+        let initial_pixels = cached.pixels()?;
+        cached.render_with_backdrop_blurs_indexed(&doc, page, &shifted, clear, &index)?;
+        assert_eq!(cached.backdrop_cache.len(), 4, "subpixel pan rebuilt a cached backdrop");
+        assert!(cached.cached_backdrop_info(&doc, page, cached.backdrop_cache[0].node, &shifted).is_some());
+        let shifted_pixels = cached.pixels()?;
+
+        let mut uncached = GpuCanvas::new(view.width, view.height)?;
+        uncached.register_images_at_scale(&doc, 0.0, view.scale)?;
+        uncached.prepare_static_effects(&doc)?;
+        uncached.render_with_backdrop_blurs_indexed(&doc, page, &view, clear, &index)?;
+        let initial_uncached = uncached.pixels()?;
+        uncached.render_with_backdrop_blurs_indexed(&doc, page, &shifted, clear, &index)?;
+        let uncached_pixels = uncached.pixels()?;
+        let mut differing = 0usize;
+        let mut max_delta = 0u8;
+        let mut first = None;
+        let mut above_eight = 0usize;
+        let mut bounds = (view.width as usize, view.height as usize, 0usize, 0usize);
+        for (index, (&left, &right)) in shifted_pixels.iter().zip(&uncached_pixels).enumerate() {
+            let delta = left.abs_diff(right);
+            if delta > 0 {
+                differing += 1;
+                max_delta = max_delta.max(delta);
+                first.get_or_insert(index);
+                if delta > 8 {
+                    above_eight += 1;
+                    let pixel = index / 4;
+                    let x = pixel % view.width as usize;
+                    let y = pixel / view.width as usize;
+                    bounds = (bounds.0.min(x), bounds.1.min(y), bounds.2.max(x), bounds.3.max(y));
+                }
+            }
+        }
+        let initial_differing = initial_pixels.iter().zip(&initial_uncached).filter(|(left, right)| left != right).count();
+        assert!(
+            max_delta <= 16 && above_eight <= 100 && differing <= initial_differing + shifted_pixels.len() / 100,
+            "cached Glass changed {differing} channels after pan, {initial_differing} initially, max delta {max_delta}, above8 {above_eight}, bounds {bounds:?}, first {first:?}"
+        );
+        cached.prune_backdrop_cache_after_submit(1);
+        assert!(cached.backdrop_cache.is_empty(), "backdrop eviction retained an over-budget texture");
+        cached.render_with_backdrop_blurs_indexed(&doc, page, &shifted, clear, &index)?;
+        assert_eq!(cached.backdrop_cache.len(), 4, "evicted backdrops did not rebuild after the next pan");
+        let rebuilt = cached.pixels()?;
+        let rebuild_max = rebuilt.iter().zip(&uncached_pixels).map(|(&left, &right)| left.abs_diff(right)).max().unwrap_or(0);
+        let rebuild_above_eight = rebuilt.iter().zip(&uncached_pixels).filter(|(left, right)| (**left).abs_diff(**right) > 8).count();
+        assert!(
+            rebuild_max <= 16 && rebuild_above_eight <= 100,
+            "rebuilding evicted backdrops changed visible pixels: max {rebuild_max}, above8 {rebuild_above_eight}"
+        );
         Ok(())
     }
 }

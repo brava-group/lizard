@@ -243,7 +243,7 @@ text tool).
 
 Raw window input for the next frame, as if from the mouse and keyboard: it reaches the panels,
 popovers and fields (`ui.pointer` and `ui.key` drive the canvas tools and shortcuts instead).
-`events` is a list of `{move: [x, y]}`, `{down: [x, y], button?: "secondary"}`,
+`events` is a list of `{move: [x, y]}`, `{down: [x, y], button?: "secondary" | "middle"}`,
 `{up: [x, y], button?}`, `{key, shift?, alt?, cmd?}` (pressed and released; egui key names such as
 `ArrowLeft`, `Escape`, `A`), `{text}` (typed text), `{scroll: [dx, dy], shift?, alt?, cmd?}` (a
 mouse wheel at the pointer: the content moves by that many points, so a negative `dy` scrolls down)

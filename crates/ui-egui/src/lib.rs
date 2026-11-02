@@ -1662,6 +1662,13 @@ impl LizardApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.ui.frame_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let uncovered = self.session.ds().ok().and_then(|ds| self.canvas.uncovered_pixels(ds)).unwrap_or(0);
+            self.frame_stats.record_timing(
+                self.ui.frame_ms,
+                self.gpu_canvas.as_ref().and_then(|gpu| gpu.last_render_ms()).unwrap_or(0.0),
+                uncovered,
+                self.canvas.tex_coarse,
+            );
         }
     }
 
@@ -1958,6 +1965,8 @@ impl LizardApp {
         state["homeSearch"] = json!(self.ui.home_view.file_query);
         state["uiScale"] = json!({"choice": self.session.prefs.ui_scale, "zoom": self.ui.ui_scale.zoom, "drawn": self.ui.ui_scale.drawn, "limited": self.ui.ui_scale.limited});
         state["canvas"]["uncoveredPixels"] = json!(self.session.ds().ok().and_then(|ds| self.canvas.uncovered_pixels(ds)));
+        state["canvas"]["gpuRenderMs"] = json!(self.gpu_canvas.as_ref().and_then(|gpu| gpu.last_render_ms()));
+        state["recentFrameTimings"] = self.frame_stats.recent_timings();
         state["canvas"]["tileCount"] = json!(self.canvas.tile_count());
         state["pendingOpens"] = json!(self.ui.pending_opens.len());
         state["missingFonts"] = json!(self.ui.missing_fonts.as_ref().map(missing_fonts::Shown::inspect));

@@ -3198,6 +3198,7 @@ dependencies = [
  "image 0.25.10",
  "lizard-color",
  "lizard-doc",
+ "lizard-format",
  "lizard-geom",
  "lizard-render",
  "lizard-shader",
