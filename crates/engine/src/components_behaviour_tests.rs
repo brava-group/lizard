@@ -241,6 +241,69 @@ fn alt_dragging_a_main_component_copies_an_instance() {
 }
 
 #[test]
+fn cmd_dragging_a_variant_creates_an_instance_outside_its_set() {
+    use crate::tools::{PointerEvent, PointerKind};
+    let mut s = Session::new();
+    let (set, _, variant) = button_set(&mut s);
+    s.set_selection(vec![variant]);
+    let original = s.doc().unwrap().clone();
+    let before = s.doc().unwrap().world_bounds(variant).unwrap();
+    let from = (before.x0 + 20.0, before.y0 + 20.0);
+    let ev = |kind, x| PointerEvent { cmd: true, ..PointerEvent::at(kind, x, from.1, 1.0) };
+    s.pointer(&ev(PointerKind::Down, from.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, from.0 + 80.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, from.0 + 160.0)).unwrap();
+    s.pointer(&ev(PointerKind::Up, from.0 + 160.0)).unwrap();
+    let [copy] = s.selection()[..] else { panic!("one copy selected") };
+    assert!(matches!(node(&s, copy).kind, NodeKind::Instance { .. }));
+    assert_eq!(component_of(&s, copy), variant);
+    assert_eq!(node(&s, copy).parent, Some(s.page().unwrap()));
+    assert_eq!(kids(&s, set).len(), 2, "the set keeps its original variants");
+    assert_eq!(s.doc().unwrap().world_bounds(variant).unwrap(), before);
+    ex(&mut s, "edit.undo", json!({}));
+    assert_eq!(*s.doc().unwrap(), original);
+    s.set_selection(vec![variant]);
+    s.pointer(&ev(PointerKind::Down, from.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, from.0 + 40.0)).unwrap();
+    s.pointer(&ev(PointerKind::Up, from.0 + 40.0)).unwrap();
+    let [inside_copy] = s.selection()[..] else { panic!("one copy selected") };
+    assert!(matches!(node(&s, inside_copy).kind, NodeKind::Instance { .. }));
+    assert_eq!(node(&s, inside_copy).parent, Some(s.page().unwrap()), "dropping over the set still places an instance on the page");
+    ex(&mut s, "edit.undo", json!({}));
+    s.set_selection(vec![variant]);
+    s.pointer(&ev(PointerKind::Down, from.0)).unwrap();
+    s.pointer(&ev(PointerKind::Up, from.0)).unwrap();
+    let [leaf] = s.selection()[..] else { panic!("one nested layer selected") };
+    assert!(s.doc().unwrap().is_ancestor(variant, leaf), "Cmd-click without dragging still selects the nested layer");
+    healthy(&s);
+}
+
+#[test]
+fn cmd_dragging_a_standalone_component_creates_its_second_variant() {
+    use crate::tools::{PointerEvent, PointerKind};
+    let mut s = Session::new();
+    let frame = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 100, "height": 100, "name": "Tile"})));
+    let main = idv(&ex(&mut s, "component.create", json!({"ids": [frame]})));
+    s.set_selection(vec![main]);
+    let original = s.doc().unwrap().clone();
+    let ev = |kind, x| PointerEvent { cmd: true, ..PointerEvent::at(kind, x, 50.0, 1.0) };
+    s.pointer(&ev(PointerKind::Down, 50.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 150.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 200.0)).unwrap();
+    s.pointer(&ev(PointerKind::Up, 200.0)).unwrap();
+    let [copy] = s.selection()[..] else { panic!("one variant selected") };
+    let set = crate::components::variant_set(s.doc().unwrap(), main).unwrap();
+    assert_eq!(crate::components::variant_set(s.doc().unwrap(), copy), Some(set));
+    assert!(matches!(node(&s, copy).kind, NodeKind::Component { .. }));
+    assert_eq!(kids(&s, set).len(), 2);
+    assert_eq!(s.doc().unwrap().world_bounds(main).unwrap().x0, 0.0);
+    assert_eq!(s.doc().unwrap().world_bounds(copy).unwrap().x0, 150.0);
+    ex(&mut s, "edit.undo", json!({}));
+    assert_eq!(*s.doc().unwrap(), original);
+    healthy(&s);
+}
+
+#[test]
 fn duplicating_a_variant_adds_a_variant_to_its_set() {
     let mut s = Session::new();
     let (set, _, hover) = button_set(&mut s);

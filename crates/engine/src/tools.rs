@@ -359,6 +359,8 @@ pub(crate) enum Gesture {
         ids: Vec<NodeId>,
         targets: Targets,
         duplicate: bool,
+        /// Cmd-drag of a component without a set makes its second variant.
+        make_variant: bool,
         moved: bool,
         /// A Shift-press on this selected layer: it leaves the selection on release, unless the
         /// press became a drag.
@@ -1267,7 +1269,13 @@ impl Session {
                     .node(leaf)
                     .is_some_and(|n| n.parent == Some(page) && n.kind.is_frame_like() && !n.children.is_empty() && !crate::widgets::is_widget(n))
         };
-        let target = label_at(&doc, page, &self.tool.labels, ev.p()).or_else(|| {
+        // Copy-drag starts from the selected main/variant even when the pointer is over
+        // one of its children. The selected component, rather than that child, is copied.
+        let selected_component = ((ev.cmd || ev.alt) && sel.len() == 1)
+            .then(|| sel[0])
+            .filter(|id| doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Component { .. })))
+            .filter(|id| doc.world_bounds(*id).is_some_and(|bounds| bounds.contains(ev.p())));
+        let target = label_at(&doc, page, &self.tool.labels, ev.p()).or(selected_component).or_else(|| {
             self.hit(&doc, page, ev.p(), ev.tol() * 2.0)
                 .filter(|leaf| ev.cmd || !board_background(*leaf))
                 .map(|leaf| select_target(&doc, leaf, &sel, ev.cmd))
@@ -1300,21 +1308,30 @@ impl Session {
                     }
                     return Ok(());
                 }
+                let make_variant = ev.cmd
+                    && ids.len() == 1
+                    && ids.first().is_some_and(|id| {
+                        doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Component { .. }))
+                            && crate::components::variant_set(&doc, *id).is_none()
+                            && crate::cmd::component::can_add_variant(&doc, *id)
+                    });
+                let duplicate = ev.alt
+                    || (ev.cmd
+                        && ids.len() == 1
+                        && ids.first().is_some_and(|id| doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::Component { .. }))));
                 let mut targets = Targets::gather(&doc, page, &ids);
-                // A copy dragged out with Alt snaps to the layers it came from too (they stay put).
-                if ev.alt
-                    && let Some(b) = targets.moving
-                {
+                // A copy snaps to the layer it came from too (it stays put).
+                if duplicate && let Some(b) = targets.moving {
                     targets.add_box(b);
                 }
-                if let Err(e) = self.begin_interaction(if ev.alt { "Duplicate" } else { "Move" }) {
+                if let Err(e) = self.begin_interaction(if duplicate { "Duplicate" } else { "Move" }) {
                     if deselect.is_some() {
                         self.set_selection(without_target());
                     }
                     return Err(e);
                 }
-                self.tool.gesture = Gesture::Move { start: ev.p(), ids, targets, duplicate: ev.alt, moved: false, deselect };
-                self.tool.overlay.cursor = if ev.alt { Cursor::Copy } else { Cursor::Default };
+                self.tool.gesture = Gesture::Move { start: ev.p(), ids, targets, duplicate, make_variant, moved: false, deselect };
+                self.tool.overlay.cursor = if duplicate { Cursor::Copy } else { Cursor::Default };
             }
             None => {
                 let within = self.marquee_within(ev.p())?;
@@ -1340,7 +1357,7 @@ impl Session {
                 Ok(())
             }
             Gesture::Move { start, moved: false, .. } | Gesture::Resize { start, moved: false, .. } if within_slop(ev, *start) => Ok(()),
-            Gesture::Move { start, ids, targets, duplicate, .. } => {
+            Gesture::Move { start, ids, targets, duplicate, make_variant, .. } => {
                 let mut d = ev.p() - *start;
                 if ev.shift {
                     if d.x.abs() > d.y.abs() {
@@ -1363,6 +1380,7 @@ impl Session {
                 }
                 let ids = ids.clone();
                 let dup = *duplicate;
+                let make_variant = *make_variant;
                 let page = self.page()?;
                 let mut drop_cell = None;
                 let mut drop_target = None;
@@ -1370,13 +1388,25 @@ impl Session {
                 // Placed in a row or column: (is it a column, its gap) for the insertion line.
                 let mut slot_axis: Option<(bool, f64)> = None;
                 self.preview(|doc, sel| {
+                    let from_variant = dup && ids.iter().any(|id| crate::components::variant_set(doc, *id).is_some());
                     let mut moving = ids.clone();
                     if dup {
                         let mut copies = Vec::new();
                         for i in &ids {
-                            let parent = doc.get(*i)?.parent.unwrap_or(page);
-                            let idx = doc.index_in_parent(*i).map(|x| x + 1);
-                            copies.push(crate::components::copy_in_file(doc, *i, parent, idx)?);
+                            if make_variant {
+                                copies.push(crate::cmd::component::add_variant_for_drag(doc, *i)?);
+                            } else if let Some(set) = crate::components::variant_set(doc, *i) {
+                                let parent = doc.get(set)?.parent.unwrap_or(page);
+                                let idx = doc.index_in_parent(set).map(|x| x + 1);
+                                let transform = doc.world_transform(parent).inverse() * doc.world_transform(*i);
+                                let copy = crate::components::create_instance_at(doc, *i, parent, 0.0, 0.0, idx)?;
+                                doc.get_mut(copy)?.transform = transform;
+                                copies.push(copy);
+                            } else {
+                                let parent = doc.get(*i)?.parent.unwrap_or(page);
+                                let idx = doc.index_in_parent(*i).map(|x| x + 1);
+                                copies.push(crate::components::copy_in_file(doc, *i, parent, idx)?);
+                            }
                         }
                         moving = copies;
                         *sel = moving.clone();
@@ -1386,9 +1416,21 @@ impl Session {
                     // Absolute children of an auto layout frame stay in it, and so do the layers of
                     // groups, boolean groups and instances ([`crate::drop::keeps_layers`]); the
                     // rest may change parent.
-                    let flow = moving.iter().all(|i| doc.node(*i).is_some_and(|n| !n.child_layout.absolute))
+                    let flow = !make_variant
+                        && moving.iter().all(|i| doc.node(*i).is_some_and(|n| !n.child_layout.absolute))
                         && !home.is_some_and(|h| crate::drop::keeps_layers(doc, h));
                     let target = if flow { crate::drop::drag_parent(doc, page, p, &moving) } else { home.unwrap_or(page) };
+                    // An instance dragged from a variant must remain outside component sets,
+                    // including when the pointer is still over the source set.
+                    let target = if from_variant {
+                        std::iter::once(target)
+                            .chain(doc.ancestors(target))
+                            .find(|id| doc.node(*id).is_some_and(|n| matches!(n.kind, NodeKind::ComponentSet { .. })))
+                            .and_then(|set| doc.node(set).and_then(|n| n.parent))
+                            .unwrap_or(target)
+                    } else {
+                        target
+                    };
                     let mode = doc.node(target).and_then(|n| n.layout.as_ref()).map(|l| l.mode);
                     if let (true, Some(mode)) = (flow, mode) {
                         // Into (or within) an auto layout frame: the layers take the slot (a grid: the
@@ -1428,8 +1470,11 @@ impl Session {
                             doc.reparent(*m, page, None)?;
                         }
                         move_world(doc, *m, d.x, d.y)?;
+                        if make_variant && let Some(set) = crate::components::variant_set(doc, *m) {
+                            crate::cmd::component::fit_set(doc, set);
+                        }
                     }
-                    drop_target = (flow && target != page).then_some(target);
+                    drop_target = if make_variant { home } else { (flow && target != page).then_some(target) };
                     Ok(())
                 })?;
                 let placed = if dup { self.selection() } else { ids };
@@ -1883,6 +1928,15 @@ impl Session {
                     }
                 } else {
                     self.cancel_interaction()?;
+                    // A Cmd-click without a drag still selects the nested layer under the
+                    // selected component, preserving deep selection on the canvas.
+                    if ev.cmd && !ev.alt && duplicate && ids.len() == 1 {
+                        let doc = self.doc()?.clone();
+                        let page = self.page()?;
+                        if let Some(leaf) = self.hit(&doc, page, start, ev.tol() * 2.0).filter(|leaf| doc.is_ancestor(ids[0], *leaf)) {
+                            self.set_selection(vec![leaf]);
+                        }
+                    }
                     if let Some(d) = deselect {
                         let sel = self.selection().into_iter().filter(|x| *x != d).collect();
                         self.set_selection(sel);

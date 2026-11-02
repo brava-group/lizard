@@ -459,7 +459,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Grow a component set so it wraps its variants with 20 px of padding (right and bottom).
-fn fit_set(doc: &mut Document, set: NodeId) {
+pub(crate) fn fit_set(doc: &mut Document, set: NodeId) {
     let Some(kids) = doc.node(set).map(|n| n.children.clone()) else { return };
     let (mut w, mut h) = (0.0f64, 0.0f64);
     for c in kids {
@@ -476,9 +476,20 @@ fn fit_set(doc: &mut Document, set: NodeId) {
 }
 
 pub(super) fn add_variant(s: &mut Session, p: &Value) -> Result<Value> {
+    let t = targets(s, p).first().copied().ok_or_else(|| bad("component.addVariant", "select a component set or component"))?;
+    let dup = add_variant_in_doc(s.doc_mut()?, t, p, false)?;
+    s.set_selection(vec![dup]);
+    Ok(json!({"id": dup}))
+}
+
+/// A Cmd-drag of a standalone main starts its new variant at the main's position;
+/// the pointer movement then places it inside the freshly created set.
+pub(crate) fn add_variant_for_drag(doc: &mut Document, id: NodeId) -> Result<NodeId> {
+    add_variant_in_doc(doc, id, &json!({}), true)
+}
+
+fn add_variant_in_doc(doc: &mut Document, t: NodeId, p: &Value, at_source: bool) -> Result<NodeId> {
     let cmd = "component.addVariant";
-    let t = targets(s, p).first().copied().ok_or_else(|| bad(cmd, "select a component set or component"))?;
-    let doc = s.doc_mut()?;
     let (set, base) = match doc.get(t)?.kind {
         NodeKind::ComponentSet { .. } => {
             let last = doc.get(t)?.children.last().copied().ok_or_else(|| bad(cmd, "the component set is empty"))?;
@@ -531,14 +542,18 @@ pub(super) fn add_variant(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|c| doc.node(*c))
         .map(|n| lizard_geom::transform_rect_bbox(n.transform, n.local_rect()).y1)
         .fold(0.0f64, f64::max);
+    let source_transform = doc.get(base)?.transform;
     let dup = doc.duplicate_into(base, set, None)?;
     let n = doc.get_mut(dup)?;
     n.name = name;
-    let c = n.transform.as_coeffs();
-    n.transform = lizard_geom::Affine::new([c[0], c[1], c[2], c[3], c[4], bottom + 20.0]);
+    if at_source {
+        n.transform = source_transform;
+    } else {
+        let c = n.transform.as_coeffs();
+        n.transform = lizard_geom::Affine::new([c[0], c[1], c[2], c[3], c[4], bottom + 20.0]);
+    }
     fit_set(doc, set);
-    s.set_selection(vec![dup]);
-    Ok(json!({"id": dup}))
+    Ok(dup)
 }
 
 fn set_variant_value(s: &mut Session, p: &Value) -> Result<Value> {
