@@ -2,7 +2,7 @@
 
 use egui::{Color32, Frame, InnerResponse, Margin, Pos2, Rect, Response, RichText, Shape, Stroke, Ui, WidgetText, pos2};
 
-use crate::theme::{Tokens, regular, semibold};
+use crate::theme::{Tokens, regular};
 use super::Shortcut;
 
 pub struct Tooltip<'a> {
@@ -67,22 +67,24 @@ impl<'a> Tooltip<'a> {
             .fill(colors.surface)
             .stroke(Stroke::new(1.0, colors.border))
             .corner_radius(8)
-            .inner_margin(Margin::symmetric(10, 7))
+            .inner_margin(Margin::symmetric(5, 2))
             .shadow(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: t.shadow })
     }
 
     fn content(&self, ui: &mut Ui) {
-        let colors = TooltipColors::for_theme(Tokens::get(ui.ctx()));
+        let t = Tokens::get(ui.ctx());
+        let colors = TooltipColors::for_theme(t);
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.horizontal(|ui| {
             if !self.title.is_empty() {
-                ui.label(RichText::new(self.title).font(semibold(11.0)).color(colors.text));
+                ui.label(RichText::new(self.title).font(regular(11.0)).color(colors.text));
             }
             if let Some(shortcut) = self.shortcut {
                 if !self.title.is_empty() {
                     ui.add_space(8.0);
                 }
-                Shortcut::new(shortcut).ink(colors.secondary).show(ui);
+                let badge_background = if t.dark { Color32::from_black_alpha(13) } else { Color32::from_white_alpha(26) };
+                Shortcut::new(shortcut).ink(colors.secondary).background(badge_background).show(ui);
             }
         });
         if let Some(description) = self.description {
