@@ -14,6 +14,11 @@ use crate::canvas::status_badge;
 use crate::i18n::tr;
 use crate::theme::{COMPONENT, Tokens, regular, semibold};
 
+/// Clear space between a canvas label and the edge of its frame or section.
+pub(crate) const LABEL_GAP: f32 = 8.0;
+/// The interface font's visible glyphs sit below the centre of their line box.
+pub(crate) const ICON_OPTICAL_OFFSET: f32 = 1.5;
+
 /// Where a label goes on screen: the corner it starts at, the angle it reads along (radians,
 /// clockwise on screen) and the length of the frame's edge along that direction.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,28 +126,31 @@ pub fn draw(app: &LizardApp, painter: &Painter, t: &Tokens, doc: &Document, id: 
         let eye = if hidden { 16.0 } else { 0.0 };
         let galley = crate::bidi::name_galley(painter, &n.name, semibold(11.0), fg, (edge.len - 16.0 - eye).clamp(20.0, 480.0));
         let size = galley.size() + vec2(16.0 + eye, 10.0);
-        let r = Rect::from_min_size(pos2(tl.x, tl.y - size.y - 6.0), size);
+        let r = Rect::from_min_size(pos2(tl.x, tl.y - size.y - LABEL_GAP), size);
         painter.rect_filled(r, CornerRadius::same(4), bg);
         if hidden {
-            let ir = Rect::from_center_size(pos2(r.min.x + 14.0, r.center().y), vec2(12.0, 12.0));
+            let ir = Rect::from_center_size(pos2(r.min.x + 14.0, r.center().y + ICON_OPTICAL_OFFSET), vec2(12.0, 12.0));
             crate::icons::paint(painter, ir, crate::icons::Icon::EyeOff, fg);
         }
         painter.galley(r.min + vec2(8.0 + eye, 5.0), galley, fg);
         status_badge(painter, n, pos2(r.max.x + 6.0, r.center().y));
         r
     } else {
-        let mut x = tl.x;
-        if is_comp {
-            crate::icons::paint(painter, Rect::from_min_size(pos2(x, tl.y - 16.0), vec2(12.0, 12.0)), crate::icons::Icon::Component, col);
-            x += 14.0;
-        }
+        let x = tl.x + if is_comp { 14.0 } else { 0.0 };
         // Names longer than the frame end in an ellipsis (a right-to-left name keeps its start).
         let galley = crate::bidi::name_galley(painter, &n.name, regular(11.0), col, (edge.len - (x - tl.x)).max(20.0));
         let size = galley.size();
+        let height = size.y.max(if is_comp { 12.0 + ICON_OPTICAL_OFFSET * 2.0 } else { 0.0 });
+        let top = tl.y - LABEL_GAP - height;
+        let center_y = top + height / 2.0;
+        if is_comp {
+            let icon = Rect::from_center_size(pos2(tl.x + 6.0, center_y + ICON_OPTICAL_OFFSET), vec2(12.0, 12.0));
+            crate::icons::paint(painter, icon, crate::icons::Icon::Component, col);
+        }
         let end = x + size.x;
-        painter.galley(pos2(x, tl.y - 16.0), galley, col);
-        status_badge(painter, n, pos2(end + 6.0, tl.y - 9.0));
-        Rect::from_min_max(pos2(tl.x, tl.y - 18.0), pos2(end, tl.y - 16.0 + size.y.max(12.0)))
+        painter.galley(pos2(x, center_y - size.y / 2.0), galley, col);
+        status_badge(painter, n, pos2(end + 6.0, center_y + ICON_OPTICAL_OFFSET));
+        Rect::from_min_max(pos2(tl.x, top), pos2(end, tl.y - LABEL_GAP))
     };
     turn_since(painter, from, tl, edge.angle);
     if n.hides_contents() {
@@ -170,7 +178,7 @@ pub fn rename_field(app: &mut LizardApp, ui: &mut egui::Ui) {
     let area = Rect::from_points(&quad);
     let font = regular(11.0);
     let text_w = ui.painter().layout_no_wrap(name.clone(), font.clone(), Color32::WHITE).size().x;
-    let rect = Rect::from_min_size(pos2(area.min.x, area.max.y - 16.0), vec2((text_w + 24.0).max(area.width()).clamp(80.0, 480.0), 16.0));
+    let rect = Rect::from_min_size(pos2(area.min.x, area.center().y - 8.0), vec2((text_w + 24.0).max(area.width()).clamp(80.0, 480.0), 16.0));
     let (done, open) = crate::widgets::rename_field(ui, egui::Id::new(("frame_label_rename", r.id)), &name, rect, font, r.start);
     app.ui.rename_label = open.then_some(crate::layers::Rename { id: r.id, start: false });
     if let Some(new) = done {

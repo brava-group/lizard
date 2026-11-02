@@ -2199,12 +2199,13 @@ fn slot_badges(app: &LizardApp, painter: &egui::Painter, doc: &Document, sel: &[
         painter.extend(Shape::dashed_line(&[q[0], q[1], q[2], q[3], q[0]], stroke(COMPONENT, 1.0), 4.0, 3.0));
         // The label, when the slot is wide enough on screen to hold it.
         let galley = painter.layout_no_wrap(name, regular(10.0), COMPONENT);
-        let (w, h) = (galley.size().x + 14.0, galley.size().y.max(11.0));
+        let (w, h) = (galley.size().x + 14.0, galley.size().y.max(11.0 + crate::frame_labels::ICON_OPTICAL_OFFSET * 2.0));
         if (q[1] - q[0]).length() < w {
             continue;
         }
-        let at = q[0] - vec2(0.0, h + 2.0);
-        crate::icons::paint(painter, Rect::from_min_size(pos2(at.x, at.y + (h - 11.0) / 2.0), vec2(11.0, 11.0)), crate::icons::Icon::Slot, COMPONENT);
+        let at = q[0] - vec2(0.0, h + crate::frame_labels::LABEL_GAP);
+        let icon = Rect::from_center_size(pos2(at.x + 5.5, at.y + h / 2.0 + crate::frame_labels::ICON_OPTICAL_OFFSET), vec2(11.0, 11.0));
+        crate::icons::paint(painter, icon, crate::icons::Icon::Slot, COMPONENT);
         painter.galley(pos2(at.x + 14.0, at.y + (h - galley.size().y) / 2.0), galley, COMPONENT);
     }
 }
@@ -2220,11 +2221,11 @@ fn swap_highlight(app: &LizardApp, painter: &egui::Painter, doc: &Document, id: 
     let galley = painter.layout_no_wrap(tr("Swap instance").to_string(), semibold(10.0), ink);
     let size = vec2(galley.size().x + 26.0, 18.0);
     let top = Rect::from_points(&q).min;
-    let pill = Rect::from_min_size(pos2(top.x, top.y - size.y - 4.0), size);
+    let pill = Rect::from_min_size(pos2(top.x, top.y - size.y - crate::frame_labels::LABEL_GAP), size);
     painter.rect_filled(pill, CornerRadius::same(4), COMPONENT);
     crate::icons::paint(
         painter,
-        Rect::from_center_size(pos2(pill.min.x + 11.0, pill.center().y), vec2(10.0, 10.0)),
+        Rect::from_center_size(pos2(pill.min.x + 11.0, pill.center().y + crate::frame_labels::ICON_OPTICAL_OFFSET), vec2(10.0, 10.0)),
         crate::icons::Icon::Instance,
         ink,
     );
