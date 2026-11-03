@@ -911,9 +911,7 @@ pub fn export_bytes(doc: &Document, ids: &[NodeId], format: ExportFormat, scale:
 /// Render a page at a requested view, using the GPU for supported native content.
 pub fn render_page_pixels(doc: &Document, page: NodeId, view: &lizard_render::View) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(pixmap) = lizard_canvas_gpu::export::render_page_gpu(doc, page, view)
-    {
+    if let Some(pixmap) = lizard_canvas_gpu::export::render_page_gpu(doc, page, view) {
         return Some(pixmap);
     }
     lizard_render::render_view(doc, page, view, &Default::default())
@@ -922,9 +920,7 @@ pub fn render_page_pixels(doc: &Document, page: NodeId, view: &lizard_render::Vi
 /// Screen-ready sRGB pixels. The native GPU path performs profile conversion before readback.
 pub fn render_page_screen_pixels(doc: &Document, page: NodeId, view: &lizard_render::View) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(pixmap) = lizard_canvas_gpu::export::render_page_gpu_screen(doc, page, view)
-    {
+    if let Some(pixmap) = lizard_canvas_gpu::export::render_page_gpu_screen(doc, page, view) {
         return Some(pixmap);
     }
     let mut pixmap = lizard_render::render_view(doc, page, view, &Default::default())?;
@@ -935,9 +931,7 @@ pub fn render_page_screen_pixels(doc: &Document, page: NodeId, view: &lizard_ren
 /// Render selected layers at export resolution, retaining a CPU fallback for unhandled content.
 pub fn render_export_area(doc: &Document, ids: &[NodeId], area: lizard_geom::Rect, scale: f64) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu(doc, ids, area, scale)
-    {
+    if let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu(doc, ids, area, scale) {
         return Some(pixmap);
     }
     lizard_render::render_area(doc, ids, area, scale)
@@ -946,9 +940,7 @@ pub fn render_export_area(doc: &Document, ids: &[NodeId], area: lizard_geom::Rec
 /// Screen-ready sRGB pixels for a selected subtree, converted on the native GPU when possible.
 pub fn render_export_area_screen(doc: &Document, ids: &[NodeId], area: lizard_geom::Rect, scale: f64) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu_screen(doc, ids, area, scale)
-    {
+    if let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu_screen(doc, ids, area, scale) {
         return Some(pixmap);
     }
     let mut pixmap = lizard_render::render_area(doc, ids, area, scale)?;
@@ -969,8 +961,7 @@ pub fn render_node_screen_pixels(doc: &Document, id: NodeId, scale: f64) -> Opti
 /// Screen-ready animated layer at presentation time.
 pub fn render_node_screen_pixels_at(doc: &Document, id: NodeId, scale: f64, time: f64) -> Option<lizard_render::Pixmap> {
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os("LIZARD_GPU_EXPORT_CPU").is_none()
-        && let Some(area) = lizard_render::export_bounds(doc, id)
+    if let Some(area) = lizard_render::export_bounds(doc, id)
         && let Some(pixmap) = lizard_canvas_gpu::export::render_area_gpu_screen_at(doc, &[id], area, scale, time)
     {
         return Some(pixmap);

@@ -20,6 +20,7 @@ struct Params {
 @group(0) @binding(0) var source: texture_2d<f32>;
 @group(0) @binding(1) var destination: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(3) var linear_sampler: sampler;
 
 fn read_source(xy: vec2<i32>) -> vec4<f32> {
     if params.clip_enabled != 0u {
@@ -45,22 +46,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         weight_sum += weight;
     }
     textureStore(destination, xy, total / weight_sum);
-}
-
-@compute @workgroup_size(16, 16)
-fn box_main(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x >= params.width || id.y >= params.height { return; }
-    let xy = vec2<i32>(id.xy);
-    var total = vec4<u32>(0u);
-    for (var i = -i32(params.radius); i <= i32(params.radius); i += 1) {
-        let delta = select(vec2<i32>(0, i), vec2<i32>(i, 0), params.horizontal != 0u);
-        let sample_xy = xy + delta;
-        if sample_xy.x >= 0 && sample_xy.y >= 0 && sample_xy.x < i32(params.width) && sample_xy.y < i32(params.height) {
-            total += vec4<u32>(round(read_source(sample_xy) * 255.0));
-        }
-    }
-    let divisor = 2u * params.radius + 1u;
-    textureStore(destination, xy, vec4<f32>(total / divisor) / 255.0);
 }
 
 @compute @workgroup_size(16, 16)
@@ -99,10 +84,10 @@ fn upsample(@builtin(global_invocation_id) id: vec3<u32>) {
 
 pub struct GpuBlur {
     pipeline: wgpu::ComputePipeline,
-    box_pipeline: wgpu::ComputePipeline,
     downsample_pipeline: wgpu::ComputePipeline,
     upsample_pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    linear_sampler: wgpu::Sampler,
 }
 
 impl GpuBlur {
@@ -118,7 +103,7 @@ impl GpuBlur {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -140,7 +125,21 @@ impl GpuBlur {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
+        });
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Lizard blur linear sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Lizard blur pipeline layout"),
@@ -152,14 +151,6 @@ impl GpuBlur {
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        let box_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Lizard separable three box blur"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("box_main"),
             compilation_options: Default::default(),
             cache: None,
         });
@@ -179,22 +170,7 @@ impl GpuBlur {
             compilation_options: Default::default(),
             cache: None,
         });
-        Self { pipeline, box_pipeline, downsample_pipeline, upsample_pipeline, layout }
-    }
-
-    fn box_radii(sigma: f32) -> [u32; 3] {
-        let sigma = f64::from(sigma);
-        let ideal = (4.0 * sigma * sigma + 1.0).sqrt();
-        let mut lower = ideal.floor() as i64;
-        if lower % 2 == 0 {
-            lower -= 1;
-        }
-        let upper = lower + 2;
-        let count = ((12.0 * sigma * sigma - 3.0 * (lower * lower) as f64 - 12.0 * lower as f64 - 9.0) / (-4.0 * lower as f64 - 4.0)).round() as i64;
-        std::array::from_fn(|index| {
-            let width = if (index as i64) < count { lower } else { upper };
-            ((width.max(1) - 1) / 2) as u32
-        })
+        Self { pipeline, downsample_pipeline, upsample_pipeline, layout, linear_sampler }
     }
 
     pub fn submit(
@@ -263,34 +239,17 @@ impl GpuBlur {
                         resource: wgpu::BindingResource::TextureView(&output.create_view(&wgpu::TextureViewDescriptor::default())),
                     },
                     wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.linear_sampler) },
                 ],
             });
             (uniform, group)
         };
         let downsample = smaller_source.as_ref().map(|small| bind(source, small, 0, 0, 1.0, scale, clip));
         let first_input = smaller_source.as_ref().unwrap_or(source);
-        let box_kernel = std::env::var("LIZARD_GPU_BLUR_KERNEL").is_ok_and(|value| value == "box");
-        let groups = if box_kernel {
-            let radii = Self::box_radii(small_sigma);
-            (0..6)
-                .map(|pass| {
-                    let input = if pass == 0 {
-                        first_input
-                    } else if pass % 2 == 0 {
-                        &result
-                    } else {
-                        &scratch
-                    };
-                    let output = if pass % 2 == 0 { &scratch } else { &result };
-                    bind(input, output, radii[pass % 3], u32::from(pass < 3), small_sigma, 1, if pass == 0 && scale == 1 { clip } else { None })
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![
-                bind(first_input, &scratch, radius, 1, small_sigma, 1, if scale == 1 { clip } else { None }),
-                bind(&scratch, &result, radius, 0, small_sigma, 1, None),
-            ]
-        };
+        let groups = [
+            bind(first_input, &scratch, radius, 1, small_sigma, 1, if scale == 1 { clip } else { None }),
+            bind(&scratch, &result, radius, 0, small_sigma, 1, None),
+        ];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard blur compute") });
         if let Some((_, group)) = &downsample {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Lizard downsample pass"), timestamp_writes: None });
@@ -300,7 +259,7 @@ impl GpuBlur {
         }
         for (_, group) in &groups {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Lizard blur pass"), timestamp_writes: None });
-            pass.set_pipeline(if box_kernel { &self.box_pipeline } else { &self.pipeline });
+            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, group, &[]);
             pass.dispatch_workgroups(size.width.div_ceil(16), size.height.div_ceil(16), 1);
         }
@@ -349,6 +308,7 @@ impl GpuBlur {
                     resource: wgpu::BindingResource::TextureView(&result.create_view(&wgpu::TextureViewDescriptor::default())),
                 },
                 wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.linear_sampler) },
             ],
         });
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard blur upsample encoder") });

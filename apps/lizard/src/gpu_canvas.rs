@@ -9,7 +9,7 @@ use eframe::egui_wgpu::{RenderState, wgpu};
 use lizard_canvas_gpu::vello_scene::{
     BackdropIndex, GpuCanvas, GpuPixelSample, focused_document, has_unhandled_effects_except_outlined_in_focused_subtree,
     has_unhandled_effects_except_outlined_on_page_in_view, has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view,
-    make_focused_outline_scene, make_outline_scene, make_scene_with_images,
+    make_focused_outline_scene, make_outline_scene,
 };
 use lizard_color::{Color, ColorProfile};
 use lizard_doc::{Document, NodeId};
@@ -17,7 +17,10 @@ use lizard_geom::{Point, Rect};
 use lizard_render::View;
 use lizard_ui_egui::canvas::{CanvasGpuBackend, GpuSample};
 
-pub struct GpuCanvasExperiment {
+const PAN_TILE_BUDGET_PIXELS: u64 = 96_000_000;
+const PAN_MARGIN_PIXELS: u32 = 128;
+
+pub struct NativeGpuCanvas {
     state: RenderState,
     direct: Option<GpuCanvas>,
     direct_texture_id: Option<egui::TextureId>,
@@ -34,14 +37,10 @@ pub struct GpuCanvasExperiment {
     direct_render_view: Option<View>,
     direct_complete_page: bool,
     pan_tiles: Vec<CachedPanTile>,
-    pan_tile_budget_pixels: u64,
-    pan_margin_pixels: u32,
     presented_pan_tiles: Vec<(egui::TextureId, View)>,
     direct_current: bool,
     eyedrop_pending: Option<(Point, GpuPixelSample)>,
     direct_provisional_effects: bool,
-    direct_force: bool,
-    direct_cached_blur: bool,
     direct_fallback_logged: bool,
     profile: bool,
     last_render_ms: f64,
@@ -81,7 +80,7 @@ struct CachedPanTile {
     complete_page: bool,
 }
 
-impl GpuCanvasExperiment {
+impl NativeGpuCanvas {
     pub fn new(state: RenderState) -> Self {
         Self {
             state,
@@ -100,18 +99,10 @@ impl GpuCanvasExperiment {
             direct_render_view: None,
             direct_complete_page: false,
             pan_tiles: Vec::new(),
-            pan_tile_budget_pixels: std::env::var("LIZARD_GPU_PAN_TILE_PIXELS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(96_000_000)
-                .clamp(16_000_000, 128_000_000),
-            pan_margin_pixels: std::env::var("LIZARD_GPU_PAN_MARGIN").ok().and_then(|value| value.parse::<u32>().ok()).unwrap_or(128).clamp(0, 512),
             presented_pan_tiles: Vec::new(),
             direct_current: false,
             eyedrop_pending: None,
             direct_provisional_effects: false,
-            direct_force: std::env::var_os("LIZARD_GPU_CANVAS_DIRECT_FORCE").is_some(),
-            direct_cached_blur: std::env::var_os("LIZARD_GPU_CANVAS_NO_EFFECT_CACHE").is_none(),
             direct_fallback_logged: false,
             profile: std::env::var_os("LIZARD_GPU_PROFILE").is_some(),
             last_render_ms: 0.0,
@@ -140,8 +131,7 @@ impl GpuCanvasExperiment {
 
     fn save_current_pan_tile(&mut self, doc: &Arc<Document>, page: NodeId, view_scale: f64, proof_srgb: bool) {
         let Some(view) = self.direct_render_view.as_ref() else { return };
-        if std::env::var_os("LIZARD_GPU_NO_PAN_TILES").is_some()
-            || doc.color_profile != ColorProfile::Srgb
+        if doc.color_profile != ColorProfile::Srgb
             || self.direct_outline.is_some()
             || self.direct_focus.is_some()
             || self.direct_selected_outlines.is_some()
@@ -169,7 +159,7 @@ impl GpuCanvasExperiment {
             complete_page: self.direct_complete_page,
         });
         let mut pixels = self.pan_tiles.iter().map(|tile| u64::from(tile.view.width) * u64::from(tile.view.height)).sum::<u64>();
-        while pixels > self.pan_tile_budget_pixels && self.pan_tiles.len() > 1 {
+        while pixels > PAN_TILE_BUDGET_PIXELS && self.pan_tiles.len() > 1 {
             let old = self.pan_tiles.remove(0);
             pixels -= u64::from(old.view.width) * u64::from(old.view.height);
             self.state.renderer.write().free_texture(&old.id);
@@ -177,7 +167,7 @@ impl GpuCanvasExperiment {
     }
 
     fn cached_pan_coverage(&self, doc: &Arc<Document>, page: NodeId, view: &View, proof_srgb: bool) -> Option<Vec<(egui::TextureId, View)>> {
-        if std::env::var_os("LIZARD_GPU_NO_PAN_TILES").is_some() || doc.color_profile != ColorProfile::Srgb {
+        if doc.color_profile != ColorProfile::Srgb {
             return None;
         }
         let mut views = Vec::new();
@@ -282,7 +272,6 @@ impl GpuCanvasExperiment {
         let (sender, receiver) = mpsc::channel();
         let device = self.state.device.clone();
         let queue = self.state.queue.clone();
-        let cached_blur = self.direct_cached_blur;
         let worker_doc = doc.clone();
         let worker_view = view.clone();
         let profile = doc.color_profile;
@@ -297,9 +286,7 @@ impl GpuCanvasExperiment {
                 let mut canvas =
                     GpuCanvas::from_device(device, queue, "eframe shared device pan cache".to_owned(), worker_view.width, worker_view.height);
                 canvas.register_images_at_scale(&worker_doc, 0.0, worker_view.scale).map_err(|error| error.to_string())?;
-                if cached_blur {
-                    canvas.prepare_static_effects(&worker_doc).map_err(|error| error.to_string())?;
-                }
+                canvas.prepare_static_effects(&worker_doc).map_err(|error| error.to_string())?;
                 let backdrops = BackdropIndex::new(&worker_doc, page);
                 if backdrops.visible_ids(&worker_view).is_empty() {
                     let scene = canvas.make_scene_document(&worker_doc, page, &worker_view);
@@ -366,7 +353,7 @@ impl GpuCanvasExperiment {
         if self.expansion.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
-        if self.direct_force || !has_unhandled_effects_on_page_in_view(&doc, page, view, self.direct_cached_blur) {
+        if !has_unhandled_effects_on_page_in_view(&doc, page, view, true) {
             if (!self.direct_provisional_effects || gesture_active)
                 && self.direct_outline.is_none()
                 && self.direct_focus.is_none()
@@ -479,12 +466,12 @@ impl GpuCanvasExperiment {
                 }
             }
             let limit = self.state.device.limits().max_texture_dimension_2d;
-            let candidate = document_pan_view(&doc, page, view, limit, self.direct_cached_blur);
+            let candidate = document_pan_view(&doc, page, view, limit);
             let visible_pixels = u64::from(view.width) * u64::from(view.height);
             let expand_in_background =
                 candidate.as_ref().is_some_and(|(source, _)| u64::from(source.width) * u64::from(source.height) > visible_pixels.saturating_mul(2));
             let (buffered, complete_page) = candidate.as_ref().filter(|_| !expand_in_background).cloned().unwrap_or_else(|| {
-                let margin = self.pan_margin_pixels.min(view.width.min(view.height) / 4).min(limit.saturating_sub(view.width.max(view.height)) / 2);
+                let margin = PAN_MARGIN_PIXELS.min(view.width.min(view.height) / 4).min(limit.saturating_sub(view.width.max(view.height)) / 2);
                 (
                     View {
                         origin: (view.origin.0 - f64::from(margin) / view.scale, view.origin.1 - f64::from(margin) / view.scale),
@@ -637,9 +624,7 @@ impl GpuCanvasExperiment {
             if changed_doc {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
-                if self.direct_cached_blur {
-                    canvas.prepare_static_effects(&doc)?;
-                }
+                canvas.prepare_static_effects(&doc)?;
             }
             if self.profile {
                 eprintln!("gpu_stage cache_ms={:.2} changed_doc={changed_doc}", cache_started.elapsed().as_secs_f64() * 1000.0);
@@ -675,28 +660,23 @@ impl GpuCanvasExperiment {
             let cache_started = Instant::now();
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing after creation")?;
             if changed_doc {
-                let translated = self.direct_cached_blur
-                    && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_translated_effects(previous, &doc));
+                let translated = self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_translated_effects(previous, &doc));
                 let duplicated = !translated
                     && gesture_active
-                    && self.direct_cached_blur
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_duplicated_effects(previous, &doc));
                 let unaffected = !translated
                     && !duplicated
-                    && self.direct_cached_blur
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_unaffected_effects(previous, &doc));
                 let rotated = !translated
                     && !duplicated
                     && !unaffected
                     && gesture_active
-                    && self.direct_cached_blur
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_rotated_effects(previous, &doc));
                 let scaled = !translated
                     && !duplicated
                     && !unaffected
                     && !rotated
                     && gesture_active
-                    && self.direct_cached_blur
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_scaled_effects(previous, &doc));
                 let resized = !translated
                     && !duplicated
@@ -704,7 +684,6 @@ impl GpuCanvasExperiment {
                     && !rotated
                     && !scaled
                     && gesture_active
-                    && self.direct_cached_blur
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_resized_effects(previous, &doc));
                 if duplicated || rotated || scaled || resized {
                     self.direct_provisional_effects = true;
@@ -712,7 +691,7 @@ impl GpuCanvasExperiment {
                 if !translated && !duplicated && !unaffected && !rotated && !scaled && !resized {
                     canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
                 }
-                if self.direct_cached_blur && ((!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) || finish_preview) {
+                if (!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) || finish_preview {
                     let (blur, drop, inner) = canvas.prepare_static_effects(&doc)?;
                     self.direct_provisional_effects = false;
                     eprintln!(
@@ -721,7 +700,7 @@ impl GpuCanvasExperiment {
                         canvas.cached_texture_count()
                     );
                 }
-            } else if finish_preview && self.direct_cached_blur {
+            } else if finish_preview {
                 canvas.prepare_static_effects(&doc)?;
                 self.direct_provisional_effects = false;
             }
@@ -735,10 +714,8 @@ impl GpuCanvasExperiment {
                 canvas.make_scene_selected_outlines(&doc, page, view, selected, options)
             } else if let Some(focus) = focus {
                 canvas.make_scene_roots(&doc, &[focus], view)
-            } else if self.direct_cached_blur {
-                canvas.make_scene_document(&doc, page, view)
             } else {
-                make_scene_with_images(&doc, page, view, Some(canvas.image_info()))
+                canvas.make_scene_document(&doc, page, view)
             };
             if self.profile {
                 eprintln!("gpu_stage scene_ms={:.2}", scene_started.elapsed().as_secs_f64() * 1000.0);
@@ -1004,14 +981,11 @@ fn view_inside_source(source: &View, view: &View, guard: f64) -> bool {
 /// Hold completed page artwork in document coordinates while the camera pans. The page
 /// candidate stays fixed even when the viewport extends outside the artwork; the UI paints
 /// the page background around that texture. A frame candidate also covers the viewport.
-fn document_pan_view(doc: &Document, page: NodeId, view: &View, limit: u32, cached_blur: bool) -> Option<(View, bool)> {
-    if std::env::var_os("LIZARD_GPU_VIEWPORT_ONLY").is_some() {
-        return None;
-    }
+fn document_pan_view(doc: &Document, page: NodeId, view: &View, limit: u32) -> Option<(View, bool)> {
     let visible = view.page_rect();
     let usable = |bounds, cover_view| {
         let source = bounded_pan_view(bounds, view, limit, cover_view)?;
-        (!has_unhandled_effects_on_page_in_view(doc, page, &source, cached_blur)).then_some(source)
+        (!has_unhandled_effects_on_page_in_view(doc, page, &source, true)).then_some(source)
     };
     let roots = doc.node(page)?.children.as_slice();
     let whole = roots.iter().filter_map(|id| lizard_render::raster_bounds(doc, *id)).reduce(|a, b| a.union(b));
@@ -1069,7 +1043,7 @@ fn document_pan_buffer_covers_artwork_at_native_scale_without_exceeding_budget()
     );
 }
 
-impl CanvasGpuBackend for GpuCanvasExperiment {
+impl CanvasGpuBackend for NativeGpuCanvas {
     fn source_view(&self) -> Option<View> {
         self.direct_render_view.clone()
     }
@@ -1093,7 +1067,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, self.direct_cached_blur, selected) {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, false, None, Some((selected, options))) {
@@ -1121,7 +1095,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, self.direct_cached_blur, selected) {
+        if self.disabled || has_unhandled_effects_except_outlined_on_page_in_view(&doc, page, view, true, selected) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, true, None, Some((selected, options))) {
@@ -1152,7 +1126,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
     ) -> Option<egui::TextureId> {
         if self.disabled
             || doc.page_of(focus) != Some(page)
-            || has_unhandled_effects_except_outlined_in_focused_subtree(&doc, view, self.direct_cached_blur, focus, selected)
+            || has_unhandled_effects_except_outlined_in_focused_subtree(&doc, view, true, focus, selected)
         {
             return None;
         }
@@ -1180,7 +1154,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || doc.page_of(focus) != Some(page) || has_unhandled_effects_in_focused_subtree(&doc, view, self.direct_cached_blur, focus) {
+        if self.disabled || doc.page_of(focus) != Some(page) || has_unhandled_effects_in_focused_subtree(&doc, view, true, focus) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, false, Some(focus), None) {
@@ -1207,7 +1181,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || doc.page_of(focus) != Some(page) || has_unhandled_effects_in_focused_subtree(&doc, view, self.direct_cached_blur, focus) {
+        if self.disabled || doc.page_of(focus) != Some(page) || has_unhandled_effects_in_focused_subtree(&doc, view, true, focus) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, true, Some(focus), None) {
@@ -1233,7 +1207,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
         proof_srgb: bool,
         _ctx: &egui::Context,
     ) -> Option<egui::TextureId> {
-        if self.disabled || (!self.direct_force && has_unhandled_effects_on_page_in_view(&doc, page, view, self.direct_cached_blur)) {
+        if self.disabled || has_unhandled_effects_on_page_in_view(&doc, page, view, true) {
             return None;
         }
         match self.update_direct(doc, page, view, clear, false, proof_srgb, true, None, None) {
@@ -1376,7 +1350,7 @@ impl CanvasGpuBackend for GpuCanvasExperiment {
     }
 }
 
-impl Drop for GpuCanvasExperiment {
+impl Drop for NativeGpuCanvas {
     fn drop(&mut self) {
         if let Some(id) = self.direct_texture_id.take() {
             self.state.renderer.write().free_texture(&id);

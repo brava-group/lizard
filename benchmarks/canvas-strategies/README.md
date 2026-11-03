@@ -72,21 +72,6 @@ For an actual Metal window and a pointer-like 75 Hz trace, run `gpu_residual_win
 
 The finite-source experiment removes that advance knowledge. Use `streaming_window --sharp-underlay --direct-underlay --source-guard=512 --trace=random --trace-repeats=10 --background-warm --interact-during-warm --interact-at-preview` to measure sharp initial coverage and whole-viewport tile handoff. It prints `covered_cameras`; `--oracle-source` is for reproducing the older known-trace result only. `--defer-tiles-until-idle` isolates interaction timing by postponing faithful tile preparation until the trace ends. That mode cannot claim full visual coverage when `covered_cameras` is below the trace length.
 
-`gpu_live_residual_window` tests full-viewport Vello vectors with a document-wide low-resolution effect correction. Run it with `LIZARD_GPU_NO_EFFECTS=1` and `--trace-repeats=10`. Add `--cache-guard=512` or `--cache-guard=1024` to use a finite sharp source around the initial camera and fall back to live vectors outside it. `--cached-two-pass` tests the cached source through an intermediate texture. `--low-cpu-base` computes the effect correction against the document renderer's low-resolution geometry; `--poll-background` keeps GPU callback polling off the presentation thread. `--compare-routes` compares cache, live vectors, and the faithful renderer at several covered pan and zoom positions; `--save-routes` writes the first cache/live image pair. These are benchmark-only paths, and neither has passed the editor integration gates.
-
-The newer bounded geometry-atlas route is reproducible with:
-
-```sh
-LIZARD_GPU_NO_EFFECTS=1 CARGO_TARGET_DIR=target/canvas-strategies/target cargo run --release \
-  --manifest-path benchmarks/canvas-strategies/Cargo.toml \
-  --bin gpu_live_residual_window -- --geometry-atlas --atlas-slots=96 \
-  --start-atlas-ready --initial-margin=2 --atlas-upload-limit=2 \
-  --motion-delay-ms=4000 --warm-frame-interval-ms=500 \
-  --poll-background --low-cpu-base --trace=random --trace-repeats=10
-```
-
-Change `--trace=random` to `--trace=excursion` to pan beyond the prepared area and exercise the live-vector fallback. `--start-atlas-ready` waits for initial coverage before the timed trace; omit it to test early interaction. `--verify-atlas` compares seven cameras against the document renderer after the trace, and `--save-atlas` writes the first actual/reference PNG pair if that camera is still resident. `--atlas-one-pass` measures the experimental fused compositor; the two-pass route is the measured baseline. The setup rejects an atlas too small for the requested initial margin and times out if initial preparation cannot finish. See the report for timing, memory, pixel differences, and the remaining readiness gates.
-
 Run the focused regression tests with:
 
 ```sh

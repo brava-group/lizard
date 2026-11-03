@@ -14,19 +14,10 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
-[features]
-default = ["gpu-canvas-experiment"]
-gpu-canvas-experiment = ["dep:lizard-canvas-gpu", "dep:lizard-color", "dep:lizard-doc", "dep:lizard-geom", "dep:lizard-render"]
-
 [dependencies]
 lizard-engine = { workspace = true }
 lizard-figma-plugin = { workspace = true }
 lizard-ui-egui = { workspace = true }
-lizard-canvas-gpu = { workspace = true, optional = true }
-lizard-color = { workspace = true, optional = true }
-lizard-doc = { workspace = true, optional = true }
-lizard-geom = { workspace = true, optional = true }
-lizard-render = { workspace = true, optional = true }
 lizard-collab-net = { workspace = true }
 lizard-format = { workspace = true }
 lizard-text = { workspace = true }
@@ -42,6 +33,13 @@ arboard = { workspace = true, features = ["image-data", "wayland-data-control"] 
 webbrowser = { workspace = true }
 image = { workspace = true }
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+lizard-canvas-gpu = { workspace = true }
+lizard-color = { workspace = true }
+lizard-doc = { workspace = true }
+lizard-geom = { workspace = true }
+lizard-render = { workspace = true }
 
 # The system's reduce-motion setting (UISettings.AnimationsEnabled), interface language
 # (GlobalizationPreferences.Languages) and controllers for prototypes (Gaming.Input.Gamepad).

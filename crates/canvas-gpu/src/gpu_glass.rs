@@ -123,32 +123,33 @@ struct GlassParams {
 @group(0) @binding(13) var glass_normals: texture_2d<f32>;
 @group(0) @binding(14) var glass_out: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(15) var<uniform> glass: GlassParams;
+@group(0) @binding(19) var backdrop_sampler: sampler;
 
 fn sample_backdrop(at: vec2<f32>) -> vec4<f32> {
-    let p = at - vec2<f32>(0.5);
-    let lower = vec2<i32>(floor(p));
-    let fraction = fract(p);
-    let limit = vec2<i32>(glass.dimensions.xy);
-    var samples = array<vec4<f32>, 4>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
-    for (var y = 0; y < 2; y += 1) {
-        for (var x = 0; x < 2; x += 1) {
-            let xy = lower + vec2<i32>(x, y);
-            if all(xy >= vec2<i32>(0)) && all(xy < limit) { samples[u32(y * 2 + x)] = textureLoad(glass_backdrop, xy, 0); }
-        }
-    }
-    return mix(mix(samples[0], samples[1], fraction.x), mix(samples[2], samples[3], fraction.x), fraction.y);
+    let size = vec2<f32>(glass.dimensions.xy);
+    // Preserve a transparent edge while the sampler performs bilinear filtering.
+    let coverage = clamp(at + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0))
+        * clamp(size + vec2<f32>(0.5) - at, vec2<f32>(0.0), vec2<f32>(1.0));
+    return textureSampleLevel(glass_backdrop, backdrop_sampler, at / size, 0.0) * coverage.x * coverage.y;
 }
 
 fn shade_glass(point: vec2<f32>, d: f32, coverage: f32, inward: vec2<f32>) -> vec4<f32> {
     if coverage <= 0.0 { return vec4<f32>(0.0); }
     let bend = glass.lens.y * pow(1.0 - min(d / glass.lens.x, 1.0), 2.0);
-    var base = sample_backdrop(point);
+    var base: vec4<f32>;
     if bend > 0.0 {
-        let red = sample_backdrop(point + inward * bend * (1.0 - glass.lens.z));
-        let green = sample_backdrop(point + inward * bend);
-        let blue = sample_backdrop(point + inward * bend * (1.0 + glass.lens.z));
-        let alpha = max(red.a, max(green.a, blue.a));
-        base = vec4<f32>(min(red.r, alpha), min(green.g, alpha), min(blue.b, alpha), alpha);
+        if glass.lens.z <= 0.0 {
+            let sampled = sample_backdrop(point + inward * bend);
+            base = vec4<f32>(min(sampled.rgb, vec3<f32>(sampled.a)), sampled.a);
+        } else {
+            let red = sample_backdrop(point + inward * bend * (1.0 - glass.lens.z));
+            let green = sample_backdrop(point + inward * bend);
+            let blue = sample_backdrop(point + inward * bend * (1.0 + glass.lens.z));
+            let alpha = max(red.a, max(green.a, blue.a));
+            base = vec4<f32>(min(red.r, alpha), min(green.g, alpha), min(blue.b, alpha), alpha);
+        }
+    } else {
+        base = sample_backdrop(point);
     }
     var highlight = 0.0;
     if d < glass.falloff.x && glass.falloff.z > 0.0 {
@@ -192,6 +193,7 @@ pub struct GpuGlass {
     composite: wgpu::ComputePipeline,
     composite_rounded: wgpu::ComputePipeline,
     layouts: Vec<wgpu::BindGroupLayout>,
+    backdrop_sampler: wgpu::Sampler,
 }
 
 impl GpuGlass {
@@ -223,15 +225,30 @@ impl GpuGlass {
             count: None,
         };
         let f = wgpu::TextureSampleType::Float { filterable: false };
+        let filterable = wgpu::TextureSampleType::Float { filterable: true };
+        let sampler = wgpu::BindGroupLayoutEntry {
+            binding: 19,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
         let i = wgpu::TextureSampleType::Sint;
         let specs = [
             vec![texture(0, f), storage(1, wgpu::TextureFormat::Rg32Sint)],
             vec![texture(2, i), storage(3, wgpu::TextureFormat::Rg32Sint), uniform(4)],
             vec![texture(5, i), texture(6, f), storage(7, wgpu::TextureFormat::R32Float)],
             vec![texture(8, f), storage(9, wgpu::TextureFormat::Rgba8Unorm)],
-            vec![texture(10, f), texture(11, f), texture(12, f), texture(13, f), storage(14, wgpu::TextureFormat::Rgba8Unorm), uniform(15)],
+            vec![
+                texture(10, filterable),
+                texture(11, f),
+                texture(12, f),
+                texture(13, f),
+                storage(14, wgpu::TextureFormat::Rgba8Unorm),
+                uniform(15),
+                sampler,
+            ],
             vec![uniform(16), storage(17, wgpu::TextureFormat::R32Float), storage(18, wgpu::TextureFormat::Rgba8Unorm)],
-            vec![texture(10, f), storage(14, wgpu::TextureFormat::Rgba8Unorm), uniform(15), uniform(16)],
+            vec![texture(10, filterable), storage(14, wgpu::TextureFormat::Rgba8Unorm), uniform(15), uniform(16), sampler],
         ];
         let layouts: Vec<_> = specs
             .iter()
@@ -273,6 +290,12 @@ impl GpuGlass {
             composite: pipeline(4, "composite"),
             composite_rounded: pipeline(6, "composite_rounded"),
             layouts,
+            backdrop_sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Lizard glass backdrop linear sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            }),
         }
     }
 
@@ -378,9 +401,7 @@ impl GpuGlass {
             pass.set_bind_group(0, group, &[]);
             pass.dispatch_workgroups(size.width.div_ceil(16), size.height.div_ceil(16), 1);
         };
-        if let Some((rect, radius)) = rounded_rect
-            && std::env::var("LIZARD_GPU_GLASS_FUSED").ok().as_deref() != Some("0")
-        {
+        if let Some((rect, radius)) = rounded_rect {
             let bytes: Vec<u8> = rect.into_iter().chain([radius, 0.0, 0.0, 0.0]).flat_map(f32::to_le_bytes).collect();
             let rounded_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Lizard glass rounded rectangle"),
@@ -397,6 +418,7 @@ impl GpuGlass {
                     wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&result_view) },
                     wgpu::BindGroupEntry { binding: 15, resource: composite_uniform.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 16, resource: rounded_uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 19, resource: wgpu::BindingResource::Sampler(&self.backdrop_sampler) },
                 ],
             });
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard fused rounded glass encoder") });
@@ -444,8 +466,28 @@ impl GpuGlass {
         }
         queue.submit([encoder.finish()]);
         let smoothed = if rounded_rect.is_some() { gradients } else { blur.submit(device, queue, &gradients, smooth_radius, 1, None) };
-        let group_composite =
-            make_group(4, &[(&frost, 10), (mask, 11), (&field, 12), (&smoothed, 13), (&result, 14)], Some((&composite_uniform, 15)));
+        let group_composite = {
+            let views = [
+                frost.create_view(&wgpu::TextureViewDescriptor::default()),
+                mask.create_view(&wgpu::TextureViewDescriptor::default()),
+                field.create_view(&wgpu::TextureViewDescriptor::default()),
+                smoothed.create_view(&wgpu::TextureViewDescriptor::default()),
+                result.create_view(&wgpu::TextureViewDescriptor::default()),
+            ];
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Lizard glass composite bindings"),
+                layout: &self.layouts[4],
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&views[0]) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&views[1]) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&views[2]) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&views[3]) },
+                    wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&views[4]) },
+                    wgpu::BindGroupEntry { binding: 15, resource: composite_uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 19, resource: wgpu::BindingResource::Sampler(&self.backdrop_sampler) },
+                ],
+            })
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard glass composite encoder") });
         dispatch(&mut encoder, &self.composite, &group_composite);
         queue.submit([encoder.finish()]);
