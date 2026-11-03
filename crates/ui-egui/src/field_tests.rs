@@ -5,8 +5,8 @@
 //! commit (the colour picker's, the prototype panel's and the Scale panel's fields too).
 
 use egui::accesskit::Role;
-use egui::{Event, Id, Key, Modifiers, Pos2, pos2};
-use lizard_doc::NodeId;
+use egui::{Event, Id, Key, Modifiers, Pos2, pos2, vec2};
+use lizard_doc::{EffectKind, NodeId};
 use lizard_engine::Session;
 use serde_json::json;
 
@@ -541,6 +541,37 @@ fn the_glass_light_controls_have_their_group_label_and_values() {
     let angle = u.ctx.read_response(Id::new(("fx_gl", 0usize)).with("field")).expect("the angle field is shown").rect;
     assert!(intensity.width() >= 60.0 && angle.width() >= 60.0);
     assert!(intensity.min.y > angle.max.y, "the intensity is below the angle");
+}
+
+#[test]
+fn dragging_the_glass_light_orbits_the_source_and_commits_one_edit() {
+    let mut session = Session::new();
+    let node = NodeId(session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 100, "height": 80})).unwrap()["id"].as_u64().unwrap());
+    session.execute("select.set", &json!({"ids": [node]})).unwrap();
+    session.execute("effect.add", &json!({"type": "glass"})).unwrap();
+    let mut ui = Ui::new(session);
+    ui.ctx.data_mut(|data| data.insert_temp(Id::new(("fx_open", 0usize)), true));
+    ui.frame(vec![]);
+    let preview = ui.ctx.read_response(Id::new(("fx_light_preview", 0usize))).expect("glass light preview").rect;
+    let start = preview.center() + vec2(-15.0, -15.0);
+    let end = preview.center() + vec2(-15.0, 15.0);
+    let before = undo_steps(&ui);
+    ui.frame(vec![Event::PointerMoved(start)]);
+    ui.frame(vec![
+        Event::PointerMoved(start),
+        Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+    ]);
+    for step in 1..=10 {
+        ui.frame(vec![Event::PointerMoved(start + (end - start) * step as f32 / 10.0)]);
+    }
+    ui.frame(vec![
+        Event::PointerMoved(end),
+        Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+    ]);
+    let effect = &ui.app.session.doc().unwrap().node(node).unwrap().effects[0].kind;
+    let EffectKind::Glass(glass) = effect else { panic!("glass effect expected") };
+    assert!((glass.light_angle - 45.0).abs() < 1.0, "the light follows the pointer around the anchor: {}", glass.light_angle);
+    assert_eq!(undo_steps(&ui), before + 1, "the whole drag is one undo step");
 }
 
 #[test]

@@ -11,7 +11,7 @@ use crate::a11y::{self, Tip};
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, AppearanceIcon, HeaderIcon, Icon, PositionIcon};
 use crate::list_drag::{ListDrag, move_flags, remove_flags};
-use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant};
+use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, GlassLightControl, NumberField, Slider};
 use crate::style_picker::{self, StyleSlot};
 use crate::theme::{Tokens, regular, semibold};
 use crate::widgets::{self, Edit, FIELD_H, FieldEdit, Lead, PAD};
@@ -2793,41 +2793,29 @@ fn fx_glass_slider(
     effect: impl Fn(f64) -> Effect,
 ) {
     let (row, _) = ui.allocate_exact_size(vec2(240.0, 32.0), Sense::hover());
-    ui.painter().text(row.min + vec2(16.0, 16.0), Align2::LEFT_CENTER, label, regular(11.0), Color32::from_white_alpha(178));
-    let slider = Rect::from_min_size(row.min + vec2(88.0, 4.0), vec2(80.0, 24.0));
-    let number = Rect::from_min_size(row.min + vec2(168.0, 4.0), vec2(56.0, 24.0));
-    ui.painter().rect_filled(slider, CornerRadius { nw: 5, ne: 0, sw: 5, se: 0 }, Color32::from_rgb(56, 56, 56));
-    ui.painter().rect_filled(number, CornerRadius { nw: 0, ne: 5, sw: 0, se: 5 }, Color32::from_rgb(56, 56, 56));
-    ui.painter().vline(number.min.x, number.min.y..=number.max.y, Stroke::new(1.0, Color32::from_rgb(38, 38, 38)));
-    let track = Rect::from_min_size(slider.min + vec2(11.0, 9.0), vec2(58.0, 6.0));
-    let response = ui.interact(slider, Id::new(("fx_glass_slider", key, i)), Sense::click_and_drag()).lizard_tooltip(label);
-    let picked = if response.clicked() || response.dragged() || response.drag_started() || response.drag_stopped() {
-        response.interact_pointer_pos().map(|p| (f64::from((p.x - track.min.x) / track.width()).clamp(0.0, 1.0) * max).round())
-    } else {
-        None
-    };
-    if let Some(next) = picked.filter(|next| (next - value).abs() > f64::EPSILON) {
-        target.set(app, i, effect(next), if response.clicked() { None } else { Some(false) });
+    ui.painter().text(row.min + vec2(16.0, 16.0), Align2::LEFT_CENTER, label, regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+    let controls = Rect::from_min_size(row.min + vec2(88.0, 4.0), vec2(136.0, 24.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(controls).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    child.spacing_mut().item_spacing.x = 0.0;
+    let slider = Slider::new(Id::new(("fx_glass_slider", key, i)), label)
+        .range(0.0, max)
+        .step(1.0)
+        .value(Some(value.clamp(0.0, max)))
+        .text(false)
+        .width(ControlWidth::Fixed(80.0))
+        .show(&mut child);
+    if let Some((next, done)) = slider.change {
+        if (next - value).abs() > f64::EPSILON {
+            target.set(app, i, effect(next), Some(done));
+        } else if done {
+            let _ = app.session.commit_interaction();
+        }
     }
-    if response.drag_stopped() {
-        let _ = app.session.commit_interaction();
-    }
-    let fraction = (picked.unwrap_or(value) / max).clamp(0.0, 1.0) as f32;
-    ui.painter().rect_filled(track, CornerRadius::same(4), Color32::from_rgb(68, 68, 68));
-    ui.painter().rect_filled(
-        Rect::from_min_size(track.min, vec2((track.width() * fraction).max(3.0), 6.0)),
-        CornerRadius::same(4),
-        Tokens::get(ui.ctx()).accent,
-    );
-    let knob = pos2(track.min.x + track.width() * fraction, track.center().y);
-    ui.painter().circle_filled(knob + vec2(0.0, 1.0), 7.0, Color32::from_black_alpha(70));
-    ui.painter().circle_filled(knob, 6.0, Color32::WHITE);
-    let ed = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(number), |ui| {
-            widgets::number_field(ui, Id::new(("fx_glass", key, i)), Lead::None, Some(value.round()), "", 56.0, 1.0)
-        })
-        .inner;
-    effect_target_field(app, target, i, ed, |v| effect(v.max(0.0)));
+    let edit = NumberField::new(Id::new(("fx_glass", key, i)), Lead::None, Some(value.round()), "")
+        .show(&mut child, ControlWidth::Fixed(56.0))
+        .edit
+        .and_then(Edit::settled);
+    effect_target_field(app, target, i, edit, |v| effect(v.max(0.0)));
 }
 
 fn effect_target_field(app: &mut LizardApp, target: &EffectTarget<'_>, index: usize, edit: Option<FieldEdit>, effect: impl Fn(f64) -> Effect) {
@@ -2836,19 +2824,6 @@ fn effect_target_field(app: &mut LizardApp, target: &EffectTarget<'_>, index: us
         Some(FieldEdit::Scrub(value, done)) => target.set(app, index, effect(value), Some(done)),
         None => {}
     }
-}
-
-fn fx_glass_light_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let id = Id::new("lizard_effect_glass_light_texture");
-    if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
-        return Some(texture);
-    }
-    let rgba = image::load_from_memory(include_bytes!("../assets/effect-glass-light.png")).ok()?.to_rgba8();
-    let size = [usize::try_from(rgba.width()).ok()?, usize::try_from(rgba.height()).ok()?];
-    let texture =
-        ctx.load_texture("lizard_effect_glass_light", egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()), egui::TextureOptions::LINEAR);
-    ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
-    Some(texture)
 }
 
 fn effect_settings(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, i: usize, e: &Effect) {
@@ -3061,33 +3036,32 @@ fn effect_settings(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, 
                 Color32::from_white_alpha(178),
             );
             let preview = Rect::from_min_size(light.min + vec2(88.0, 16.0), vec2(56.0, 56.0));
-            if let Some(texture) = fx_glass_light_texture(ui.ctx()) {
-                ui.painter().image(texture.id(), preview, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-            }
-            let response = ui.interact(preview, Id::new(("fx_light_preview", i)), Sense::click_and_drag());
-            if (response.clicked() || response.dragged() || response.drag_started() || response.drag_stopped())
-                && let Some(pointer) = response.interact_pointer_pos()
-            {
-                let d = pointer - preview.center();
-                let angle = f64::from(d.y.atan2(-d.x).to_degrees());
+            let light_control = GlassLightControl::new(Id::new(("fx_light_preview", i)), g.light_angle, g.light_intensity).show(ui, preview);
+            if let Some(angle) = light_control.angle {
                 if (angle - g.light_angle).abs() > 0.5 {
-                    target.set(app, i, with(&|gl| gl.light_angle = angle), if response.clicked() { None } else { Some(false) });
+                    target.set(app, i, with(&|gl| gl.light_angle = angle), if light_control.response.clicked() { None } else { Some(false) });
                 }
             }
-            if response.drag_stopped() {
+            if light_control.response.drag_stopped() {
                 let _ = app.session.commit_interaction();
             }
             let angle = Rect::from_min_size(light.min + vec2(152.0, 16.0), vec2(72.0, 24.0));
             let intensity = Rect::from_min_size(light.min + vec2(152.0, 47.0), vec2(72.0, 24.0));
             let angle_edit = ui
                 .scope_builder(egui::UiBuilder::new().max_rect(angle), |ui| {
-                    widgets::number_field(ui, Id::new(("fx_gl", i)), Lead::None, Some(g.light_angle.round()), "°", 72.0, 1.0)
+                    NumberField::new(Id::new(("fx_gl", i)), Lead::None, Some(g.light_angle.round()), "°")
+                        .show(ui, ControlWidth::Fixed(72.0))
+                        .edit
+                        .and_then(Edit::settled)
                 })
                 .inner;
             effect_target_field(app, target, i, angle_edit, |v| with(&|gl| gl.light_angle = v.clamp(-180.0, 180.0)));
             let intensity_edit = ui
                 .scope_builder(egui::UiBuilder::new().max_rect(intensity), |ui| {
-                    widgets::number_field(ui, Id::new(("fx_gi", i)), Lead::None, Some((g.light_intensity * 100.0).round()), "%", 72.0, 1.0)
+                    NumberField::new(Id::new(("fx_gi", i)), Lead::None, Some((g.light_intensity * 100.0).round()), "%")
+                        .show(ui, ControlWidth::Fixed(72.0))
+                        .edit
+                        .and_then(Edit::settled)
                 })
                 .inner;
             effect_target_field(app, target, i, intensity_edit, |v| with(&|gl| gl.light_intensity = (v / 100.0).clamp(0.0, 1.0)));
