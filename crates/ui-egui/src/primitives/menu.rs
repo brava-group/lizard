@@ -123,6 +123,17 @@ impl Menu {
         MenuPopup { popup }
     }
 
+    /// A section title inset with the menu rows instead of touching the popup edge.
+    pub fn heading(ui: &mut Ui, text: &str) {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(LABEL_INSET);
+            ui.label(egui::RichText::new(text).font(regular(11.0)).color(Tokens::get(ui.ctx()).menu_text));
+        });
+        ui.add_space(4.0);
+    }
+
     /// A rule between groups, with an optional secondary group heading below it.
     pub fn separator(ui: &mut Ui, heading: Option<&str>) {
         ui.add_space(8.0);

@@ -92,7 +92,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
                 .agent
                 .runtime_conversation
                 .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
-                .map_or("Agente", |chat| chat.agent.label());
+                .map_or(crate::i18n::tr("Agent"), |chat| chat.agent.label());
             crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
         }
     }

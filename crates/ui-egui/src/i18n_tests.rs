@@ -165,6 +165,10 @@ fn used_keys() -> BTreeSet<String> {
             keys.extend(literals(&std::fs::read_to_string(&path).unwrap(), LOOKUPS));
         }
     }
+    for file in ["agent.rs", "services.rs", "control_server.rs"] {
+        let native_agent = dir.join("../../../apps/lizard/src").join(file);
+        keys.extend(literals(&std::fs::read_to_string(native_agent).unwrap(), LOOKUPS));
+    }
     keys
 }
 

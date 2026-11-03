@@ -263,7 +263,7 @@ pub use control::{ControlReply, ControlRequest};
 pub trait Services {
     /// Start or continue a local ACP design agent. Desktop implementations run it off the UI thread.
     fn agent_send(&mut self, _agent: agent_panel::AgentKind, _prompt: agent_panel::AgentPrompt, _document: u64) -> Result<(), String> {
-        Err("Agentes locais estão disponíveis apenas no aplicativo desktop".into())
+        Err(crate::i18n::tr("Local agents are only available in the desktop app").into())
     }
     fn agent_poll(&mut self) -> Vec<agent_panel::AgentEvent> {
         Vec::new()
@@ -276,7 +276,7 @@ pub trait Services {
     }
     fn agent_refresh_connection(&mut self, _agent: agent_panel::AgentKind) {}
     fn agent_login(&mut self, _agent: agent_panel::AgentKind) -> Result<(), String> {
-        Err("O login dos agentes está disponível apenas no aplicativo desktop".into())
+        Err(crate::i18n::tr("Agent sign-in is only available in the desktop app").into())
     }
     fn agent_cancel_login(&mut self) {}
     fn agent_request_models(&mut self, _agent: agent_panel::AgentKind) {}

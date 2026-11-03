@@ -150,7 +150,7 @@ fn serve_guarded(
                 }
                 if let Some((document, agent_index, enabled)) = &guard {
                     if !enabled.load(Ordering::Acquire) {
-                        writeln!(out, "{}", json!({"id": id, "ok": false, "error": "A sessão do agente foi encerrada"}))?;
+                        writeln!(out, "{}", json!({"id": id, "ok": false, "error": lizard_ui_egui::i18n::tr("The agent session has ended")}))?;
                         continue;
                     }
                     if let Some(object) = params.as_object_mut() {

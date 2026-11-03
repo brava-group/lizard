@@ -108,7 +108,7 @@ pub fn drain(app: &mut LizardApp, ctx: &Context) {
             continue;
         }
         if r.is_revoked() {
-            let _ = r.reply.send(ControlReply { id: r.id, result: Err("A sessão do agente foi encerrada".into()) });
+            let _ = r.reply.send(ControlReply { id: r.id, result: Err(crate::i18n::tr("The agent session has ended").into()) });
             continue;
         }
         // Requests for another window wait for its frame.
@@ -188,7 +188,7 @@ pub fn drain_hidden(app: &mut LizardApp, ctx: &Context) {
             continue;
         }
         if r.is_revoked() {
-            let _ = r.reply.send(ControlReply { id: r.id, result: Err("A sessão do agente foi encerrada".into()) });
+            let _ = r.reply.send(ControlReply { id: r.id, result: Err(crate::i18n::tr("The agent session has ended").into()) });
             continue;
         }
         let target = r.params.get("window").and_then(Value::as_u64).unwrap_or(app.windows.focused);
@@ -266,14 +266,14 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
     if let Some(expected) = p.get("__agent_document").and_then(Value::as_u64)
         && app.session.ds().ok().map(|ds| ds.uid) != Some(expected)
     {
-        return Err("O documento ativo mudou; a ação do agente foi recusada".into());
+        return Err(crate::i18n::tr("The active document changed; the agent action was denied").into());
     }
     if p.get("__agent_document").is_some() && app.session.ds().ok().is_some_and(|ds| ds.interaction.is_some()) {
-        return Err("Termine o gesto no canvas antes de executar uma ação do agente".into());
+        return Err(crate::i18n::tr("Finish the canvas gesture before running an agent action").into());
     }
     match method {
         "agent.activity" => {
-            let document = p.get("__agent_document").and_then(Value::as_u64).ok_or("A atividade do agente exige uma sessão anexada")?;
+            let document = p.get("__agent_document").and_then(Value::as_u64).ok_or(crate::i18n::tr("Agent activity requires an attached session"))?;
             if !app.ui.agent.busy || app.ui.agent.runtime_document != Some(document) {
                 return Ok(json!({"accepted": false}));
             }

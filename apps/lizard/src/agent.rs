@@ -9,6 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use lizard_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
+use lizard_ui_egui::i18n::{tr, trf};
 use serde_json::{Value, json};
 
 const MAX_LINE: usize = 8 * 1024 * 1024;
@@ -38,7 +39,7 @@ impl LoginAttempt {
         if self.canceled() {
             let _ = child.kill();
             let _ = child.wait();
-            return Err("Sign-in was canceled".into());
+            return Err(tr("Sign-in was canceled").into());
         }
         *process = Some(child);
         Ok(())
@@ -48,13 +49,13 @@ impl LoginAttempt {
         loop {
             let status = {
                 let mut process = self.process.lock().map_err(|error| error.to_string())?;
-                process.as_mut().ok_or("Sign-in process ended unexpectedly")?.try_wait().map_err(|error| error.to_string())?
+                process.as_mut().ok_or(tr("Sign-in process ended unexpectedly"))?.try_wait().map_err(|error| error.to_string())?
             };
             if let Some(status) = status {
-                return if self.canceled() { Err("Sign-in was canceled".into()) } else { Ok(status) };
+                return if self.canceled() { Err(tr("Sign-in was canceled").into()) } else { Ok(status) };
             }
             if self.canceled() {
-                return Err("Sign-in was canceled".into());
+                return Err(tr("Sign-in was canceled").into());
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -114,7 +115,7 @@ impl Agent {
         // A single executable override lets protocol tests use a synthetic ACP process. No
         // shell is involved, so its value is never interpreted as shell code.
         let resolved = if override_command.is_none() {
-            self::program(kind).ok_or_else(|| format!("{} is not available", kind.label()))?
+            self::program(kind).ok_or_else(|| trf("{provider} is not available", &[("provider", &kind.label())]))?
         } else {
             PathBuf::new()
         };
@@ -127,9 +128,11 @@ impl Agent {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Não foi possível iniciar {}: {e}. Instale o adaptador ACP e entre na sua conta.", kind.label()))?;
-        let stdin = child.stdin.take().ok_or("O agente não abriu a entrada ACP")?;
-        let stdout = child.stdout.take().ok_or("O agente não abriu a saída ACP")?;
+            .map_err(|error| {
+                trf("Could not start {provider}: {error}. Install the ACP adapter and sign in.", &[("provider", &kind.label()), ("error", &error)])
+            })?;
+        let stdin = child.stdin.take().ok_or(tr("The agent did not open ACP input"))?;
+        let stdout = child.stdout.take().ok_or(tr("The agent did not open ACP output"))?;
         let read_tx = input.clone();
         std::thread::Builder::new().name("lizard-agent-read".into()).spawn(move || read_messages(stdout, read_tx)).map_err(|e| e.to_string())?;
         let mcp = json!({"name":"lizard", "command":cli, "args":["mcp", "--attach", port.to_string()], "env":[]});
@@ -142,7 +145,7 @@ impl Agent {
     }
 
     pub fn send(&self, prompt: AgentPrompt) -> Result<(), String> {
-        self.input.send(Input::Prompt(prompt)).map_err(|_| "O agente terminou a sessão".into())
+        self.input.send(Input::Prompt(prompt)).map_err(|_| tr("The agent ended the session").into())
     }
 
     pub fn stop(&self) {
@@ -190,7 +193,7 @@ fn send(stdin: &mut ChildStdin, id: Option<u64>, method: &str, params: Value) ->
     if let Some(id) = id {
         message["id"] = json!(id);
     }
-    writeln!(stdin, "{message}").and_then(|_| stdin.flush()).map_err(|e| format!("Falha na conexão com o agente: {e}"))
+    writeln!(stdin, "{message}").and_then(|_| stdin.flush()).map_err(|error| trf("Agent connection failed: {error}", &[("error", &error)]))
 }
 
 fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, output: Sender<AgentEvent>, cwd: String, mcp: Value) {
@@ -235,19 +238,19 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                     } else if method == "session/request_permission" {
                         let id = message.get("id").cloned().unwrap_or(Value::Null);
                         let p = &message["params"];
-                        let title = p["toolCall"]["title"].as_str().unwrap_or("Ação do agente").to_string();
+                        let title = p["toolCall"]["title"].as_str().unwrap_or(tr("Agent action")).to_string();
                         let options = p["options"]
                             .as_array()
                             .map(|a| a.iter().filter_map(|v| Some((v["optionId"].as_str()?.to_string(), v["name"].as_str()?.to_string()))).collect())
                             .unwrap_or_default();
                         let _ = output.send(AgentEvent::Permission { id, title, options });
                     } else if let Some(id) = message.get("id") {
-                        let reply = json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32601,"message":"Método não disponível no Lizard"}});
+                        let reply = json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32601,"message":tr("Method not available in Lizard")}});
                         let _ = writeln!(stdin, "{reply}").and_then(|_| stdin.flush());
                     }
                     Ok(())
                 } else if let Some(error) = message.get("error") {
-                    let msg = error["message"].as_str().unwrap_or("Erro do agente").to_string();
+                    let msg = error["message"].as_str().unwrap_or(tr("Agent error")).to_string();
                     let _ = output.send(AgentEvent::Error(msg));
                     active = None;
                     Ok(())
@@ -255,7 +258,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                     match message.get("id").and_then(Value::as_u64) {
                         Some(1) => {
                             if message["result"]["protocolVersion"].as_u64() != Some(1) {
-                                Err("O agente não suporta ACP v1".into())
+                                Err(tr("The agent does not support ACP v1").into())
                             } else {
                                 image_supported = message["result"]["agentCapabilities"]["promptCapabilities"]["image"].as_bool() == Some(true);
                                 load_supported = message["result"]["agentCapabilities"]["loadSession"].as_bool() == Some(true);
@@ -280,7 +283,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                                 let _ = output.send(AgentEvent::Ready);
                                 Ok(())
                             } else {
-                                Err("O agente não criou uma sessão ACP".into())
+                                Err(tr("The agent did not create an ACP session").into())
                             }
                         }
                         Some(id) if active == Some(id) => {
@@ -296,7 +299,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
             Input::Shutdown => break,
             Input::Closed => {
                 if active.is_some() || session.is_none() || !queued.is_empty() {
-                    let _ = output.send(AgentEvent::Error("O agente encerrou a conexão ACP".into()));
+                    let _ = output.send(AgentEvent::Error(tr("The agent closed the ACP connection").into()));
                 }
                 break;
             }
@@ -327,7 +330,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
             && let Some(prompt) = queued.pop_front()
         {
             if !prompt.images.is_empty() && !image_supported {
-                let _ = output.send(AgentEvent::Error("Este agente ACP não aceita imagens no prompt.".into()));
+                let _ = output.send(AgentEvent::Error(tr("This ACP agent does not accept images in the prompt.").into()));
                 continue;
             }
             let mut blocks = vec![json!({"type":"text", "text":prompt.text})];
@@ -496,20 +499,20 @@ fn command_with_runtime(program: &std::ffi::OsStr) -> Command {
 
 fn ensure_provider(kind: AgentKind, attempt: &LoginAttempt) -> Result<(), String> {
     if attempt.canceled() {
-        return Err("Sign-in was canceled".into());
+        return Err(tr("Sign-in was canceled").into());
     }
     let needs_install = !login_available(kind) || (kind == AgentKind::Claude && program(kind).is_none());
     if !needs_install {
         return Ok(());
     }
-    let npm = named_program("npm").ok_or("Automatic provider setup needs Node.js on this computer")?;
+    let npm = named_program("npm").ok_or(tr("Automatic provider setup requires Node.js on this computer"))?;
     let folder = match kind {
         AgentKind::Codex => "codex",
         AgentKind::Claude => "claude",
         AgentKind::Gemini => "gemini",
         AgentKind::Kimi => "kimi",
     };
-    let root = crate::services::config_dir().ok_or("Lizard could not find its application support folder")?.join("Agents").join(folder);
+    let root = crate::services::config_dir().ok_or(tr("Lizard could not find its application support folder"))?.join("Agents").join(folder);
     std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let packages: &[&str] = match kind {
         AgentKind::Codex => &["@openai/codex"],
@@ -537,7 +540,7 @@ fn ensure_provider(kind: AgentKind, attempt: &LoginAttempt) -> Result<(), String
     if status.success() && login_available(kind) && (kind != AgentKind::Claude || program(kind).is_some()) {
         Ok(())
     } else {
-        Err(format!("Automatic setup for {} could not finish. Open the advanced setup guide for another method.", kind.label()))
+        Err(trf("Automatic setup for {provider} could not finish. Open the advanced setup guide for another method.", &[("provider", &kind.label())]))
     }
 }
 
@@ -597,7 +600,7 @@ fn forward_auth_links<R: Read>(stream: R, events: &Sender<AgentEvent>, allowed_p
 }
 
 fn login_claude(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
-    let program = named_program("claude").ok_or("Claude Code is not installed")?;
+    let program = named_program("claude").ok_or(tr("Claude Code is not installed"))?;
     let mut child = command_with_runtime(program.as_os_str())
         .args(["auth", "login", "--claudeai"])
         .stdin(Stdio::null())
@@ -605,8 +608,8 @@ fn login_claude(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let stdout = child.stdout.take().ok_or("Claude did not return sign-in instructions")?;
-    let stderr = child.stderr.take().ok_or("Claude did not return sign-in status")?;
+    let stdout = child.stdout.take().ok_or(tr("Claude did not return sign-in instructions"))?;
+    let stderr = child.stderr.take().ok_or(tr("Claude did not return sign-in status"))?;
     let out_events = events.clone();
     let out = std::thread::spawn(move || {
         forward_auth_links(stdout, &out_events, &["https://claude.ai/", "https://www.claude.ai/", "https://console.anthropic.com/"])
@@ -621,11 +624,11 @@ fn login_claude(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(
     let _ = out.join();
     let _ = err.join();
     let status = status?;
-    if status.success() { Ok(()) } else { Err("Claude sign-in did not complete".into()) }
+    if status.success() { Ok(()) } else { Err(tr("Claude sign-in did not complete").into()) }
 }
 
 fn login_gemini(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
-    let program = program(AgentKind::Gemini).ok_or("Gemini is not installed")?;
+    let program = program(AgentKind::Gemini).ok_or(tr("Gemini is not installed"))?;
     login_gemini_with_program(program.as_os_str(), events, attempt)
 }
 
@@ -637,7 +640,7 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let stderr = child.stderr.take().ok_or("Gemini did not return sign-in instructions")?;
+    let stderr = child.stderr.take().ok_or(tr("Gemini did not return sign-in instructions"))?;
     let link_events = events.clone();
     let link_attempt = attempt.clone();
     let links = std::thread::spawn(move || {
@@ -645,8 +648,8 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
             forward_auth_links(stderr, &link_events, &["https://accounts.google.com/", "https://auth.cloud.google/"]);
         }
     });
-    let mut stdin = child.stdin.take().ok_or("Gemini did not open the authentication channel")?;
-    let stdout = child.stdout.take().ok_or("Gemini did not return an authentication channel")?;
+    let mut stdin = child.stdin.take().ok_or(tr("Gemini did not open the authentication channel"))?;
+    let stdout = child.stdout.take().ok_or(tr("Gemini did not return an authentication channel"))?;
     attempt.attach(child)?;
     let outcome = (|| -> Result<(), String> {
         let mut reader = BufReader::new(stdout);
@@ -661,7 +664,7 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
             let mut line = Vec::new();
             let size = (&mut reader).take((MAX_LINE + 1) as u64).read_until(b'\n', &mut line).map_err(|error| error.to_string())?;
             if size == 0 || size > MAX_LINE {
-                return Err("Gemini closed before sign-in completed".into());
+                return Err(tr("Gemini closed before sign-in completed").into());
             }
             let Ok(message) = serde_json::from_slice::<Value>(&line) else { continue };
             if message["id"] == 1 && !initialized {
@@ -672,7 +675,7 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
                     .as_array()
                     .and_then(|items| items.iter().find(|item| item["id"] == "oauth-personal"))
                     .and_then(|item| item["id"].as_str())
-                    .ok_or("Gemini did not offer Google account sign-in")?;
+                    .ok_or(tr("Gemini did not offer Google account sign-in"))?;
                 send(&mut stdin, Some(2), "authenticate", json!({"methodId":method}))?;
                 initialized = true;
             } else if message["id"] == 2 {
@@ -689,7 +692,7 @@ fn login_gemini_with_program(program: &std::ffi::OsStr, events: &Sender<AgentEve
 }
 
 fn login_kimi(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(), String> {
-    let program = program(AgentKind::Kimi).ok_or("Kimi Code is not installed")?;
+    let program = program(AgentKind::Kimi).ok_or(tr("Kimi Code is not installed"))?;
     let mut child = command_with_runtime(program.as_os_str())
         .arg("login")
         .stdin(Stdio::null())
@@ -697,7 +700,7 @@ fn login_kimi(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(),
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let stderr = child.stderr.take().ok_or("Kimi did not return sign-in instructions")?;
+    let stderr = child.stderr.take().ok_or(tr("Kimi did not return sign-in instructions"))?;
     attempt.attach(child)?;
     let mut reader = BufReader::new(stderr);
     let mut line = String::new();
@@ -733,11 +736,11 @@ fn login_kimi(events: &Sender<AgentEvent>, attempt: &LoginAttempt) -> Result<(),
     let status = attempt.wait();
     attempt.finish();
     let status = status?;
-    if status.success() { Ok(()) } else { Err("Kimi sign-in did not complete".into()) }
+    if status.success() { Ok(()) } else { Err(tr("Kimi sign-in did not complete").into()) }
 }
 
 fn start_codex(document: u64, conversation: u64, port: u16, cwd: &str, cli: &str) -> Result<Agent, String> {
-    let program = program(AgentKind::Codex).ok_or("Instale o Codex CLI para usar o agente Codex")?;
+    let program = program(AgentKind::Codex).ok_or(tr("Install Codex CLI to use the Codex agent"))?;
     start_codex_with_program(program.as_os_str(), document, conversation, port, cwd, cli)
 }
 
@@ -753,9 +756,9 @@ fn start_codex_with_program(program: &std::ffi::OsStr, document: u64, conversati
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| format!("Não foi possível iniciar o Codex: {e}"))?;
-    let stdin = child.stdin.take().ok_or("O Codex não abriu a entrada do app-server")?;
-    let stdout = child.stdout.take().ok_or("O Codex não abriu a saída do app-server")?;
+        .map_err(|error| trf("Could not start Codex: {error}", &[("error", &error)]))?;
+    let stdin = child.stdin.take().ok_or(tr("Codex did not open app-server input"))?;
+    let stdout = child.stdout.take().ok_or(tr("Codex did not open app-server output"))?;
     let read_tx = input.clone();
     std::thread::Builder::new().name("lizard-codex-read".into()).spawn(move || read_messages(stdout, read_tx)).map_err(|e| e.to_string())?;
     let cwd = cwd.to_string();
@@ -814,11 +817,11 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                                 let id = item["id"].as_str().unwrap_or("tool").to_string();
                                 let title = match item_type {
                                     "mcpToolCall" => {
-                                        format!("{} · {}", item["server"].as_str().unwrap_or("MCP"), item["tool"].as_str().unwrap_or("Ferramenta"))
+                                        format!("{} · {}", item["server"].as_str().unwrap_or("MCP"), item["tool"].as_str().unwrap_or(tr("Tool")))
                                     }
-                                    "commandExecution" => item["command"].as_str().unwrap_or("Comando").chars().take(120).collect(),
-                                    "fileChange" => "Alteração de arquivo".into(),
-                                    _ => "Busca na web".into(),
+                                    "commandExecution" => item["command"].as_str().unwrap_or(tr("Command")).chars().take(120).collect(),
+                                    "fileChange" => tr("File change").into(),
+                                    _ => tr("Web search").into(),
                                 };
                                 let status = Some(if method == "item/completed" { "completed" } else { "in_progress" }.into());
                                 let input = match item_type {
@@ -838,25 +841,26 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                             active = false;
                             let status = message["params"]["turn"]["status"].as_str().unwrap_or("failed");
                             if status == "failed" {
-                                let detail = message["params"]["turn"]["error"]["message"].as_str().unwrap_or("A execução do Codex falhou");
+                                let detail = message["params"]["turn"]["error"]["message"].as_str().unwrap_or(tr("The Codex run failed"));
                                 let _ = output.send(AgentEvent::Error(detail.to_string()));
                             } else {
                                 let _ = output.send(AgentEvent::Done(if status == "completed" { "end_turn" } else { "cancelled" }.into()));
                             }
                         }
                         "error" if !message["params"]["willRetry"].as_bool().unwrap_or(false) => {
-                            let detail = message["params"]["error"]["message"].as_str().unwrap_or("Erro do Codex");
+                            let detail = message["params"]["error"]["message"].as_str().unwrap_or(tr("Codex error"));
                             let _ = output.send(AgentEvent::Error(detail.to_string()));
                         }
                         _ => {}
                     }
                     if let Some(id) = message.get("id") {
-                        let reply = json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Aprovação não disponível nesta sessão"}});
+                        let reply =
+                            json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":tr("Approval is not available in this session")}});
                         let _ = writeln!(stdin, "{reply}").and_then(|_| stdin.flush());
                     }
                     Ok(())
                 } else if let Some(error) = message.get("error") {
-                    let detail = error["message"].as_str().unwrap_or("Erro do app-server");
+                    let detail = error["message"].as_str().unwrap_or(tr("App-server error"));
                     Err(detail.to_string())
                 } else {
                     match message.get("id").and_then(Value::as_u64) {
@@ -866,7 +870,7 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                             send(&mut stdin, Some(3), "model/list", json!({"limit":100}))
                         }
                         Some(2) => {
-                            let sid = message["result"]["thread"]["id"].as_str().ok_or("O Codex não retornou uma thread")?.to_string();
+                            let sid = message["result"]["thread"]["id"].as_str().ok_or(tr("Codex did not return a thread"))?.to_string();
                             session = Some(sid.clone());
                             let _ = output.send(AgentEvent::Session(sid));
                             let _ = output.send(AgentEvent::Ready);
@@ -883,7 +887,7 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
             Input::Shutdown => break,
             Input::Closed => {
                 if active || session.is_none() || !queued.is_empty() {
-                    let _ = output.send(AgentEvent::Error("O Codex encerrou a conexão".into()));
+                    let _ = output.send(AgentEvent::Error(tr("Codex closed the connection").into()));
                 }
                 break;
             }
@@ -937,7 +941,7 @@ fn parse_models(message: &Value) -> Vec<(String, String)> {
 }
 
 pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
-    let program = program(AgentKind::Codex).ok_or("Codex CLI não instalado")?;
+    let program = program(AgentKind::Codex).ok_or(tr("Codex CLI is not installed"))?;
     std::thread::Builder::new()
         .name("lizard-codex-models".into())
         .spawn(move || {
@@ -949,8 +953,8 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
                     .stderr(Stdio::null())
                     .spawn()
                     .map_err(|error| error.to_string())?;
-                let mut stdin = child.stdin.take().ok_or("O Codex não abriu a entrada de modelos")?;
-                let stdout = child.stdout.take().ok_or("O Codex não abriu a saída de modelos")?;
+                let mut stdin = child.stdin.take().ok_or(tr("Codex did not open model input"))?;
+                let stdout = child.stdout.take().ok_or(tr("Codex did not open model output"))?;
                 let mut reader = BufReader::new(stdout);
                 let outcome = (|| -> Result<(), String> {
                     send(
@@ -964,7 +968,7 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
                         let mut line = Vec::new();
                         let size = (&mut reader).take((MAX_LINE + 1) as u64).read_until(b'\n', &mut line).map_err(|error| error.to_string())?;
                         if size == 0 || size > MAX_LINE {
-                            return Err("O Codex encerrou a consulta de modelos".into());
+                            return Err(tr("Codex ended the model request").into());
                         }
                         let Ok(message) = serde_json::from_slice::<Value>(&line) else { continue };
                         if message["id"] == 1 && !requested {
@@ -992,7 +996,7 @@ pub fn request_codex_models(events: Sender<AgentEvent>) -> Result<(), String> {
 /// Start the Codex CLI's supported ChatGPT OAuth flow and keep its callback server alive until
 /// completion. The browser is opened by the UI after receiving `LoginUrl`.
 pub fn login_codex(events: Sender<AgentEvent>, attempt: LoginAttempt) -> Result<(), String> {
-    let program = program(AgentKind::Codex).ok_or("Instale o Codex CLI antes de conectar sua conta ChatGPT")?;
+    let program = program(AgentKind::Codex).ok_or(tr("Install Codex CLI before connecting your ChatGPT account"))?;
     login_codex_with_program(program.as_os_str(), events, attempt)
 }
 
@@ -1009,8 +1013,8 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                     .stderr(Stdio::null())
                     .spawn()
                     .map_err(|error| error.to_string())?;
-                let mut stdin = child.stdin.take().ok_or("O Codex não abriu a entrada de login")?;
-                let stdout = child.stdout.take().ok_or("O Codex não abriu a saída de login")?;
+                let mut stdin = child.stdin.take().ok_or(tr("Codex did not open sign-in input"))?;
+                let stdout = child.stdout.take().ok_or(tr("Codex did not open sign-in output"))?;
                 attempt.attach(child)?;
                 let mut reader = BufReader::new(stdout);
                 let outcome = (|| -> Result<(), String> {
@@ -1026,7 +1030,7 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                         let mut line = Vec::new();
                         let size = (&mut reader).take((MAX_LINE + 1) as u64).read_until(b'\n', &mut line).map_err(|error| error.to_string())?;
                         if size == 0 || size > MAX_LINE {
-                            return Err("O Codex encerrou o login antes de concluir".into());
+                            return Err(tr("Codex closed before sign-in completed").into());
                         }
                         let Ok(message) = serde_json::from_slice::<Value>(&line) else { continue };
                         if message["id"] == 1 && !started {
@@ -1037,9 +1041,9 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                             if let Some(error) = message["error"]["message"].as_str() {
                                 return Err(error.to_string());
                             }
-                            let url = message["result"]["authUrl"].as_str().ok_or("O Codex não forneceu a página de login")?;
+                            let url = message["result"]["authUrl"].as_str().ok_or(tr("Codex did not provide a sign-in page"))?;
                             if !url.starts_with("https://") && !url.starts_with("http://127.0.0.1:") {
-                                return Err("O Codex forneceu um endereço de login inválido".into());
+                                return Err(tr("Codex provided an invalid sign-in address").into());
                             }
                             if !attempt.canceled() {
                                 let _ = events.send(AgentEvent::LoginUrl(url.to_string()));
@@ -1052,7 +1056,7 @@ fn login_codex_with_program(program: &std::ffi::OsStr, events: Sender<AgentEvent
                                 }
                                 return Ok(());
                             }
-                            return Err(message["params"]["error"].as_str().unwrap_or("O login do Codex não foi concluído").to_string());
+                            return Err(message["params"]["error"].as_str().unwrap_or(tr("Codex sign-in did not complete")).to_string());
                         } else if message["method"] == "account/updated" && url_sent && message["params"]["account"].is_object() {
                             if !attempt.canceled() {
                                 let _ = events.send(AgentEvent::LoginComplete);

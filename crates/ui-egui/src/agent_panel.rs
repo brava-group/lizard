@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::LizardApp;
 use crate::a11y;
+use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::{self, AgentIcon, LayerIcon};
-use crate::primitives::{Menu, MenuItem, ShimmerDirection, ShimmerText};
+use crate::primitives::{Menu, MenuItem, Select, SelectVariant, ShimmerDirection, ShimmerText};
 use crate::theme::{Tokens, regular, semibold};
 
 const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
@@ -19,7 +20,15 @@ const RECEIPT_BG: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
 const RECEIPT_BORDER: Color32 = Color32::from_rgb(0x3D, 0x3D, 0x42);
 const RECEIPT_GREEN: Color32 = Color32::from_rgb(0x00, 0xD4, 0x82);
 const TRANSCRIPT_SCROLL_GUTTER: f32 = 16.0;
-const WORK_WORDS: [&str; 7] = ["Pensando…", "Trabalhando…", "Desenhando…", "Criando…", "Revisando…", "Validando…", "Testando…"];
+const WORK_WORDS: [&str; 7] = [
+    tr_noop("Thinking…"),
+    tr_noop("Working…"),
+    tr_noop("Designing…"),
+    tr_noop("Creating…"),
+    tr_noop("Reviewing…"),
+    tr_noop("Validating…"),
+    tr_noop("Testing…"),
+];
 
 #[derive(Clone)]
 struct WorkWordState {
@@ -443,7 +452,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     } else if message.tools.len() < 100 {
                         message.tools.push(ChatTool {
                             id,
-                            title: title.unwrap_or_else(|| "Ação do agente".into()),
+                            title: title.unwrap_or_else(|| tr("Agent action").into()),
                             status: status.unwrap_or_else(|| "in_progress".into()),
                             input: input.flatten(),
                             output: output.flatten(),
@@ -507,7 +516,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     if !message.text.is_empty() {
                         message.text.push_str("\n\n");
                     }
-                    message.text.push_str(&format!("Erro: {error}"));
+                    message.text.push_str(&trf("Error: {error}", &[("error", &error)]));
                 } else {
                     app.toast(error);
                 }
@@ -576,12 +585,12 @@ fn attach_image(app: &mut LizardApp, name: String, bytes: Vec<u8>) -> Result<(),
         || bytes.is_empty()
         || bytes.len().saturating_add(app.ui.agent.images.iter().map(|image| image.bytes.len()).sum::<usize>()) > MAX_IMAGE_BYTES
     {
-        return Err("Anexe até 4 imagens, somando no máximo 4 MB.".into());
+        return Err(tr("Attach up to 4 images, with a combined size of at most 4 MB.").into());
     }
     let mime = match image::guess_format(&bytes) {
         Ok(image::ImageFormat::Png) => "image/png",
         Ok(image::ImageFormat::Jpeg) => "image/jpeg",
-        _ => return Err("Use uma imagem PNG ou JPEG.".into()),
+        _ => return Err(tr("Use a PNG or JPEG image.").into()),
     };
     let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
         .with_guessed_format()
@@ -589,30 +598,30 @@ fn attach_image(app: &mut LizardApp, name: String, bytes: Vec<u8>) -> Result<(),
         .into_dimensions()
         .map_err(|error| error.to_string())?;
     if width == 0 || height == 0 || width > 4096 || height > 4096 || u64::from(width) * u64::from(height) > 12_000_000 {
-        return Err("A imagem deve ter até 4.096 px por lado e 12 milhões de pixels.".into());
+        return Err(tr("Images must be at most 4,096 px per side and 12 million pixels.").into());
     }
-    image::load_from_memory(&bytes).map_err(|error| format!("A imagem está danificada: {error}"))?;
+    image::load_from_memory(&bytes).map_err(|error| trf("The image is damaged: {error}", &[("error", &error)]))?;
     app.ui.agent.images.push(DraftImage { name, mime: mime.into(), bytes, preview: None });
     Ok(())
 }
 
 fn attach_rgba_image(app: &mut LizardApp, width: u32, height: u32, rgba: Vec<u8>) {
     let Some(expected) = usize::try_from(width).ok().and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)?.checked_mul(4))) else {
-        app.toast("A imagem da área de transferência é grande demais.");
+        app.toast(tr("The clipboard image is too large."));
         return;
     };
     if rgba.len() != expected || width > 4096 || height > 4096 || u64::from(width) * u64::from(height) > 12_000_000 {
-        app.toast("A imagem da área de transferência é grande demais.");
+        app.toast(tr("The clipboard image is too large."));
         return;
     }
     let Some(image) = image::RgbaImage::from_raw(width, height, rgba) else {
-        app.toast("Não foi possível ler a imagem copiada.");
+        app.toast(tr("Could not read the copied image."));
         return;
     };
     let mut out = std::io::Cursor::new(Vec::new());
     match image::DynamicImage::ImageRgba8(image).write_to(&mut out, image::ImageFormat::Png) {
         Ok(()) => {
-            if let Err(error) = attach_image(app, "Imagem colada.png".into(), out.into_inner()) {
+            if let Err(error) = attach_image(app, format!("{}.png", tr("Pasted image")), out.into_inner()) {
                 app.toast(error);
             }
         }
@@ -622,7 +631,7 @@ fn attach_rgba_image(app: &mut LizardApp, width: u32, height: u32, rgba: Vec<u8>
 
 fn attach_clipboard_image(app: &mut LizardApp) {
     let Some((width, height, rgba)) = app.services.clipboard_get_image() else {
-        app.toast("Não há uma imagem na área de transferência.");
+        app.toast(tr("There is no image on the clipboard."));
         return;
     };
     attach_rgba_image(app, width, height, rgba);
@@ -667,7 +676,7 @@ fn send_prompt(app: &mut LizardApp) {
         return;
     }
     let Ok(ds) = app.session.ds() else {
-        app.toast("Abra um documento para conversar com o agente.");
+        app.toast(tr("Open a document to chat with the agent."));
         return;
     };
     let document = ds.uid;
@@ -735,7 +744,7 @@ fn send_prompt(app: &mut LizardApp) {
                     document: key,
                     title: if prompt.is_empty() {
                         selected_nodes.first().map_or_else(
-                            || app.ui.agent.images.first().map_or_else(|| "Novo chat".to_string(), |image| image.name.clone()),
+                            || app.ui.agent.images.first().map_or_else(|| tr_noop("New chat").to_string(), |image| image.name.clone()),
                             |node| node.name.clone(),
                         )
                     } else {
@@ -814,12 +823,12 @@ fn begin_next_variant(app: &mut LizardApp) {
     let document = ds.uid;
     let undo_before = ds.history.undo.len();
     let direction = match app.ui.agent.active_variant_mode {
-        VariantMode::Layout => "Explore uma composição diferente, preservando a linguagem visual.",
-        VariantMode::Style => "Explore uma direção visual diferente para o mesmo pedido.",
+        VariantMode::Layout => tr("Explore a different composition while preserving the visual language."),
+        VariantMode::Style => tr("Explore a different visual direction for the same request."),
     };
-    let instruction = format!(
-        "Crie uma nova variação independente da proposta anterior. {direction} Mantenha o resultado anterior para comparação, em vez de o substituir. Pedido original: {}",
-        app.ui.agent.active_prompt
+    let instruction = trf(
+        "Create a new variation independent of the previous design. {direction} Keep the previous result for comparison instead of replacing it. Original request: {request}",
+        &[("direction", &direction), ("request", &app.ui.agent.active_prompt)],
     );
     let selected_nodes = app
         .ui
@@ -1013,7 +1022,7 @@ fn work_word(ui: &Ui, id: Id) -> &'static str {
         }
         state.index
     });
-    WORK_WORDS[word_index]
+    tr(WORK_WORDS[word_index])
 }
 
 fn composer_hover(ui: &Ui, id: &'static str, rect: Rect, response: &egui::Response, dark: bool, reduce_motion: bool) -> f32 {
@@ -1034,13 +1043,11 @@ fn message_timestamp(created_at: u64) -> String {
     let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(created_at, |time| time.as_secs());
     let elapsed = now.saturating_sub(created_at);
     if elapsed < 60 {
-        "há instantes".into()
+        tr("Just now").into()
     } else if elapsed < 3_600 {
-        let minutes = elapsed / 60;
-        format!("há {minutes} {}", if minutes == 1 { "minuto" } else { "minutos" })
+        trn("{n} minutes ago", (elapsed / 60) as usize, &[])
     } else if elapsed < 86_400 {
-        let hours = elapsed / 3_600;
-        format!("há {hours} {}", if hours == 1 { "hora" } else { "horas" })
+        trn("{n} hours ago", (elapsed / 3_600) as usize, &[])
     } else {
         let Some(local) = i64::try_from(created_at)
             .ok()
@@ -1050,29 +1057,52 @@ fn message_timestamp(created_at: u64) -> String {
             return String::new();
         };
         let weekday = match local.weekday() {
-            time::Weekday::Sunday => "DOM",
-            time::Weekday::Monday => "SEG",
-            time::Weekday::Tuesday => "TER",
-            time::Weekday::Wednesday => "QUA",
-            time::Weekday::Thursday => "QUI",
-            time::Weekday::Friday => "SEX",
-            time::Weekday::Saturday => "SÁB",
+            time::Weekday::Sunday => tr("SUN"),
+            time::Weekday::Monday => tr("MON"),
+            time::Weekday::Tuesday => tr("TUE"),
+            time::Weekday::Wednesday => tr("WED"),
+            time::Weekday::Thursday => tr("THU"),
+            time::Weekday::Friday => tr("FRI"),
+            time::Weekday::Saturday => tr("SAT"),
         };
         let month = match local.month() {
-            time::Month::January => "JAN",
-            time::Month::February => "FEV",
-            time::Month::March => "MAR",
-            time::Month::April => "ABR",
-            time::Month::May => "MAI",
-            time::Month::June => "JUN",
-            time::Month::July => "JUL",
-            time::Month::August => "AGO",
-            time::Month::September => "SET",
-            time::Month::October => "OUT",
-            time::Month::November => "NOV",
-            time::Month::December => "DEZ",
+            time::Month::January => tr("JAN"),
+            time::Month::February => tr("FEB"),
+            time::Month::March => tr("MAR"),
+            time::Month::April => tr("APR"),
+            time::Month::May => tr("MAY"),
+            time::Month::June => tr("JUN"),
+            time::Month::July => tr("JUL"),
+            time::Month::August => tr("AUG"),
+            time::Month::September => tr("SEP"),
+            time::Month::October => tr("OCT"),
+            time::Month::November => tr("NOV"),
+            time::Month::December => tr("DEC"),
         };
-        format!("{weekday} {} de {month} - {:02}:{:02}", local.day(), local.hour(), local.minute())
+        let hour = format!("{:02}", local.hour());
+        let minute = format!("{:02}", local.minute());
+        trf(
+            "{weekday}, {day} {month} at {hour}:{minute}",
+            &[("weekday", &weekday), ("day", &local.day()), ("month", &month), ("hour", &hour), ("minute", &minute)],
+        )
+    }
+}
+
+fn chat_title(title: &str) -> &str {
+    if title == "New chat" || title == "Novo chat" { tr("New chat") } else { title }
+}
+
+fn connection_detail(connection: &AgentConnection, kind: AgentKind) -> String {
+    if connection.detail == "checking" {
+        tr("Checking account…").to_owned()
+    } else if !connection.installed {
+        trf("{provider} is not installed on this computer", &[("provider", &kind.label())])
+    } else if kind == AgentKind::Codex {
+        if connection.authenticated { tr("ChatGPT connected") } else { tr("Sign in with your ChatGPT account") }.to_owned()
+    } else if connection.authenticated {
+        trf("{provider} connected", &[("provider", &kind.label())])
+    } else {
+        trf("{provider} ready to connect", &[("provider", &kind.label())])
     }
 }
 
@@ -1098,7 +1128,7 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
             is_open = !is_open;
             ui.data_mut(|data| data.insert_temp(id, is_open));
         }
-        a11y::disclosure(&header.1, "Detalhes da ferramenta", is_open);
+        a11y::disclosure(&header.1, tr("Tool details"), is_open);
         let rect = header.0;
         let max_chars = ((rect.width() - 62.0) / 7.0).floor().max(0.0) as usize;
         let label = if title.chars().count() > max_chars {
@@ -1155,16 +1185,16 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
                 .show(ui, |ui| {
                     ui.set_min_width((width - 24.0).max(1.0));
                     if let Some(input) = &input {
-                        receipt_detail(ui, "Parâmetros", input);
+                        receipt_detail(ui, tr("Parameters"), input);
                     }
                     if let Some(output) = &output {
-                        receipt_detail(ui, "Resposta", output);
+                        receipt_detail(ui, tr("Response"), output);
                     } else if input.is_none() {
                         ui.label(
                             egui::RichText::new(if tool.status == "in_progress" {
-                                "Aguardando resposta da ferramenta…"
+                                tr("Waiting for the tool response…")
                             } else {
-                                "Sem detalhes enviados pela ferramenta."
+                                tr("The tool sent no details.")
                             })
                             .size(crate::theme::ui_font_size(11.0))
                             .color(Color32::from_rgb(0x94, 0x94, 0x98)),
@@ -1182,10 +1212,10 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
 fn context_chip(ui: &mut Ui, rect: Rect, name: &str, salt: NodeId, t: &Tokens) -> (bool, bool) {
     let body = Rect::from_min_max(rect.min, pos2(rect.max.x - 24.0, rect.max.y));
     let remove = Rect::from_min_max(pos2(body.max.x, rect.min.y), rect.max);
-    let locate = ui.interact(body, ui.id().with(("agent_node", &salt)), Sense::click()).lizard_tooltip("Localizar no canvas");
-    let exclude = ui.interact(remove, ui.id().with(("agent_remove_node", &salt)), Sense::click()).lizard_tooltip("Retirar do contexto do chat");
-    a11y::button(&locate, "Localizar no canvas");
-    a11y::button(&exclude, "Retirar do contexto do chat");
+    let locate = ui.interact(body, ui.id().with(("agent_node", &salt)), Sense::click()).lizard_tooltip(tr("Find on canvas"));
+    let exclude = ui.interact(remove, ui.id().with(("agent_remove_node", &salt)), Sense::click()).lizard_tooltip(tr("Remove from chat context"));
+    a11y::button(&locate, tr("Find on canvas"));
+    a11y::button(&exclude, tr("Remove from chat context"));
     ui.painter().rect(
         rect,
         CornerRadius::same(5),
@@ -1235,7 +1265,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let header_bottom = full.min.y + 63.0;
     line(ui, pos2(full.min.x, header_bottom - 0.5), pos2(full.max.x, header_bottom - 0.5), border);
     let back = Rect::from_min_size(pos2(full.min.x + 8.0, full.min.y + 19.0), vec2(24.0, 24.0));
-    let back_resp = hit(ui, "agent_back", back, "Todos os chats");
+    let back_resp = hit(ui, "agent_back", back, tr("All chats"));
     if back_resp.hovered() {
         ui.painter().rect_filled(back, CornerRadius::same(5), t.hover);
     }
@@ -1245,26 +1275,26 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     }
     let title_x = full.min.x + 36.0;
     let title = if app.ui.agent.history_open {
-        "Todos os chats"
+        tr("All chats")
     } else {
         app.ui
             .agent
             .active
             .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
-            .map_or("Novo chat", |chat| chat.title.as_str())
+            .map_or(tr("New chat"), |chat| chat_title(&chat.title))
     };
     ui.painter().text(pos2(title_x, full.min.y + 12.0), Align2::LEFT_TOP, title, semibold(13.0), text);
-    ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, "Compartilhado", regular(11.0), secondary);
+    ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, tr("Shared"), regular(11.0), secondary);
     let more = Rect::from_min_size(pos2(full.max.x - 38.0, full.min.y + 12.0), vec2(24.0, 24.0));
-    let more_resp = hit(ui, "agent_options", more, "Mais opções");
+    let more_resp = hit(ui, "agent_options", more, tr("More options"));
     if more_resp.hovered() || a11y::menu_open(&more_resp) {
         ui.painter().rect_filled(more, CornerRadius::same(5), t.hover);
     }
     glyph(ui, more, AgentIcon::More, vec2(15.0, 3.0), text);
     let badge = Rect::from_center_size(pos2(full.max.x - 55.5, full.min.y + 24.0), vec2(19.0, 18.0));
     ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
-    ui.painter().text(badge.center(), Align2::CENTER_CENTER, "IA", semibold(11.0), secondary);
-    if hit(ui, "agent_model_badge", badge, "Selecionar modelo").clicked() {
+    ui.painter().text(badge.center(), Align2::CENTER_CENTER, tr("AI"), semibold(11.0), secondary);
+    if hit(ui, "agent_model_badge", badge, tr("Select model")).clicked() {
         egui::Popup::open_id(ui.ctx(), Id::new("agent_footer_model_popup"));
     }
 
@@ -1273,10 +1303,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let painter = ui.painter().with_clip_rect(middle);
     if app.ui.agent.history_open {
         let new_chat = Rect::from_min_size(pos2(full.min.x + 16.0, header_bottom + 16.0), vec2((width - 32.0).max(0.0), 42.0));
-        let resp = hit(ui, "agent_new_chat", new_chat, "Novo chat");
+        let resp = hit(ui, "agent_new_chat", new_chat, tr("New chat"));
         painter.rect(new_chat, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
         glyph(ui, Rect::from_center_size(pos2(new_chat.min.x + 21.0, new_chat.center().y), vec2(24.0, 24.0)), AgentIcon::Add, vec2(12.0, 12.0), text);
-        painter.text(pos2(new_chat.min.x + 40.0, new_chat.center().y), Align2::LEFT_CENTER, "Novo chat", regular(13.0), text);
+        painter.text(pos2(new_chat.min.x + 40.0, new_chat.center().y), Align2::LEFT_CENTER, tr("New chat"), regular(13.0), text);
         let key = document_key(app);
         let chats: Vec<_> = app.ui.agent.conversations.iter().filter(|chat| chat.document == key).cloned().collect();
         let mut chosen = None;
@@ -1284,10 +1314,16 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
             if chats.is_empty() {
-                ui.label(egui::RichText::new("Nenhum chat anterior").size(crate::theme::ui_font_size(11.0)).color(secondary));
+                ui.label(egui::RichText::new(tr("No previous chats")).size(crate::theme::ui_font_size(11.0)).color(secondary));
             }
             for chat in chats.iter().rev() {
-                if ui.add_sized([list.width() - 16.0, 36.0], egui::Button::new(egui::RichText::new(&chat.title).size(crate::theme::ui_font_size(12.0))).frame(false)).clicked() {
+                if ui
+                    .add_sized(
+                        [list.width() - 16.0, 36.0],
+                        egui::Button::new(egui::RichText::new(chat_title(&chat.title)).size(crate::theme::ui_font_size(12.0))).frame(false),
+                    )
+                    .clicked()
+                {
                     chosen = Some((chat.id, chat.agent));
                 }
             }
@@ -1322,9 +1358,16 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             ui.set_width(bubble_width);
                             ui.allocate_ui_with_layout(vec2(bubble_width, 18.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
-                                    egui::RichText::new(message_timestamp(message.created_at)).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x92, 0x92, 0x98)),
+                                    egui::RichText::new(message_timestamp(message.created_at))
+                                        .size(crate::theme::ui_font_size(12.0))
+                                        .color(Color32::from_rgb(0x92, 0x92, 0x98)),
                                 );
-                                ui.label(egui::RichText::new("Você").size(crate::theme::ui_font_size(12.0)).strong().color(Color32::from_rgb(0xC9, 0xC9, 0xCD)));
+                                ui.label(
+                                    egui::RichText::new(tr("You"))
+                                        .size(crate::theme::ui_font_size(12.0))
+                                        .strong()
+                                        .color(Color32::from_rgb(0xC9, 0xC9, 0xCD)),
+                                );
                             });
                             ui.add_space(5.0);
                             egui::Frame::new()
@@ -1335,20 +1378,30 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     ui.set_width((bubble_width - 32.0).max(0.0));
                                     for node in &message.selected_nodes {
                                         let badge = egui::Button::new(
-                                            egui::RichText::new(format!("⌗ {}", node.name)).size(crate::theme::ui_font_size(12.0)).color(Tokens::get(ui.ctx()).accent_text),
+                                            egui::RichText::new(format!("⌗ {}", node.name))
+                                                .size(crate::theme::ui_font_size(12.0))
+                                                .color(Tokens::get(ui.ctx()).accent_text),
                                         )
                                         .fill(Tokens::get(ui.ctx()).selected_row)
                                         .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).accent_text.gamma_multiply(0.4)))
                                         .corner_radius(5);
-                                        if ui.add(badge).lizard_tooltip("Localizar no canvas").clicked() {
+                                        if ui.add(badge).lizard_tooltip(tr("Find on canvas")).clicked() {
                                             locate_node = Some(node.id);
                                         }
                                     }
                                     if !message.text.is_empty() {
-                                        ui.label(egui::RichText::new(&message.text).size(crate::theme::ui_font_size(14.0)).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
+                                        ui.label(
+                                            egui::RichText::new(&message.text)
+                                                .size(crate::theme::ui_font_size(14.0))
+                                                .color(Color32::from_rgb(0xD1, 0xD1, 0xD4)),
+                                        );
                                     }
                                     for image in &message.attached_images {
-                                        ui.label(egui::RichText::new(format!("▧ {image}")).size(crate::theme::ui_font_size(11.0)).color(Tokens::get(ui.ctx()).accent_text));
+                                        ui.label(
+                                            egui::RichText::new(format!("▧ {image}"))
+                                                .size(crate::theme::ui_font_size(11.0))
+                                                .color(Tokens::get(ui.ctx()).accent_text),
+                                        );
                                     }
                                 });
                         });
@@ -1363,11 +1416,15 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             if message.parallel { format!("Lizard Agent {}", message.agent_index + 1) } else { "Lizard Agent".to_string() };
                         ui.label(egui::RichText::new(agent_name).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
                         if !message.model_label.is_empty() {
-                            ui.label(egui::RichText::new(&message.model_label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x85, 0x85, 0x8A)));
+                            ui.label(
+                                egui::RichText::new(&message.model_label)
+                                    .size(crate::theme::ui_font_size(12.0))
+                                    .color(Color32::from_rgb(0x85, 0x85, 0x8A)),
+                            );
                         }
                         if message.variant_total > 1 {
                             ui.label(
-                                egui::RichText::new(format!("Variação {}", message.variant_index))
+                                egui::RichText::new(trf("Variation {n}", &[("n", &message.variant_index)]))
                                     .size(crate::theme::ui_font_size(12.0))
                                     .color(Color32::from_rgb(0x85, 0x85, 0x8A)),
                             );
@@ -1408,16 +1465,20 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     });
                                 });
                             } else {
-                                let label = message.work_seconds.map_or_else(|| "Pensando…".to_string(), |s| format!("Thought for {s}s"));
-                                egui::CollapsingHeader::new(egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)))
-                                    .id_salt(("agent_work", chat.id, index))
-                                    .default_open(false)
-                                    .icon(thought_chevron)
-                                    .show(ui, |ui| {
-                                        if !message.thinking.is_empty() {
-                                            ui.label(egui::RichText::new(&message.thinking).size(crate::theme::ui_font_size(12.0)).color(secondary));
-                                        }
-                                    });
+                                let label = message
+                                    .work_seconds
+                                    .map_or_else(|| tr("Thinking…").to_string(), |s| trf("Thought for {seconds}s", &[("seconds", &s)]));
+                                egui::CollapsingHeader::new(
+                                    egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                                )
+                                .id_salt(("agent_work", chat.id, index))
+                                .default_open(false)
+                                .icon(thought_chevron)
+                                .show(ui, |ui| {
+                                    if !message.thinking.is_empty() {
+                                        ui.label(egui::RichText::new(&message.thinking).size(crate::theme::ui_font_size(12.0)).color(secondary));
+                                    }
+                                });
                             }
                         });
                     }
@@ -1425,7 +1486,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         ui.add_space(9.0);
                         let preview = if tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
                         let title =
-                            if tool.title.contains("screenshot") || tool.title.contains("execute") { "Designed" } else { tool.title.as_str() };
+                            if tool.title.contains("screenshot") || tool.title.contains("execute") { tr("Designed") } else { tool.title.as_str() };
                         receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
                     }
                     if message.tools.is_empty() && !message.previews.is_empty() {
@@ -1434,7 +1495,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         receipt(
                             ui,
                             ui.id().with(("agent_receipt", chat.id, index, 0)),
-                            "Designed",
+                            tr("Designed"),
                             &preview_tool,
                             message.previews.first(),
                             content_width,
@@ -1446,11 +1507,15 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         crate::agent_markdown::show(ui, &message.text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
                     }
                     if message.stopped {
-                        ui.label(egui::RichText::new("Interrompido").size(crate::theme::ui_font_size(11.0)).color(secondary));
+                        ui.label(egui::RichText::new(tr("Stopped")).size(crate::theme::ui_font_size(11.0)).color(secondary));
                     }
                     if let Some(seconds) = message.work_seconds {
                         ui.add_space(9.0);
-                        ui.label(egui::RichText::new(format!("Designed for {seconds}s")).size(crate::theme::ui_font_size(14.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)));
+                        ui.label(
+                            egui::RichText::new(trf("Designed for {seconds}s", &[("seconds", &seconds)]))
+                                .size(crate::theme::ui_font_size(14.0))
+                                .color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                        );
                     }
                     if !app.ui.agent.busy
                         && !message.parallel
@@ -1465,7 +1530,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     .get(message.undo_before..message.undo_after)
                                     .is_some_and(|entries| entries.iter().all(|entry| entry.agent))
                         })
-                        && ui.small_button("Desfazer alterações desta resposta").clicked()
+                        && ui.small_button(tr("Undo changes from this reply")).clicked()
                     {
                         revert = Some((index, message.undo_after - message.undo_before));
                     }
@@ -1494,10 +1559,13 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let palette = Tokens::get(ui.ctx());
         painter.circle_filled(emblem.center(), 20.0, palette.selected_row);
         glyph(ui, emblem, AgentIcon::Emblem, vec2(16.5, 16.5), palette.accent_text);
-        painter.text(pos2(full.center().x, welcome_top + 68.0), Align2::CENTER_TOP, "E depois?", semibold(15.0), text);
-        let labels = ["Organizar e polir", "Gerar designs", "Criar plugins e shaders"];
-        let prompts =
-            ["Organize e refine este design.", "Crie uma nova proposta visual para esta tela.", "Crie um plugin ou shader para este documento."];
+        painter.text(pos2(full.center().x, welcome_top + 68.0), Align2::CENTER_TOP, tr("What's next?"), semibold(15.0), text);
+        let labels = [tr("Organize and refine"), tr("Generate designs"), tr("Create plugins and shaders")];
+        let prompts = [
+            tr("Organize and refine this design."),
+            tr("Create a new visual design for this screen."),
+            tr("Create a plugin or shader for this document."),
+        ];
         let cards_top = welcome_top + 113.0;
         for (index, label) in labels.iter().enumerate() {
             let card = Rect::from_min_size(pos2(full.min.x + 16.0, cards_top + index as f32 * 50.0), vec2((width - 32.0).max(0.0), 42.0));
@@ -1533,17 +1601,17 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let setup = Rect::from_min_size(pos2(full.min.x + 16.0, cards_top + 160.0), vec2((width - 32.0).max(0.0), 54.0));
         painter.rect(setup, CornerRadius::same(8), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
         let setup_title = if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {
-            "Aguardando login no navegador…"
+            tr("Waiting for browser sign-in…")
         } else if !connection.authenticated {
-            "Conectar conta"
+            tr("Connect account")
         } else {
-            "Conta conectada"
+            tr("Account connected")
         };
         painter.text(pos2(setup.min.x + 12.0, setup.min.y + 9.0), Align2::LEFT_TOP, setup_title, semibold(12.0), text);
         painter.text(
             pos2(setup.min.x + 12.0, setup.min.y + 29.0),
             Align2::LEFT_TOP,
-            if connection.detail == "checking" { "Verificando conta…" } else { &connection.detail },
+            connection_detail(&connection, app.ui.agent.agent),
             regular(11.0),
             secondary,
         );
@@ -1562,8 +1630,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         if app.ui.agent.login_pending && app.ui.agent.login_kind == Some(app.ui.agent.agent) {
             let cancel = Rect::from_min_size(pos2(setup.right() - 92.0, setup.top() + 10.0), vec2(80.0, 34.0));
             painter.rect(cancel, CornerRadius::same(6), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-            painter.text(cancel.center(), Align2::CENTER_CENTER, "Cancelar", regular(12.0), text);
-            if hit(ui, "agent_login_cancel", cancel, "Cancelar login").clicked() {
+            painter.text(cancel.center(), Align2::CENTER_CENTER, tr("Cancel"), regular(12.0), text);
+            if hit(ui, "agent_login_cancel", cancel, tr("Cancel sign-in")).clicked() {
                 cancel_login(app);
             }
         }
@@ -1594,8 +1662,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                 egui::Image::from_texture(preview).corner_radius(8).paint_at(ui, tile.shrink(1.0));
             }
             let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y + 4.0), vec2(20.0, 20.0));
-            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).lizard_tooltip("Remover imagem");
-            a11y::button(&remove_resp, "Remover imagem");
+            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).lizard_tooltip(tr("Remove image"));
+            a11y::button(&remove_resp, tr("Remove image"));
             ui.painter().circle_filled(remove.center(), 10.0, if remove_resp.hovered() { t.pressed } else { panel });
             ui.painter().circle_stroke(remove.center(), 9.5, Stroke::new(1.0, border));
             ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), text);
@@ -1652,7 +1720,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                 egui::TextEdit::multiline(&mut app.ui.agent.draft)
                     .id(Id::new("agent_prompt"))
                     .font(regular(13.0))
-                    .hint_text(egui::RichText::new("Solicitar alterações").size(crate::theme::ui_font_size(13.0)).color(secondary))
+                    .hint_text(egui::RichText::new(tr("Request changes")).size(crate::theme::ui_font_size(13.0)).color(secondary))
                     .frame(egui::Frame::NONE)
                     .desired_width(ui.available_width())
                     .desired_rows(3),
@@ -1676,31 +1744,19 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let model_label_width = ui.painter().layout_no_wrap(model_label.to_owned(), regular(12.0), Color32::PLACEHOLDER).size().x;
     let model_width = (model_label_width + 36.0).ceil().max(72.0).min(model_available);
     let model = Rect::from_min_size(pos2(model_x, actions_y), vec2(model_width, 24.0));
-    let attach_resp = hit(ui, "agent_context", attach, "Inserir anexo");
-    let parallel_resp = hit(ui, "agent_parallel", parallel, "Quantidade de agentes");
-    let variants_resp = hit(ui, "agent_variants", variants, "Quantidade de variantes");
-    let model_resp = hit(ui, "agent_footer_model", model, "Selecionar modelo");
-    ui.painter().rect_filled(model, CornerRadius::same(5), t.field);
-    a11y::combo(&model_resp, "Selecionar modelo", model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
-    let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { "Parar agente" } else { "Enviar mensagem" });
+    let attach_resp = hit(ui, "agent_context", attach, tr("Insert attachment"));
+    let parallel_resp = hit(ui, "agent_parallel", parallel, tr("Number of agents"));
+    let variants_resp = hit(ui, "agent_variants", variants, tr("Number of variations"));
+    let mut model_ui = ui.new_child(egui::UiBuilder::new().max_rect(model));
+    let model_resp =
+        Select::trigger_with_variant(&mut model_ui, model_label, model.width(), None, SelectVariant::Ghost).lizard_tooltip(tr("Select model"));
+    a11y::combo(&model_resp, tr("Select model"), model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
+    let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { tr("Stop agent") } else { tr("Send message") });
     let reduce_motion = app.reduce_motion();
     for (id, rect, response) in
         [("agent_context", attach, &attach_resp), ("agent_parallel", parallel, &parallel_resp), ("agent_variants", variants, &variants_resp)]
     {
         composer_hover(ui, id, rect, response, t.dark, reduce_motion);
-    }
-    let model_hover = ui.ctx().animate_bool_with_time(
-        ui.id().with("agent_footer_model_hover"),
-        model_resp.hovered() || model_resp.has_focus(),
-        if reduce_motion { 0.0 } else { 0.14 },
-    );
-    if model_hover > 0.0 {
-        ui.painter().rect_stroke(
-            model,
-            CornerRadius::same(5),
-            Stroke::new(1.0, t.field_hover_border.linear_multiply(model_hover)),
-            egui::StrokeKind::Inside,
-        );
     }
     glyph(ui, attach, AgentIcon::Paperclip, vec2(14.0, 14.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
     let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
@@ -1720,25 +1776,6 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         regular(12.0),
         Color32::from_rgb(0x99, 0x99, 0x99),
     );
-    let model_name = crate::widgets::elide_font(ui, model_label, (model.width() - 36.0).max(0.0), regular(12.0));
-    if model.width() >= 36.0 {
-        ui.painter().text(
-            pos2(model.min.x + 8.0, model.center().y),
-            Align2::LEFT_CENTER,
-            model_name,
-            regular(12.0),
-            Color32::from_rgb(0xAA, 0xAA, 0xAA),
-        );
-    }
-    if model.width() >= 24.0 {
-        glyph(
-            ui,
-            Rect::from_center_size(pos2(model.max.x - 12.0, model.center().y), vec2(11.0, 11.0)),
-            AgentIcon::Down,
-            vec2(11.0, 11.0),
-            Color32::from_rgb(0x77, 0x77, 0x77),
-        );
-    }
     let send_hover = ui.ctx().animate_bool_with_time(
         ui.id().with("agent_send_hover"),
         send_resp.hovered() || send_resp.has_focus(),
@@ -1761,19 +1798,19 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     }
 
     Menu::popup(&attach_resp).width(176.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        if MenuItem::new("Anexar PNG ou JPEG").show(ui).clicked() {
-            app.pick_open("Anexar imagem ao agente", &["png", "jpg", "jpeg"], |app, path| {
+        if MenuItem::new(tr("Attach PNG or JPEG")).show(ui).clicked() {
+            app.pick_open(tr("Attach image to agent"), &["png", "jpg", "jpeg"], |app, path| {
                 let result = std::fs::metadata(&path)
                     .map_err(|error| error.to_string())
                     .and_then(|meta| {
                         if meta.len() <= MAX_IMAGE_BYTES as u64 {
                             std::fs::read(&path).map_err(|error| error.to_string())
                         } else {
-                            Err("A imagem excede 4 MB.".into())
+                            Err(tr("The image exceeds 4 MB.").into())
                         }
                     })
                     .and_then(|bytes| {
-                        attach_image(app, path.file_name().map_or_else(|| "Imagem".into(), |name| name.to_string_lossy().into_owned()), bytes)
+                        attach_image(app, path.file_name().map_or_else(|| tr("Image").into(), |name| name.to_string_lossy().into_owned()), bytes)
                     });
                 if let Err(error) = result {
                     app.toast(error);
@@ -1781,14 +1818,14 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             });
             ui.close();
         }
-        if MenuItem::new("Colar imagem").show(ui).clicked() {
+        if MenuItem::new(tr("Paste image")).show(ui).clicked() {
             attach_clipboard_image(app);
             ui.close();
         }
     });
 
     if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
-        egui::Window::new("Permissão do agente").collapsible(false).resizable(false).show(ui.ctx(), |ui| {
+        egui::Window::new(tr("Agent permission")).collapsible(false).resizable(false).show(ui.ctx(), |ui| {
             ui.label(title);
             ui.horizontal(|ui| {
                 for (option, label) in options {
@@ -1797,7 +1834,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         app.ui.agent.permission = None;
                     }
                 }
-                if ui.button("Recusar").clicked() {
+                if ui.button(tr("Decline")).clicked() {
                     app.services.agent_permission(id, None);
                     app.ui.agent.permission = None;
                 }
@@ -1806,7 +1843,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     }
 
     Menu::popup(&more_resp).width(166.0).show(|ui| {
-        if MenuItem::new("Novo chat").show(ui).clicked() {
+        if MenuItem::new(tr("New chat")).show(ui).clicked() {
             reset_chat(app);
             ui.close();
         }
@@ -1818,7 +1855,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             }
         }
         Menu::separator(ui, None);
-        let setup_label = "Conectar conta";
+        let setup_label = tr("Connect account");
         if MenuItem::new(setup_label).show(ui).clicked() {
             let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
             app.ui.agent.connection = None;
@@ -1838,7 +1875,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     });
     let models = app.ui.agent.models.clone();
     crate::right::menu_popup(&model_resp).id(Id::new("agent_footer_model_popup")).width(model.width().max(180.0)).show(|ui| {
-        if crate::right::menu_item(ui, "Modelo padrão", "") {
+        if crate::right::menu_item(ui, tr("Default model"), "") {
             app.ui.agent.model = None;
             ui.close();
         }
@@ -1852,9 +1889,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         });
     });
     Menu::popup(&parallel_resp).width(196.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Agentes em paralelo").size(crate::theme::ui_font_size(11.0)).color(ui.visuals().text_color()));
-        ui.add_space(4.0);
+        Menu::heading(ui, tr("Agents in parallel"));
         for count in 1..=6_u8 {
             let label = format!("{count}x");
             if MenuItem::new(&label).checked(app.ui.agent.agent_count.max(1) == count).show(ui).clicked() {
@@ -1862,24 +1897,22 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             }
         }
         Menu::separator(ui, None);
-        for (label, mode) in [("Dividir trabalho", ParallelMode::Split), ("Lado a lado", ParallelMode::SideBySide)] {
+        for (label, mode) in [(tr("Split work"), ParallelMode::Split), (tr("Side by side"), ParallelMode::SideBySide)] {
             if MenuItem::new(label).checked(app.ui.agent.parallel_mode == mode).show(ui).clicked() {
                 app.ui.agent.parallel_mode = mode;
             }
         }
     });
     Menu::popup(&variants_resp).width(192.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Variantes").size(crate::theme::ui_font_size(11.0)).color(ui.visuals().text_color()));
-        ui.add_space(4.0);
+        Menu::heading(ui, tr("Variations"));
         for count in 1..=6_u8 {
-            let label = if count == 1 { "1x · Sem iteração".to_owned() } else { format!("{count}x") };
+            let label = if count == 1 { tr("1x · No iteration").to_owned() } else { format!("{count}x") };
             if MenuItem::new(&label).checked(app.ui.agent.variant_count.max(1) == count).show(ui).clicked() {
                 app.ui.agent.variant_count = count;
             }
         }
         Menu::separator(ui, None);
-        for (label, mode) in [("Variar layout", VariantMode::Layout), ("Variar estilo", VariantMode::Style)] {
+        for (label, mode) in [(tr("Vary layout"), VariantMode::Layout), (tr("Vary style"), VariantMode::Style)] {
             if MenuItem::new(label).checked(app.ui.agent.variant_mode == mode).show(ui).clicked() {
                 app.ui.agent.variant_mode = mode;
             }

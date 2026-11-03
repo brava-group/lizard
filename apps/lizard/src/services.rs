@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use lizard_engine::{Prefs, Session};
 use lizard_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
+use lizard_ui_egui::i18n::{tr, trf};
 use lizard_ui_egui::{ControlRequest, DialogFuture, LizardApp, Services};
 use serde_json::{Value, json};
 
@@ -114,13 +115,13 @@ impl Desktop {
     }
 
     fn agent_port(&mut self, document: u64, index: usize) -> Result<u16, String> {
-        let Some((queue, context)) = &self.agent_control else { return Err("O canal de controle não está disponível".into()) };
+        let Some((queue, context)) = &self.agent_control else { return Err(tr("The control channel is unavailable").into()) };
         let bridge = if index == 0 {
             crate::control_server::start_agent(document, queue.clone(), context.clone())
         } else {
             crate::control_server::start_agent_scoped(document, index, queue.clone(), context.clone())
         };
-        let (port, enabled) = bridge.ok_or("Não foi possível abrir o canal de controle do Lizard")?;
+        let (port, enabled) = bridge.ok_or(tr("Could not open Lizard's control channel"))?;
         self.agent_bridges.push((port, enabled));
         Ok(port)
     }
@@ -347,7 +348,7 @@ impl Services for Desktop {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "lizard-cli".into());
             let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
-            std::fs::create_dir_all(&cwd).map_err(|e| format!("Não foi possível preparar a pasta do agente: {e}"))?;
+            std::fs::create_dir_all(&cwd).map_err(|error| trf("Could not prepare the agent folder: {error}", &[("error", &error)]))?;
             for index in 0..count {
                 let port = match self.agent_port(document, index) {
                     Ok(port) => port,
@@ -369,20 +370,17 @@ impl Services for Desktop {
             let mut assigned = prompt.clone();
             if count > 1 {
                 let role = match prompt.parallel_mode {
-                    lizard_ui_egui::agent_panel::ParallelMode::SideBySide => format!(
-                        "Você é o agente {} de {}. Crie uma versão completa e independente do pedido. Trabalhe em um novo frame raiz identificado como 'Alternativa {}'. Preserve os frames dos outros agentes e não altere o trabalho deles.",
-                        index + 1,
-                        count,
-                        index + 1
+                    lizard_ui_egui::agent_panel::ParallelMode::SideBySide => trf(
+                        "You are agent {index} of {count}. Create a complete, independent version of the request. Work in a new root frame named 'Alternative {index}'. Preserve the other agents' frames and do not change their work.",
+                        &[("index", &(index + 1)), ("count", &count)],
                     ),
-                    lizard_ui_egui::agent_panel::ParallelMode::Split => format!(
-                        "Você é o agente {} de {}. Faça uma parte distinta e proporcional do trabalho pedido. Identifique claramente sua parte antes de editar. Não altere as partes dos outros agentes. Ao terminar, informe qual parte fez.",
-                        index + 1,
-                        count
+                    lizard_ui_egui::agent_panel::ParallelMode::Split => trf(
+                        "You are agent {index} of {count}. Do a distinct, proportional part of the requested work. Clearly identify your part before editing. Do not change the other agents' work. When finished, report which part you did.",
+                        &[("index", &(index + 1)), ("count", &count)],
                     ),
                 };
-                assigned.text.push_str("\n\nCoordenação da rodada: ");
-                assigned.text.push_str(&role);
+                assigned.text.push_str("\n\n");
+                assigned.text.push_str(&trf("Round coordination: {role}", &[("role", &role)]));
                 assigned.resume = prompt.resumes.get(index).cloned().flatten().or_else(|| if index == 0 { prompt.resume.clone() } else { None });
             }
             if let Err(error) = self.agents[index].send(assigned) {
@@ -428,19 +426,11 @@ impl Services for Desktop {
             }
         }
         if !crate::agent::login_available(kind) {
-            return lizard_ui_egui::agent_panel::AgentConnection {
-                installed: false,
-                authenticated: false,
-                detail: format!("{} não está instalado neste computador", kind.label()),
-            };
+            return lizard_ui_egui::agent_panel::AgentConnection { installed: false, authenticated: false, detail: String::new() };
         }
         if kind == AgentKind::Codex {
             let authenticated = crate::agent::codex_authenticated();
-            lizard_ui_egui::agent_panel::AgentConnection {
-                installed: true,
-                authenticated,
-                detail: if authenticated { "ChatGPT conectado".into() } else { "Entre com sua conta ChatGPT".into() },
-            }
+            lizard_ui_egui::agent_panel::AgentConnection { installed: true, authenticated, detail: String::new() }
         } else {
             let authenticated = if kind == AgentKind::Claude {
                 crate::agent::claude_authenticated()
@@ -466,10 +456,8 @@ impl Services for Desktop {
                 authenticated,
                 detail: if kind != AgentKind::Claude && self.agent_auth_checked[kind as usize].is_none() && !self.agent_signed_in[kind as usize] {
                     "checking".into()
-                } else if authenticated {
-                    format!("{} conectado", kind.label())
                 } else {
-                    format!("{} pronto para conectar", kind.label())
+                    String::new()
                 },
             }
         }
