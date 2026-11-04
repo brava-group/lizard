@@ -198,6 +198,8 @@ pub struct AgentPresence {
     pub document: Option<u64>,
     pub conversation: Option<u64>,
     pub target: Option<NodeId>,
+    /// Planned page position for a node that has not been created yet.
+    pub point: Option<(f64, f64)>,
     /// Smoothed cursor position in page coordinates; camera changes must not move it off target.
     pub shown: Option<(f64, f64)>,
     pub updated: Option<web_time::Instant>,
@@ -2128,6 +2130,48 @@ mod tests {
         assert_eq!(app.ui.agent.presence.shimmers.len(), 1);
         assert_eq!(app.ui.agent.presence.shimmers[0].id, NodeId(frame));
         assert!(!app.ui.agent.presence.shimmers[0].ongoing, "the shimmer finishes after the tool completes");
+    }
+
+    #[test]
+    fn agent_create_moves_to_planned_child_position_before_the_node_exists() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
+        let frame =
+            app.session.execute("node.create", &json!({"type":"frame", "x":140, "y":90, "width":320, "height":240})).unwrap()["id"].as_u64().unwrap();
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Crie um card".into();
+        send_prompt(&mut app);
+        let uid = app.session.ds().unwrap().uid;
+        let ctx = egui::Context::default();
+        crate::control::handle(
+            &mut app,
+            &ctx,
+            "agent.activity",
+            &json!({
+                "__agent_document":uid, "phase":"start", "tool":"create_node", "ids":[frame],
+                "position":{"parent":frame,"x":48.0,"y":32.0}
+            }),
+        )
+        .unwrap();
+        assert_eq!(app.ui.agent.presence.point, Some((188.0, 122.0)));
+        assert_eq!(app.ui.agent.presence.target, Some(NodeId(frame)));
+        let card =
+            app.session.execute("node.create", &json!({"type":"rectangle", "parent":frame, "x":48, "y":32, "width":100, "height":60})).unwrap()["id"]
+                .as_u64()
+                .unwrap();
+        crate::control::handle(
+            &mut app,
+            &ctx,
+            "agent.activity",
+            &json!({
+                "__agent_document":uid, "phase":"done", "tool":"create_node", "ids":[card], "parent":frame
+            }),
+        )
+        .unwrap();
+        assert_eq!(app.ui.agent.presence.point, None);
+        assert_eq!(app.ui.agent.presence.target, Some(NodeId(card)));
+        assert!(!app.ui.agent.presence.shimmers[0].ongoing);
     }
 
     #[test]

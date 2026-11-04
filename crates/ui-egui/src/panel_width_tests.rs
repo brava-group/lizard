@@ -24,9 +24,10 @@ fn agent_rail_opens_chat_and_restores_explorer_width() {
     assert_eq!(u.app.ui.left_width, 417.0);
     assert_eq!(u.app.inspect()["leftTab"], "Agent");
 
+    let suggestion = crate::i18n::tr("Organize and refine this design.").to_string();
     u.button(pos2(100.0, 253.0), true);
     u.button(pos2(100.0, 253.0), false);
-    assert_eq!(u.app.ui.agent.draft, "Organize e refine este design.");
+    assert_eq!(u.app.ui.agent.draft, suggestion);
 
     u.button(pos2(24.0, 116.0), true);
     u.button(pos2(24.0, 116.0), false);

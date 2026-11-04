@@ -20,17 +20,19 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     let active = app.ui.agent.busy && presence.active;
     let idle_age = presence.updated.map_or(Duration::MAX, |updated| now.saturating_duration_since(updated));
     let fade = if active { 1.0 } else { (1.0 - idle_age.as_secs_f32() / 1.0).clamp(0.0, 1.0) };
-    let target = presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
-        let x = bounds.x0 + bounds.width() * 0.35;
-        let y = bounds.y0 + bounds.height() * 0.35;
-        (x, y)
+    let target = presence.point.or_else(|| {
+        presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
+            let x = bounds.x0 + bounds.width() * 0.35;
+            let y = bounds.y0 + bounds.height() * 0.35;
+            (x, y)
+        })
     });
     let reduce_motion = app.reduce_motion();
     // Smooth only in page space. A pan or zoom then reprojects the agent with its frame in
     // the same UI frame, without the cursor trailing behind the camera.
     let shown = target.map(|target| {
         let old = presence.shown.unwrap_or(target);
-        if reduce_motion { target } else { (old.0 + (target.0 - old.0) * 0.22, old.1 + (target.1 - old.1) * 0.22) }
+        if reduce_motion { target } else { (old.0 + (target.0 - old.0) * 0.35, old.1 + (target.1 - old.1) * 0.35) }
     });
     let moving = shown.zip(target).is_some_and(|(shown, target)| (shown.0 - target.0).abs() + (shown.1 - target.1).abs() > 0.5);
     app.ui.agent.presence.shown = shown;
@@ -136,5 +138,24 @@ mod tests {
         ui.app.ui.agent.presence.target = None;
         ui.frame(vec![]);
         assert!(ui.app.ui.agent.presence.shown.is_none(), "without a target there is no marker at canvas center");
+    }
+
+    #[test]
+    fn planned_creation_position_is_drawn_before_the_node_exists() {
+        let mut ui = Ui::new(Session::new());
+        let uid = ui.app.session.ds().unwrap().uid;
+        ui.app.ui.agent.busy = true;
+        ui.app.ui.agent.runtime_conversation = Some(7);
+        ui.app.ui.agent.presence.document = Some(uid);
+        ui.app.ui.agent.presence.conversation = Some(7);
+        ui.app.ui.agent.presence.active = true;
+        ui.app.ui.agent.presence.point = Some((180.0, 120.0));
+        ui.frame(vec![]);
+        assert_eq!(ui.app.ui.agent.presence.shown, Some((180.0, 120.0)));
+        ui.app.ui.agent.presence.point = Some((380.0, 220.0));
+        ui.frame(vec![]);
+        let moved = ui.app.ui.agent.presence.shown.unwrap();
+        assert!(moved.0 > 180.0 && moved.0 < 380.0);
+        assert!(moved.1 > 120.0 && moved.1 < 220.0);
     }
 }

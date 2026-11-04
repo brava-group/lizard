@@ -91,6 +91,12 @@ document-scoped UI overlay: the agent cursor moves toward the current target, in
 highlights visible frames, and edits pulse on the affected layer. An active creation inside a
 frame gives that frame a subtle animated outline. The overlay never enters Undo, export or the
 document; reduced-motion settings remove the moving scan and cursor glide.
+When the agent creates a layer with `create_node`, the cursor moves to its planned page position
+before the command runs. Attached sessions leave a short paint interval before and after each
+creation or property change, so sections appear one after another while the agent works. The
+agent instructions favor separate calls for visible sections; `batch` remains atomic and appears
+as one update when several commands must succeed or fail together. Headless MCP calls have no
+visual pacing.
 
 The browser build retains the chat layout but cannot start local agent executables. File attachment
 dialogs use the desktop file picker. Specialized image generation, background removal and visual

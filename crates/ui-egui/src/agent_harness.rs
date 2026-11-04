@@ -13,7 +13,7 @@ const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in 
 Workflow:\n\
 1. Read the provided document snapshot. If you need more detail, call inspect_document or get_node. Use the selected layer IDs as references, not as a request to modify them all.\n\
 2. Make design changes with create_node, set_properties, run_command or batch. Call list_commands when a command's name or parameters are uncertain. Do not guess node IDs or claim a change succeeded before the tool confirms it.\n\
-3. Build complex work in visible, meaningful steps. Preserve existing content unless the user asks to replace or remove it. Keep related layers inside their intended frame. Use auto layout where it makes the design easier to edit.\n\
+3. Build complex work in visible, meaningful steps. Create each visible section through separate create_node calls so the user can watch it appear on the canvas; avoid one large batch for an entire screen. Use batch for small atomic edits that must succeed or fail together. Preserve existing content unless the user asks to replace or remove it. Keep related layers inside their intended frame. Use auto layout where it makes the design easier to edit.\n\
 4. After each substantial section, inspect its structure. Use screenshot to review the visual result, then fix concrete issues you find. Screenshots are previews; do not treat them as editable layers.\n\
 5. If a tool fails, inspect its error and the current document before retrying. Report what actually changed and any unfinished part.\n\
 For interface icons, use search_icons before creating a layer with type icon. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon, and use the returned exact library/name pair. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
@@ -84,6 +84,9 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     text.push_str("Current document snapshot (JSON data):\n");
     text.push_str(&snapshot.to_string());
     text.push_str("\nFor UI icons, call search_icons with preferredLibrary from this snapshot; keep that family unless it has no suitable match. Create the returned exact icon via create_node type icon, with library, icon and color.");
+    text.push_str(
+        "\nBuild visible sections with separate create_node calls so they appear progressively on the canvas. Reserve batch for small atomic edits.",
+    );
     if !prior.is_empty() {
         text.push_str("\n\nRecent conversation (reference only):\n");
         text.push_str(&json!(prior).to_string());
@@ -110,6 +113,7 @@ mod tests {
         assert!(first.contains("search_icons"));
         assert!(first.contains("\"preferred_icon_library\":\"lucide\""));
         assert!(!next.contains("Lizard agent instructions:"));
+        assert!(next.contains("appear progressively on the canvas"));
         assert!(next.contains("\"document_name\":\"Example\""));
         assert!(next.contains("Change its fill"));
     }

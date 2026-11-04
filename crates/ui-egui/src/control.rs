@@ -279,6 +279,24 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             }
             let phase = p.get("phase").and_then(Value::as_str).unwrap_or("");
             let tool = p.get("tool").and_then(Value::as_str).unwrap_or("");
+            let point = if phase == "start" && tool == "create_node" {
+                p.get("position").and_then(|position| {
+                    let x = position.get("x")?.as_f64()?;
+                    let y = position.get("y")?.as_f64()?;
+                    if !x.is_finite() || !y.is_finite() {
+                        return None;
+                    }
+                    let parent = position.get("parent").and_then(Value::as_u64);
+                    if let Some(parent) = parent {
+                        let bounds = app.session.ds().ok()?.doc.world_bounds(lizard_doc::NodeId(parent))?;
+                        Some((bounds.x0 + x, bounds.y0 + y))
+                    } else {
+                        Some((x, y))
+                    }
+                })
+            } else {
+                None
+            };
             let inspection = matches!(tool, "get_node" | "inspect_document" | "screenshot");
             let mut ids: Vec<_> = p.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).take(8).collect();
             if ids.is_empty()
@@ -319,9 +337,19 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             presence.updated = Some(now);
             presence.active = true;
             presence.generating = phase == "start" && matches!(tool, "create_node" | "set_properties");
+            presence.point = point;
+            if tool == "create_node"
+                && matches!(phase, "done" | "failed")
+                && let Some(parent) = p.get("parent").and_then(Value::as_u64)
+            {
+                for shimmer in presence.shimmers.iter_mut().filter(|shimmer| shimmer.id == lizard_doc::NodeId(parent)) {
+                    shimmer.started = now;
+                    shimmer.ongoing = false;
+                }
+            }
             if let Some(id) = ids.first().copied() {
                 presence.target = Some(lizard_doc::NodeId(id));
-            } else if phase == "start" {
+            } else if phase == "start" && point.is_none() {
                 presence.target = None;
                 presence.shown = None;
             }

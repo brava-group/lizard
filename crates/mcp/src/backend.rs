@@ -152,7 +152,17 @@ impl Attached {
 
 impl Backend for Attached {
     fn agent_activity(&mut self, activity: Value) {
-        let _ = self.call("agent.activity", activity);
+        let starting = activity.get("phase").and_then(Value::as_str) == Some("start");
+        let completed = activity.get("phase").and_then(Value::as_str) == Some("done");
+        let visual_edit = matches!(activity.get("tool").and_then(Value::as_str), Some("create_node" | "set_properties"));
+        let accepted = self.call("agent.activity", activity).ok().and_then(|reply| reply.get("accepted").and_then(Value::as_bool)) == Some(true);
+        if accepted && visual_edit && (starting || completed) {
+            // Let the attached canvas paint the cursor at the planned location before the
+            // command runs, and its visual change before the next tool starts. Headless calls
+            // never wait, and a detached MCP client receives accepted: false.
+            let delay = if starting { 110 } else { 85 };
+            std::thread::sleep(Duration::from_millis(delay));
+        }
     }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;

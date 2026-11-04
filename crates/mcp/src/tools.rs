@@ -425,7 +425,22 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         matches!(name, "create_node" | "set_properties" | "get_node" | "inspect_document" | "screenshot" | "select" | "run_command" | "batch");
     if relevant {
         let ids = activity_ids(name, args);
-        b.agent_activity(json!({"phase":"start", "tool":name, "ids":ids}));
+        let position = if name == "create_node" {
+            let x = args.get("x").and_then(Value::as_f64);
+            let y = args.get("y").and_then(Value::as_f64);
+            match (x, y) {
+                (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+                    let width = args.get("width").and_then(Value::as_f64).filter(|size| size.is_finite()).unwrap_or(0.0);
+                    let height = args.get("height").and_then(Value::as_f64).filter(|size| size.is_finite()).unwrap_or(0.0);
+                    let parent = args.get("parent").and_then(lizard_engine::params::id_of).map(|id| id.0);
+                    Some(json!({"x": x + width * 0.35, "y": y + height * 0.35, "parent": parent}))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        b.agent_activity(json!({"phase":"start", "tool":name, "ids":ids, "position":position}));
     }
     let r = match name {
         "list_commands" => list_commands(b, &a),
@@ -469,22 +484,24 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         } else {
             None
         };
-        b.agent_activity(json!({"phase": if result.is_error {"failed"} else {"done"}, "tool":name, "ids":ids, "preview":preview}));
+        let parent = (name == "create_node").then(|| args.get("parent").and_then(lizard_engine::params::id_of).map(|id| id.0)).flatten();
+        b.agent_activity(json!({"phase": if result.is_error {"failed"} else {"done"}, "tool":name, "ids":ids, "parent":parent, "preview":preview}));
     }
     result
 }
 
 fn activity_ids(name: &str, args: &Value) -> Vec<u64> {
     if name == "create_node" {
-        return args.get("parent").and_then(Value::as_u64).into_iter().collect();
+        return args.get("parent").and_then(lizard_engine::params::id_of).map(|id| id.0).into_iter().collect();
     }
     if !matches!(name, "set_properties" | "get_node" | "screenshot" | "select" | "run_command" | "batch") {
         return Vec::new();
     }
     let source = if name == "run_command" { &args["params"] } else { args };
-    let mut ids: Vec<u64> = source.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).take(8).collect();
-    if let Some(id) = source.get("id").and_then(Value::as_u64) {
-        ids.push(id);
+    let mut ids: Vec<u64> =
+        source.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(lizard_engine::params::id_of).map(|id| id.0).take(8).collect();
+    if let Some(id) = source.get("id").and_then(lizard_engine::params::id_of) {
+        ids.push(id.0);
     }
     ids.truncate(8);
     ids
@@ -864,13 +881,55 @@ fn type_text(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, 
 #[cfg(test)]
 mod activity_tests {
     use super::*;
+    use crate::Headless;
+
+    struct Traced {
+        backend: Headless,
+        activity: Vec<Value>,
+    }
+
+    impl Backend for Traced {
+        fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+            self.backend.call(method, params)
+        }
+        fn has_ui(&self) -> bool {
+            false
+        }
+        fn describe(&self) -> String {
+            "traced headless".into()
+        }
+        fn agent_activity(&mut self, activity: Value) {
+            self.activity.push(activity);
+        }
+    }
 
     #[test]
     fn activity_targets_only_explicit_design_nodes() {
         assert_eq!(activity_ids("get_node", &json!({"id":42})), vec![42]);
         assert_eq!(activity_ids("set_properties", &json!({"ids":[2,3]})), vec![2, 3]);
         assert_eq!(activity_ids("create_node", &json!({"parent":7,"name":"Demo"})), vec![7]);
+        assert_eq!(activity_ids("create_node", &json!({"parent":"7","name":"Demo"})), vec![7]);
         assert_eq!(activity_ids("run_command", &json!({"command":"node.set","params":{"ids":[9]}})), vec![9]);
         assert!(activity_ids("list_commands", &json!({"ids":[5]})).is_empty());
+    }
+
+    #[test]
+    fn creation_reports_planned_position_then_created_id() {
+        let mut traced = Traced { backend: Headless::new(), activity: Vec::new() };
+        let result = call_tool(
+            &mut traced,
+            "create_node",
+            &json!({
+                "type":"rectangle", "x":100, "y":80, "width":200, "height":100
+            }),
+        );
+        assert!(!result.is_error, "{}", result.first_text());
+        assert_eq!(traced.activity.len(), 2);
+        assert_eq!(traced.activity[0]["phase"], "start");
+        assert_eq!(traced.activity[0]["position"]["x"], 170.0);
+        assert_eq!(traced.activity[0]["position"]["y"], 115.0);
+        let created: Value = serde_json::from_str(result.first_text()).unwrap();
+        assert_eq!(traced.activity[1]["phase"], "done");
+        assert_eq!(traced.activity[1]["ids"], json!([created["id"]]));
     }
 }
