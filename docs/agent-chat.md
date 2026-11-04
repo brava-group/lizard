@@ -91,6 +91,10 @@ document-scoped UI overlay: the agent cursor moves toward the current target, in
 highlights visible frames, and edits pulse on the affected layer. An active creation inside a
 frame gives that frame a subtle animated outline. The overlay never enters Undo, export or the
 document; reduced-motion settings remove the moving scan and cursor glide.
+The cursor keeps its last page position between tools and variants, moves toward new targets
+over multiple frames, and gently idles while the agent waits. It stays at the last work area
+briefly after the turn ends before fading. A new cursor without a target starts in the visible
+canvas; later untargeted tools do not return it to the center.
 When the agent creates a layer with `create_node`, the cursor moves to its planned page position
 before the command runs. Attached sessions leave a short paint interval before and after each
 creation or property change, so sections appear one after another while the agent works. The

@@ -202,6 +202,8 @@ pub struct AgentPresence {
     pub point: Option<(f64, f64)>,
     /// Smoothed cursor position in page coordinates; camera changes must not move it off target.
     pub shown: Option<(f64, f64)>,
+    pub motion_updated: Option<web_time::Instant>,
+    pub idle_strength: f32,
     pub updated: Option<web_time::Instant>,
     pub pulses: Vec<AgentPulse>,
     pub shimmers: Vec<AgentShimmer>,
@@ -798,10 +800,16 @@ fn send_prompt(app: &mut LizardApp) {
             app.ui.agent.pending_images = std::mem::take(&mut app.ui.agent.images);
             app.ui.agent.turn_started = Some(web_time::Instant::now());
             app.ui.agent.busy = true;
+            if app.ui.agent.presence.conversation != Some(id) {
+                app.ui.agent.presence.shown = None;
+                app.ui.agent.presence.motion_updated = None;
+            }
             app.ui.agent.presence.document = Some(document);
             app.ui.agent.presence.conversation = Some(id);
-            app.ui.agent.presence.target = first_selected_node;
-            app.ui.agent.presence.shown = None;
+            app.ui.agent.presence.point = None;
+            if first_selected_node.is_some() || app.ui.agent.presence.shown.is_none() {
+                app.ui.agent.presence.target = first_selected_node;
+            }
             app.ui.agent.presence.pulses.clear();
             app.ui.agent.presence.shimmers.clear();
             app.ui.agent.presence.generating = false;
@@ -904,8 +912,10 @@ fn begin_next_variant(app: &mut LizardApp) {
     app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
     app.ui.agent.turn_started = Some(web_time::Instant::now());
     app.ui.agent.presence.active = true;
-    app.ui.agent.presence.target = selected_nodes.first().map(|node| node.id);
-    app.ui.agent.presence.shown = None;
+    app.ui.agent.presence.point = None;
+    if let Some(selected) = selected_nodes.first() {
+        app.ui.agent.presence.target = Some(selected.id);
+    }
     app.ui.agent.presence.shimmers.clear();
     app.ui.agent.presence.generating = false;
 }

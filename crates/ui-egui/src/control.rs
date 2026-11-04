@@ -349,9 +349,6 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             }
             if let Some(id) = ids.first().copied() {
                 presence.target = Some(lizard_doc::NodeId(id));
-            } else if phase == "start" && point.is_none() {
-                presence.target = None;
-                presence.shown = None;
             }
             for id in shimmer_ids {
                 let id = lizard_doc::NodeId(id);

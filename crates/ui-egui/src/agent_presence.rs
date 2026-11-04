@@ -9,6 +9,38 @@ use egui::{Align2, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
 use crate::LizardApp;
 use crate::theme::Tokens;
 
+const CURSOR_HOLD: Duration = Duration::from_secs(5);
+const CURSOR_FADE: Duration = Duration::from_millis(1_500);
+
+fn cursor_alpha(active: bool, idle: Duration) -> f32 {
+    if active || idle <= CURSOR_HOLD { 1.0 } else { (1.0 - (idle - CURSOR_HOLD).as_secs_f32() / CURSOR_FADE.as_secs_f32()).clamp(0.0, 1.0) }
+}
+
+fn advance_cursor(from: (f64, f64), to: (f64, f64), dt: Duration, reduce_motion: bool) -> (f64, f64) {
+    if reduce_motion {
+        return to;
+    }
+    let seconds = dt.as_secs_f64().clamp(1.0 / 60.0, 0.1);
+    let progress = 1.0 - (-3.0 * seconds).exp();
+    (from.0 + (to.0 - from.0) * progress, from.1 + (to.1 - from.1) * progress)
+}
+
+fn idle_offset(idle: Duration, strength: f32) -> egui::Vec2 {
+    if strength <= 0.0 {
+        return egui::Vec2::ZERO;
+    }
+    let seconds = idle.as_secs_f32();
+    vec2((seconds * 2.7).sin() * 3.0 * strength, (seconds * 1.9).cos() * 2.5 * strength)
+}
+
+fn advance_idle_strength(current: f32, idle: bool, dt: Duration, reduce_motion: bool) -> f32 {
+    if reduce_motion {
+        return 0.0;
+    }
+    let progress = 1.0 - (-4.0 * dt.as_secs_f32().clamp(1.0 / 60.0, 0.1)).exp();
+    current + ((if idle { 1.0 } else { 0.0 }) - current) * progress
+}
+
 pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     let brand = Tokens::get(ctx).accent_text;
     let now = Instant::now();
@@ -19,23 +51,38 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     }
     let active = app.ui.agent.busy && presence.active;
     let idle_age = presence.updated.map_or(Duration::MAX, |updated| now.saturating_duration_since(updated));
-    let fade = if active { 1.0 } else { (1.0 - idle_age.as_secs_f32() / 1.0).clamp(0.0, 1.0) };
-    let target = presence.point.or_else(|| {
-        presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
-            let x = bounds.x0 + bounds.width() * 0.35;
-            let y = bounds.y0 + bounds.height() * 0.35;
-            (x, y)
+    let fade = cursor_alpha(active, idle_age);
+    let target = presence
+        .point
+        .or_else(|| {
+            presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
+                let x = bounds.x0 + bounds.width() * 0.35;
+                let y = bounds.y0 + bounds.height() * 0.35;
+                (x, y)
+            })
         })
-    });
+        .or(presence.shown)
+        .or_else(|| {
+            active
+                .then(|| {
+                    app.session
+                        .ds()
+                        .ok()
+                        .map(|ds| ds.view.screen_to_page(f64::from(app.canvas.rect.width()) * 0.5, f64::from(app.canvas.rect.height()) * 0.5))
+                })
+                .flatten()
+        });
     let reduce_motion = app.reduce_motion();
     // Smooth only in page space. A pan or zoom then reprojects the agent with its frame in
     // the same UI frame, without the cursor trailing behind the camera.
-    let shown = target.map(|target| {
-        let old = presence.shown.unwrap_or(target);
-        if reduce_motion { target } else { (old.0 + (target.0 - old.0) * 0.35, old.1 + (target.1 - old.1) * 0.35) }
-    });
+    let motion_dt = presence.motion_updated.map_or(Duration::ZERO, |at| now.saturating_duration_since(at));
+    let shown = target.map(|target| advance_cursor(presence.shown.unwrap_or(target), target, motion_dt, reduce_motion));
     let moving = shown.zip(target).is_some_and(|(shown, target)| (shown.0 - target.0).abs() + (shown.1 - target.1).abs() > 0.5);
+    let idle_goal = active && !moving && idle_age >= Duration::from_millis(350) && !reduce_motion;
+    let idle_strength = advance_idle_strength(presence.idle_strength, idle_goal, motion_dt, reduce_motion);
     app.ui.agent.presence.shown = shown;
+    app.ui.agent.presence.motion_updated = Some(now);
+    app.ui.agent.presence.idle_strength = idle_strength;
     app.ui
         .agent
         .presence
@@ -86,7 +133,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         }
     }
     if let Some((x, y)) = shown.filter(|_| fade > 0.0) {
-        let tip = app.to_screen(x, y);
+        let tip = app.to_screen(x, y) + idle_offset(idle_age, idle_strength);
         if app.canvas.rect.contains(tip) {
             crate::live::pointer(painter, tip, brand.gamma_multiply(fade));
             let name = app
@@ -98,13 +145,21 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
             crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
         }
     }
-    if moving || !app.ui.agent.presence.shimmers.is_empty() || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && !active) {
-        ctx.request_repaint_after(Duration::from_millis(if reduce_motion { 100 } else { 33 }));
+    let cursor_visible = shown.is_some_and(|(x, y)| app.canvas.rect.contains(app.to_screen(x, y)));
+    if moving || !app.ui.agent.presence.shimmers.is_empty() || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && cursor_visible) {
+        ctx.request_repaint_after(Duration::from_millis(if reduce_motion {
+            100
+        } else if moving {
+            33
+        } else {
+            50
+        }));
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use lizard_doc::NodeId;
     use lizard_engine::Session;
     use serde_json::json;
@@ -112,7 +167,7 @@ mod tests {
     use crate::layers_drag_tests::Ui;
 
     #[test]
-    fn agent_cursor_uses_page_coordinates_through_pan_and_has_no_center_fallback() {
+    fn agent_cursor_uses_page_coordinates_through_pan_and_stays_at_last_work() {
         let mut session = Session::new();
         let frame =
             NodeId(session.execute("node.create", &json!({"type":"frame","x":140,"y":90,"width":320,"height":240})).unwrap()["id"].as_u64().unwrap());
@@ -137,7 +192,7 @@ mod tests {
 
         ui.app.ui.agent.presence.target = None;
         ui.frame(vec![]);
-        assert!(ui.app.ui.agent.presence.shown.is_none(), "without a target there is no marker at canvas center");
+        assert_eq!(ui.app.ui.agent.presence.shown, Some(page), "an untargeted tool leaves the cursor by its last work");
     }
 
     #[test]
@@ -157,5 +212,26 @@ mod tests {
         let moved = ui.app.ui.agent.presence.shown.unwrap();
         assert!(moved.0 > 180.0 && moved.0 < 380.0);
         assert!(moved.1 > 120.0 && moved.1 < 220.0);
+    }
+
+    #[test]
+    fn cursor_moves_over_time_and_idles_before_fading() {
+        let from = (20.0, 30.0);
+        let to = (420.0, 230.0);
+        let first = advance_cursor(from, to, Duration::from_millis(33), false);
+        let second = advance_cursor(first, to, Duration::from_millis(33), false);
+        assert!(from.0 < first.0 && first.0 < second.0 && second.0 < to.0);
+        assert_eq!(advance_cursor(from, to, Duration::ZERO, true), to);
+        assert_eq!(cursor_alpha(true, Duration::from_secs(30)), 1.0);
+        assert_eq!(cursor_alpha(false, Duration::from_secs(4)), 1.0);
+        assert!(cursor_alpha(false, Duration::from_millis(5_750)) > 0.0);
+        assert_eq!(cursor_alpha(false, Duration::from_secs(7)), 0.0);
+        assert_eq!(idle_offset(Duration::from_millis(200), 0.0), egui::Vec2::ZERO);
+        assert_ne!(idle_offset(Duration::from_secs(1), 0.5), egui::Vec2::ZERO);
+        let first_idle = advance_idle_strength(0.0, true, Duration::from_millis(50), false);
+        let second_idle = advance_idle_strength(first_idle, true, Duration::from_millis(50), false);
+        assert!(0.0 < first_idle && first_idle < second_idle && second_idle < 1.0);
+        assert!(advance_idle_strength(second_idle, false, Duration::from_millis(50), false) < second_idle);
+        assert_eq!(advance_idle_strength(second_idle, true, Duration::from_millis(50), true), 0.0);
     }
 }
