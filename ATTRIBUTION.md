@@ -1,5 +1,11 @@
 # Asset attribution
 
+## Design toolbar icon
+
+- File: `crates/ui-egui/assets/toolbar-mode-design.svg`.
+- Source: the owner's `new-icons.lizard` document, node 16 (`design toolbar icon`); exported as SVG from Lizard.
+- Original owner-provided artwork; no third-party asset or licence.
+
 ## Shortcuts Font
 
 - Files: `assets/fonts/shortcuts-font/ShortcutsFont-original.ttf` (upstream) and
