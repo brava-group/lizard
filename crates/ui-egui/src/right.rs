@@ -3581,7 +3581,7 @@ fn inspect_disclosure(ui: &mut Ui, title: &str, id: Id, default_open: bool) -> b
     let ink = if response.hovered() { t.text } else { t.text_secondary };
     icons::paint(
         ui.painter(),
-        Rect::from_center_size(pos2(rect.left() + PAD - 12.0, rect.center().y), vec2(8.0, 8.0)),
+        Rect::from_center_size(pos2(rect.left() + PAD - 8.0, rect.center().y), vec2(8.0, 8.0)),
         if open { Icon::Chevron } else { Icon::ChevronRight },
         ink,
     );
