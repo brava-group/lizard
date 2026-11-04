@@ -3758,7 +3758,9 @@ fn inspect(app: &mut LizardApp, ui: &mut Ui) {
     ui.add_space(7.0);
     let (toolbar_rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let content = toolbar_rect.shrink2(vec2(PAD, 4.0));
-    let mut toolbar = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let language_rect = Rect::from_min_size(pos2(content.right() - 82.0, content.top()), vec2(82.0, content.height()));
+    let controls_rect = Rect::from_min_max(content.min, pos2(language_rect.left() - 8.0, content.bottom()));
+    let mut toolbar = ui.new_child(egui::UiBuilder::new().max_rect(controls_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
     toolbar.spacing_mut().item_spacing = vec2(8.0, 0.0);
     {
         let ui = &mut toolbar;
@@ -3778,17 +3780,17 @@ fn inspect(app: &mut LizardApp, ui: &mut Ui) {
                 }
             });
         }
-        ui.add_space((ui.available_width() - 90.0).max(0.0));
-        let resp = crate::primitives::Select::trigger(ui, lang.label(), 82.0, None);
-        menu_popup(&resp).show(|ui| {
-            for (i, language) in CodeLang::ALL.iter().enumerate() {
-                if menu_item(ui, language.label(), "") {
-                    ui.data_mut(|data| data.insert_temp(lang_id, i));
-                    ui.close();
-                }
-            }
-        });
     }
+    let mut language_ui = ui.new_child(egui::UiBuilder::new().max_rect(language_rect));
+    let resp = crate::primitives::Select::trigger(&mut language_ui, lang.label(), 82.0, None);
+    menu_popup(&resp).show(|ui| {
+        for (i, language) in CodeLang::ALL.iter().enumerate() {
+            if menu_item(ui, language.label(), "") {
+                ui.data_mut(|data| data.insert_temp(lang_id, i));
+                ui.close();
+            }
+        }
+    });
     let played = crate::dev_mode::playground_section(app, ui, &doc, first, lang);
     if code_view {
         let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 39.0), Sense::hover());
