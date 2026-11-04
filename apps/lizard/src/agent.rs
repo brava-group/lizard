@@ -813,6 +813,9 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
                         "item/started" | "item/completed" => {
                             let item = &message["params"]["item"];
                             let item_type = item["type"].as_str().unwrap_or_default();
+                            if method == "item/started" && item_type == "agentMessage" {
+                                let _ = output.send(AgentEvent::TextBoundary);
+                            }
                             if matches!(item_type, "mcpToolCall" | "commandExecution" | "fileChange" | "webSearch") {
                                 let id = item["id"].as_str().unwrap_or("tool").to_string();
                                 let title = match item_type {
@@ -1216,6 +1219,7 @@ for line in sys.stdin:
   assert msg['params']['input'][1]['url']=='data:image/png;base64,aGVsbG8='
   send({'jsonrpc':'2.0','id':msg['id'],'result':{'turn':{'id':'turn-1'}}})
   send({'jsonrpc':'2.0','method':'item/started','params':{'item':{'id':'tool-1','type':'mcpToolCall','server':'lizard','tool':'create_node'}}})
+  send({'jsonrpc':'2.0','method':'item/started','params':{'item':{'id':'message-1','type':'agentMessage'}}})
   send({'jsonrpc':'2.0','method':'item/agentMessage/delta','params':{'delta':'Created frame'}})
   send({'jsonrpc':'2.0','method':'item/completed','params':{'item':{'id':'tool-1','type':'mcpToolCall','server':'lizard','tool':'create_node'}}})
   send({'jsonrpc':'2.0','method':'turn/completed','params':{'turn':{'status':'completed'}}})
@@ -1245,6 +1249,7 @@ for line in sys.stdin:
             let mut got_session = false;
             let mut got_model = false;
             let mut got_text = false;
+            let mut got_boundary = false;
             let mut got_tool = false;
             let mut got_done = false;
             while Instant::now() < deadline && !got_done {
@@ -1253,6 +1258,7 @@ for line in sys.stdin:
                         AgentEvent::Session(id) => got_session |= id == "saved-thread",
                         AgentEvent::Models(models) => got_model |= models.first().is_some_and(|(id, _)| id == "test-model"),
                         AgentEvent::Text(text) => got_text |= text == "Created frame",
+                        AgentEvent::TextBoundary => got_boundary = true,
                         AgentEvent::Tool { status, .. } => got_tool |= status.as_deref() == Some("completed"),
                         AgentEvent::Done(reason) => got_done = reason == "end_turn",
                         AgentEvent::Error(error) => panic!("{error}"),
@@ -1261,7 +1267,7 @@ for line in sys.stdin:
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            assert!(got_session && got_model && got_text && got_tool && got_done);
+            assert!(got_session && got_model && got_text && got_boundary && got_tool && got_done);
         }
         let _ = std::fs::remove_dir_all(folder);
     }
@@ -1340,6 +1346,7 @@ for line in sys.stdin:
                     | AgentEvent::LoginComplete
                     | AgentEvent::LoginError(_)
                     | AgentEvent::Models(_)
+                    | AgentEvent::TextBoundary
                     | AgentEvent::Thinking(_)
                     | AgentEvent::Scoped { .. } => {}
                 }

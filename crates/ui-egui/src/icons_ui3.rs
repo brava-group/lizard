@@ -21,6 +21,16 @@ const HOME_TAB_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="
 // Settings icon supplied by the owner for the desktop tab strip.
 const SETTINGS_TAB_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="m12.25,17.46c-.13-.01-.25-.05-.35-.11l-1.91-1.07-1.91,1.07c-.11.06-.22.09-.34.11h-.02c-.17,0-.25-.01-.34-.04-.97-.33-1.85-.82-2.62-1.48-.1-.08-.17-.18-.23-.3-.05-.11-.08-.24-.08-.36v-2.12s-1.9-1.07-1.9-1.07c-.11-.06-.21-.15-.28-.25-.07-.1-.12-.22-.15-.34-.2-.99-.2-1.99,0-2.98.02-.12.07-.24.15-.34.07-.1.17-.19.27-.25l1.88-1.07v-2.13c0-.13.04-.25.09-.36.05-.11.13-.21.22-.29.78-.66,1.66-1.16,2.63-1.48.09-.03.18-.05.28-.05.18.01.31.04.42.11l1.91,1.07,1.91-1.07c.11-.06.22-.09.34-.11h.03c.16,0,.24.01.33.04.97.33,1.85.82,2.63,1.48.1.08.17.18.23.3.05.12.08.24.08.37v2.12s1.89,1.08,1.89,1.08c.11.06.2.15.28.25.08.1.12.22.15.34.2.98.2,1.99,0,2.98-.02.12-.07.24-.15.34-.07.1-.16.18-.28.25l-1.89,1.07v2.13c0,.12-.04.25-.09.36-.06.12-.13.22-.23.3-.77.66-1.65,1.15-2.62,1.48-.08.03-.18.05-.28.05h-.07Zm-2.14-2.96c.17,0,.31.04.44.11l1.85,1.03c.53-.22.99-.48,1.4-.79v-2.06c0-.16.06-.32.14-.46.04-.07.08-.13.12-.2.08-.14.19-.26.33-.33l1.83-1.04c.07-.55.06-1.05,0-1.54l-1.83-1.04c-.14-.08-.25-.19-.33-.33-.04-.07-.08-.13-.12-.2-.09-.14-.13-.3-.13-.46v-2.05c-.47-.34-.93-.59-1.41-.79l-1.85,1.03c-.13.07-.28.11-.43.11h-.26c-.16,0-.31-.04-.44-.11l-1.85-1.03c-.54.22-.99.48-1.4.79v2.06c0,.16-.05.32-.14.46-.04.07-.08.13-.12.2-.08.14-.19.26-.33.33l-1.82,1.04c-.07.55-.07,1.05,0,1.54l1.83,1.04c.14.08.25.19.33.33.04.07.08.13.12.2.09.14.13.3.13.46v2.05c.48.34.93.59,1.41.79l1.85-1.03c.13-.07.28-.11.43-.11h.25Zm-.12-.88c-.24,0-.47-.02-.7-.07-.71-.14-1.35-.48-1.85-.99-.51-.51-.85-1.15-.99-1.85-.14-.7-.07-1.42.21-2.09.27-.66.73-1.23,1.33-1.62.6-.4,1.29-.61,2.01-.61.96,0,1.87.38,2.56,1.06.68.68,1.06,1.59,1.06,2.56,0,.72-.21,1.41-.61,2.01-.4.6-.96,1.06-1.62,1.33-.44.18-.91.28-1.38.28Zm0-5.49c-.12,0-.24.01-.37.04-.37.07-.7.25-.96.51-.26.26-.44.6-.51.96-.07.36-.04.74.11,1.09.14.34.38.63.69.84.31.21.67.32,1.04.32.5,0,.97-.19,1.33-.55.35-.36.55-.83.55-1.33,0-.37-.11-.73-.32-1.04-.21-.31-.5-.55-.84-.69-.23-.09-.47-.14-.72-.14Z" fill="#000"/></svg>"##;
 const CHEVRON_SVG: &str = include_str!("../assets/chevron.svg");
+const TOOL_SVGS: [&str; 8] = [
+    include_str!("../assets/iconoir/page-plus.svg"),
+    include_str!("../assets/iconoir/page-search.svg"),
+    include_str!("../assets/iconoir/edit-pencil.svg"),
+    include_str!("../assets/iconoir/terminal.svg"),
+    include_str!("../assets/iconoir/globe.svg"),
+    include_str!("../assets/iconoir/code-brackets.svg"),
+    include_str!("../assets/iconoir/camera.svg"),
+    include_str!("../assets/iconoir/page.svg"),
+];
 const TYPOGRAPHY_SVGS: [&str; 9] = [
     include_str!("../assets/typ-line-height.svg"),
     include_str!("../assets/typ-letter-spacing.svg"),
@@ -1003,6 +1013,24 @@ pub(super) fn paint_agent(painter: &Painter, rect: Rect, icon: super::AgentIcon,
     }
 }
 
+pub(super) fn paint_tool(painter: &Painter, rect: Rect, icon: super::ToolIcon, color: Color32) {
+    static TOOLS: OnceLock<[Option<Geometry>; 8]> = OnceLock::new();
+    let icons = TOOLS.get_or_init(|| std::array::from_fn(|index| build(TOOL_SVGS[index], true)));
+    let index = match icon {
+        super::ToolIcon::Create => 0,
+        super::ToolIcon::Inspect => 1,
+        super::ToolIcon::Edit => 2,
+        super::ToolIcon::Command => 3,
+        super::ToolIcon::Web => 4,
+        super::ToolIcon::Code => 5,
+        super::ToolIcon::Preview => 6,
+        super::ToolIcon::Other => 7,
+    };
+    if let Some(Some(geometry)) = icons.get(index) {
+        paint_geometry(painter, rect, geometry, color, [24.0, 24.0]);
+    }
+}
+
 pub(super) fn paint_sizing(painter: &Painter, rect: Rect, icon: super::SizingIcon, color: Color32) {
     static SIZING: OnceLock<Vec<Option<Geometry>>> = OnceLock::new();
     let icons = SIZING.get_or_init(|| SIZING_SVGS.iter().map(|(svg, _)| build(svg, true)).collect());
@@ -1168,6 +1196,13 @@ mod tests {
                 continue;
             }
             assert!(build(svg, true).is_some(), "Agent SVG {index} did not tessellate");
+        }
+    }
+
+    #[test]
+    fn iconoir_tool_svgs_have_vector_geometry() {
+        for (index, svg) in TOOL_SVGS.into_iter().enumerate() {
+            assert!(build(svg, true).is_some(), "Iconoir tool SVG {index} did not tessellate");
         }
     }
 

@@ -14,6 +14,9 @@ interface artwork was supplied by the project owner. The offline icon catalog co
 Material Symbols artwork. Their ISC, MIT and Apache-2.0 licence texts are preserved in
 assets/icon-packs/LICENSE-lucide, LICENSE-feather, LICENSE-phosphor and LICENSE-material.
 
+Agent tool-call glyphs are from Iconoir 7.12.2 (MIT); the bundled SVGs and licence are in
+crates/ui-egui/assets/iconoir/. Source: https://github.com/iconoir-icons/iconoir.
+
 Interface icons based on Figma's UI3 kit include work by Figma and Abhimanyu Rana (@planetabhi).
 The free Community artwork is licensed CC BY 4.0; source:
 https://www.figma.com/community/file/1486123838948777078/ui3-figmas-ui-kit .

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::LizardApp;
 use crate::a11y;
 use crate::i18n::{tr, tr_noop, trf, trn};
-use crate::icons::{self, AgentIcon, LayerIcon};
+use crate::icons::{self, AgentIcon, LayerIcon, ToolIcon};
 use crate::primitives::{Menu, MenuItem, Select, SelectVariant, ShimmerDirection, ShimmerText};
 use crate::theme::{Tokens, regular, semibold};
 
@@ -98,6 +98,7 @@ pub enum AgentEvent {
     LoginError(String),
     Models(Vec<(String, String)>),
     Text(String),
+    TextBoundary,
     Thinking(String),
     Tool {
         id: String,
@@ -426,6 +427,14 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     && message.text.len() < 100_000
                 {
                     message.text.push_str(&chunk);
+                }
+            }
+            AgentEvent::TextBoundary => {
+                if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index))
+                    && !message.text.is_empty()
+                    && !message.text.ends_with("\n\n")
+                {
+                    message.text.push_str("\n\n");
                 }
             }
             AgentEvent::Thinking(chunk) => {
@@ -1130,40 +1139,71 @@ fn receipt_detail(ui: &mut Ui, label: &str, text: &str) {
     });
 }
 
+fn tool_icon(title: &str) -> ToolIcon {
+    if title.contains("create_node") {
+        ToolIcon::Create
+    } else if title.contains("Web search") || title.contains("http") {
+        ToolIcon::Web
+    } else if title.contains("inspect_document") || title.contains("search") {
+        ToolIcon::Inspect
+    } else if title.contains("set_properties") || title.contains("edit") {
+        ToolIcon::Edit
+    } else if title.contains("screenshot") || title.contains("Designed") {
+        ToolIcon::Preview
+    } else if title.contains("execute") || title.contains("Command") {
+        ToolIcon::Command
+    } else if title.contains("File change") {
+        ToolIcon::Code
+    } else {
+        ToolIcon::Other
+    }
+}
+
+fn receipt_is_compact(tool: &ChatTool, preview: Option<&AgentPreview>) -> bool {
+    (tool.title.contains("create_node") && tool.output.is_none() && tool.content.is_empty() && preview.is_none())
+        || (tool.input.is_none() && tool.output.is_none() && tool.content.is_empty() && preview.is_none())
+}
+
 fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&AgentPreview>, max_width: f32) {
     let mut is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(preview.is_some());
     let width = max_width.min(ui.available_width()).max(1.0);
+    let compact = receipt_is_compact(tool, preview);
     egui::Frame::new().fill(RECEIPT_BG).stroke(Stroke::new(1.0, RECEIPT_BORDER)).corner_radius(11).show(ui, |ui| {
         ui.set_width(width);
-        let header = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-        if header.1.clicked() {
+        let header = ui.allocate_exact_size(vec2(width, if compact { 28.0 } else { 36.0 }), if compact { Sense::hover() } else { Sense::click() });
+        if !compact && header.1.clicked() {
             is_open = !is_open;
             ui.data_mut(|data| data.insert_temp(id, is_open));
         }
-        a11y::disclosure(&header.1, tr("Tool details"), is_open);
+        if !compact {
+            a11y::disclosure(&header.1, tr("Tool details"), is_open);
+        }
         let rect = header.0;
-        let max_chars = ((rect.width() - 62.0) / 7.0).floor().max(0.0) as usize;
+        let max_chars = ((rect.width() - if compact { 48.0 } else { 68.0 }) / 7.0).floor().max(0.0) as usize;
         let label = if title.chars().count() > max_chars {
             format!("{}…", title.chars().take(max_chars.saturating_sub(1)).collect::<String>())
         } else {
             title.to_string()
         };
-        ui.painter().text(pos2(rect.min.x + 11.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), Color32::from_rgb(0xB9, 0xB9, 0xBC));
+        icons::paint_tool(
+            ui.painter(),
+            Rect::from_center_size(pos2(rect.min.x + 18.0, rect.center().y), vec2(16.0, 16.0)),
+            tool_icon(&tool.title),
+            Color32::from_rgb(0xB9, 0xB9, 0xBC),
+        );
+        ui.painter().text(pos2(rect.min.x + 31.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), Color32::from_rgb(0xB9, 0xB9, 0xBC));
         let status_color = if tool.status == "completed" { RECEIPT_GREEN } else { Color32::from_rgb(0x94, 0x94, 0x98) };
         ui.painter().text(
-            pos2(rect.max.x - 35.0, rect.center().y),
+            pos2(rect.max.x - if compact { 17.0 } else { 35.0 }, rect.center().y),
             Align2::CENTER_CENTER,
             if tool.status == "completed" { "✓" } else { "◌" },
             regular(13.0),
             status_color,
         );
-        glyph(
-            ui,
-            Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)),
-            if is_open { AgentIcon::Up } else { AgentIcon::Down },
-            vec2(14.0, 14.0),
-            Color32::from_rgb(0x85, 0x85, 0x89),
-        );
+        if compact {
+            return;
+        }
+        glyph(ui, Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)), if is_open { AgentIcon::Up } else { AgentIcon::Down }, vec2(14.0, 14.0), Color32::from_rgb(0x85, 0x85, 0x89));
         let animation_time = if ui.style().animation_time > 0.0 { 0.2 } else { 0.0 };
         let openness = ui.ctx().animate_bool_with_time_and_easing(id.with("open"), is_open, animation_time, egui::emath::easing::cubic_in_out);
         if openness > 0.001 {
@@ -1446,9 +1486,17 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         && app.ui.agent.runtime_conversation == Some(chat.id)
                         && message.work_seconds.is_none()
                         && !chat.messages.iter().skip(index + 1).any(|later| later.role == "assistant" && later.agent_index == message.agent_index);
-                    if working || !message.tools.is_empty() || !message.thinking.is_empty() {
+                    if working || !message.thinking.is_empty() {
                         ui.horizontal(|ui| {
-                            if working {
+                            if working && message.thinking.is_empty() {
+                                let word = work_word(ui, ui.make_persistent_id(("agent_work", chat.id, index)));
+                                ShimmerText::new(word)
+                                    .direction(ShimmerDirection::Diagonal)
+                                    .duration(0.6)
+                                    .size(crate::theme::ui_font_size(12.0))
+                                    .colors(Color32::from_rgb(0x94, 0x94, 0x98), Color32::from_rgb(0xD1, 0xD1, 0xD4))
+                                    .show(ui);
+                            } else if working {
                                 ui.vertical(|ui| {
                                     let header_id = ui.make_persistent_id(("agent_work", chat.id, index));
                                     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), header_id, false);
@@ -1495,8 +1543,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         });
                     }
                     for (tool_index, tool) in message.tools.iter().enumerate() {
-                        ui.add_space(9.0);
                         let preview = if tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
+                        ui.add_space(if receipt_is_compact(tool, preview) { 4.0 } else { 9.0 });
                         let title =
                             if tool.title.contains("screenshot") || tool.title.contains("execute") { tr("Designed") } else { tool.title.as_str() };
                         receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
@@ -2025,6 +2073,35 @@ mod tests {
         assert_eq!(sent[1].resume.as_deref(), Some("remote-session"));
         assert!(!sent[1].text.contains("Lizard agent instructions:"));
         assert!(sent[1].text.contains("Current document snapshot"));
+    }
+
+    #[test]
+    fn separate_agent_messages_keep_paragraph_boundaries() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events: events.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Crie uma tela".into();
+        send_prompt(&mut app);
+        events.lock().unwrap().extend([
+            AgentEvent::TextBoundary,
+            AgentEvent::Text("Vou montar a tela.".into()),
+            AgentEvent::TextBoundary,
+            AgentEvent::Text("Criei a tela.".into()),
+            AgentEvent::Done("end_turn".into()),
+        ]);
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(app.ui.agent.conversations[0].messages[1].text, "Vou montar a tela.\n\nCriei a tela.");
+    }
+
+    #[test]
+    fn creation_receipts_are_compact_even_with_parameters() {
+        let create = ChatTool { title: "lizard · create_node".into(), input: Some(serde_json::json!({"kind": "frame"})), ..Default::default() };
+        assert!(receipt_is_compact(&create, None));
+        let failed_create = ChatTool { output: Some(serde_json::json!({"error": "invalid parent"})), ..create.clone() };
+        assert!(!receipt_is_compact(&failed_create, None));
+        let inspect = ChatTool { title: "lizard · inspect_document".into(), input: Some(serde_json::json!({"scope": "all"})), ..Default::default() };
+        assert!(!receipt_is_compact(&inspect, None));
     }
 
     #[test]

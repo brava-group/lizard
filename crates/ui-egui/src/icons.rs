@@ -166,6 +166,19 @@ pub enum AgentIcon {
     SendUp,
 }
 
+/// Iconoir glyphs for agent tool calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolIcon {
+    Create,
+    Inspect,
+    Edit,
+    Command,
+    Web,
+    Code,
+    Preview,
+    Other,
+}
+
 macro_rules! icons {
     ($($(#[$m:meta])* $name:ident,)*) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -752,6 +765,10 @@ pub fn paint_nav(painter: &Painter, rect: Rect, icon: NavIcon, color: Color32) {
 
 pub fn paint_agent(painter: &Painter, rect: Rect, icon: AgentIcon, color: Color32) {
     ui3::paint_agent(painter, rect, icon, color);
+}
+
+pub fn paint_tool(painter: &Painter, rect: Rect, icon: ToolIcon, color: Color32) {
+    ui3::paint_tool(painter, rect, icon, color);
 }
 
 /// Monochrome provider marks for the Settings integration list.
