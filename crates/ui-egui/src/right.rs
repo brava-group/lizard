@@ -3634,7 +3634,7 @@ fn inspect_box_model(ui: &mut Ui, node: &Node) {
     let content = padding.shrink2(vec2(30.0, 23.0));
     ui.painter().rect_filled(content, CornerRadius::same(3), border_fill);
     inspect_dashed_rect(ui.painter(), content, Stroke::new(1.2, if t.dark { Color32::WHITE } else { t.text }));
-    ui.painter().text(content.center(), Align2::CENTER_CENTER, format!("{} × {}", node.width.round(), node.height.round()), regular(12.0), t.text);
+    ui.painter().text(content.center(), Align2::CENTER_CENTER, format!("{} × {}", node.width.round(), node.height.round()), regular(11.0), t.text);
     ui.painter().text(card.right_bottom() - vec2(9.0, 12.0), Align2::RIGHT_CENTER, "border-box", regular(10.0), t.text_tertiary);
 }
 
