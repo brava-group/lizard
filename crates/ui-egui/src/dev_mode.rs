@@ -498,7 +498,7 @@ pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
         return;
     }
     widgets::separator(ui);
-    widgets::sublabels(ui, tr("Status"), None);
+    widgets::section_header(ui, tr("Status"), &[], false);
     let w = widgets::property_body_width(ui.available_width());
     row(ui, 32.0, |ui| crate::section_panel::status_dropdown(app, ui, doc, sel, w));
     let changed = sel.iter().any(|id| doc.node(*id).is_some_and(|node| node.dev_status == DevStatus::ReadyForDev && node.dev_changed));
@@ -544,7 +544,7 @@ pub fn status(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) 
             }
         });
     }
-    ui.add_space(4.0);
+    ui.add_space(12.0);
 }
 
 /// The selected layer's annotations: each note editable in place with its pinned properties (click
@@ -554,7 +554,7 @@ pub fn annotations_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id:
     let Some(n) = doc.node(id) else { return };
     let sections = devinspect::properties(doc, id);
     widgets::separator(ui);
-    widgets::section_header(ui, tr("Annotations"), &[], n.annotations.is_empty());
+    widgets::section_header(ui, tr("Annotations"), &[], false);
     for (k, a) in n.annotations.iter().enumerate() {
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
         ui.painter().text(
@@ -605,7 +605,7 @@ pub fn annotations_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id:
     {
         app.run("annotation.add", json!({"id": id, "label": label}));
     }
-    ui.add_space(4.0);
+    ui.add_space(12.0);
 }
 
 /// The selected layer's dev resources: links for developers, opened in the browser when clicked.
@@ -621,7 +621,7 @@ pub fn dev_resources_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, i
     let mut editing = ui.data(|d| d.get_temp::<usize>(editing_id)).filter(|i| *i < n.dev_resources.len());
     widgets::separator(ui);
     let buttons: &[(Icon, &str)] = if can_add { &[(Icon::Plus, tr("Add dev resource"))] } else { &[] };
-    if widgets::section_header(ui, tr("Dev resources"), buttons, list.is_empty() && !adding).is_some() {
+    if widgets::section_header(ui, tr("Dev resources"), buttons, false).is_some() {
         adding = !adding;
     }
     for item in &list {
@@ -702,7 +702,7 @@ pub fn dev_resources_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, i
             None => d.remove::<usize>(editing_id),
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(if list.is_empty() && !adding { 6.0 } else { 12.0 });
 }
 
 /// The category of annotation `a` as a dropdown: the one picked (`Value::Null` for none).

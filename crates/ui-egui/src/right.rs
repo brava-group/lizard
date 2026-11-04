@@ -3539,6 +3539,7 @@ fn inspect_assets(app: &mut LizardApp, ui: &mut Ui, assets: &[lizard_engine::dev
     let all = widgets::section_header(ui, tr("Assets"), if assets.is_empty() { &[] } else { &export_all }, false).is_some();
     if assets.is_empty() {
         widgets::note(ui, tr("No assets: no export settings, icons or images. Add export settings in the Design tab."), t.text_secondary);
+        ui.add_space(6.0);
         return;
     }
     let mut export: Option<Vec<NodeId>> = all.then(|| assets.iter().map(|a| a.id).collect());
