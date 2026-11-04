@@ -6,7 +6,9 @@ use lizard_doc::NodeId;
 use lizard_engine::Session;
 use lizard_ui_egui::icons::{self, AgentIcon, AppearanceIcon, HeaderIcon, Icon, LayerIcon, LayoutIcon, NavIcon, PositionIcon, SizingIcon};
 use lizard_ui_egui::primitives::TooltipResponseExt as _;
-use lizard_ui_egui::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, SearchField, TextFieldWithPresets};
+use lizard_ui_egui::primitives::{
+    Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, CodeBlock, CodeLanguage, ControlWidth, SearchField, TextFieldWithPresets,
+};
 use lizard_ui_egui::theme::{self, ALL_COLOR_ROLES, ColorRole, Tokens};
 use lizard_ui_egui::widgets::{self, Empty, FieldEdit, Lead};
 use lizard_ui_egui::{LeftTab, LizardApp, RightTab};
@@ -24,6 +26,7 @@ enum Page {
     Buttons,
     Numeric,
     Text,
+    CodeBlock,
     Select,
     FloatingPanel,
     Segmented,
@@ -113,6 +116,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::Buttons, "Primitives", "Buttons", "primitives::Button · widgets::button · icon_button"),
     (Page::Numeric, "Primitives", "Number fields", "primitives::NumberField · sizing · binding · width"),
     (Page::Text, "Primitives", "Text fields", "text_field · TextFieldWithPresets · rename · multiline"),
+    (Page::CodeBlock, "Primitives", "Code block", "primitives::CodeBlock · line numbers · WGSL syntax · editable"),
     (Page::Select, "Primitives", "Select", "primitives::Select · overlay / popup · width · ghost"),
     (Page::FloatingPanel, "Primitives", "Floating panel", "primitives::FloatingPanel · draggable · width / height"),
     (Page::Segmented, "Primitives", "Segmented", "segmented · segmented_text"),
@@ -220,6 +224,7 @@ pub struct State {
     text: String,
     draft: String,
     multiline: String,
+    code_sample: String,
     combo: String,
     text_presets: String,
     select_choice: usize,
@@ -275,6 +280,9 @@ impl Default for State {
             text: "Component name".into(),
             draft: String::new(),
             multiline: "A note with more than one line.".into(),
+            code_sample:
+                "// Edit this WGSL source\nfn tint(uv: vec2f) -> vec4f {\n    let pulse: f32 = 0.75;\n    return vec4f(uv.x, pulse, uv.y, 1.0);\n}"
+                    .into(),
             combo: "1x".into(),
             text_presets: "Hover".into(),
             select_choice: 1,
@@ -802,6 +810,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::Buttons => buttons(ui, state),
                     Page::Numeric => numeric(ui, state),
                     Page::Text => text_fields(ui, state),
+                    Page::CodeBlock => code_blocks(ui, state),
                     Page::Select => selects(ui, state),
                     Page::FloatingPanel => floating_panels(ui, state),
                     Page::Segmented => segmented(ui, state),
@@ -1229,6 +1238,16 @@ fn numeric(ui: &mut Ui, state: &mut State) {
                 });
             }
         });
+    });
+}
+
+fn code_blocks(ui: &mut Ui, state: &mut State) {
+    example(ui, "WGSL editor", "Editable code with syntax colors, line numbers, and scrolling inside the block.", |ui| {
+        CodeBlock::new(Id::new("catalog_wgsl_code")).size(560.0, 300.0).language(CodeLanguage::Wgsl).show(ui, &mut state.code_sample);
+    });
+    example(ui, "Plain code", "The same primitive can display other source formats without WGSL highlighting.", |ui| {
+        let mut sample = "const value = 42;\nconsole.log(value);".to_owned();
+        CodeBlock::new(Id::new("catalog_plain_code")).size(420.0, 100.0).editable(false).show(ui, &mut sample);
     });
 }
 

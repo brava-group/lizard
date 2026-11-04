@@ -3,6 +3,7 @@
 
 mod alias_value;
 mod button;
+mod code_block;
 mod color_control;
 mod floating_panel;
 mod glass_light;
@@ -25,6 +26,7 @@ mod tooltip;
 
 pub use alias_value::AliasValue;
 pub use button::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant};
+pub use code_block::{CodeBlock, CodeLanguage};
 pub use color_control::{ColorControl, ColorControlResponse, ColorModel, ColorValue};
 pub use floating_panel::{FloatingPanel, FloatingPanelHeight, FloatingPanelWidth};
 pub use glass_light::{GlassLightControl, GlassLightResponse};

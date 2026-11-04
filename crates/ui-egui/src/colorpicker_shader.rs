@@ -521,7 +521,7 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
     let mut apply = false;
     crate::primitives::FloatingPanel::new(Id::new("shader_code_editor"), position)
         .width(crate::primitives::FloatingPanelWidth::Wide)
-        .height(crate::primitives::FloatingPanelHeight::Fixed(470.0))
+        .height(crate::primitives::FloatingPanelHeight::Fixed(408.0))
         .fill(panel(ctx))
         .open(&mut open)
         .show_with_header(ctx, |ui, header| {
@@ -529,74 +529,42 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
             if crate::primitives::FloatingPanel::title_header(ui, header, "Edit WGSL", Id::new("shader_code_close")) {
                 close_now = true;
             }
-            ui.add_space(8.0);
-            let preview_rect = ui.allocate_exact_size(vec2(368.0, 94.0), Sense::hover()).0;
             let mut candidate = definition.clone();
             candidate.source = state.draft.clone();
-            if state.diagnostic.is_none() && state.checked_draft == state.draft {
-                if let Some(texture) = thumbnail(ctx, &candidate) {
-                    ui.painter().image(texture.id(), preview_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-                } else {
-                    ui.painter().rect_filled(preview_rect, CornerRadius::same(5), FIELD);
-                    ui.painter().text(preview_rect.center(), Align2::CENTER_CENTER, "Rendering preview…", regular(11.0), MUTED);
+            egui::Frame::NONE.inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
+                let response = crate::primitives::CodeBlock::new(Id::new("shader_wgsl_source"))
+                    .size(368.0, 266.0)
+                    .language(crate::primitives::CodeLanguage::Wgsl)
+                    .show(ui, &mut state.draft);
+                if response.changed() {
+                    state.changed_at = ctx.input(|input| input.time);
+                    ctx.request_repaint_after(std::time::Duration::from_millis(320));
                 }
-            } else {
-                ui.painter().rect_filled(preview_rect, CornerRadius::same(5), FIELD);
-                ui.painter().text(preview_rect.center(), Align2::CENTER_CENTER, "Last valid shader remains on canvas", regular(11.0), MUTED);
-            }
-            ui.add_space(4.0);
-            egui::ScrollArea::both().max_height(242.0).show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    let (gutter, _) = ui.allocate_exact_size(vec2(28.0, 228.0), Sense::hover());
-                    let longest = state.draft.lines().map(str::len).max().unwrap_or(0);
-                    let editor_width = (longest as f32 * 7.0 + 24.0).clamp(328.0, 2_048.0);
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-                        ui.fonts_mut(|fonts| fonts.layout_job(wgsl_layout_job(text.as_str())))
-                    };
-                    let output = egui::TextEdit::multiline(&mut state.draft)
-                        .code_editor()
-                        .desired_width(editor_width)
-                        .min_size(vec2(editor_width, 228.0))
-                        .layouter(&mut layouter)
-                        .show(ui);
-                    let painter = ui.painter().with_clip_rect(gutter.intersect(ui.clip_rect()));
-                    for (index, row) in output.galley.rows.iter().enumerate() {
-                        let y = output.galley_pos.y + row.rect().center().y;
-                        painter.text(
-                            pos2(gutter.right() - 4.0, y),
-                            Align2::RIGHT_CENTER,
-                            (index + 1).to_string(),
-                            egui::FontId::monospace(crate::theme::ui_font_size(11.0)),
-                            MUTED,
-                        );
-                    }
-                    if output.response.changed() {
-                        state.changed_at = ctx.input(|input| input.time);
-                        ctx.request_repaint_after(std::time::Duration::from_millis(320));
-                    }
-                });
             });
             if state.checked_draft != state.draft && ctx.input(|input| input.time) - state.changed_at >= 0.3 {
                 candidate.source = state.draft.clone();
                 state.diagnostic = lizard_shader::validate(&candidate).err();
                 state.checked_draft = state.draft.clone();
             }
-            let diagnostic = state.diagnostic.as_deref().unwrap_or("WGSL valid");
-            ui.label(
-                egui::RichText::new(diagnostic.lines().take(2).collect::<Vec<_>>().join(" "))
-                    .size(crate::theme::ui_font_size(10.0))
-                    .color(if state.diagnostic.is_some() { Color32::from_rgb(255, 130, 120) } else { Color32::from_rgb(125, 205, 150) }),
-            );
-            ui.horizontal(|ui| {
-                if crate::primitives::Button::new("Restore saved").show(ui).clicked() {
-                    state.draft = definition.source.clone();
-                    state.checked_draft = state.draft.clone();
-                    state.diagnostic = None;
-                    state.changed_at = 0.0;
-                }
-                if crate::primitives::Button::new("Apply WGSL").enabled(state.diagnostic.is_none()).show(ui).clicked() {
-                    apply = true;
-                }
+            let diagnostic = state.diagnostic.as_deref().unwrap_or("WGSL valid").lines().take(2).collect::<Vec<_>>().join(" ");
+            let valid = state.diagnostic.is_none();
+            egui::Frame::NONE.inner_margin(egui::Margin::symmetric(16, 0)).show(ui, |ui| {
+                ui.label(egui::RichText::new(diagnostic).size(crate::theme::ui_font_size(10.0)).color(if valid {
+                    Color32::from_rgb(125, 205, 150)
+                } else {
+                    Color32::from_rgb(255, 130, 120)
+                }));
+                ui.horizontal(|ui| {
+                    if crate::primitives::Button::new("Restore saved").show(ui).clicked() {
+                        state.draft = definition.source.clone();
+                        state.checked_draft = state.draft.clone();
+                        state.diagnostic = None;
+                        state.changed_at = 0.0;
+                    }
+                    if crate::primitives::Button::new("Apply WGSL").enabled(state.diagnostic.is_none()).show(ui).clicked() {
+                        apply = true;
+                    }
+                });
             });
         });
     if apply {
@@ -617,61 +585,4 @@ fn show_code(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, _p
     } else {
         ctx.data_mut(|data| data.insert_temp(Id::new(CODE_STATE), state));
     }
-}
-
-fn wgsl_layout_job(source: &str) -> egui::text::LayoutJob {
-    use egui::text::{LayoutJob, TextFormat};
-
-    let mut job = LayoutJob::default();
-    job.wrap.max_width = f32::INFINITY;
-    let font = egui::FontId::monospace(crate::theme::ui_font_size(11.0));
-    let format = |color| TextFormat { font_id: font.clone(), color, ..Default::default() };
-    let normal = format(Color32::from_rgb(225, 225, 225));
-    let mut cursor = 0;
-    let mut plain = 0;
-    while cursor < source.len() {
-        let rest = &source[cursor..];
-        let token = if rest.starts_with("//") {
-            let end = rest.find('\n').unwrap_or(rest.len());
-            Some((cursor + end, Color32::from_rgb(132, 171, 136)))
-        } else if let Some(first) = rest.chars().next() {
-            if first.is_ascii_digit() {
-                let end = rest.bytes().take_while(|byte| byte.is_ascii_digit() || *byte == b'.').count();
-                Some((cursor + end, Color32::from_rgb(230, 174, 116)))
-            } else if first.is_ascii_alphabetic() || first == '_' || first == '@' {
-                let end = rest.bytes().take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'@').count();
-                let word = &rest[..end];
-                let color = if word.starts_with('@') {
-                    Color32::from_rgb(233, 175, 116)
-                } else if matches!(word, "fn" | "let" | "var" | "return" | "for" | "if" | "else" | "struct" | "loop" | "break" | "continue") {
-                    Color32::from_rgb(195, 154, 239)
-                } else if matches!(word, "f32" | "i32" | "u32" | "bool" | "vec2f" | "vec3f" | "vec4f" | "mat2x2f" | "mat3x3f" | "mat4x4f") {
-                    Color32::from_rgb(139, 193, 236)
-                } else {
-                    Color32::from_rgb(225, 225, 225)
-                };
-                Some((cursor + end, color))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some((end, color)) = token {
-            if plain < cursor {
-                job.append(&source[plain..cursor], 0.0, normal.clone());
-            }
-            job.append(&source[cursor..end], 0.0, format(color));
-            cursor = end;
-            plain = end;
-        } else if let Some(ch) = rest.chars().next() {
-            cursor += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if plain < source.len() {
-        job.append(&source[plain..], 0.0, normal);
-    }
-    job
 }
