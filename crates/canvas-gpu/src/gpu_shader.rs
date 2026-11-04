@@ -79,6 +79,22 @@ impl GpuShader {
         height: u32,
         time: f32,
     ) -> Result<wgpu::Texture, String> {
+        Self::check_dimensions(width, height)?;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Lizard canvas shader texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        self.render_into(device, queue, def, values, &texture, time)?;
+        Ok(texture)
+    }
+
+    fn check_dimensions(width: u32, height: u32) -> Result<(), String> {
         if width == 0
             || height == 0
             || width > lizard_shader::MAX_DIMENSION
@@ -86,6 +102,25 @@ impl GpuShader {
             || u64::from(width) * u64::from(height) > lizard_shader::MAX_PIXELS
         {
             return Err("shader texture dimensions exceed the GPU limit".into());
+        }
+        Ok(())
+    }
+
+    /// Repaint an existing GPU texture when only uniforms or animation time changed.
+    pub fn render_into(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        def: &ShaderDefinition,
+        values: &BTreeMap<String, f32>,
+        texture: &wgpu::Texture,
+        time: f32,
+    ) -> Result<(), String> {
+        let size = texture.size();
+        let (width, height) = (size.width, size.height);
+        Self::check_dimensions(width, height)?;
+        if texture.format() != wgpu::TextureFormat::Rgba8Unorm {
+            return Err("shader texture has an unsupported format".into());
         }
         let pipeline = self.pipeline(device, def)?;
         let mut uniforms = [0u8; 16 + lizard_shader::MAX_PARAMETERS * 16];
@@ -115,16 +150,6 @@ impl GpuShader {
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
         });
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Lizard canvas shader texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lizard canvas shader encoder") });
         {
@@ -143,6 +168,6 @@ impl GpuShader {
             pass.draw(0..3, 0..1);
         }
         queue.submit([encoder.finish()]);
-        Ok(texture)
+        Ok(())
     }
 }

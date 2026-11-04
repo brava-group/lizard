@@ -19,6 +19,9 @@ use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
 
 /// The GPU canvas. The ordinary render worker remains the fallback for unsupported scenes.
 pub trait CanvasGpuBackend {
+    /// `Some` advances visible animated fills; `None` uses their static first frame.
+    fn set_animation_time(&mut self, _time: Option<f64>) {}
+
     fn texture(
         &mut self,
         doc: Arc<Document>,
@@ -956,14 +959,20 @@ fn animated_shader_visible(doc: &Document, page: NodeId, view: &lizard_render::V
             continue;
         }
         let intersects = doc.world_bounds(id).is_some_and(|b| b.x0 <= visible.x1 && b.x1 >= visible.x0 && b.y0 <= visible.y1 && b.y1 >= visible.y0);
-        if intersects
-            && node.fills.iter().chain(&node.strokes).any(|paint| {
+        if intersects {
+            let animated = |paint: &lizard_color::Paint| {
                 paint.visible
                     && paint.opacity > 0.0
                     && matches!(&paint.kind, PaintKind::Shader(fill) if doc.shaders.get(&fill.shader_id).is_some_and(|def| def.features.animated))
-            })
-        {
-            return true;
+            };
+            let region_shader = matches!(&node.kind, NodeKind::Vector { network }
+                if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(animated));
+            let text_shader = matches!(&node.kind, NodeKind::Text(text)
+                if std::iter::once(&text.style).chain(text.runs.iter().map(|run| &run.style))
+                    .filter_map(|style| style.fills.as_ref()).flatten().any(animated));
+            if node.fills.iter().chain(&node.strokes).any(animated) || region_shader || text_shader {
+                return true;
+            }
         }
         if intersects || !node.clip {
             pending.extend(node.children.iter().copied());
@@ -1241,6 +1250,13 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
         // The IME composition lives in a stable transient document until the next edit. Render
         // that document on the GPU as well, keeping the visible caret/underline as egui overlays.
         let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
+        let animation_time = if !app.reduce_motion() && !ds.view.outlines && animated_shader_visible(&gpu_doc, ds.page, &view) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            Some((app.canvas.shader_started.elapsed().as_secs_f64() * 60.0).floor() / 60.0)
+        } else {
+            None
+        };
+        backend.set_animation_time(animation_time);
         let clear = [f32::from(bg.r()) / 255.0, f32::from(bg.g()) / 255.0, f32::from(bg.b()) / 255.0];
         let texture = if let Some(focus) = ds.focused() {
             if ds.view.outlines {

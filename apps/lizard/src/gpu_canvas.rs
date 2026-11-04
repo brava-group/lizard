@@ -11,14 +11,42 @@ use lizard_canvas_gpu::vello_scene::{
     has_unhandled_effects_except_outlined_on_page_in_view, has_unhandled_effects_in_focused_subtree, has_unhandled_effects_on_page_in_view,
     make_focused_outline_scene, make_outline_scene,
 };
-use lizard_color::{Color, ColorProfile};
-use lizard_doc::{Document, NodeId};
+use lizard_color::{Color, ColorProfile, Paint, PaintKind};
+use lizard_doc::{Document, NodeId, NodeKind};
 use lizard_geom::{Point, Rect};
 use lizard_render::View;
 use lizard_ui_egui::canvas::{CanvasGpuBackend, GpuSample};
 
 const PAN_TILE_BUDGET_PIXELS: u64 = 96_000_000;
 const PAN_MARGIN_PIXELS: u32 = 128;
+
+fn animated_shader_affects_cached_effects(doc: &Document, page: NodeId) -> bool {
+    let animated = |paint: &Paint| {
+        paint.visible
+            && paint.opacity > 0.0
+            && matches!(&paint.kind, PaintKind::Shader(fill) if doc.shaders.get(&fill.shader_id).is_some_and(|def| def.features.animated))
+    };
+    let animated_nodes: Vec<_> = doc
+        .nodes()
+        .filter(|node| {
+            node.visible
+                && doc.is_ancestor(page, node.id)
+                && (node.fills.iter().chain(&node.strokes).any(animated)
+                    || matches!(&node.kind, NodeKind::Vector { network }
+                        if network.regions.iter().filter_map(|region| region.fills.as_ref()).flatten().any(animated))
+                    || matches!(&node.kind, NodeKind::Text(text)
+                        if std::iter::once(&text.style).chain(text.runs.iter().map(|run| &run.style))
+                            .filter_map(|style| style.fills.as_ref()).flatten().any(animated)))
+        })
+        .map(|node| node.id)
+        .collect();
+    !animated_nodes.is_empty()
+        && doc.nodes().any(|node| {
+            node.visible
+                && node.effects.iter().any(|effect| effect.visible)
+                && animated_nodes.iter().any(|id| node.id == *id || doc.is_ancestor(node.id, *id))
+        })
+}
 
 pub struct NativeGpuCanvas {
     state: RenderState,
@@ -34,6 +62,8 @@ pub struct NativeGpuCanvas {
     direct_document: Option<Arc<Document>>,
     direct_page: Option<NodeId>,
     direct_camera: Option<(f64, f64, f64)>,
+    animation_time: Option<f64>,
+    direct_animation_time: Option<u64>,
     direct_render_view: Option<View>,
     direct_complete_page: bool,
     pan_tiles: Vec<CachedPanTile>,
@@ -96,6 +126,8 @@ impl NativeGpuCanvas {
             direct_document: None,
             direct_page: None,
             direct_camera: None,
+            animation_time: None,
+            direct_animation_time: None,
             direct_render_view: None,
             direct_complete_page: false,
             pan_tiles: Vec::new(),
@@ -347,6 +379,25 @@ impl NativeGpuCanvas {
     ) -> Result<Option<egui::TextureId>, Box<dyn Error>> {
         self.last_render_ms = 0.0;
         self.presented_pan_tiles.clear();
+        if self.animation_time.is_some() {
+            // A cached pan tile contains one instant of an animated fill. Render the current
+            // viewport instead of presenting stale pixels or starting a static expansion.
+            for tile in self.pan_tiles.drain(..) {
+                self.state.renderer.write().free_texture(&tile.id);
+            }
+            self.expansion = None;
+            self.deferred_expansion = None;
+            let started = Instant::now();
+            let texture = self.update_direct(doc, page, view, clear, gesture_active, proof_srgb, false, None, None)?;
+            self.last_render_ms = started.elapsed().as_secs_f64() * 1000.0;
+            self.direct_render_view = texture.map(|_| view.clone());
+            self.direct_complete_page = false;
+            return Ok(texture);
+        }
+        if self.direct_animation_time.is_some() {
+            self.direct_camera = None;
+            self.direct_render_view = None;
+        }
         self.retain_pan_tiles(&doc, page, view, proof_srgb);
         self.poll_expansion(&doc, page, view, proof_srgb)?;
         self.drive_deferred_expansion(&doc, page, view, gesture_active, proof_srgb, ctx);
@@ -582,7 +633,12 @@ impl NativeGpuCanvas {
         if self.direct_profile != Some(profile) || self.direct_pixel_preview != pixel_preview {
             self.register_direct_view(profile, pixel_preview)?;
         }
+        let frame_time = self.animation_time.unwrap_or(0.0);
+        let animation_changed = self.direct_animation_time != self.animation_time.map(f64::to_bits);
         if let Some(canvas) = self.direct.as_mut() {
+            if animation_changed && self.animation_time.is_some() {
+                canvas.set_backdrop_cache_document(None, view.scale);
+            }
             let cache_document = (focus.is_none() && selected_outlines.is_none() && !pixel_preview).then(|| doc.clone());
             canvas.set_backdrop_cache_document(cache_document, view.scale);
         }
@@ -595,6 +651,7 @@ impl NativeGpuCanvas {
             && !changed_selection
             && self.direct_page == Some(page)
             && self.direct_camera == Some(camera)
+            && !animation_changed
             && self.direct_proof != proof_srgb
             && let Some(canvas) = self.direct.as_mut()
         {
@@ -602,10 +659,10 @@ impl NativeGpuCanvas {
             self.direct_proof = proof_srgb;
             return Ok(self.direct_texture_id);
         }
-        if !changed_doc && self.direct_camera.is_none_or(|previous| previous.2 != view.scale) {
+        if !changed_doc && (animation_changed || self.direct_camera.is_none_or(|previous| previous.2 != view.scale)) {
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing during zoom")?;
             if canvas.has_scale_dependent_paints() {
-                canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+                canvas.register_images_at_scale(&doc, frame_time, view.scale)?;
             }
         }
         let finish_preview = self.direct_provisional_effects && !gesture_active;
@@ -623,13 +680,21 @@ impl NativeGpuCanvas {
             let cache_started = Instant::now();
             if changed_doc {
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
-                canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+                canvas.register_images_at_scale(&doc, frame_time, view.scale)?;
                 canvas.prepare_static_effects(&doc)?;
+            } else if animation_changed && animated_shader_affects_cached_effects(&doc, page) {
+                self.direct.as_mut().ok_or("direct GPU canvas missing")?.prepare_static_effects(&doc)?;
             }
             if self.profile {
                 eprintln!("gpu_stage cache_ms={:.2} changed_doc={changed_doc}", cache_started.elapsed().as_secs_f64() * 1000.0);
             }
-            if changed_doc || changed_focus || changed_selection || self.direct_page != Some(page) || self.direct_camera != Some(camera) {
+            if changed_doc
+                || animation_changed
+                || changed_focus
+                || changed_selection
+                || self.direct_page != Some(page)
+                || self.direct_camera != Some(camera)
+            {
                 let render_started = Instant::now();
                 let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing")?;
                 if let Some((selected, options)) = selected_outlines {
@@ -648,6 +713,7 @@ impl NativeGpuCanvas {
                 self.direct_document = Some(doc);
                 self.direct_page = Some(page);
                 self.direct_camera = Some(camera);
+                self.direct_animation_time = self.animation_time.map(f64::to_bits);
                 self.direct_proof = proof_srgb;
                 self.direct_focus = focus;
                 self.direct_selected_outlines = selected_outlines.map(|(ids, options)| (ids.to_vec(), options));
@@ -655,7 +721,13 @@ impl NativeGpuCanvas {
             }
             return Ok(self.direct_texture_id);
         }
-        if changed_doc || changed_focus || changed_selection || self.direct_page != Some(page) || self.direct_camera != Some(camera) || finish_preview
+        if changed_doc
+            || animation_changed
+            || changed_focus
+            || changed_selection
+            || self.direct_page != Some(page)
+            || self.direct_camera != Some(camera)
+            || finish_preview
         {
             let cache_started = Instant::now();
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing after creation")?;
@@ -688,8 +760,8 @@ impl NativeGpuCanvas {
                 if duplicated || rotated || scaled || resized {
                     self.direct_provisional_effects = true;
                 }
-                if !translated && !duplicated && !unaffected && !rotated && !scaled && !resized {
-                    canvas.register_images_at_scale(&doc, 0.0, view.scale)?;
+                if animation_changed || (!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) {
+                    canvas.register_images_at_scale(&doc, frame_time, view.scale)?;
                 }
                 if (!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) || finish_preview {
                     let (blur, drop, inner) = canvas.prepare_static_effects(&doc)?;
@@ -700,7 +772,7 @@ impl NativeGpuCanvas {
                         canvas.cached_texture_count()
                     );
                 }
-            } else if finish_preview {
+            } else if finish_preview || (animation_changed && animated_shader_affects_cached_effects(&doc, page)) {
                 canvas.prepare_static_effects(&doc)?;
                 self.direct_provisional_effects = false;
             }
@@ -732,6 +804,7 @@ impl NativeGpuCanvas {
             self.direct_document = Some(doc);
             self.direct_page = Some(page);
             self.direct_camera = Some(camera);
+            self.direct_animation_time = self.animation_time.map(f64::to_bits);
             self.direct_proof = proof_srgb;
             self.direct_focus = focus;
             self.direct_selected_outlines = selected_outlines.map(|(ids, options)| (ids.to_vec(), options));
@@ -1044,6 +1117,10 @@ fn document_pan_buffer_covers_artwork_at_native_scale_without_exceeding_budget()
 }
 
 impl CanvasGpuBackend for NativeGpuCanvas {
+    fn set_animation_time(&mut self, time: Option<f64>) {
+        self.animation_time = time;
+    }
+
     fn source_view(&self) -> Option<View> {
         self.direct_render_view.clone()
     }

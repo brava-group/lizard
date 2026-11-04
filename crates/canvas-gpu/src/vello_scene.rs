@@ -83,6 +83,36 @@ mod shader_cache_tests {
     }
 
     #[test]
+    fn animated_shader_repaints_the_same_gpu_texture() -> Result<(), Box<dyn Error>> {
+        let Ok(mut canvas) = GpuCanvas::new(64, 64) else { return Ok(()) };
+        let mut doc = Document::new("animated shader");
+        let page = doc.current_page.ok_or("page missing")?;
+        let id = doc.create(page, NodeKind::Rectangle, "Aurora", 0.0, 0.0, 64.0, 64.0)?;
+        let definition = lizard_shader::presets().into_iter().find(|shader| shader.id == "lizard.aurora").ok_or("Aurora preset missing")?;
+        doc.shaders.insert(definition.id.clone(), definition);
+        doc.node_mut(id).ok_or("shader node missing")?.fills = vec![Paint {
+            kind: PaintKind::Shader(ShaderFill { shader_id: "lizard.aurora".into(), values: Default::default() }),
+            ..Paint::solid(Color::WHITE)
+        }];
+        let view = View { origin: (0.0, 0.0), scale: 1.0, width: 64, height: 64 };
+        assert_eq!(canvas.register_images_at_scale(&doc, 0.0, view.scale)?, 1);
+        let key =
+            shader_key(doc.node(id).ok_or("shader node missing")?, &ShaderFill { shader_id: "lizard.aurora".into(), values: Default::default() });
+        let texture_id = canvas.image_info.get(&key).ok_or("shader texture missing")?.id;
+        let scene = canvas.make_scene_document(&doc, page, &view);
+        canvas.render_with_clear(&scene, [0.0; 3])?;
+        let first = canvas.pixels()?;
+        assert_eq!(canvas.register_images_at_scale(&doc, 1.0, view.scale)?, 1);
+        assert_eq!(canvas.image_info.get(&key).ok_or("shader texture missing after animation")?.id, texture_id);
+        assert_eq!(canvas.shader_textures.len(), 1);
+        let scene = canvas.make_scene_document(&doc, page, &view);
+        canvas.render_with_clear(&scene, [0.0; 3])?;
+        let second = canvas.pixels()?;
+        assert_ne!(first, second, "animation time must change pixels on the GPU canvas");
+        Ok(())
+    }
+
+    #[test]
     fn rounded_translucent_frame_backdrop_stays_on_gpu() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("frame backdrop");
         let page = doc.current_page.ok_or("page missing")?;
@@ -9887,6 +9917,17 @@ impl GpuCanvas {
                         continue;
                     }
                     let generator = self.gpu_shader.get_or_insert_with(GpuShader::new);
+                    if let Some(texture) = self.shader_textures.get(&key)
+                        && self
+                            .shader_info
+                            .get(&key)
+                            .is_some_and(|(cached_width, cached_height, _, _)| *cached_width == width && *cached_height == height)
+                    {
+                        generator.render_into(&self.device, &self.queue, definition, &fill.values, texture, frame_time)?;
+                        self.shader_info.insert(key, state);
+                        count += 1;
+                        continue;
+                    }
                     let texture =
                         generator.render(&self.device, &self.queue, definition, &fill.values, u32::from(width), u32::from(height), frame_time)?;
                     let id = self.image_info.get(&key).map_or_else(|| TextureId(self.next_external_id), |info| info.id);
