@@ -3823,7 +3823,14 @@ fn inspect(app: &mut LizardApp, ui: &mut Ui) {
             ui.add_space(PAD);
             crate::primitives::CodeBlock::new(ui.id().with(("inspect_code_block", first)))
                 .size(block_width, height)
-                .language(if lang == CodeLang::Css { crate::primitives::CodeLanguage::Css } else { crate::primitives::CodeLanguage::Plain })
+                .language(match lang {
+                    CodeLang::Css => crate::primitives::CodeLanguage::Css,
+                    CodeLang::Html => crate::primitives::CodeLanguage::Html,
+                    CodeLang::React => crate::primitives::CodeLanguage::React,
+                    CodeLang::Leptos => crate::primitives::CodeLanguage::Leptos,
+                    CodeLang::SwiftUi => crate::primitives::CodeLanguage::SwiftUi,
+                    CodeLang::Compose => crate::primitives::CodeLanguage::Compose,
+                })
                 .editable(false)
                 .show(ui, &mut code);
         });

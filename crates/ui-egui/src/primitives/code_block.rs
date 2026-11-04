@@ -11,6 +11,11 @@ pub enum CodeLanguage {
     Plain,
     Wgsl,
     Css,
+    Html,
+    React,
+    Leptos,
+    SwiftUi,
+    Compose,
 }
 
 /// An editable or read-only IDE-style code surface. The caller owns the source text.
@@ -122,73 +127,376 @@ fn code_layout_job(source: &str, language: CodeLanguage, dark: bool) -> egui::te
     let mut job = LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
     let font = FontId::monospace(theme::ui_font_size(11.0));
-    let format = |color| TextFormat { font_id: font.clone(), color, ..Default::default() };
     let normal_color = if dark { Color32::from_rgb(225, 225, 225) } else { Color32::from_rgb(38, 38, 42) };
-    let normal = format(normal_color);
-    if language == CodeLanguage::Plain {
-        job.append(source, 0.0, normal);
-        return job;
-    }
-    if language == CodeLanguage::Css {
-        let accent = format(Color32::from_rgb(218, 130, 185));
-        for line in source.split_inclusive('\n') {
-            let Some((property, value)) = line.split_once(':') else {
-                job.append(line, 0.0, normal.clone());
-                continue;
-            };
-            job.append(property, 0.0, normal.clone());
-            job.append(":", 0.0, normal.clone());
-            let (value, end) = value.strip_suffix('\n').map_or((value, ""), |value| (value, "\n"));
-            job.append(value, 0.0, accent.clone());
-            job.append(end, 0.0, normal.clone());
+    let format = |color| TextFormat { font_id: font.clone(), color, ..Default::default() };
+    let mut previous = 0;
+    for token in syntax_tokens(source, language) {
+        if previous < token.start {
+            job.append(&source[previous..token.start], 0.0, format(normal_color));
         }
-        return job;
+        job.append(&source[token.start..token.end], 0.0, format(syntax_color(token.kind, dark)));
+        previous = token.end;
     }
-    let mut cursor = 0;
-    let mut plain = 0;
-    while cursor < source.len() {
-        let rest = &source[cursor..];
-        let token = if rest.starts_with("//") {
-            let end = rest.find('\n').unwrap_or(rest.len());
-            Some((cursor + end, Color32::from_rgb(100, 155, 110)))
-        } else if let Some(first) = rest.chars().next() {
-            if first.is_ascii_digit() {
-                let end = rest.bytes().take_while(|byte| byte.is_ascii_digit() || *byte == b'.').count();
-                Some((cursor + end, Color32::from_rgb(215, 143, 83)))
-            } else if first.is_ascii_alphabetic() || first == '_' || first == '@' {
-                let end = rest.bytes().take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'@').count();
-                let word = &rest[..end];
-                let color = if word.starts_with('@') {
-                    Color32::from_rgb(220, 163, 94)
-                } else if matches!(word, "fn" | "let" | "var" | "return" | "for" | "if" | "else" | "struct" | "loop" | "break" | "continue") {
-                    Color32::from_rgb(185, 143, 230)
-                } else if matches!(word, "f32" | "i32" | "u32" | "bool" | "vec2f" | "vec3f" | "vec4f" | "mat2x2f" | "mat3x3f" | "mat4x4f") {
-                    Color32::from_rgb(110, 175, 225)
-                } else {
-                    normal_color
-                };
-                Some((cursor + end, color))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some((end, color)) = token {
-            if plain < cursor {
-                job.append(&source[plain..cursor], 0.0, normal.clone());
-            }
-            job.append(&source[cursor..end], 0.0, format(color));
-            cursor = end;
-            plain = end;
-        } else if let Some(ch) = rest.chars().next() {
-            cursor += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    if plain < source.len() {
-        job.append(&source[plain..], 0.0, normal);
+    if previous < source.len() || source.is_empty() {
+        job.append(&source[previous..], 0.0, format(normal_color));
     }
     job
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyntaxKind {
+    Comment,
+    String,
+    Number,
+    Keyword,
+    Type,
+    Tag,
+    Attribute,
+    Property,
+    Value,
+    Selector,
+}
+
+#[derive(Clone, Copy)]
+struct SyntaxToken {
+    start: usize,
+    end: usize,
+    kind: SyntaxKind,
+}
+
+fn syntax_color(kind: SyntaxKind, dark: bool) -> Color32 {
+    let (dark_rgb, light_rgb) = match kind {
+        SyntaxKind::Comment => ((116, 157, 119), (83, 127, 87)),
+        SyntaxKind::String => ((221, 174, 126), (151, 92, 43)),
+        SyntaxKind::Number => ((220, 151, 93), (154, 93, 43)),
+        SyntaxKind::Keyword => ((190, 149, 232), (113, 67, 171)),
+        SyntaxKind::Type => ((123, 181, 227), (35, 104, 165)),
+        SyntaxKind::Tag => ((123, 194, 214), (28, 110, 150)),
+        SyntaxKind::Attribute => ((220, 175, 111), (152, 101, 37)),
+        SyntaxKind::Property => ((159, 195, 219), (41, 113, 153)),
+        SyntaxKind::Value => ((218, 130, 185), (159, 64, 120)),
+        SyntaxKind::Selector => ((184, 181, 227), (84, 78, 151)),
+    };
+    let (r, g, b) = if dark { dark_rgb } else { light_rgb };
+    Color32::from_rgb(r, g, b)
+}
+
+fn syntax_tokens(source: &str, language: CodeLanguage) -> Vec<SyntaxToken> {
+    if language == CodeLanguage::Plain {
+        return Vec::new();
+    }
+    let bytes = source.as_bytes();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    let mut css = language == CodeLanguage::Css;
+    let mut css_rule = false;
+    let mut css_value = false;
+    while index < bytes.len() {
+        let rest = &source[index..];
+        if css && language == CodeLanguage::Html && rest.starts_with("</style") {
+            css = false;
+        }
+        if rest.starts_with("<!--") {
+            let end = index + rest.find("-->").map_or(rest.len(), |offset| offset + 3);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Comment });
+            index = end;
+            continue;
+        }
+        if rest.starts_with("/*") {
+            let end = index + rest.find("*/").map_or(rest.len(), |offset| offset + 2);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Comment });
+            if matches!(language, CodeLanguage::React | CodeLanguage::Leptos) && source[index..end].contains(".css") {
+                css = true;
+            }
+            index = end;
+            continue;
+        }
+        if !css && rest.starts_with("//") {
+            let end = index + rest.find('\n').unwrap_or(rest.len());
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Comment });
+            index = end;
+            continue;
+        }
+        if matches!(language, CodeLanguage::Html | CodeLanguage::React | CodeLanguage::Leptos)
+            && bytes[index] == b'<'
+            && is_markup_start(bytes, index)
+        {
+            let (end, style, closing) = markup_tag(source, index, &mut tokens);
+            if language == CodeLanguage::Html && style {
+                css = !closing;
+            }
+            index = end;
+            continue;
+        }
+        if bytes[index] == b'"' || bytes[index] == b'\'' || bytes[index] == b'`' {
+            let end = quoted_end(bytes, index);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::String });
+            index = end;
+            continue;
+        }
+        if !css && bytes[index] == b'#' && bytes.get(index + 1) == Some(&b'[') {
+            let end = index + rest.find(']').map_or(rest.len(), |offset| offset + 1);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Attribute });
+            index = end;
+            continue;
+        }
+        if bytes[index] == b'@' && bytes.get(index + 1).is_some_and(u8::is_ascii_alphabetic) {
+            let end = identifier_end(bytes, index + 1);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Attribute });
+            index = end;
+            continue;
+        }
+        if bytes[index].is_ascii_digit() {
+            let mut end = index + 1;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'.' | b'_')) {
+                end += 1;
+            }
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Number });
+            index = end;
+            continue;
+        }
+        if is_identifier_start(bytes[index]) {
+            let end = identifier_end(bytes, index);
+            let word = &source[index..end];
+            let kind = if css {
+                if css_rule && !css_value && source[end..].trim_start().starts_with(':') {
+                    SyntaxKind::Property
+                } else if css_value {
+                    SyntaxKind::Value
+                } else {
+                    SyntaxKind::Selector
+                }
+            } else if is_keyword(language, word) || word == "true" || word == "false" || word == "null" || word == "nil" {
+                SyntaxKind::Keyword
+            } else if word.as_bytes().first().is_some_and(u8::is_ascii_uppercase) || is_builtin_type(word) {
+                SyntaxKind::Type
+            } else if bytes.get(end) == Some(&b'!') && language == CodeLanguage::Leptos {
+                SyntaxKind::Keyword
+            } else {
+                index = end;
+                continue;
+            };
+            tokens.push(SyntaxToken { start: index, end, kind });
+            index = end;
+            continue;
+        }
+        if css {
+            match bytes[index] {
+                b'{' => {
+                    css_rule = true;
+                    css_value = false;
+                }
+                b'}' => {
+                    css_rule = false;
+                    css_value = false;
+                }
+                b':' if css_rule => css_value = true,
+                b';' => css_value = false,
+                _ => {}
+            }
+        }
+        index += source[index..].chars().next().map_or(1, char::len_utf8);
+    }
+    tokens
+}
+
+fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn identifier_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    end
+}
+
+fn quoted_end(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut end = start + 1;
+    while end < bytes.len() {
+        if bytes[end] == b'\\' {
+            end = (end + 2).min(bytes.len());
+        } else if bytes[end] == quote {
+            return end + 1;
+        } else {
+            end += 1;
+        }
+    }
+    end
+}
+
+fn is_markup_start(bytes: &[u8], start: usize) -> bool {
+    let mut next = start + 1;
+    if bytes.get(next) == Some(&b'/') {
+        next += 1;
+    }
+    bytes.get(next).is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'!')
+}
+
+fn markup_tag(source: &str, start: usize, tokens: &mut Vec<SyntaxToken>) -> (usize, bool, bool) {
+    let bytes = source.as_bytes();
+    let closing = bytes.get(start + 1) == Some(&b'/');
+    let name_start = start + if closing { 2 } else { 1 };
+    let mut index = name_start;
+    while index < bytes.len() && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b'-' | b':' | b'_')) {
+        index += 1;
+    }
+    let style = source[name_start..index].eq_ignore_ascii_case("style");
+    tokens.push(SyntaxToken { start, end: index, kind: SyntaxKind::Tag });
+    while index < bytes.len() {
+        if bytes[index] == b'>' {
+            tokens.push(SyntaxToken { start: index, end: index + 1, kind: SyntaxKind::Tag });
+            return (index + 1, style, closing);
+        }
+        if bytes[index] == b'"' || bytes[index] == b'\'' {
+            let end = quoted_end(bytes, index);
+            tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::String });
+            index = end;
+            continue;
+        }
+        if is_identifier_start(bytes[index]) {
+            let end = identifier_end(bytes, index);
+            if source[end..].trim_start().starts_with('=') {
+                tokens.push(SyntaxToken { start: index, end, kind: SyntaxKind::Attribute });
+            }
+            index = end;
+        } else {
+            index += source[index..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    (index, style, closing)
+}
+
+fn is_builtin_type(word: &str) -> bool {
+    matches!(word, "f32" | "f16" | "i32" | "u32" | "bool" | "str" | "usize" | "vec2f" | "vec3f" | "vec4f" | "mat2x2f" | "mat3x3f" | "mat4x4f")
+}
+
+fn is_keyword(language: CodeLanguage, word: &str) -> bool {
+    match language {
+        CodeLanguage::Wgsl => {
+            matches!(word, "fn" | "let" | "var" | "return" | "for" | "if" | "else" | "struct" | "loop" | "break" | "continue" | "const" | "override")
+        }
+        CodeLanguage::React => matches!(
+            word,
+            "import"
+                | "from"
+                | "export"
+                | "default"
+                | "function"
+                | "const"
+                | "let"
+                | "return"
+                | "interface"
+                | "type"
+                | "extends"
+                | "if"
+                | "else"
+                | "new"
+                | "as"
+        ),
+        CodeLanguage::Leptos => matches!(
+            word,
+            "use" | "pub" | "fn" | "let" | "mut" | "move" | "impl" | "struct" | "enum" | "if" | "else" | "match" | "Some" | "None" | "return"
+        ),
+        CodeLanguage::SwiftUi => matches!(
+            word,
+            "import" | "struct" | "var" | "let" | "some" | "func" | "private" | "public" | "if" | "else" | "return" | "enum" | "case" | "in"
+        ),
+        CodeLanguage::Compose => matches!(
+            word,
+            "package"
+                | "import"
+                | "fun"
+                | "val"
+                | "var"
+                | "private"
+                | "public"
+                | "if"
+                | "else"
+                | "return"
+                | "object"
+                | "data"
+                | "class"
+                | "enum"
+                | "when"
+                | "is"
+        ),
+        CodeLanguage::Plain | CodeLanguage::Css | CodeLanguage::Html => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CodeLanguage, SyntaxKind, SyntaxToken, syntax_tokens};
+
+    fn kind_of(source: &str, tokens: &[SyntaxToken], fragment: &str) -> Option<SyntaxKind> {
+        let at = source.find(fragment)?;
+        tokens.iter().find(|token| token.start <= at && at < token.end).map(|token| token.kind)
+    }
+
+    #[test]
+    fn every_inspect_language_colors_its_native_syntax() {
+        let cases = [
+            (CodeLanguage::Css, ".card { width: 12px; color: red; }", "width", SyntaxKind::Property, "red", SyntaxKind::Value),
+            (CodeLanguage::Html, "<div class=\"card\"></div>", "<div", SyntaxKind::Tag, "class", SyntaxKind::Attribute),
+            (
+                CodeLanguage::React,
+                "export function Card() { return <div className=\"card\" />; }",
+                "export",
+                SyntaxKind::Keyword,
+                "<div",
+                SyntaxKind::Tag,
+            ),
+            (
+                CodeLanguage::Leptos,
+                "#[component]\npub fn Card() -> impl IntoView { view! { <div /> } }",
+                "#[component]",
+                SyntaxKind::Attribute,
+                "pub",
+                SyntaxKind::Keyword,
+            ),
+            (
+                CodeLanguage::SwiftUi,
+                "import SwiftUI\nstruct Card: View { var body: some View { Text(\"Hi\") } }",
+                "import",
+                SyntaxKind::Keyword,
+                "SwiftUI",
+                SyntaxKind::Type,
+            ),
+            (
+                CodeLanguage::Compose,
+                "@Composable\nfun Card() { Text(\"Hi\", color = Color.Red) }",
+                "@Composable",
+                SyntaxKind::Attribute,
+                "fun",
+                SyntaxKind::Keyword,
+            ),
+        ];
+        for (language, source, first, first_kind, second, second_kind) in cases {
+            let tokens = syntax_tokens(source, language);
+            assert_eq!(kind_of(source, &tokens, first), Some(first_kind), "{first} in {source}");
+            assert_eq!(kind_of(source, &tokens, second), Some(second_kind), "{second} in {source}");
+        }
+    }
+
+    #[test]
+    fn embedded_css_and_unicode_strings_keep_valid_non_overlapping_ranges() {
+        for (language, source) in [
+            (CodeLanguage::Html, "<p title=\"Olá\">Oi</p><style>.card { color: red; }</style>"),
+            (CodeLanguage::React, "export const Card = () => <div>Olá</div>;\n/* card.css */\n.card { color: red; }"),
+            (CodeLanguage::Leptos, "pub fn card() { view! { <div>Olá</div> } }\n/* card.css */\n.card { color: red; }"),
+        ] {
+            let tokens = syntax_tokens(source, language);
+            assert_eq!(kind_of(source, &tokens, "color",), Some(SyntaxKind::Property));
+            assert_eq!(kind_of(source, &tokens, "red"), Some(SyntaxKind::Value));
+            let mut end = 0;
+            for token in tokens {
+                assert!(token.start >= end && token.end <= source.len());
+                assert!(source.is_char_boundary(token.start) && source.is_char_boundary(token.end));
+                end = token.end;
+            }
+        }
+    }
 }
