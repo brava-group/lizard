@@ -62,6 +62,7 @@ pub struct Home {
 }
 
 const SIDEBAR: f32 = 240.0;
+const MAX_BODY_WIDTH: f32 = 1440.0;
 const CARD_W: f32 = 248.0;
 const THUMB_H: f32 = 148.0;
 const CARD_H: f32 = THUMB_H + 86.0;
@@ -146,15 +147,16 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let left = Rect::from_min_size(rect.min, vec2(SIDEBAR, rect.height()));
         ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, t.border));
         sidebar(app, ui, &t, left);
+        let main = Rect::from_min_max(pos2(left.max.x, rect.min.y), rect.max);
+        let body = centered_body(main);
         if app.ui.home_view.file_query.trim().is_empty() && app.ui.home_view.section == Section::Online {
             // Your online files lay themselves out in the area (and scroll their own list).
-            let area = Rect::from_min_max(pos2(left.max.x + 40.0, rect.min.y + 24.0), rect.max - vec2(40.0, 24.0));
+            let area = body.shrink2(vec2(40.0, 24.0));
             crate::online::section(app, ui, area, &t);
             opened_join(app);
             return;
         }
-        let main = Rect::from_min_max(pos2(left.max.x, rect.min.y), rect.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(main), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().id_salt("home").auto_shrink([false, false]).show(ui, |ui| {
                 egui::Frame::NONE.inner_margin(egui::Margin::symmetric(40, 24)).show(ui, |ui| {
                     ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
@@ -173,6 +175,11 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     });
     // The whole window is the drop target, not only the canvas.
     crate::drop_overlay(ui.ctx(), ui.ctx().content_rect(), tr("Drop to open"));
+}
+
+fn centered_body(main: Rect) -> Rect {
+    let width = main.width().min(MAX_BODY_WIDTH);
+    Rect::from_min_size(pos2(main.center().x - width / 2.0, main.top()), vec2(width, main.height()))
 }
 
 /// Files dropped on the home screen: each one the app opens becomes a document of its own (the
