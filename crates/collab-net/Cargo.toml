@@ -35,7 +35,7 @@ web-sys = { version = "0.3", features = ["Window", "Location", "WebSocket", "Bin
 
 # Opening invite links: the per-user URL handler registration on Windows.
 [target.'cfg(windows)'.dependencies]
-windows-registry = "0.6"
+windows-registry = "0.100"
 
 [dev-dependencies]
 proptest = { workspace = true }
