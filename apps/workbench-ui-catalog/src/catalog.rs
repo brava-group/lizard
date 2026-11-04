@@ -519,7 +519,6 @@ impl Fixture {
             | Page::ColorPicker
             | Page::ColorLibrary
             | Page::Prototype
-            | Page::Inspect
             | Page::PropHeader
             | Page::PropPosition
             | Page::PropAppearance
@@ -527,7 +526,7 @@ impl Fixture {
             | Page::PropStrokes
             | Page::PropExport
             | Page::PropScale => self.rect.into_iter().collect(),
-            Page::FrameProperties | Page::PropGrids | Page::PropVariableModes => self.frame.into_iter().collect(),
+            Page::FrameProperties | Page::Inspect | Page::PropGrids | Page::PropVariableModes => self.frame.into_iter().collect(),
             Page::AutoLayoutProperties | Page::PropLayout => self.auto.into_iter().collect(),
             Page::TextProperties | Page::PropTypography => self.text.into_iter().collect(),
             Page::VectorProperties => self.vector.into_iter().collect(),

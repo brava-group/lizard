@@ -170,11 +170,16 @@ pub fn right_panel(app: &mut LizardApp, ui: &mut Ui) {
     // Tabs row.
     let (tabs, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
     ui.painter().rect_filled(tabs, 0.0, header_bg);
-    let tab_items = [crate::primitives::Tab::new(tr("Create")), crate::primitives::Tab::new(tr("Prototype"))];
+    let inspecting = app.ui.right_tab == RightTab::Inspect;
+    let tab_items = if inspecting {
+        [crate::primitives::Tab::new(tr("Inspect")), crate::primitives::Tab::new(tr("Plugins"))]
+    } else {
+        [crate::primitives::Tab::new(tr("Create")), crate::primitives::Tab::new(tr("Prototype"))]
+    };
     let selected = match app.ui.right_tab {
         RightTab::Design => Some(0),
         RightTab::Prototype => Some(1),
-        RightTab::Inspect => None,
+        RightTab::Inspect => Some(usize::from(app.ui.dev.plugins_tab)),
     };
     let tab_area = Rect::from_min_size(pos2(tabs.min.x + 6.0, tabs.min.y), vec2((tabs.width() - 90.0).max(1.0), 32.0));
     let mut tab_ui = ui.new_child(egui::UiBuilder::new().max_rect(tab_area));
@@ -184,7 +189,11 @@ pub fn right_panel(app: &mut LizardApp, ui: &mut Ui) {
         .show(&mut tab_ui)
     {
         crate::proto_panel::open_editor(ui.ctx(), None);
-        app.ui.right_tab = if index == 0 { RightTab::Design } else { RightTab::Prototype };
+        if inspecting {
+            app.ui.dev.plugins_tab = index == 1;
+        } else {
+            app.ui.right_tab = if index == 0 { RightTab::Design } else { RightTab::Prototype };
+        }
     }
     // Zoom menu.
     let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
@@ -3560,107 +3569,287 @@ fn inspect_assets(app: &mut LizardApp, ui: &mut Ui, assets: &[lizard_engine::dev
     ui.add_space(12.0);
 }
 
+fn inspect_disclosure(ui: &mut Ui, title: &str, id: Id, default_open: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|data| data.insert_temp(id, open));
+    }
+    let ink = if response.hovered() { t.text } else { t.text_secondary };
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(pos2(rect.left() + PAD - 10.0, rect.center().y), vec2(10.0, 10.0)),
+        if open { Icon::Chevron } else { Icon::ChevronRight },
+        ink,
+    );
+    ui.painter().text(pos2(rect.left() + PAD, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), ink);
+    crate::a11y::disclosure(&response, title, open);
+    open
+}
+
+fn inspect_box_model(ui: &mut Ui, node: &Node) {
+    let t = Tokens::get(ui.ctx());
+    let width = (ui.available_width() - 32.0).max(120.0);
+    let (outer, _) = ui.allocate_exact_size(vec2(ui.available_width(), 188.0), Sense::hover());
+    let card = Rect::from_min_size(pos2(outer.left() + 16.0, outer.top() + 6.0), vec2(width, 176.0));
+    let card_fill = if t.dark { Color32::from_rgb(48, 48, 48) } else { t.field };
+    let border_fill = if t.dark { Color32::from_rgb(39, 39, 39) } else { t.panel };
+    let border_ink = if t.dark { Color32::from_rgb(70, 70, 70) } else { t.border };
+    ui.painter().rect_filled(card, CornerRadius::same(7), card_fill);
+    let border = card.shrink2(vec2(30.0, 31.0));
+    ui.painter().rect_filled(border, CornerRadius::same(3), border_fill);
+    ui.painter().rect_stroke(border, CornerRadius::same(3), Stroke::new(1.0, border_ink), egui::StrokeKind::Inside);
+    ui.painter().text(border.left_top() + vec2(38.0, 12.0), Align2::LEFT_CENTER, tr("Border"), regular(11.0), t.text_secondary);
+    let stroke = if node.strokes.is_empty() { "-".to_owned() } else { format!("{}", node.stroke.weight.round()) };
+    let border_metrics = [
+        pos2(border.left() + 14.0, border.top() + 12.0),
+        pos2(border.center().x, border.top() + 12.0),
+        pos2(border.right() - 14.0, border.top() + 12.0),
+        pos2(border.left() + 14.0, border.center().y),
+        pos2(border.right() - 14.0, border.center().y),
+        pos2(border.left() + 14.0, border.bottom() - 12.0),
+        pos2(border.center().x, border.bottom() - 12.0),
+        pos2(border.right() - 14.0, border.bottom() - 12.0),
+    ];
+    for metric in border_metrics {
+        ui.painter().text(metric, Align2::CENTER_CENTER, &stroke, regular(10.0), t.text_secondary);
+    }
+    let padding = border.shrink2(vec2(30.0, 22.0));
+    ui.painter().rect_filled(padding, CornerRadius::same(3), if t.dark { Color32::from_rgb(52, 61, 83) } else { Color32::from_rgb(225, 231, 244) });
+    ui.painter().rect_stroke(
+        padding,
+        CornerRadius::same(3),
+        Stroke::new(1.0, if t.dark { Color32::from_rgb(215, 222, 236) } else { t.border }),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(padding.left_top() + vec2(8.0, 11.0), Align2::LEFT_CENTER, tr("Padding|inspect"), regular(11.0), t.text_secondary);
+    let pad = node.layout.as_ref().map(|layout| layout.padding).unwrap_or([0.0; 4]);
+    let pad_text = |value: f64| if node.layout.is_some() { format!("{}", value.round()) } else { "-".to_owned() };
+    ui.painter().text(pos2(padding.center().x, padding.top() + 11.0), Align2::CENTER_CENTER, pad_text(pad[0]), regular(10.0), t.text_secondary);
+    ui.painter().text(pos2(padding.right() - 11.0, padding.center().y), Align2::CENTER_CENTER, pad_text(pad[1]), regular(10.0), t.text_secondary);
+    ui.painter().text(pos2(padding.center().x, padding.bottom() - 10.0), Align2::CENTER_CENTER, pad_text(pad[2]), regular(10.0), t.text_secondary);
+    ui.painter().text(pos2(padding.left() + 11.0, padding.center().y), Align2::CENTER_CENTER, pad_text(pad[3]), regular(10.0), t.text_secondary);
+    let content = padding.shrink2(vec2(30.0, 23.0));
+    ui.painter().rect_filled(content, CornerRadius::same(3), border_fill);
+    inspect_dashed_rect(ui.painter(), content, Stroke::new(1.2, if t.dark { Color32::WHITE } else { t.text }));
+    ui.painter().text(content.center(), Align2::CENTER_CENTER, format!("{} × {}", node.width.round(), node.height.round()), regular(12.0), t.text);
+    ui.painter().text(card.right_bottom() - vec2(9.0, 12.0), Align2::RIGHT_CENTER, "border-box", regular(10.0), t.text_tertiary);
+}
+
+fn inspect_dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
+    let dash = 3.0;
+    let pitch = 6.0;
+    for y in [rect.top(), rect.bottom()] {
+        let mut x = rect.left();
+        while x < rect.right() {
+            painter.line_segment([pos2(x, y), pos2((x + dash).min(rect.right()), y)], stroke);
+            x += pitch;
+        }
+    }
+    for x in [rect.left(), rect.right()] {
+        let mut y = rect.top();
+        while y < rect.bottom() {
+            painter.line_segment([pos2(x, y), pos2(x, (y + dash).min(rect.bottom()))], stroke);
+            y += pitch;
+        }
+    }
+}
+
+fn inspect_colors(ui: &mut Ui, doc: &Document, selection: &[NodeId], format: lizard_engine::devinspect::ColorFormat) {
+    let t = Tokens::get(ui.ctx());
+    let colors = lizard_engine::selection_colors::collect(doc, selection);
+    if colors.is_empty() {
+        return;
+    }
+    let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 35.0), Sense::hover());
+    ui.painter().text(pos2(heading.left() + 16.0, heading.center().y), Align2::LEFT_CENTER, tr("Selection colors"), regular(11.0), t.text_secondary);
+    for group in colors {
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+        let swatch = Rect::from_center_size(pos2(row.left() + 26.0, row.center().y), vec2(17.0, 17.0));
+        widgets::paint_swatch(ui.painter(), swatch, &group.paint);
+        let label = group.paint.solid_color().map_or_else(|| widgets::paint_name(&group.paint), |color| inspect_color_label(format, color));
+        let text_rect = Rect::from_min_max(pos2(row.left() + 44.0, row.top()), pos2(row.right() - 16.0, row.bottom()));
+        ui.painter().with_clip_rect(text_rect).text(text_rect.left_center(), Align2::LEFT_CENTER, label, regular(11.0), t.text);
+        if let PaintKind::Gradient(gradient) = &group.paint.kind {
+            for stop in gradient.sorted_stops() {
+                let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+                let paint = Paint::solid(stop.color.with_alpha(stop.color.a * group.paint.opacity));
+                let swatch = Rect::from_center_size(pos2(row.left() + 44.0, row.center().y), vec2(16.0, 16.0));
+                widgets::paint_swatch(ui.painter(), swatch, &paint);
+                let text_rect = Rect::from_min_max(pos2(row.left() + 60.0, row.top()), pos2(row.right() - 16.0, row.bottom()));
+                ui.painter().with_clip_rect(text_rect).text(
+                    text_rect.left_center(),
+                    Align2::LEFT_CENTER,
+                    inspect_color_label(format, stop.color.with_alpha(stop.color.a * group.paint.opacity)),
+                    regular(11.0),
+                    t.text,
+                );
+            }
+        }
+    }
+    ui.add_space(12.0);
+}
+
+fn inspect_color_label(format: lizard_engine::devinspect::ColorFormat, color: lizard_color::Color) -> String {
+    if format == lizard_engine::devinspect::ColorFormat::Hsb {
+        let hsb = lizard_color::Hsb::from_color(color);
+        format!("hsba({}, {}%, {}%, {})", hsb.h.round(), (hsb.s * 100.0).round(), (hsb.b * 100.0).round(), color.a)
+    } else {
+        format.format(color)
+    }
+}
+
 /// The Inspect tab (Dev Mode): the handoff status, annotations, properties, assets and code of
 /// the selected layer, or the list of what's ready for dev.
 fn inspect(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
+    if app.ui.dev.plugins_tab {
+        crate::dev_mode::plugins_section(app, ui);
+        return;
+    }
     let Ok(ds) = app.session.ds() else { return };
     let doc = ds.doc.clone();
     let sel = ds.selection.clone();
     let Some(first) = sel.first().copied() else {
-        widgets::section_header(ui, tr("Inspect"), &[], false);
+        ui.add_space(12.0);
         widgets::note(ui, tr("Select a layer to see its properties and code"), t.text_secondary);
         widgets::note(ui, tr("Hover other layers to measure the distance"), t.text_secondary);
         crate::dev_mode::ready_list(app, ui);
         crate::dev_mode::categories_section(app, ui);
-        crate::dev_mode::plugins_section(app, ui);
         return;
     };
-    let name = doc.node(first).map(|n| n.name.clone()).unwrap_or_default();
-    widgets::section_header(ui, &name, &[], false);
-    crate::dev_mode::status(app, ui, &doc, &sel);
-    crate::dev_mode::annotations_section(app, ui, &doc, first);
-    crate::dev_mode::dev_resources_section(app, ui, &doc, first);
+    let Some(node) = doc.node(first) else { return };
+    let kind = tr(node.kind.label());
+    let (header, _) = ui.allocate_exact_size(vec2(ui.available_width(), 68.0), Sense::hover());
+    ui.painter().text(pos2(header.left() + 16.0, header.top() + 23.0), Align2::LEFT_CENTER, kind, semibold(14.0), t.text);
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(pos2(header.left() + 24.0, header.top() + 51.0), vec2(13.0, 13.0)),
+        crate::layers::node_icon(&doc, first),
+        t.text_secondary,
+    );
+    ui.painter().text(pos2(header.left() + 42.0, header.top() + 51.0), Align2::LEFT_CENTER, &node.name, regular(11.0), t.text_secondary);
+    let code_button = Rect::from_center_size(pos2(header.right() - 25.0, header.top() + 23.0), vec2(25.0, 25.0));
+    if Button::icon(Icon::Code, tr("Show code")).variant(ButtonVariant::Ghost).show_at(ui, ui.id().with("inspect_code"), code_button).clicked() {
+        ui.data_mut(|data| data.insert_temp(Id::new("inspect_view_code"), true));
+    }
+    widgets::separator(ui);
+    if inspect_disclosure(ui, "MCP", Id::new("inspect_mcp_open"), false) {
+        widgets::note(ui, tr("Use the Lizard MCP server to inspect this document"), t.text_secondary);
+    }
+    widgets::separator(ui);
+    if !inspect_disclosure(ui, tr("Layer properties"), Id::new("inspect_properties_open"), true) {
+        return;
+    }
+    inspect_box_model(ui, node);
     use lizard_engine::devinspect::ColorFormat;
     let fmt_id = Id::new("inspect_color_format");
-    let fmt = ui.data(|d| d.get_temp::<usize>(fmt_id)).and_then(|i| ColorFormat::ALL.get(i).copied()).unwrap_or_default();
-    row(ui, 32.0, |ui| {
-        widgets::label(ui, tr("Color format"), t.text_secondary);
-        let width = ui.available_width();
-        let resp = crate::primitives::Select::trigger(ui, fmt.label(), width, None);
-        menu_popup(&resp).show(|ui| {
-            for (i, f) in ColorFormat::ALL.iter().enumerate() {
-                if menu_item(ui, f.label(), "") {
-                    ui.data_mut(|d| d.insert_temp(fmt_id, i));
-                    ui.close();
-                }
-            }
-        });
-    });
-    for s in lizard_engine::devinspect::properties_with(&doc, first, fmt) {
-        inspect_section(app, ui, &s);
-    }
-    inspect_assets(app, ui, &lizard_engine::devinspect::assets(&doc, &sel));
+    let fmt = ui.data(|d| d.get_temp::<usize>(fmt_id)).and_then(|i| ColorFormat::ALL.get(i).copied()).unwrap_or(ColorFormat::Hsb);
     use lizard_engine::codegen::CodeLang;
     let lang_id = Id::new("inspect_lang");
     let lang = ui.data(|d| d.get_temp::<usize>(lang_id)).and_then(|i| CodeLang::ALL.get(i).copied()).unwrap_or_default();
-    // A component tried with other property values: its code replaces the layer's below.
-    let played = crate::dev_mode::playground_section(app, ui, &doc, first, lang);
-    ui.add_space(12.0);
-    widgets::separator(ui);
-    let copy = widgets::section_header(ui, tr("Code"), &[(Icon::Export, tr("Copy"))], false).is_some();
-    // Pixels or rem (of a 16 px root) for the web languages.
     let rem_id = Id::new("inspect_rem");
-    let web = lang.is_web();
-    let rem = web && ui.data(|d| d.get_temp::<bool>(rem_id)).unwrap_or(false);
-    row(ui, 32.0, |ui| {
-        let width = (ui.available_width() - if web { 64.0 } else { 0.0 }).max(72.0);
-        let resp = crate::primitives::Select::trigger(ui, lang.label(), width, Some(Icon::Code));
-        menu_popup(&resp).show(|ui| {
-            for (i, l) in CodeLang::ALL.iter().enumerate() {
-                if menu_item(ui, l.label(), "") {
-                    ui.data_mut(|d| d.insert_temp(lang_id, i));
-                    ui.close();
-                }
-            }
-        });
-        if web {
-            let resp = crate::primitives::Select::trigger(ui, if rem { "rem" } else { "px" }, 56.0, None);
+    let rem = lang.is_web() && ui.data(|d| d.get_temp::<bool>(rem_id)).unwrap_or(false);
+    let view_id = Id::new("inspect_view_code");
+    let mut code_view = ui.data(|data| data.get_temp::<bool>(view_id)).unwrap_or(true);
+    ui.add_space(7.0);
+    let (toolbar_rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+    let content = toolbar_rect.shrink2(vec2(PAD, 4.0));
+    let mut toolbar = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    toolbar.spacing_mut().item_spacing = vec2(8.0, 0.0);
+    {
+        let ui = &mut toolbar;
+        let segments = [crate::primitives::Segment::text(tr("List")), crate::primitives::Segment::text(tr("Code"))];
+        if let Some(selected) = crate::primitives::SegmentedControl::new(&segments, Some(usize::from(code_view))).show(ui) {
+            code_view = selected == 1;
+            ui.data_mut(|data| data.insert_temp(view_id, code_view));
+        }
+        if code_view && lang.is_web() {
+            let resp = crate::primitives::Select::trigger(ui, if rem { "rem" } else { "px" }, 55.0, None);
             menu_popup(&resp).show(|ui| {
                 for (on, label) in [(false, "px"), (true, "rem")] {
                     if menu_item(ui, label, "") {
-                        ui.data_mut(|d| d.insert_temp(rem_id, on));
+                        ui.data_mut(|data| data.insert_temp(rem_id, on));
                         ui.close();
                     }
                 }
             });
         }
-    });
-    let code = played.unwrap_or_else(|| crate::dev_mode::code(app, ui, first, lang));
-    let code = if rem { lizard_engine::codegen::px_to_rem(&code, 16.0) } else { code };
-    egui::Frame::NONE
-        .fill(t.field)
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(egui::Margin::same(10))
-        .outer_margin(egui::Margin::symmetric(16, 0))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(&code).monospace().color(t.text));
+        ui.add_space((ui.available_width() - 90.0).max(0.0));
+        let resp = crate::primitives::Select::trigger(ui, lang.label(), 82.0, None);
+        menu_popup(&resp).show(|ui| {
+            for (i, language) in CodeLang::ALL.iter().enumerate() {
+                if menu_item(ui, language.label(), "") {
+                    ui.data_mut(|data| data.insert_temp(lang_id, i));
+                    ui.close();
+                }
+            }
         });
-    ui.add_space(8.0);
-    let mut copy_clicked = copy;
-    row(ui, 32.0, |ui| {
-        copy_clicked |= Button::new(&trf("Copy {value}", &[("value", &lang.label())]))
-            .variant(ButtonVariant::Secondary)
-            .width(crate::primitives::ControlWidth::Fill)
-            .show(ui)
-            .clicked();
-    });
-    if copy_clicked {
-        app.services.clipboard_set_text(&code);
-        app.toast(trf("Copied {value}", &[("value", &lang.label())]));
     }
+    let played = crate::dev_mode::playground_section(app, ui, &doc, first, lang);
+    if code_view {
+        let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 39.0), Sense::hover());
+        ui.painter().text(
+            pos2(heading.left() + 16.0, heading.center().y),
+            Align2::LEFT_CENTER,
+            if lang == CodeLang::Css { tr("Layout") } else { tr("Code") },
+            regular(12.0),
+            t.text,
+        );
+        let copy_rect = Rect::from_center_size(pos2(heading.right() - 25.0, heading.center().y), vec2(26.0, 26.0));
+        let mut code = played.unwrap_or_else(|| crate::dev_mode::code(app, ui, first, lang));
+        if rem {
+            code = lizard_engine::codegen::px_to_rem(&code, 16.0);
+        }
+        let copy_response = ui.interact(copy_rect, ui.id().with("inspect_copy_code"), Sense::click()).tip(tr("Copy code"));
+        crate::a11y::button(&copy_response, tr("Copy code"));
+        if copy_response.hovered() {
+            ui.painter().rect_filled(copy_rect, CornerRadius::same(5), t.hover);
+        }
+        icons::paint_copy(ui.painter(), copy_rect.shrink(4.0), t.icon);
+        if copy_response.clicked() {
+            app.services.clipboard_set_text(&code);
+            app.toast(trf("Copied {value}", &[("value", &lang.label())]));
+        }
+        let height = ((code.lines().count().min(11) as f32) * 17.0 + 24.0).clamp(80.0, 220.0);
+        let block_width = (ui.available_width() - 2.0 * PAD).max(120.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(PAD);
+            crate::primitives::CodeBlock::new(ui.id().with(("inspect_code_block", first)))
+                .size(block_width, height)
+                .language(if lang == CodeLang::Css { crate::primitives::CodeLanguage::Css } else { crate::primitives::CodeLanguage::Plain })
+                .editable(false)
+                .show(ui, &mut code);
+        });
+        ui.add_space(16.0);
+    } else {
+        for section in lizard_engine::devinspect::properties_with(&doc, first, fmt) {
+            inspect_section(app, ui, &section);
+        }
+    }
+    widgets::separator(ui);
+    let (colors_heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::hover());
+    ui.painter().text(pos2(colors_heading.left() + 16.0, colors_heading.center().y), Align2::LEFT_CENTER, tr("Colors"), regular(12.0), t.text);
+    let format_rect = Rect::from_center_size(pos2(colors_heading.right() - 52.0, colors_heading.center().y), vec2(76.0, 26.0));
+    let mut format_ui = ui.new_child(egui::UiBuilder::new().max_rect(format_rect));
+    let resp = crate::primitives::Select::trigger(&mut format_ui, fmt.label(), 76.0, None).tip(tr("Color format"));
+    menu_popup(&resp).show(|ui| {
+        for (i, format) in ColorFormat::ALL.iter().enumerate() {
+            if menu_item(ui, format.label(), "") {
+                ui.data_mut(|data| data.insert_temp(fmt_id, i));
+                ui.close();
+            }
+        }
+    });
+    inspect_colors(ui, &doc, &sel, fmt);
+    inspect_assets(app, ui, &lizard_engine::devinspect::assets(&doc, &sel));
+    crate::dev_mode::status(app, ui, &doc, &sel);
+    crate::dev_mode::annotations_section(app, ui, &doc, first);
+    crate::dev_mode::dev_resources_section(app, ui, &doc, first);
     crate::dev_mode::connect_section(app, ui, &doc, first, lang);
-    crate::dev_mode::plugins_section(app, ui);
 }
 
 #[cfg(test)]

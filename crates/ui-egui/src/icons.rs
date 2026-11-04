@@ -640,6 +640,27 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     draw(&p, icon);
 }
 
+/// Two overlapping sheets, scaled from the 24 × 24 copy icon used by Inspect.
+pub fn paint_copy(painter: &Painter, rect: Rect, color: Color32) {
+    let scale = rect.width().min(rect.height()) / 24.0;
+    let point = |x: f32, y: f32| pos2(rect.center().x + (x - 12.0) * scale, rect.center().y + (y - 12.0) * scale);
+    let stroke = Stroke::new(1.5 * scale, color);
+    painter.rect_stroke(Rect::from_min_max(point(9.0, 9.0), point(20.0, 20.0)), 1.0, stroke, egui::StrokeKind::Inside);
+    painter.add(Shape::line(
+        vec![
+            point(15.0, 9.0),
+            point(15.0, 4.6),
+            point(14.4, 4.0),
+            point(4.6, 4.0),
+            point(4.0, 4.6),
+            point(4.0, 14.4),
+            point(4.6, 15.0),
+            point(9.0, 15.0),
+        ],
+        stroke,
+    ));
+}
+
 /// A chevron sized by its painted bounds for compact controls.
 pub(crate) fn paint_compact_chevron(painter: &Painter, rect: Rect, color: Color32) {
     ui3::paint_compact_chevron(painter, rect, color);

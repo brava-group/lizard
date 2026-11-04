@@ -10,6 +10,7 @@ pub enum CodeLanguage {
     #[default]
     Plain,
     Wgsl,
+    Css,
 }
 
 /// An editable or read-only IDE-style code surface. The caller owns the source text.
@@ -126,6 +127,21 @@ fn code_layout_job(source: &str, language: CodeLanguage, dark: bool) -> egui::te
     let normal = format(normal_color);
     if language == CodeLanguage::Plain {
         job.append(source, 0.0, normal);
+        return job;
+    }
+    if language == CodeLanguage::Css {
+        let accent = format(Color32::from_rgb(218, 130, 185));
+        for line in source.split_inclusive('\n') {
+            let Some((property, value)) = line.split_once(':') else {
+                job.append(line, 0.0, normal.clone());
+                continue;
+            };
+            job.append(property, 0.0, normal.clone());
+            job.append(":", 0.0, normal.clone());
+            let (value, end) = value.strip_suffix('\n').map_or((value, ""), |value| (value, "\n"));
+            job.append(value, 0.0, accent.clone());
+            job.append(end, 0.0, normal.clone());
+        }
         return job;
     }
     let mut cursor = 0;

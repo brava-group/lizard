@@ -88,6 +88,7 @@ impl CategoryFilter {
 #[derive(Default)]
 pub struct DevUi {
     pub filter: usize,
+    pub plugins_tab: bool,
     pub categories: CategoryFilter,
     pub compare: Option<crate::dev_compare::CompareView>,
     annotated: Vec<NodeId>,
