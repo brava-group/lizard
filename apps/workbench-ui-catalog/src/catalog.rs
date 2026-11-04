@@ -7,7 +7,7 @@ use lizard_engine::Session;
 use lizard_ui_egui::icons::{self, AgentIcon, AppearanceIcon, HeaderIcon, Icon, LayerIcon, LayoutIcon, NavIcon, PositionIcon, SizingIcon};
 use lizard_ui_egui::primitives::TooltipResponseExt as _;
 use lizard_ui_egui::primitives::{
-    Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, CodeBlock, CodeLanguage, ControlWidth, SearchField, TextFieldWithPresets,
+    Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, CodeBlock, CodeLanguage, ControlWidth, SearchField, Switch, TextFieldWithPresets,
 };
 use lizard_ui_egui::theme::{self, ALL_COLOR_ROLES, ColorRole, Tokens};
 use lizard_ui_egui::widgets::{self, Empty, FieldEdit, Lead};
@@ -31,6 +31,7 @@ enum Page {
     FloatingPanel,
     Segmented,
     Choices,
+    Switch,
     Paint,
     ColorControl,
     PropertyController,
@@ -121,6 +122,7 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::FloatingPanel, "Primitives", "Floating panel", "primitives::FloatingPanel · draggable · width / height"),
     (Page::Segmented, "Primitives", "Segmented", "segmented · segmented_text"),
     (Page::Choices, "Primitives", "Choices", "checkbox · radio"),
+    (Page::Switch, "Primitives", "Switch", "primitives::Switch · standalone / embedded · animated"),
     (Page::Paint, "Primitives", "Paint", "swatch · checker"),
     (Page::ColorControl, "Primitives", "Color control", "primitives::ColorControl · swatch / models / opacity · width"),
     (Page::PropertyController, "Primitives", "Property controller", "primitives::PropertyController · component properties · usage indicator"),
@@ -235,6 +237,9 @@ pub struct State {
     icon_segment: usize,
     checked: bool,
     checked_other: bool,
+    switch_primary: bool,
+    switch_secondary: bool,
+    switch_embedded: bool,
     radio: usize,
     slider: f64,
     slider_classic_default: f64,
@@ -293,6 +298,9 @@ impl Default for State {
             icon_segment: 0,
             checked: true,
             checked_other: false,
+            switch_primary: true,
+            switch_secondary: false,
+            switch_embedded: true,
             radio: 0,
             slider: 42.0,
             slider_classic_default: 0.0,
@@ -815,6 +823,7 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     Page::FloatingPanel => floating_panels(ui, state),
                     Page::Segmented => segmented(ui, state),
                     Page::Choices => choices(ui, state),
+                    Page::Switch => switches(ui, state),
                     Page::Paint => paint(ui),
                     Page::ColorControl => color_control(ui, state, fig, fixture),
                     Page::PropertyController => property_controllers(ui, state),
@@ -1654,6 +1663,23 @@ fn segmented(ui: &mut Ui, state: &mut State) {
             SegmentedControl::new(&segments, Some(state.segment_auto)).size(SegmentSize::Large).width(ControlWidth::Fixed(320.0)).show(ui)
         {
             state.segment_auto = index;
+        }
+    });
+}
+
+fn switches(ui: &mut Ui, state: &mut State) {
+    example(ui, "Standalone", "Click to toggle. The thumb and track use a short transition.", |ui| {
+        if Switch::new(Id::new("catalog_switch_grid"), state.switch_primary, "Show grid").show(ui).clicked() {
+            state.switch_primary = !state.switch_primary;
+        }
+        if Switch::new(Id::new("catalog_switch_snap"), state.switch_secondary, "Snap to pixels").show(ui).clicked() {
+            state.switch_secondary = !state.switch_secondary;
+        }
+    });
+    example(ui, "Embedded", "The same switch fits a row whose layout is owned by its parent.", |ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(220.0, 24.0), Sense::hover());
+        if Switch::new(Id::new("catalog_switch_embedded"), state.switch_embedded, "Show guides").show_at(ui, rect).clicked() {
+            state.switch_embedded = !state.switch_embedded;
         }
     });
 }
