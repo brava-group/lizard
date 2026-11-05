@@ -121,6 +121,11 @@ fn draw_mode_illustrations_select_pen_brush_and_plain_pencil() {
     assert!(u.app.ui.draw_mode);
     assert_eq!(u.app.session.tool.tool, ToolId::Pencil);
 
+    // The illustrated buttons become clickable after the toolbar finishes expanding.
+    for _ in 0..20 {
+        u.frame(vec![]);
+    }
+
     let brush = mode_button(&mut u, "Brush");
     click(&mut u, brush);
     assert_eq!(u.app.session.tool.tool, ToolId::Pencil);

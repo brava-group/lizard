@@ -62,6 +62,8 @@ const TOOL_GAP: f32 = 8.0;
 const FLYOUT_WIDTH: f32 = 16.0;
 const DRAW_NIB_CELL: f32 = 54.0;
 const DRAW_NIB_LIFT: f32 = 8.0;
+const DRAW_SECTION_WIDTH: f32 = 182.0;
+const PEN_GROUP_WIDTH: f32 = 57.0;
 
 fn toolbar_icon_index(icon: Icon) -> Option<usize> {
     match icon {
@@ -132,7 +134,16 @@ fn drawing_mode(app: &LizardApp) -> bool {
 
 pub(crate) fn width_for(app: &LizardApp) -> f32 {
     // Draw replaces the Pen flyout with three 54 px illustrated tool cells and two separators.
-    main_width() + if drawing_mode(app) { 125.0 } else { 0.0 }
+    main_width() + if drawing_mode(app) { DRAW_SECTION_WIDTH - PEN_GROUP_WIDTH } else { 0.0 }
+}
+
+fn draw_expansion(app: &LizardApp, ui: &Ui) -> f32 {
+    let target = if drawing_mode(app) { 1.0 } else { 0.0 };
+    if app.reduce_motion() {
+        return target;
+    }
+    let progress = ui.ctx().animate_value_with_time(egui::Id::new("draw_toolbar_expansion"), target, 0.28);
+    progress * progress * (3.0 - 2.0 * progress)
 }
 
 fn brush_texture(ui: &Ui, index: usize) -> Option<egui::TextureHandle> {
@@ -153,9 +164,14 @@ fn brush_texture(ui: &Ui, index: usize) -> Option<egui::TextureHandle> {
     Some(texture)
 }
 
-fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x: f32) -> f32 {
+fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x: f32, progress: f32) {
     let cy = rect.center().y;
-    divider(ui, t, x - 4.0, cy);
+    let reveal = Rect::from_min_max(pos2(x - 4.0, rect.min.y - 20.0), pos2(x + DRAW_SECTION_WIDTH * progress, rect.max.y));
+    let painter = ui.painter().with_clip_rect(reveal);
+    // A little opacity follows the growing edge so the artwork does not pop in at its clip.
+    let opacity = progress.clamp(0.0, 1.0);
+    let divider_color = if t.dark { Color32::from_rgb(0x3e, 0x3c, 0x3e) } else { t.border };
+    painter.line_segment([pos2(x - 4.0, cy - 16.0), pos2(x - 4.0, cy + 16.0)], Stroke::new(1.0, divider_color.gamma_multiply(opacity)));
     x += 8.0;
     for (index, label) in [tr("Pen"), tr("Brush"), tr("Pencil")].into_iter().enumerate() {
         let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(DRAW_NIB_CELL, rect.height()));
@@ -164,7 +180,8 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
             1 => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_some(),
             _ => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_none(),
         };
-        let response = ui.interact(cell, ui.id().with(("draw_art", index)), Sense::click()).lizard_tooltip(label);
+        let sense = if progress >= 0.95 { Sense::click() } else { Sense::hover() };
+        let response = ui.interact(cell, ui.id().with(("draw_art", index)), sense).lizard_tooltip(label);
         a11y::toggle(&response, label, active);
         let hover = if app.reduce_motion() {
             if response.hovered() { 1.0 } else { 0.0 }
@@ -175,11 +192,11 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
         if active {
             let selected = if t.dark { Color32::from_rgb(0x40, 0x40, 0x40) } else { t.pressed };
             let selected_rect = Rect::from_min_max(pos2(cell.min.x + 4.0, cell.min.y - 4.0), pos2(cell.max.x - 4.0, cell.max.y - 3.0));
-            ui.painter().rect_filled(selected_rect, CornerRadius::same(5), selected);
+            painter.rect_filled(selected_rect, CornerRadius::same(5), selected.gamma_multiply(opacity));
             a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
         } else if hover > 0.0 {
             let hover_rect = Rect::from_min_max(pos2(cell.min.x + 4.0, cell.min.y - 4.0 * hover_eased), pos2(cell.max.x - 4.0, cell.max.y - 3.0));
-            ui.painter().rect_filled(hover_rect, CornerRadius::same(5), t.hover.gamma_multiply(hover));
+            painter.rect_filled(hover_rect, CornerRadius::same(5), t.hover.gamma_multiply(hover * opacity));
         }
         if let Some(texture) = brush_texture(ui, index) {
             let height = 60.0;
@@ -188,8 +205,7 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
             let optical_top = [0.0, 2.0, 4.0][index];
             let lift = optical_top + (if active { DRAW_NIB_LIFT } else { DRAW_NIB_LIFT * hover_eased });
             let art = Rect::from_min_size(pos2(cell.center().x - width / 2.0, rect.min.y + 1.0 - lift), vec2(width, height));
-            let clip = Rect::from_min_max(pos2(rect.min.x, rect.min.y - 20.0), rect.max);
-            ui.painter().with_clip_rect(clip).image(texture.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            painter.image(texture.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE.gamma_multiply(opacity));
         }
         if response.clicked() {
             app.ui.draw_mode = true;
@@ -203,8 +219,7 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
         }
         x += DRAW_NIB_CELL;
     }
-    divider(ui, t, x, cy);
-    x + 12.0
+    painter.line_segment([pos2(x, cy - 16.0), pos2(x, cy + 16.0)], Stroke::new(1.0, divider_color.gamma_multiply(opacity)));
 }
 
 /// The main toolbar pill: the tool groups with their flyouts, Comment and Actions, then the
@@ -212,7 +227,8 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
 fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let cell = 32.0;
     let draw = drawing_mode(app);
-    let width = width_for(app);
+    let expansion = draw_expansion(app, ui);
+    let width = main_width() + (DRAW_SECTION_WIDTH - PEN_GROUP_WIDTH) * expansion;
     let rect = pill(ui, &mut app.ui.nav, canvas, width, t);
     let current = match app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).map(|ve| ve.tool) {
         Some(VTool::Pen) => ToolId::Pen,
@@ -221,7 +237,18 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let mut x = rect.min.x + 8.0;
     let cy = rect.center().y;
     for g in GROUPS {
-        if draw && g.key == "pen" {
+        if g.key == "pen" && expansion > 0.0 {
+            let remaining = 1.0 - expansion;
+            let clip = Rect::from_min_max(pos2(x, rect.min.y), pos2(x + PEN_GROUP_WIDTH * remaining, rect.max.y));
+            let painter = ui.painter().with_clip_rect(clip);
+            icons::paint_toolbar(&painter, Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(24.0, 24.0)), 3, t.icon.gamma_multiply(remaining));
+            icons::paint_toolbar(
+                &painter,
+                Rect::from_center_size(pos2(x + cell + 1.0 + FLYOUT_WIDTH / 2.0, cy), vec2(24.0, 24.0)),
+                7,
+                t.icon.gamma_multiply(remaining),
+            );
+            x += PEN_GROUP_WIDTH * remaining;
             continue;
         }
         let in_group = g.tools.iter().any(|(tid, _)| *tid == current);
@@ -271,8 +298,9 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             x += FLYOUT_WIDTH;
         }
         x += TOOL_GAP;
-        if draw && g.key == "move" {
-            x = draw_brushes(app, ui, t, rect, x);
+        if expansion > 0.0 && g.key == "move" {
+            draw_brushes(app, ui, t, rect, x, expansion);
+            x += DRAW_SECTION_WIDTH * expansion;
         }
     }
     let actions = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
