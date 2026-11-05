@@ -2747,14 +2747,18 @@ fn transform_box(
     if let Some(label) = label.filter(|_| app.session.prefs.show_dimensions) {
         let bottom = q.iter().map(|p| p.y).fold(f32::MIN, f32::max);
         let cx = q.iter().map(|p| p.x).sum::<f32>() / 4.0;
-        return Some(pill(painter, pos2(cx, bottom + 9.0), Align2::CENTER_TOP, label, col));
+        return Some(pill_with_font(painter, pos2(cx, bottom + 9.0), Align2::CENTER_TOP, label, col, regular(10.5)));
     }
     None
 }
 
 /// A canvas readout: white `text` on a `col` pill placed at `at` by `align` (its box returned).
 fn pill(painter: &egui::Painter, at: Pos2, align: Align2, text: String, col: Color32) -> Rect {
-    let galley = painter.layout_no_wrap(text, semibold(11.0), Color32::WHITE);
+    pill_with_font(painter, at, align, text, col, semibold(11.0))
+}
+
+fn pill_with_font(painter: &egui::Painter, at: Pos2, align: Align2, text: String, col: Color32, font: egui::FontId) -> Rect {
+    let galley = painter.layout_no_wrap(text, font, Color32::WHITE);
     let r = align.anchor_size(at, galley.size() + vec2(8.0, 4.0));
     painter.rect_filled(r, CornerRadius::same(3), crate::theme::under_white(col));
     painter.galley(r.min + vec2(4.0, 2.0), galley, Color32::WHITE);
