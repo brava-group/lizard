@@ -211,6 +211,8 @@ pub struct AgentPresence {
     pub updated: Option<web_time::Instant>,
     pub pulses: Vec<AgentPulse>,
     pub shimmers: Vec<AgentShimmer>,
+    /// Canvas-only preview while create_node arguments are arriving.
+    pub draft: Option<crate::agent_presence::NodeDraft>,
     pub active: bool,
     pub generating: bool,
 }
@@ -448,6 +450,18 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 }
             }
             AgentEvent::Tool { id, title, status, input, output, content } => {
+                let source = if app.ui.agent.agent == AgentKind::Codex { "mcp-create-node" } else { &id };
+                let creating = title.as_deref().is_some_and(|title| {
+                    let title = title.to_lowercase();
+                    title.contains("create") || title.contains("criar") || title.contains("adicionar camada")
+                }) || app.ui.agent.presence.draft.as_ref().is_some_and(|draft| draft.source == source);
+                if creating && !matches!(status.as_deref(), Some("completed" | "failed")) {
+                    if let Some(Some(raw)) = input.as_ref() {
+                        crate::agent_presence::update_draft(&mut app.ui.agent.presence, source, raw);
+                    }
+                } else if creating && matches!(status.as_deref(), Some("completed" | "failed")) {
+                    app.ui.agent.presence.draft = None;
+                }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
                     if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == id) {
                         if let Some(title) = title {
@@ -821,6 +835,7 @@ fn send_prompt(app: &mut LizardApp) {
             app.ui.agent.presence.document = Some(document);
             app.ui.agent.presence.conversation = Some(id);
             app.ui.agent.presence.point = None;
+            app.ui.agent.presence.draft = None;
             if first_selected_node.is_some() || app.ui.agent.presence.shown.is_none() {
                 app.ui.agent.presence.target = first_selected_node;
             }
@@ -1208,7 +1223,13 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
         if compact {
             return;
         }
-        glyph(ui, Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)), if is_open { AgentIcon::Up } else { AgentIcon::Down }, vec2(14.0, 14.0), Color32::from_rgb(0x85, 0x85, 0x89));
+        glyph(
+            ui,
+            Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)),
+            if is_open { AgentIcon::Up } else { AgentIcon::Down },
+            vec2(14.0, 14.0),
+            Color32::from_rgb(0x85, 0x85, 0x89),
+        );
         let animation_time = if ui.style().animation_time > 0.0 { 0.2 } else { 0.0 };
         let openness = ui.ctx().animate_bool_with_time_and_easing(id.with("open"), is_open, animation_time, egui::emath::easing::cubic_in_out);
         if openness > 0.001 {
@@ -2242,12 +2263,14 @@ mod tests {
             "agent.activity",
             &json!({
                 "__agent_document":uid, "phase":"start", "tool":"create_node", "ids":[frame],
-                "position":{"parent":frame,"x":48.0,"y":32.0}
+                "position":{"parent":frame,"x":48.0,"y":32.0},
+                "arguments":{"type":"rectangle","parent":frame,"x":48,"y":32,"width":100,"height":60,"props":{"fill":"#3366FF"}}
             }),
         )
         .unwrap();
         assert_eq!(app.ui.agent.presence.point, Some((188.0, 122.0)));
         assert_eq!(app.ui.agent.presence.target, Some(NodeId(frame)));
+        assert_eq!(app.ui.agent.presence.draft.as_ref().map(|draft| &draft.args["type"]), Some(&json!("rectangle")));
         let card =
             app.session.execute("node.create", &json!({"type":"rectangle", "parent":frame, "x":48, "y":32, "width":100, "height":60})).unwrap()["id"]
                 .as_u64()
@@ -2263,7 +2286,36 @@ mod tests {
         .unwrap();
         assert_eq!(app.ui.agent.presence.point, None);
         assert_eq!(app.ui.agent.presence.target, Some(NodeId(card)));
+        assert!(app.ui.agent.presence.draft.is_none());
         assert!(!app.ui.agent.presence.shimmers[0].ongoing);
+    }
+
+    #[test]
+    fn acp_tool_input_updates_the_canvas_draft_before_completion() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events: events.clone() }));
+        app.ui.agent.agent = AgentKind::Kimi;
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Crie um retângulo".into();
+        send_prompt(&mut app);
+        let tool = |title: Option<&str>, status: &str, raw: Option<&str>| AgentEvent::Tool {
+            id: "create-1".into(),
+            title: title.map(str::to_owned),
+            status: Some(status.into()),
+            input: raw.map(|raw| Some(json!(raw))),
+            output: None,
+            content: None,
+        };
+        events.lock().unwrap().push(tool(Some("Create layer"), "in_progress", Some("{\"type\":\"rectangle\",")));
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(app.ui.agent.presence.draft.as_ref().map(|draft| &draft.args["type"]), Some(&json!("rectangle")));
+        events.lock().unwrap().push(tool(None, "in_progress", Some("\"x\":42,\"y\":24}")));
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(app.ui.agent.presence.draft.as_ref().map(|draft| &draft.args["x"]), Some(&json!(42)));
+        events.lock().unwrap().push(tool(None, "completed", None));
+        sync(&mut app, &egui::Context::default());
+        assert!(app.ui.agent.presence.draft.is_none());
     }
 
     #[test]

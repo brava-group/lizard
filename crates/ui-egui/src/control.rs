@@ -332,6 +332,15 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             };
             let now = web_time::Instant::now();
             let presence = &mut app.ui.agent.presence;
+            if tool == "create_node" {
+                if phase == "start" {
+                    if let Some(arguments) = p.get("arguments").filter(|arguments| arguments.is_object()) {
+                        crate::agent_presence::update_draft(presence, "mcp-create-node", arguments);
+                    }
+                } else if matches!(phase, "done" | "failed") {
+                    presence.draft = None;
+                }
+            }
             presence.document = Some(document);
             presence.conversation = app.ui.agent.runtime_conversation;
             presence.updated = Some(now);

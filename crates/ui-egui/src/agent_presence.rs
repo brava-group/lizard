@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use web_time::Instant;
 
-use egui::{Align2, CornerRadius, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use serde_json::Value;
 
 use crate::LizardApp;
 use crate::theme::Tokens;
@@ -14,6 +15,157 @@ const CURSOR_FADE: Duration = Duration::from_millis(1_500);
 const WORK_ZONE_DWELL: Duration = Duration::from_millis(1_600);
 const WORK_ZONE_RADIUS: f64 = 170.0;
 const WORK_ZONE_REST: f64 = 90.0;
+
+/// A transient canvas preview. The document is only changed by the completed tool call.
+#[derive(Clone, Debug)]
+pub struct NodeDraft {
+    pub source: String,
+    pub args: Value,
+    raw: String,
+    started: Instant,
+    updated: Instant,
+}
+
+/// Recover complete top-level fields from a JSON prefix while the agent is still writing it.
+fn draft_object(raw: &str) -> Option<Value> {
+    if raw.len() > 64 * 1024 {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(raw)
+        && value.is_object()
+    {
+        return Some(value);
+    }
+    let mut depth = 0_i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut last_field = None;
+    for (index, ch) in raw.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth -= 1,
+            ',' if depth == 1 => last_field = Some(index),
+            _ => {}
+        }
+        if depth < 0 {
+            return None;
+        }
+    }
+    let end = last_field?;
+    serde_json::from_str::<Value>(&format!("{}}}", &raw[..end])).ok().filter(Value::is_object)
+}
+
+pub fn update_draft(presence: &mut crate::agent_panel::AgentPresence, source: &str, input: &Value) {
+    let (raw, args) = match input {
+        Value::Object(fields) => {
+            let mut args =
+                presence.draft.as_ref().filter(|draft| draft.source == source).and_then(|draft| draft.args.as_object().cloned()).unwrap_or_default();
+            args.extend(fields.clone());
+            let args = Value::Object(args);
+            let raw = args.to_string();
+            if raw.len() > 64 * 1024 {
+                return;
+            }
+            (raw, Some(args))
+        }
+        Value::String(chunk) => {
+            let previous = presence.draft.as_ref().filter(|draft| draft.source == source).map_or("", |draft| draft.raw.as_str());
+            let raw = if chunk.starts_with(previous) { chunk.clone() } else { format!("{previous}{chunk}") };
+            if raw.len() > 64 * 1024 {
+                return;
+            }
+            let args = draft_object(&raw);
+            (raw, args)
+        }
+        _ => return,
+    };
+    let args = args.unwrap_or_else(|| presence.draft.as_ref().filter(|draft| draft.source == source).map_or(Value::Null, |draft| draft.args.clone()));
+    let started = presence.draft.as_ref().filter(|draft| draft.source == source).map_or_else(Instant::now, |draft| draft.started);
+    presence.draft = Some(NodeDraft { source: source.to_owned(), args, raw, started, updated: Instant::now() });
+}
+
+fn draft_rect(app: &LizardApp, args: &Value) -> Option<Rect> {
+    let kind = args.get("type")?.as_str()?;
+    let width = args.get("width").and_then(Value::as_f64).unwrap_or(if kind == "text" { 160.0 } else { 100.0 });
+    let height = args.get("height").and_then(Value::as_f64).unwrap_or(if kind == "text" { 32.0 } else { 100.0 });
+    if !width.is_finite() || !height.is_finite() || !(0.0..=20_000.0).contains(&width) || !(0.0..=20_000.0).contains(&height) {
+        return None;
+    }
+    let mut x = args.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+    let mut y = args.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+    if let Some(parent) = args.get("parent").and_then(lizard_engine::params::id_of)
+        && let Ok(doc) = app.session.doc()
+        && let Some(bounds) = doc.world_bounds(parent)
+    {
+        if let Some(node) = doc.node(parent)
+            && let Some(layout) = &node.layout
+        {
+            x = bounds.x0 + layout.padding[3];
+            y = bounds.y0 + layout.padding[0];
+            if let Some(last) = node.children.last().and_then(|id| doc.world_bounds(*id)) {
+                match layout.mode {
+                    lizard_doc::LayoutMode::Vertical => y = last.y1 + layout.gap,
+                    _ => x = last.x1 + layout.gap,
+                }
+            }
+        } else {
+            x += bounds.x0;
+            y += bounds.y0;
+        }
+    }
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let rect = Rect::from_two_pos(app.to_screen(x, y), app.to_screen(x + width, y + height));
+    (rect.is_positive() && rect.intersects(app.canvas.rect)).then_some(rect)
+}
+
+fn draft_fill(args: &Value, fallback: Color32) -> Color32 {
+    let color = args.pointer("/props/fill").or_else(|| args.get("color")).and_then(Value::as_str);
+    color
+        .and_then(lizard_color::Color::from_hex)
+        .map(|color| {
+            let [r, g, b, _] = color.to_rgba8();
+            Color32::from_rgba_unmultiplied(r, g, b, 190)
+        })
+        .unwrap_or(fallback.gamma_multiply(0.18))
+}
+
+fn draw_draft(app: &LizardApp, painter: &Painter, now: Instant, brand: Color32, reduce_motion: bool) -> bool {
+    let Some(draft) = app.ui.agent.presence.draft.as_ref() else { return false };
+    let Some(rect) = draft_rect(app, &draft.args) else { return false };
+    let progress = if reduce_motion { 1.0 } else { (now.saturating_duration_since(draft.started).as_secs_f32() / 0.36).clamp(0.0, 1.0) };
+    let visible = rect.intersect(app.canvas.rect);
+    let clip = Rect::from_min_max(visible.min, pos2(visible.left() + visible.width() * progress, visible.bottom()));
+    let painter = painter.with_clip_rect(clip);
+    let kind = draft.args.get("type").and_then(Value::as_str).unwrap_or("");
+    let fill = draft_fill(&draft.args, brand);
+    let radius = draft.args.pointer("/props/cornerRadius").and_then(Value::as_f64).unwrap_or(4.0).clamp(0.0, 60.0) as u8;
+    if kind == "ellipse" {
+        painter.add(egui::Shape::ellipse_filled(rect.center(), rect.size() * 0.5, fill));
+    } else if kind != "text" {
+        painter.rect_filled(rect, CornerRadius::same(radius), fill);
+    }
+    painter.rect_stroke(rect, CornerRadius::same(radius), Stroke::new(1.5, brand.gamma_multiply(0.85)), StrokeKind::Inside);
+    if kind == "text"
+        && let Some(text) = draft.args.get("text").and_then(Value::as_str)
+    {
+        let size = draft.args.pointer("/props/fontSize").and_then(Value::as_f64).unwrap_or(16.0).clamp(8.0, 120.0) as f32;
+        painter.text(rect.min, Align2::LEFT_TOP, text.chars().take(200).collect::<String>(), FontId::proportional(size), fill);
+    }
+    true
+}
 
 fn cursor_alpha(active: bool, idle: Duration) -> f32 {
     if active || idle <= CURSOR_HOLD { 1.0 } else { (1.0 - (idle - CURSOR_HOLD).as_secs_f32() / CURSOR_FADE.as_secs_f32()).clamp(0.0, 1.0) }
@@ -75,15 +227,13 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
     let active = app.ui.agent.busy && presence.active;
     let idle_age = presence.updated.map_or(Duration::MAX, |updated| now.saturating_duration_since(updated));
     let fade = cursor_alpha(active, idle_age);
-    let work = presence
-        .point
-        .or_else(|| {
-            presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
-                let x = bounds.x0 + bounds.width() * 0.35;
-                let y = bounds.y0 + bounds.height() * 0.35;
-                (x, y)
-            })
-        });
+    let work = presence.point.or_else(|| {
+        presence.target.and_then(|id| app.session.ds().ok()?.doc.world_bounds(id)).map(|bounds| {
+            let x = bounds.x0 + bounds.width() * 0.35;
+            let y = bounds.y0 + bounds.height() * 0.35;
+            (x, y)
+        })
+    });
     let zoom = app.session.ds().map_or(1.0, |ds| ds.view.zoom).max(0.01);
     let zone_elapsed = presence.destination_updated.map_or(Duration::MAX, |at| now.saturating_duration_since(at));
     let (destination, zone_changed) = if active {
@@ -95,7 +245,14 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         (presence.destination, false)
     };
     let target = destination.or(presence.shown).or_else(|| {
-        active.then(|| app.session.ds().ok().map(|ds| ds.view.screen_to_page(f64::from(app.canvas.rect.width()) * 0.5, f64::from(app.canvas.rect.height()) * 0.5))).flatten()
+        active
+            .then(|| {
+                app.session
+                    .ds()
+                    .ok()
+                    .map(|ds| ds.view.screen_to_page(f64::from(app.canvas.rect.width()) * 0.5, f64::from(app.canvas.rect.height()) * 0.5))
+            })
+            .flatten()
     });
     let reduce_motion = app.reduce_motion();
     // Smooth only in page space. A pan or zoom then reprojects the agent with its frame in
@@ -162,6 +319,10 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
             }
         }
     }
+    if app.ui.agent.presence.draft.as_ref().is_some_and(|draft| now.saturating_duration_since(draft.updated) > Duration::from_secs(20) || !active) {
+        app.ui.agent.presence.draft = None;
+    }
+    let draft_visible = draw_draft(app, painter, now, brand, reduce_motion);
     if let Some((x, y)) = shown.filter(|_| fade > 0.0) {
         let tip = app.to_screen(x, y) + idle_offset(idle_age, idle_strength);
         if app.canvas.rect.contains(tip) {
@@ -176,7 +337,12 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         }
     }
     let cursor_visible = shown.is_some_and(|(x, y)| app.canvas.rect.contains(app.to_screen(x, y)));
-    if moving || !app.ui.agent.presence.shimmers.is_empty() || !app.ui.agent.presence.pulses.is_empty() || (fade > 0.0 && cursor_visible) {
+    if moving
+        || draft_visible
+        || !app.ui.agent.presence.shimmers.is_empty()
+        || !app.ui.agent.presence.pulses.is_empty()
+        || (fade > 0.0 && cursor_visible)
+    {
         ctx.request_repaint_after(Duration::from_millis(if reduce_motion {
             100
         } else if moving {
@@ -195,6 +361,34 @@ mod tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn incomplete_tool_json_updates_the_canvas_draft_field_by_field() {
+        let mut presence = crate::agent_panel::AgentPresence::default();
+        update_draft(&mut presence, "call-1", &json!("{\"type\":\"rectangle\","));
+        assert_eq!(presence.draft.as_ref().map(|draft| &draft.args), Some(&json!({"type":"rectangle"})));
+        update_draft(&mut presence, "call-1", &json!("\"x\":24,\"y\":"));
+        assert_eq!(presence.draft.as_ref().map(|draft| &draft.args), Some(&json!({"type":"rectangle","x":24})));
+        update_draft(&mut presence, "call-1", &json!("32,\"width\":180,\"height\":90}"));
+        assert_eq!(presence.draft.as_ref().map(|draft| &draft.args), Some(&json!({"type":"rectangle","x":24,"y":32,"width":180,"height":90})));
+        update_draft(&mut presence, "call-2", &json!({"type":"frame"}));
+        update_draft(&mut presence, "call-2", &json!({"width":240}));
+        assert_eq!(presence.draft.as_ref().map(|draft| &draft.args), Some(&json!({"type":"frame","width":240})));
+    }
+
+    #[test]
+    fn draft_geometry_uses_the_parent_and_does_not_create_a_layer() {
+        let mut session = Session::new();
+        let parent =
+            NodeId(session.execute("node.create", &json!({"type":"frame","x":140,"y":90,"width":320,"height":240})).unwrap()["id"].as_u64().unwrap());
+        let mut ui = Ui::new(session);
+        ui.frame(vec![]);
+        let count = ui.app.session.doc().unwrap().node(parent).unwrap().children.len();
+        let args = json!({"type":"rectangle","parent":parent,"x":48,"y":32,"width":100,"height":60});
+        let rect = draft_rect(&ui.app, &args).unwrap();
+        assert_eq!(rect.min, ui.app.to_screen(188.0, 122.0));
+        assert_eq!(ui.app.session.doc().unwrap().node(parent).unwrap().children.len(), count);
+    }
 
     #[test]
     fn agent_cursor_uses_page_coordinates_through_pan_and_stays_at_last_work() {

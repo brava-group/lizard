@@ -441,7 +441,28 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         } else {
             None
         };
-        b.agent_activity(json!({"phase":"start", "tool":name, "ids":ids, "position":position}));
+        let arguments = (name == "create_node").then(|| {
+            let mut preview = Map::new();
+            for key in ["type", "x", "y", "width", "height", "parent", "color"] {
+                if let Some(value) = args.get(key) {
+                    preview.insert(key.into(), value.clone());
+                }
+            }
+            if let Some(text) = args.get("text").and_then(Value::as_str) {
+                preview.insert("text".into(), json!(text.chars().take(200).collect::<String>()));
+            }
+            if let Some(props) = args.get("props").and_then(Value::as_object) {
+                let mut preview_props = Map::new();
+                for key in ["fill", "fontSize", "cornerRadius"] {
+                    if let Some(value) = props.get(key) {
+                        preview_props.insert(key.into(), value.clone());
+                    }
+                }
+                preview.insert("props".into(), Value::Object(preview_props));
+            }
+            Value::Object(preview)
+        });
+        b.agent_activity(json!({"phase":"start", "tool":name, "ids":ids, "position":position, "arguments":arguments}));
     }
     let r = match name {
         "list_commands" => list_commands(b, &a),
@@ -945,6 +966,7 @@ mod activity_tests {
         assert_eq!(traced.activity[0]["phase"], "start");
         assert_eq!(traced.activity[0]["position"]["x"], 170.0);
         assert_eq!(traced.activity[0]["position"]["y"], 115.0);
+        assert_eq!(traced.activity[0]["arguments"], json!({"type":"rectangle","x":100,"y":80,"width":200,"height":100}));
         let created: Value = serde_json::from_str(result.first_text()).unwrap();
         assert_eq!(traced.activity[1]["phase"], "done");
         assert_eq!(traced.activity[1]["ids"], json!([created["id"]]));
