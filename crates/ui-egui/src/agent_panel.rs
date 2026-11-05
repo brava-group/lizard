@@ -154,6 +154,9 @@ pub struct ChatMessage {
     pub attached_images: Vec<String>,
     #[serde(default)]
     pub tools: Vec<ChatTool>,
+    /// Display order of streamed text and tool starts within this reply.
+    #[serde(default)]
+    pub parts: Vec<ChatPart>,
     #[serde(default)]
     pub work_seconds: Option<u64>,
     #[serde(default)]
@@ -166,6 +169,12 @@ pub struct ChatMessage {
     pub revision_after: u64,
     #[serde(default)]
     pub reverted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ChatPart {
+    Text(String),
+    Tool(usize),
 }
 
 #[derive(Clone)]
@@ -194,6 +203,12 @@ pub struct AgentShimmer {
     pub ongoing: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct AgentEntrance {
+    pub id: NodeId,
+    pub started: web_time::Instant,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AgentPresence {
     pub document: Option<u64>,
@@ -211,6 +226,7 @@ pub struct AgentPresence {
     pub updated: Option<web_time::Instant>,
     pub pulses: Vec<AgentPulse>,
     pub shimmers: Vec<AgentShimmer>,
+    pub entrances: Vec<AgentEntrance>,
     /// Canvas-only preview while create_node arguments are arriving.
     pub draft: Option<crate::agent_presence::NodeDraft>,
     pub active: bool,
@@ -338,6 +354,11 @@ fn agent_message(chat: &mut Conversation, index: usize) -> Option<&mut ChatMessa
 }
 
 pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
+    if !app.ui.agent.busy
+        && let Some(batch) = app.ui.streamed_batch.take()
+    {
+        app.session.cancel_streamed_batch(batch);
+    }
     if !app.ui.agent.history_loaded {
         app.ui.agent.history_loaded = true;
         if let Ok(mut chats) = serde_json::from_value::<Vec<Conversation>>(app.services.agent_history_load()) {
@@ -348,6 +369,12 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 for message in &mut chat.messages {
                     message.text.truncate(message.text.floor_char_boundary(64_000));
                     message.thinking.truncate(message.thinking.floor_char_boundary(32_000));
+                    message.parts.truncate(200);
+                    for part in &mut message.parts {
+                        if let ChatPart::Text(text) = part {
+                            text.truncate(text.floor_char_boundary(64_000));
+                        }
+                    }
                 }
             }
             app.ui.agent.conversations = chats;
@@ -432,6 +459,11 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     && message.text.len() < 100_000
                 {
                     message.text.push_str(&chunk);
+                    if let Some(ChatPart::Text(text)) = message.parts.last_mut() {
+                        text.push_str(&chunk);
+                    } else {
+                        message.parts.push(ChatPart::Text(chunk));
+                    }
                 }
             }
             AgentEvent::TextBoundary => {
@@ -440,6 +472,11 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     && !message.text.ends_with("\n\n")
                 {
                     message.text.push_str("\n\n");
+                    if let Some(ChatPart::Text(text)) = message.parts.last_mut() {
+                        text.push_str("\n\n");
+                    } else {
+                        message.parts.push(ChatPart::Text("\n\n".into()));
+                    }
                 }
             }
             AgentEvent::Thinking(chunk) => {
@@ -480,6 +517,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                             tool.content = content;
                         }
                     } else if message.tools.len() < 100 {
+                        message.parts.push(ChatPart::Tool(message.tools.len()));
                         message.tools.push(ChatTool {
                             id,
                             title: title.unwrap_or_else(|| tr("Agent action").into()),
@@ -1568,12 +1606,37 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             }
                         });
                     }
-                    for (tool_index, tool) in message.tools.iter().enumerate() {
-                        let preview = if tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
-                        ui.add_space(if receipt_is_compact(tool, preview) { 4.0 } else { 9.0 });
-                        let title =
-                            if tool.title.contains("screenshot") || tool.title.contains("execute") { tr("Designed") } else { tool.title.as_str() };
-                        receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
+                    let parts = if message.parts.is_empty() {
+                        message
+                            .tools
+                            .iter()
+                            .enumerate()
+                            .map(|(i, _)| ChatPart::Tool(i))
+                            .chain((!message.text.is_empty()).then(|| ChatPart::Text(message.text.clone())))
+                            .collect::<Vec<_>>()
+                    } else {
+                        message.parts.clone()
+                    };
+                    for part in &parts {
+                        match part {
+                            ChatPart::Tool(tool_index) => {
+                                let Some(tool) = message.tools.get(*tool_index) else { continue };
+                                let preview = if *tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
+                                ui.add_space(if receipt_is_compact(tool, preview) { 4.0 } else { 9.0 });
+                                let title = if tool.title.contains("screenshot") || tool.title.contains("execute") {
+                                    tr("Designed")
+                                } else {
+                                    tool.title.as_str()
+                                };
+                                receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
+                            }
+                            ChatPart::Text(text) if !text.is_empty() => {
+                                ui.add_space(9.0);
+                                let accent = Tokens::get(ui.ctx()).accent_text;
+                                crate::agent_markdown::show(ui, text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
+                            }
+                            _ => {}
+                        }
                     }
                     if message.tools.is_empty() && !message.previews.is_empty() {
                         ui.add_space(9.0);
@@ -1586,11 +1649,6 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             message.previews.first(),
                             content_width,
                         );
-                    }
-                    if !message.text.is_empty() {
-                        ui.add_space(9.0);
-                        let accent = Tokens::get(ui.ctx()).accent_text;
-                        crate::agent_markdown::show(ui, &message.text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
                     }
                     if message.stopped {
                         ui.label(egui::RichText::new(tr("Stopped")).size(crate::theme::ui_font_size(11.0)).color(secondary));
@@ -2390,6 +2448,56 @@ mod tests {
         assert_eq!(app.session.ds().unwrap().history.undo.len(), 1);
         app.session.execute("node.create", &json!({"type":"rectangle"})).unwrap();
         assert!(!app.session.ds().unwrap().history.undo.last().unwrap().agent);
+    }
+
+    #[test]
+    fn attached_agent_batch_paints_between_steps_and_keeps_one_agent_undo() {
+        let mut app = LizardApp::new(Session::new(), Box::new(NoServices));
+        let uid = app.session.ds().unwrap().uid;
+        let page = app.session.page().unwrap();
+        app.ui.agent.busy = true;
+        app.ui.agent.runtime_document = Some(uid);
+        let ctx = egui::Context::default();
+        let begin = json!({"__agent_document":uid,"label":"Login","commands":[
+            {"command":"node.create","as":"screen","params":{"type":"frame","width":390,"height":844}},
+            {"command":"node.create","params":{"type":"text","text":"Bem-vindo","parent":{"$ref":"screen"}}}
+        ]});
+        assert_eq!(crate::control::handle(&mut app, &ctx, "agent.batch.begin", &begin).unwrap()["accepted"], true);
+        assert_eq!(crate::control::handle(&mut app, &ctx, "agent.batch.step", &json!({"__agent_document":uid})).unwrap()["done"], false);
+        assert_eq!(app.session.doc().unwrap().node(page).unwrap().children.len(), 1);
+        assert_eq!(app.ui.agent.presence.entrances.len(), 1);
+        assert_eq!(crate::control::handle(&mut app, &ctx, "agent.batch.step", &json!({"__agent_document":uid})).unwrap()["done"], true);
+        let result = crate::control::handle(&mut app, &ctx, "agent.batch.finish", &json!({"__agent_document":uid})).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 2);
+        assert_eq!(app.session.ds().unwrap().history.undo.len(), 1);
+        assert!(app.session.ds().unwrap().history.undo[0].agent);
+    }
+
+    #[test]
+    fn streamed_reply_parts_keep_tools_between_text_segments() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events: events.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Crie uma tela".into();
+        send_prompt(&mut app);
+        events.lock().unwrap().extend([
+            AgentEvent::Text("Primeira parte.".into()),
+            AgentEvent::Tool {
+                id: "tool-1".into(),
+                title: Some("lizard · create_node".into()),
+                status: Some("in_progress".into()),
+                input: None,
+                output: None,
+                content: None,
+            },
+            AgentEvent::Text("Segunda parte.".into()),
+        ]);
+        sync(&mut app, &egui::Context::default());
+        let parts = &app.ui.agent.conversations[0].messages[1].parts;
+        assert!(
+            matches!(parts.as_slice(), [ChatPart::Text(a), ChatPart::Tool(0), ChatPart::Text(b)] if a == "Primeira parte." && b == "Segunda parte.")
+        );
     }
 
     #[test]

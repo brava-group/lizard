@@ -29,7 +29,7 @@
 
 use egui::Context;
 use lizard_engine::cmd::comment::{Filter, Sort};
-use lizard_engine::{PointerEvent, PointerKind};
+use lizard_engine::{BatchStep, PointerEvent, PointerKind};
 use serde_json::{Value, json};
 
 use crate::LizardApp;
@@ -272,6 +272,57 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
         return Err(crate::i18n::tr("Finish the canvas gesture before running an agent action").into());
     }
     match method {
+        "agent.batch.begin" => {
+            let Some(document) = p.get("__agent_document").and_then(Value::as_u64) else { return Ok(json!({"accepted": false})) };
+            if !app.ui.agent.busy || app.ui.agent.runtime_document != Some(document) || app.ui.streamed_batch.is_some() {
+                return Ok(json!({"accepted": false}));
+            }
+            let commands = p.get("commands").and_then(Value::as_array).ok_or("`commands` must be an array")?;
+            let steps = commands
+                .iter()
+                .enumerate()
+                .map(|(i, step)| {
+                    let command = step.get("command").and_then(Value::as_str).ok_or_else(|| format!("step {i}: `command` required"))?;
+                    let params = step.get("params").cloned().unwrap_or_else(|| json!({}));
+                    let name = lizard_engine::batch::step_name(i, step).map_err(|e| e.to_string())?;
+                    Ok(BatchStep { command: command.to_string(), params, name })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let label = p.get("label").and_then(Value::as_str).unwrap_or("Batch");
+            app.ui.streamed_batch = app.session.begin_streamed_batch(label, steps).map_err(|e| e.to_string())?;
+            Ok(json!({"accepted": app.ui.streamed_batch.is_some()}))
+        }
+        "agent.batch.step" => {
+            p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
+            let mut batch = app.ui.streamed_batch.take().ok_or("no streamed batch")?;
+            match app.session.streamed_batch_step(&mut batch) {
+                Ok((done, created)) => {
+                    if let Some(id) = created {
+                        crate::agent_presence::start_entrance(&mut app.ui.agent.presence, id);
+                    }
+                    app.ui.streamed_batch = Some(batch);
+                    ctx.request_repaint();
+                    Ok(json!({"done": done}))
+                }
+                Err(error) => {
+                    app.session.cancel_streamed_batch(batch);
+                    Err(error.to_string())
+                }
+            }
+        }
+        "agent.batch.finish" => {
+            p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
+            let batch = app.ui.streamed_batch.take().ok_or("no streamed batch")?;
+            let result = app.session.finish_streamed_batch(batch).map_err(|e| e.to_string())?;
+            Ok(Value::Array(result))
+        }
+        "agent.batch.cancel" => {
+            p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
+            if let Some(batch) = app.ui.streamed_batch.take() {
+                app.session.cancel_streamed_batch(batch);
+            }
+            Ok(json!({"cancelled": true}))
+        }
         "agent.activity" => {
             let document = p.get("__agent_document").and_then(Value::as_u64).ok_or(crate::i18n::tr("Agent activity requires an attached session"))?;
             if !app.ui.agent.busy || app.ui.agent.runtime_document != Some(document) {
@@ -396,6 +447,13 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             let params = p.get("params").cloned().unwrap_or(json!({}));
             let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
+            if cmd == "node.create"
+                && p.get("__agent_document").is_some()
+                && let Ok(result) = &r
+                && let Some(id) = result.get("id").and_then(Value::as_u64)
+            {
+                crate::agent_presence::start_entrance(&mut app.ui.agent.presence, lizard_doc::NodeId(id));
+            }
             app.clear_comment_draft_after_tool_set(cmd, r.is_ok());
             if r.is_ok()
                 && p.get("__agent_document")

@@ -2,6 +2,43 @@ use serde_json::json;
 
 use crate::{EngineError, Session};
 
+#[test]
+fn streamed_batch_exposes_each_node_then_keeps_one_undo_step() {
+    let mut session = Session::new();
+    let page = session.page().unwrap();
+    let steps = vec![
+        crate::BatchStep { name: Some("frame".into()), ..crate::BatchStep::new("node.create", json!({"type":"frame","width":200,"height":100})) },
+        crate::BatchStep::new("node.create", json!({"type":"rectangle","parent":{"$ref":"frame"},"width":40,"height":20})),
+    ];
+    let mut batch = session.begin_streamed_batch("Login", steps).unwrap().unwrap();
+    assert_eq!(session.streamed_batch_step(&mut batch).unwrap().0, false);
+    assert_eq!(session.doc().unwrap().node(page).unwrap().children.len(), 1);
+    assert_eq!(session.streamed_batch_step(&mut batch).unwrap().0, true);
+    let result = session.finish_streamed_batch(batch).unwrap();
+    let frame = id(&result[0]);
+    let child = id(&result[1]);
+    assert_eq!(session.doc().unwrap().node(child).unwrap().parent, Some(frame));
+    assert_eq!(session.ds().unwrap().history.undo.len(), 1);
+    session.execute("edit.undo", &json!({})).unwrap();
+    assert!(session.doc().unwrap().node(page).unwrap().children.is_empty());
+}
+
+#[test]
+fn streamed_batch_can_restore_a_failed_later_step() {
+    let mut session = Session::new();
+    let page = session.page().unwrap();
+    let steps = vec![
+        crate::BatchStep::new("node.create", json!({"type":"frame","width":100,"height":100})),
+        crate::BatchStep::new("node.set", json!({"ids":[{"$step":99}],"props":{"name":"bad"}})),
+    ];
+    let mut batch = session.begin_streamed_batch("Bad", steps).unwrap().unwrap();
+    session.streamed_batch_step(&mut batch).unwrap();
+    assert!(session.streamed_batch_step(&mut batch).is_err());
+    session.cancel_streamed_batch(batch);
+    assert!(session.doc().unwrap().node(page).unwrap().children.is_empty());
+    assert_eq!(session.ds().unwrap().history.undo.len(), 0);
+}
+
 fn id(value: &serde_json::Value) -> crate::NodeId {
     crate::params::id_of(&value["id"]).unwrap()
 }

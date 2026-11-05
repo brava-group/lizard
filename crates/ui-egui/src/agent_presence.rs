@@ -10,6 +10,41 @@ use serde_json::Value;
 use crate::LizardApp;
 use crate::theme::Tokens;
 
+/// Start a short canvas fade for a committed node. It is visual only and does not change history.
+pub fn start_entrance(presence: &mut crate::agent_panel::AgentPresence, id: lizard_doc::NodeId) {
+    presence.entrances.retain(|entrance| entrance.id != id);
+    if presence.entrances.len() >= 32 {
+        presence.entrances.remove(0);
+    }
+    presence.entrances.push(crate::agent_panel::AgentEntrance { id, started: Instant::now() });
+}
+
+fn entrance_background(app: &LizardApp, id: lizard_doc::NodeId, fallback: Color32) -> Color32 {
+    let Ok(ds) = app.session.ds() else { return fallback };
+    let mut parent = ds.doc.node(id).and_then(|node| node.parent);
+    for _ in 0..12 {
+        let Some(node) = parent.and_then(|id| ds.doc.node(id)) else { break };
+        if let Some(color) = node.fills.iter().rev().find_map(|paint| {
+            if !paint.visible || paint.opacity < 0.98 {
+                return None;
+            }
+            match paint.kind {
+                lizard_color::PaintKind::Solid { color } if color.a >= 0.98 => Some(color),
+                _ => None,
+            }
+        }) {
+            let [r, g, b, _] = color.to_rgba8();
+            return Color32::from_rgb(r, g, b);
+        }
+        if let lizard_doc::NodeKind::Page { background, background_visible: true, .. } = node.kind {
+            let [r, g, b, _] = background.to_rgba8();
+            return Color32::from_rgb(r, g, b);
+        }
+        parent = node.parent;
+    }
+    fallback
+}
+
 const CURSOR_HOLD: Duration = Duration::from_secs(5);
 const CURSOR_FADE: Duration = Duration::from_millis(1_500);
 const WORK_ZONE_DWELL: Duration = Duration::from_millis(1_600);
@@ -319,6 +354,21 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
             }
         }
     }
+    app.ui.agent.presence.entrances.retain(|entrance| now.saturating_duration_since(entrance.started) < Duration::from_millis(450));
+    for entrance in &app.ui.agent.presence.entrances {
+        let Some(bounds) = app.session.ds().ok().and_then(|ds| ds.doc.world_bounds(entrance.id)) else { continue };
+        let rect = Rect::from_two_pos(app.to_screen(bounds.x0, bounds.y0), app.to_screen(bounds.x1, bounds.y1));
+        if !rect.is_positive() || !rect.intersects(app.canvas.rect) {
+            continue;
+        }
+        if reduce_motion {
+            continue;
+        }
+        let t = (now.saturating_duration_since(entrance.started).as_secs_f32() / 0.45).clamp(0.0, 1.0);
+        let fade = (1.0 - t).powi(2);
+        let background = entrance_background(app, entrance.id, Tokens::get(ctx).canvas);
+        painter.with_clip_rect(app.canvas.rect).rect_filled(rect, CornerRadius::ZERO, background.gamma_multiply(fade * 0.92));
+    }
     if app.ui.agent.presence.draft.as_ref().is_some_and(|draft| now.saturating_duration_since(draft.updated) > Duration::from_secs(20) || !active) {
         app.ui.agent.presence.draft = None;
     }
@@ -341,6 +391,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         || draft_visible
         || !app.ui.agent.presence.shimmers.is_empty()
         || !app.ui.agent.presence.pulses.is_empty()
+        || !app.ui.agent.presence.entrances.is_empty()
         || (fade > 0.0 && cursor_visible)
     {
         ctx.request_repaint_after(Duration::from_millis(if reduce_motion {

@@ -137,6 +137,21 @@ pub struct History {
     pub limit: usize,
 }
 
+/// A visual agent batch whose commands are applied across UI frames, then joined into one undo step.
+pub struct StreamedBatch {
+    uid: u64,
+    label: String,
+    steps: Vec<BatchStep>,
+    scope: BatchScope,
+    before: Arc<Document>,
+    selection: Vec<NodeId>,
+    page: NodeId,
+    undo_len: usize,
+    redo: Vec<HistoryEntry>,
+    history_limit: usize,
+    journal_len: usize,
+}
+
 /// The canvas view of a document: what's at the centre of the viewport and the zoom.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1268,6 +1283,84 @@ impl Session {
         let v = self.execute(cmd, &p)?;
         scope.push(v);
         Ok(())
+    }
+
+    /// Begin a canvas-visible batch. Only ordinary node edits are streamed; other commands retain
+    /// the atomic `command.batch` path, since they may alter files or other session state.
+    pub fn begin_streamed_batch(&mut self, label: &str, steps: Vec<BatchStep>) -> Result<Option<StreamedBatch>> {
+        let ds = self.ds()?;
+        if self.live_doc(ds.uid)
+            || steps.is_empty()
+            || steps.iter().any(|step| {
+                !matches!(
+                    step.command.as_str(),
+                    "node.create" | "node.set" | "node.reparent" | "node.reorder" | "text.create" | "text.set" | "layout.add" | "layout.remove"
+                )
+            })
+        {
+            return Ok(None);
+        }
+        let scope = BatchScope::new(&steps)?;
+        let batch = StreamedBatch {
+            uid: ds.uid,
+            label: label.to_string(),
+            steps,
+            scope,
+            before: ds.doc.clone(),
+            selection: ds.selection.clone(),
+            page: ds.page,
+            undo_len: ds.history.undo.len(),
+            redo: ds.history.redo.clone(),
+            history_limit: ds.history.limit,
+            journal_len: self.journal.len(),
+        };
+        self.ds_mut()?.history.limit = usize::MAX;
+        Ok(Some(batch))
+    }
+
+    /// Apply exactly one step so the UI can paint the result before the next control request.
+    pub fn streamed_batch_step(&mut self, batch: &mut StreamedBatch) -> Result<(bool, Option<NodeId>)> {
+        if self.ds()?.uid != batch.uid {
+            return Err(bad("command.batch", "the active document changed"));
+        }
+        let Some(step) = batch.steps.get(batch.scope.next_step()) else { return Ok((true, None)) };
+        let created = step.command == "node.create";
+        self.batch_step(&mut batch.scope, &step.command, &step.params)?;
+        let id = created.then(|| batch.scope.results().last().and_then(|result| result.get("id").and_then(Value::as_u64)).map(NodeId)).flatten();
+        Ok((batch.scope.next_step() == batch.steps.len(), id))
+    }
+
+    /// Join the streamed edits into one undo step and return the normal batch results.
+    pub fn finish_streamed_batch(&mut self, batch: StreamedBatch) -> Result<Vec<Value>> {
+        if self.ds()?.uid != batch.uid || batch.scope.next_step() != batch.steps.len() {
+            self.cancel_streamed_batch(batch);
+            return Err(bad("command.batch", "the batch did not finish"));
+        }
+        let changed = !Arc::ptr_eq(&self.ds()?.doc, &batch.before);
+        let ds = self.ds_mut()?;
+        ds.history.undo.truncate(batch.undo_len);
+        ds.history.limit = batch.history_limit;
+        if changed {
+            self.record(batch.uid, Some(&batch.label), batch.before, batch.selection, batch.page);
+            if let Some(entry) = self.ds_mut()?.history.undo.last_mut() {
+                entry.agent = true;
+            }
+        }
+        Ok(batch.scope.into_results())
+    }
+
+    /// Restore the document and history if a later streamed step fails.
+    pub fn cancel_streamed_batch(&mut self, batch: StreamedBatch) {
+        if let Some(ds) = self.docs.iter_mut().find(|ds| ds.uid == batch.uid) {
+            ds.doc = batch.before;
+            ds.selection = batch.selection;
+            ds.page = batch.page;
+            ds.history.undo.truncate(batch.undo_len);
+            ds.history.redo = batch.redo;
+            ds.history.limit = batch.history_limit;
+            ds.revision += 1;
+        }
+        self.journal.truncate(batch.journal_len);
     }
 
     /// Run `f` as one undo step called `label`: the commands it executes push no steps of their

@@ -537,6 +537,8 @@ pub struct UiState {
     /// Width of the file explorer while the wider Agent panel is open.
     pub explorer_width: Option<f32>,
     pub agent: agent_panel::AgentUi,
+    /// One attached agent batch progressing a node edit per painted frame.
+    pub streamed_batch: Option<lizard_engine::StreamedBatch>,
     pub pages_open: bool,
     /// Pages panel search: open, and the case-insensitive name filter.
     pub page_search: bool,
@@ -721,6 +723,7 @@ impl Default for UiState {
             left_tab: LeftTab::File,
             explorer_width: None,
             agent: agent_panel::AgentUi::default(),
+            streamed_batch: None,
             pages_open: true,
             page_search: false,
             page_filter: String::new(),

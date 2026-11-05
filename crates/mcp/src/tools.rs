@@ -636,6 +636,21 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
         steps.push(step);
     }
     let label = s_arg(a, "label")?.unwrap_or("Batch");
+    if b.has_ui() {
+        let started = b.call("agent.batch.begin", json!({"label": label, "commands": steps}));
+        if matches!(started, Ok(ref result) if result.get("accepted").and_then(Value::as_bool) == Some(true)) {
+            for _ in 0..steps.len() {
+                if let Err(error) = b.call("agent.batch.step", json!({})) {
+                    let _ = b.call("agent.batch.cancel", json!({}));
+                    return Err(error);
+                }
+                // The control request runs at the start of a frame. Give the canvas time to
+                // paint this real node before requesting the next one.
+                std::thread::sleep(std::time::Duration::from_millis(90));
+            }
+            return b.call("agent.batch.finish", json!({})).map(|result| ToolResult::json(&result));
+        }
+    }
     exec(b, "command.batch", json!({"label": label, "commands": steps})).map(|v| ToolResult::json(&v))
 }
 
@@ -939,6 +954,38 @@ mod activity_tests {
         fn agent_activity(&mut self, activity: Value) {
             self.activity.push(activity);
         }
+    }
+
+    #[test]
+    fn attached_batch_advances_one_control_request_per_step() {
+        struct VisibleBatch {
+            methods: Vec<String>,
+        }
+        impl Backend for VisibleBatch {
+            fn call(&mut self, method: &str, _: Value) -> Result<Value, String> {
+                self.methods.push(method.into());
+                match method {
+                    "agent.batch.begin" => Ok(json!({"accepted":true})),
+                    "agent.batch.step" => Ok(json!({"done":false})),
+                    "agent.batch.finish" => Ok(json!([{"id":2},{"id":3}])),
+                    _ => Err(format!("unexpected {method}")),
+                }
+            }
+            fn has_ui(&self) -> bool {
+                true
+            }
+            fn describe(&self) -> String {
+                "visible test".into()
+            }
+        }
+        let mut backend = VisibleBatch { methods: Vec::new() };
+        let args = json!({"commands":[
+            {"command":"node.create","params":{"type":"frame"}},
+            {"command":"node.create","params":{"type":"text","text":"Hi"}}
+        ]});
+        let result = call_tool(&mut backend, "batch", &args);
+        assert!(!result.is_error, "{}", result.first_text());
+        assert_eq!(backend.methods, ["agent.batch.begin", "agent.batch.step", "agent.batch.step", "agent.batch.finish"]);
     }
 
     #[test]
