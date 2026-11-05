@@ -78,6 +78,26 @@ fn pressure_becomes_a_width_profile() {
 }
 
 #[test]
+fn brush_preview_uses_selected_geometry_during_the_drag() {
+    let mut s = Session::new();
+    s.execute("tool.set", &json!({"tool": "brush"})).unwrap();
+    s.execute("tool.drawStyle", &json!({"tool": "brush", "preset": "heist", "weight": 20})).unwrap();
+    let event = |kind, x: f64, p: f32| PointerEvent { pressure: Some(p), ..PointerEvent::at(kind, x, 40.0, 1.0) };
+    s.pointer(&event(PointerKind::Down, 0.0, 0.2)).unwrap();
+    assert!(s.live_brush_outline().is_none(), "a click without a path makes no layer");
+    s.pointer(&event(PointerKind::Move, 40.0, 0.2)).unwrap();
+    let first = s.live_brush_outline().expect("live filled brush shape");
+    s.pointer(&event(PointerKind::Move, 120.0, 0.8)).unwrap();
+    let last = s.live_brush_outline().expect("updated brush shape");
+    assert_ne!(first, last, "the preview grows during the drag");
+    s.pointer(&event(PointerKind::Up, 120.0, 0.8)).unwrap();
+    assert!(s.live_brush_outline().is_none(), "the committed layer replaces the preview");
+    let node = s.doc().unwrap().nodes().find(|n| matches!(n.kind, NodeKind::Vector { .. })).expect("committed brush layer");
+    assert_eq!(node.stroke.brush.as_ref().map(|b| b.preset.as_str()), Some("heist"));
+    assert!(node.stroke.profile().is_some(), "pen pressure is retained");
+}
+
+#[test]
 fn the_pencil_records_pressure_and_its_brush() {
     let mut s = Session::new();
     s.execute("tool.set", &json!({"tool": "pencil"})).unwrap();

@@ -17,6 +17,67 @@ use crate::i18n::{tr, trf, trn};
 use crate::render_worker::{Done, Job, RenderStyle, TextureUpdate, Worker};
 use crate::theme::{COMPONENT, Tokens, doc_c32, regular, semibold};
 
+#[derive(Clone)]
+struct LiveBrushTexture {
+    revision: u64,
+    zoom: f64,
+    pixels_per_point: f32,
+    bounds: lizard_geom::Rect,
+    texture: egui::TextureHandle,
+}
+
+fn paint_live_brush(app: &LizardApp, painter: &egui::Painter, revision: u64, zoom: f64) {
+    use lizard_geom::kurbo::Shape as _;
+    use tiny_skia::{FillRule, Paint as SkPaint, Pixmap, Transform};
+
+    let Some(style) = app.session.tool.draw_style(ToolId::Brush) else { return };
+    let color = doc_c32(painter.ctx(), style.color());
+    let pixels_per_point = painter.ctx().pixels_per_point();
+    let cache_id = egui::Id::new("lizard-live-brush-texture");
+    let cached = painter.ctx().data_mut(|data| data.get_temp::<LiveBrushTexture>(cache_id));
+    let current = cached.as_ref().is_some_and(|entry| {
+        entry.revision == revision && entry.zoom == zoom && entry.pixels_per_point == pixels_per_point
+    });
+    let entry = if current {
+        cached
+    } else {
+        let Some(mut outline) = app.session.live_brush_outline() else { return };
+        let bounds = outline.bounding_box();
+        if !bounds.width().is_finite() || !bounds.height().is_finite() || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+            return;
+        }
+        let intended_scale = zoom.max(0.001) * f64::from(pixels_per_point);
+        let scale = intended_scale.min(1536.0 / bounds.width()).min(1536.0 / bounds.height()).max(0.001);
+        let bounds = bounds.inflate(2.0 / scale, 2.0 / scale);
+        let width = (bounds.width() * scale).ceil() as u32;
+        let height = (bounds.height() * scale).ceil() as u32;
+        let Some(mut pixmap) = Pixmap::new(width, height) else { return };
+        outline.apply_affine(lizard_geom::Affine::scale(scale) * lizard_geom::Affine::translate((-bounds.x0, -bounds.y0)));
+        let Some(path) = lizard_render::ts_path(&outline) else { return };
+        let mut paint = SkPaint::default();
+        paint.set_color_rgba8(255, 255, 255, 255);
+        paint.anti_alias = true;
+        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &lizard_render::to_rgba8(&pixmap));
+        let texture = if let Some(mut entry) = cached {
+            entry.texture.set(image, egui::TextureOptions::LINEAR);
+            entry.texture
+        } else {
+            painter.ctx().load_texture("lizard-live-brush", image, egui::TextureOptions::LINEAR)
+        };
+        let entry = LiveBrushTexture { revision, zoom, pixels_per_point, bounds, texture };
+        painter.ctx().data_mut(|data| data.insert_temp(cache_id, entry.clone()));
+        Some(entry)
+    };
+    if let Some(entry) = entry {
+        let rect = Rect::from_min_max(
+            app.to_screen(entry.bounds.x0, entry.bounds.y0),
+            app.to_screen(entry.bounds.x1, entry.bounds.y1),
+        );
+        painter.image(entry.texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), color);
+    }
+}
+
 /// The GPU canvas. The ordinary render worker remains the fallback for unsupported scenes.
 pub trait CanvasGpuBackend {
     /// `Some` advances visible animated fills; `None` uses their static first frame.
@@ -2663,7 +2724,9 @@ fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId
     // Pen path.
     if !ov.pen.is_empty() {
         let pts: Vec<Pos2> = ov.pen.iter().map(|[x, y]| app.to_screen(*x, *y)).collect();
-        if matches!(app.session.tool.tool, ToolId::Pencil | ToolId::Brush) {
+        if app.session.tool.tool == ToolId::Brush {
+            paint_live_brush(app, painter, ds.revision, zoom);
+        } else if app.session.tool.tool == ToolId::Pencil {
             // The stroke it will make, in its colour and weight (at least a point when zoomed out).
             let style = app.session.tool.draw_style(app.session.tool.tool);
             let color = style.map_or(lizard_color::Color::BLACK, |s| s.color());

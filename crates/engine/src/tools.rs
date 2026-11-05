@@ -609,6 +609,17 @@ pub(crate) fn pressure_profile(points: &[Point], pressure: &[Option<f32>]) -> Op
     Some(profile.collect())
 }
 
+fn fitted_pencil_path(points: &[Point]) -> Option<lizard_geom::BezPath> {
+    if points.len() < 2 {
+        return None;
+    }
+    let mut poly = lizard_geom::BezPath::new();
+    for (index, point) in points.iter().enumerate() {
+        if index == 0 { poly.move_to(*point) } else { poly.line_to(*point) }
+    }
+    Some(lizard_geom::kurbo::simplify::simplify_bezpath(poly.iter(), 0.75, &Default::default()))
+}
+
 /// A frame or section drawn around layers takes those of its siblings that lie fully inside it
 /// (visible and unlocked ones, in their order; a frame never takes a section). Not in auto layout,
 /// where the new frame is one more item of the flow.
@@ -2494,20 +2505,24 @@ impl Session {
         Ok(())
     }
 
+    /// The filled shape that the active Brush gesture will commit, including pen pressure.
+    /// It uses the same fitted path and brush geometry as `pencil_finish`.
+    pub fn live_brush_outline(&self) -> Option<lizard_geom::BezPath> {
+        if self.tool.tool != ToolId::Brush {
+            return None;
+        }
+        let Gesture::Pencil { points, pressure } = &self.tool.gesture else { return None };
+        let fitted = fitted_pencil_path(points)?;
+        let style = self.tool.draw_style(ToolId::Brush)?;
+        let brush = style.brush();
+        let weight = style.weight(ToolId::Brush);
+        let profile = pressure_profile(points, pressure).map(|points| WidthProfile::new(points.into_iter().map(|[t, scale]| (t, scale))));
+        let props = StrokeProps { weight, align: StrokeAlign::Center, brush: Some(brush.clone()), width_profile: profile, ..Default::default() };
+        lizard_pathops::brush::outline(&fitted, weight, &props, &brush)
+    }
+
     fn pencil_finish(&mut self, points: &[Point], pressure: &[Option<f32>]) -> Result<()> {
-        if points.len() < 2 {
-            return Ok(());
-        }
-        // Smooth: fit a curve through the samples.
-        let mut poly = lizard_geom::BezPath::new();
-        for (k, p) in points.iter().enumerate() {
-            if k == 0 {
-                poly.move_to(*p);
-            } else {
-                poly.line_to(*p);
-            }
-        }
-        let fitted = lizard_geom::kurbo::simplify::simplify_bezpath(poly.iter(), 0.75, &Default::default());
+        let Some(fitted) = fitted_pencil_path(points) else { return Ok(()) };
         let d = fitted.to_svg();
         let page = self.page()?;
         let parent = frame_at(self.doc()?, page, points.first().copied().unwrap_or_default(), &[]).unwrap_or(page);
