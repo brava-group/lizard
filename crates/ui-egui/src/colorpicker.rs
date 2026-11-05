@@ -6,6 +6,7 @@ use lizard_color::{
     Color, ColorStop, Gradient, GradientKind, Hsb, ImageFilters, ImageScaleMode, Paint, PaintKind, PatternAlign, PatternPaint, PatternTile,
 };
 use lizard_doc::{NodeId, NodeKind};
+use lizard_engine::ToolId;
 use serde_json::json;
 
 use crate::LizardApp;
@@ -50,6 +51,7 @@ pub(crate) fn open_style_library(app: &mut LizardApp, ctx: &egui::Context, ids: 
 fn eyedrop_params(target: &PickerTarget, stop: Option<usize>) -> serde_json::Value {
     use lizard_engine::selection_colors::PaintTarget;
     let targets = match target {
+        PickerTarget::DrawingTool { tool } => return json!({"drawingTool": tool.id()}),
         PickerTarget::Paint { fills, index, ids } => {
             ids.iter().map(|id| PaintTarget { id: *id, fills: *fills, index: *index, range: None }).collect()
         }
@@ -90,6 +92,8 @@ mod shader_tab;
 #[derive(Clone, Debug, PartialEq)]
 pub enum PickerTarget {
     PageBackground,
+    /// Colour used by the next stroke of the active drawing tool.
+    DrawingTool { tool: ToolId },
     /// The shared Color libraries browser opened from a Fill or Stroke style control.
     ColorLibraryStyle {
         fills: bool,
@@ -172,6 +176,12 @@ pub fn range_fills(doc: &lizard_doc::Document, id: NodeId, start: usize) -> Opti
 fn current_paint(app: &LizardApp, target: &PickerTarget) -> Option<Paint> {
     let doc = app.session.doc().ok()?;
     match target {
+        PickerTarget::DrawingTool { tool } => {
+            let color = app.session.tool.draw_style(*tool)?.color();
+            let mut paint = Paint::solid(color.with_alpha(1.0));
+            paint.opacity = color.a;
+            Some(paint)
+        }
         PickerTarget::SelectionColor { targets, selection, document } => {
             let ds = app.session.ds().ok()?;
             if ds.uid != *document || ds.selection != *selection {
@@ -261,6 +271,10 @@ fn write(app: &mut LizardApp, target: &PickerTarget, paint: &Paint, live: bool) 
         let _ = app.session.begin_interaction("Color");
     }
     let r = match target {
+        PickerTarget::DrawingTool { tool } => {
+            let color = paint.solid_color().unwrap_or(Color::BLACK).with_alpha(paint.opacity);
+            app.session.execute("tool.drawStyle", &json!({"tool": tool.id(), "color": color.to_css_hex()}))
+        }
         PickerTarget::SelectionColor { targets, .. } => app.session.execute("selection.setPaint", &json!({"targets": targets, "paint": paint})),
         PickerTarget::PageBackground => {
             let c = paint.solid_color().unwrap_or(Color::DEFAULT_PAGE);
@@ -545,6 +559,9 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
 /// Keep a style's colour picker beside its editor. Other targets retain their usual position.
 fn initial_position(app: &LizardApp, ctx: &egui::Context, target: &PickerTarget) -> Pos2 {
     let beside = match target {
+        PickerTarget::DrawingTool { .. } => ctx
+            .memory(|memory| memory.area_rect(Id::new("drawing_toolbar")))
+            .map(|rect| pos2(rect.left(), (rect.top() - 460.0).max(8.0))),
         PickerTarget::Style { .. } => {
             ctx.memory(|memory| memory.area_rect(Id::new("color_style_editor_area"))).map(|rect| pos2(rect.left() - 248.0, rect.top()))
         }
@@ -575,6 +592,7 @@ pub fn show(app: &mut LizardApp, ctx: &egui::Context) {
     // A layer's picker belongs to the selection it was opened for: once that changes, close it
     // rather than keep editing layers that are no longer selected.
     let stale = match &target {
+        PickerTarget::DrawingTool { tool } => app.session.tool.tool != *tool,
         PickerTarget::Paint { ids, .. } | PickerTarget::Effect { ids, .. } | PickerTarget::ColorLibraryStyle { ids, .. } => {
             *ids != app.session.selection()
         }

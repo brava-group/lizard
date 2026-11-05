@@ -2663,9 +2663,11 @@ fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId
     // Pen path.
     if !ov.pen.is_empty() {
         let pts: Vec<Pos2> = ov.pen.iter().map(|[x, y]| app.to_screen(*x, *y)).collect();
-        if app.session.tool.tool == ToolId::Pencil {
+        if matches!(app.session.tool.tool, ToolId::Pencil | ToolId::Brush) {
             // The stroke it will make, in its colour and weight (at least a point when zoomed out).
-            let (color, weight) = lizard_engine::tools::PENCIL_STROKE;
+            let style = app.session.tool.draw_style(app.session.tool.tool);
+            let color = style.map_or(lizard_color::Color::BLACK, |s| s.color());
+            let weight = style.map_or(2.0, |s| s.weight(app.session.tool.tool));
             painter.add(Shape::line(pts, stroke(doc_c32(painter.ctx(), color), ((weight * zoom) as f32).max(1.0))));
         } else {
             for [x0, y0, x1, y1] in &ov.pen_handles {

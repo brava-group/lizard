@@ -33,6 +33,7 @@ pub enum ToolId {
     Polygon,
     Star,
     Pen,
+    Brush,
     Pencil,
     Text,
     Comment,
@@ -41,7 +42,7 @@ pub enum ToolId {
 }
 
 impl ToolId {
-    pub const ALL: [ToolId; 18] = [
+    pub const ALL: [ToolId; 19] = [
         ToolId::Move,
         ToolId::Scale,
         ToolId::Hand,
@@ -55,6 +56,7 @@ impl ToolId {
         ToolId::Polygon,
         ToolId::Star,
         ToolId::Pen,
+        ToolId::Brush,
         ToolId::Pencil,
         ToolId::Text,
         ToolId::Comment,
@@ -76,6 +78,7 @@ impl ToolId {
             ToolId::Polygon => "polygon",
             ToolId::Star => "star",
             ToolId::Pen => "pen",
+            ToolId::Brush => "brush",
             ToolId::Pencil => "pencil",
             ToolId::Text => "text",
             ToolId::Comment => "comment",
@@ -101,6 +104,7 @@ impl ToolId {
             ToolId::Polygon => "Polygon",
             ToolId::Star => "Star",
             ToolId::Pen => "Pen",
+            ToolId::Brush => "Brush",
             ToolId::Pencil => "Pencil",
             ToolId::Text => "Text",
             ToolId::Comment => "Comment",
@@ -212,6 +216,7 @@ pub enum Cursor {
     Pointer,
     Eyedropper,
     Comment,
+    Brush,
     Pencil,
     PaintBucket,
     PaintBucketAdd,
@@ -246,6 +251,7 @@ impl ToolId {
         match self {
             ToolId::Hand => Cursor::Grab,
             ToolId::Pen => Cursor::Pen(PenCursor::New),
+            ToolId::Brush => Cursor::Brush,
             ToolId::Pencil => Cursor::Pencil,
             ToolId::ShapeBuilder => Cursor::PaintBucket,
             ToolId::Comment => Cursor::Comment,
@@ -449,6 +455,67 @@ pub struct PenPath {
     pub join: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DrawLineStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+impl DrawLineStyle {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::Dashed => "dashed",
+            Self::Dotted => "dotted",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "solid" => Some(Self::Solid),
+            "dashed" => Some(Self::Dashed),
+            "dotted" => Some(Self::Dotted),
+            _ => None,
+        }
+    }
+
+    pub fn dashes(self, weight: f64) -> Vec<f64> {
+        match self {
+            Self::Solid => Vec::new(),
+            Self::Dashed => vec![weight * 3.0, weight * 2.0],
+            Self::Dotted => vec![0.1, weight * 1.5],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DrawStyle {
+    pub color: Option<lizard_color::Color>,
+    pub weight: Option<f64>,
+    pub brush: Option<lizard_doc::Brush>,
+    pub line_style: DrawLineStyle,
+}
+
+impl DrawStyle {
+    pub fn color(&self) -> lizard_color::Color {
+        self.color.unwrap_or(lizard_color::Color::BLACK)
+    }
+
+    pub fn weight(&self, tool: ToolId) -> f64 {
+        self.weight.unwrap_or(match tool {
+            ToolId::Brush => 16.0,
+            ToolId::Pen => 1.0,
+            _ => 2.0,
+        })
+    }
+
+    pub fn brush(&self) -> lizard_doc::Brush {
+        self.brush.clone().unwrap_or_else(|| lizard_doc::Brush::new("bristle"))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ToolState {
     pub tool: ToolId,
@@ -479,11 +546,35 @@ pub struct ToolState {
     pub labels: Vec<(NodeId, [Point; 4])>,
     /// The brush the Pencil draws with (`tool.pencilBrush`; `None`: a plain stroke).
     pub pencil_brush: Option<lizard_doc::Brush>,
+    pub pen_style: DrawStyle,
+    pub brush_style: DrawStyle,
+    pub pencil_style: DrawStyle,
+}
+
+impl ToolState {
+    pub fn draw_style(&self, tool: ToolId) -> Option<&DrawStyle> {
+        match tool {
+            ToolId::Pen => Some(&self.pen_style),
+            ToolId::Brush => Some(&self.brush_style),
+            ToolId::Pencil => Some(&self.pencil_style),
+            _ => None,
+        }
+    }
+
+    pub fn draw_style_mut(&mut self, tool: ToolId) -> Option<&mut DrawStyle> {
+        match tool {
+            ToolId::Pen => Some(&mut self.pen_style),
+            ToolId::Brush => Some(&mut self.brush_style),
+            ToolId::Pencil => Some(&mut self.pencil_style),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum EyedropTarget {
     PageBackground { document: u64 },
+    DrawingTool { document: u64, tool: ToolId },
     Paint { document: u64, selection: Vec<NodeId>, targets: Vec<PaintTarget>, stop: Option<usize> },
 }
 
@@ -1033,7 +1124,7 @@ impl Session {
                 }
                 ToolId::Text => self.text_down(ev),
                 ToolId::Pen => self.pen_down(ev),
-                ToolId::Pencil => {
+                ToolId::Brush | ToolId::Pencil => {
                     self.tool.gesture = Gesture::Pencil { points: vec![ev.p()], pressure: vec![ev.pressure] };
                     Ok(())
                 }
@@ -2187,13 +2278,16 @@ impl Session {
         );
         let sel = ds.selection.clone();
         let destination = self.tool.eyedrop_target.clone();
-        match destination {
-            Some(EyedropTarget::PageBackground { document: owner }) if document == owner => {
+        match &destination {
+            Some(EyedropTarget::DrawingTool { document: owner, tool }) if document == *owner => {
+                self.execute("tool.drawStyle", &json!({"tool": tool.id(), "color": c.to_css_hex()}))?;
+            }
+            Some(EyedropTarget::PageBackground { document: owner }) if document == *owner => {
                 self.execute("page.setBackground", &json!({"color": c.to_css_hex()}))?;
             }
-            Some(EyedropTarget::Paint { document: owner, selection, targets, stop }) if document == owner && sel == selection => {
+            Some(EyedropTarget::Paint { document: owner, selection, targets, stop }) if document == *owner && sel.as_slice() == selection.as_slice() => {
                 if let Some(mut paint) = targets.first().and_then(|target| target.paint(&doc)) {
-                    if let Some(index) = stop {
+                    if let Some(index) = *stop {
                         if let lizard_color::PaintKind::Gradient(gradient) = &mut paint.kind
                             && let Some(color_stop) = gradient.stops.get_mut(index)
                         {
@@ -2215,7 +2309,11 @@ impl Session {
         self.recent_colors.insert(0, c);
         self.recent_colors.truncate(16);
         self.message = Some(format!("Picked #{}", c.to_hex()));
-        self.set_tool(ToolId::Move);
+        let return_tool = match destination {
+            Some(EyedropTarget::DrawingTool { document: owner, tool }) if document == owner => tool,
+            _ => ToolId::Move,
+        };
+        self.set_tool(return_tool);
         Ok(())
     }
 
@@ -2289,6 +2387,7 @@ impl Session {
         if pen.id.is_none() {
             self.begin_interaction("Pen")?;
         }
+        let style = self.tool.pen_style.clone();
         let ds = self.ds_mut()?;
         let doc = ds.doc_mut();
         let pw = doc.world_transform(parent);
@@ -2334,8 +2433,9 @@ impl Session {
                 let id = doc.alloc_id();
                 let mut n = Node::new(id, NodeKind::Vector { network: VectorNetwork::default() }, "Vector", 0.0, 0.0);
                 n.fills.clear();
-                n.strokes = vec![lizard_color::Paint::solid(lizard_color::Color::BLACK)];
+                n.strokes = vec![lizard_color::Paint::solid(style.color())];
                 n.stroke.align = StrokeAlign::Center;
+                n.stroke.weight = style.weight(ToolId::Pen);
                 doc.insert(n, parent, None)?;
                 id
             }
@@ -2415,14 +2515,20 @@ impl Session {
         let mut local = fitted.clone();
         local.apply_affine(pw.inverse());
         let _ = d;
-        let (color, weight) = PENCIL_STROKE;
-        let mut props = json!({"fills": [], "strokes": [color.to_css_hex()], "strokeWeight": weight, "strokeCap": "round", "strokeJoin": "round", "strokeAlign": "center"});
+        let tool = self.tool.tool;
+        let style = self.tool.draw_style(tool).cloned().unwrap_or_default();
+        let weight = style.weight(tool);
+        let mut props = json!({"fills": [], "strokes": [style.color().to_css_hex()], "strokeWeight": weight, "strokeCap": "round", "strokeJoin": "round", "strokeAlign": "center"});
         // Pen pressure becomes the stroke's width profile (brushes follow it too).
         if let Some(points) = pressure_profile(points, pressure) {
             props["widthProfile"] = json!(points);
         }
-        if let Some(b) = &self.tool.pencil_brush {
+        if tool == ToolId::Brush {
+            props["brush"] = json!(style.brush());
+        } else if let Some(b) = &self.tool.pencil_brush {
             props["brush"] = serde_json::to_value(b).unwrap_or_default();
+        } else if style.line_style != DrawLineStyle::Solid {
+            props["dashes"] = json!(style.line_style.dashes(weight));
         }
         self.execute(
             "node.create",

@@ -12,7 +12,7 @@ use crate::LizardApp;
 use crate::a11y::{self, Nav, Region, Tip};
 use crate::i18n::{tr, tr_noop, trf};
 use crate::icons::{self, Icon};
-use crate::primitives::{Button, ButtonVariant, ControlWidth, Menu, MenuItem, Surface};
+use crate::primitives::{Button, ButtonVariant, ControlWidth, Menu, MenuItem, NumberField, Slider, Surface};
 use crate::theme::{Tokens, regular};
 
 struct Group {
@@ -48,7 +48,7 @@ const GROUPS: &[Group] = &[
     Group {
         key: "pen",
         name: tr_noop("Drawing tools"),
-        tools: &[(ToolId::Pen, Icon::Pen), (ToolId::Pencil, Icon::Pencil), (ToolId::ShapeBuilder, Icon::ShapeBuilder)],
+        tools: &[(ToolId::Pen, Icon::Pen), (ToolId::Brush, Icon::Pencil), (ToolId::Pencil, Icon::Pencil), (ToolId::ShapeBuilder, Icon::ShapeBuilder)],
     },
     Group { key: "text", name: tr_noop("Text"), tools: &[(ToolId::Text, Icon::Text)] },
     Group { key: "comment", name: tr_noop("Comment"), tools: &[(ToolId::Comment, Icon::Comment)] },
@@ -112,6 +112,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         return;
     }
     main_toolbar(app, ui, canvas, &t);
+    if matches!(app.session.tool.tool, ToolId::Pen | ToolId::Brush | ToolId::Pencil) {
+        drawing_toolbar(app, ui);
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.pending_image_vectorize.is_some() {
         crate::image_vectorize::toolbar(app, ui);
@@ -129,7 +133,7 @@ pub(crate) fn main_width() -> f32 {
 }
 
 fn drawing_mode(app: &LizardApp) -> bool {
-    app.ui.right_tab == crate::RightTab::Design && (app.ui.draw_mode || app.session.tool.tool == ToolId::Pencil)
+    app.ui.right_tab == crate::RightTab::Design && (app.ui.draw_mode || matches!(app.session.tool.tool, ToolId::Brush | ToolId::Pencil))
 }
 
 pub(crate) fn width_for(app: &LizardApp) -> f32 {
@@ -177,8 +181,8 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
         let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(DRAW_NIB_CELL, rect.height()));
         let active = match index {
             0 => app.session.tool.tool == ToolId::Pen,
-            1 => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_some(),
-            _ => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_none(),
+            1 => app.session.tool.tool == ToolId::Brush,
+            _ => app.session.tool.tool == ToolId::Pencil,
         };
         let sense = if progress >= 0.95 { Sense::click() } else { Sense::hover() };
         let response = ui.interact(cell, ui.id().with(("draw_art", index)), sense).lizard_tooltip(label);
@@ -211,9 +215,9 @@ fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x:
             app.ui.draw_mode = true;
             if index == 0 {
                 app.run("tool.set", json!({"tool":"pen"}));
+            } else if index == 1 {
+                app.run("tool.set", json!({"tool":"brush"}));
             } else {
-                let brush = if index == 1 { json!({"preset":"bristle"}) } else { json!({"preset":null}) };
-                app.run("tool.pencilBrush", brush);
                 app.run("tool.set", json!({"tool":"pencil"}));
             }
         }
@@ -398,7 +402,7 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
                 1 => {
                     app.ui.right_tab = crate::RightTab::Design;
                     app.ui.draw_mode = false;
-                    if app.session.tool.tool == ToolId::Pencil {
+                    if matches!(app.session.tool.tool, ToolId::Brush | ToolId::Pencil) {
                         app.run("tool.set", json!({"tool": "move"}));
                     }
                 }
@@ -527,6 +531,99 @@ fn edit_toolbar(app: &mut LizardApp, ui: &mut Ui, current: VTool) {
                 vector_edit_separator(ui, &t);
                 if Button::icon(Icon::Close, tr("Done editing")).width(ControlWidth::Fixed(24.0)).show(ui).lizard_tooltip("Esc").clicked() {
                     app.run("vector.edit.end", json!({}));
+                }
+            });
+        });
+    });
+}
+
+/// Settings for the next stroke, kept separately for Pen, Brush and Pencil.
+fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
+    use crate::widgets::{FieldEdit, Lead};
+    use lizard_engine::tools::DrawLineStyle;
+
+    let tool = app.session.tool.tool;
+    let Some(style) = app.session.tool.draw_style(tool).cloned() else { return };
+    let color = style.color();
+    let weight = style.weight(tool);
+    let preset = style.brush().preset;
+    let t = Tokens::get(ui.ctx());
+    let width = if tool == ToolId::Pen { 390.0 } else { 560.0 };
+    let canvas = app.canvas.rect;
+    let main = pill_rect(canvas, width_for(app));
+    let top_left = pos2(canvas.center().x - width / 2.0, main.min.y - 48.0);
+    Menu::area(egui::Id::new("drawing_toolbar"), top_left).show(ui.ctx(), |ui| {
+        let bounds = Rect::from_min_size(top_left, vec2(width, 40.0));
+        ui.interact(bounds, ui.id().with("drawing_toolbar_background"), Sense::CLICK | Sense::DRAG);
+        a11y::area(&mut app.ui.nav, Region::Toolbar, bounds);
+        a11y::container_bounds(ui, bounds);
+        Surface::palette().show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.horizontal(|ui| {
+                let (swatch, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+                crate::widgets::paint_swatch(ui.painter(), swatch, &Paint::solid(color));
+                a11y::button(&response, tr("Stroke color"));
+                if response.clicked() {
+                    app.ui.picker = Some(crate::colorpicker::PickerTarget::DrawingTool { tool });
+                }
+
+                let field = NumberField::new(ui.id().with(("draw_width", tool.id())), Lead::None, Some(weight), "px")
+                    .step(1.0)
+                    .show(ui, ControlWidth::Fixed(72.0));
+                if let Some(edit) = field.edit.and_then(|edit| edit.settled()) {
+                    let next = match edit { FieldEdit::Set(value) | FieldEdit::Scrub(value, _) => value };
+                    app.run("tool.drawStyle", json!({"tool": tool.id(), "weight": next.clamp(0.1, 500.0)}));
+                }
+                let slider = Slider::new(ui.id().with(("draw_slider", tool.id())), tr("Stroke width"))
+                    .range(0.1, if tool == ToolId::Brush { 100.0 } else { 50.0 })
+                    .step(0.1)
+                    .value(Some(weight))
+                    .text(false)
+                    .width(ControlWidth::Fixed(126.0))
+                    .show(ui);
+                if let Some((next, _)) = slider.change {
+                    app.run("tool.drawStyle", json!({"tool": tool.id(), "weight": next}));
+                }
+
+                if tool == ToolId::Brush {
+                    vector_edit_separator(ui, &t);
+                    let label = lizard_pathops::brush::preset(&preset).map_or(tr("Brush"), |p| tr(p.label));
+                    let trigger = Button::new(label).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(195.0)).show(ui);
+                    Menu::popup(&trigger).width(230.0).align(egui::RectAlign::TOP_START).show(|ui| {
+                        Menu::heading(ui, tr("Brushes"));
+                        for brush in lizard_pathops::brush::PRESETS {
+                            let art = |painter: &egui::Painter, rect: Rect, color: Color32| {
+                                let preview = Rect::from_center_size(rect.center(), vec2(62.0, 8.0));
+                                crate::right::brush_art(painter, preview, brush.id, color);
+                            };
+                            if MenuItem::new(tr(brush.label)).checked(preset == brush.id).show_with(ui, 70.0, art).clicked() {
+                                app.run("tool.drawStyle", json!({"tool": "brush", "preset": brush.id}));
+                                ui.close();
+                            }
+                        }
+                    });
+                } else if tool == ToolId::Pencil {
+                    vector_edit_separator(ui, &t);
+                    let label = match style.line_style {
+                        DrawLineStyle::Solid => tr("Solid"),
+                        DrawLineStyle::Dashed => tr("Dashed"),
+                        DrawLineStyle::Dotted => tr("Dotted"),
+                    };
+                    let trigger = Button::new(label).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(155.0)).show(ui);
+                    Menu::popup(&trigger).width(155.0).align(egui::RectAlign::TOP_START).show(|ui| {
+                        for (id, label) in [("solid", tr("Solid")), ("dashed", tr("Dashed")), ("dotted", tr("Dotted"))] {
+                            if MenuItem::new(label).checked(style.line_style.id() == id).show(ui).clicked() {
+                                app.run("tool.drawStyle", json!({"tool": "pencil", "lineStyle": id}));
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                if tool == ToolId::Pen {
+                    vector_edit_separator(ui, &t);
+                    if Button::icon(Icon::Close, tr("Done drawing")).width(ControlWidth::Fixed(24.0)).show(ui).clicked() {
+                        app.run("tool.set", json!({"tool": "move"}));
+                    }
                 }
             });
         });

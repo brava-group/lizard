@@ -107,3 +107,46 @@ fn the_pencil_records_pressure_and_its_brush() {
     let last = doc.nodes().filter(|n| matches!(n.kind, NodeKind::Vector { .. })).max_by_key(|n| n.id).unwrap();
     assert!(last.stroke.profile().is_none() && last.stroke.brush.is_none());
 }
+
+#[test]
+fn drawing_tools_keep_independent_stroke_styles() {
+    let mut s = Session::new();
+    assert!(s.execute("tool.drawStyle", &json!({"tool": "brush", "color": "#FF0000", "preset": "missing"})).is_err());
+    assert_eq!(s.tool.brush_style.color().to_hex(), "000000", "an invalid style does not change the tool");
+
+    for (tool, color, weight, extra) in [
+        ("brush", "#FF0000", 19.0, json!({"preset": "ink"})),
+        ("pencil", "#00CC66", 3.0, json!({"lineStyle": "dashed"})),
+    ] {
+        s.execute("tool.set", &json!({"tool": tool})).unwrap();
+        let mut style = json!({"tool": tool, "color": color, "weight": weight});
+        style.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("tool.drawStyle", &style).unwrap();
+        for (kind, x, y) in [(PointerKind::Down, 10.0, 30.0), (PointerKind::Move, 70.0, 60.0), (PointerKind::Up, 120.0, 30.0)] {
+            s.pointer(&PointerEvent::at(kind, x, y, 1.0)).unwrap();
+        }
+    }
+
+    let doc = s.doc().unwrap();
+    let mut vectors = doc.nodes().filter(|n| matches!(n.kind, NodeKind::Vector { .. }));
+    let brush = vectors.next().expect("brush stroke");
+    let pencil = vectors.next().expect("pencil stroke");
+    assert_eq!(brush.stroke.brush.as_ref().map(|b| b.preset.as_str()), Some("ink"));
+    assert_eq!(brush.stroke.weight, 19.0);
+    assert_eq!(brush.strokes.first().and_then(|p| p.solid_color()).map(|c| c.to_hex()).as_deref(), Some("FF0000"));
+    assert!(pencil.stroke.brush.is_none());
+    assert_eq!(pencil.stroke.weight, 3.0);
+    assert!(!pencil.stroke.dashes.is_empty());
+    assert_eq!(pencil.strokes.first().and_then(|p| p.solid_color()).map(|c| c.to_hex()).as_deref(), Some("00CC66"));
+}
+
+#[test]
+fn eyedropper_updates_the_brush_color_and_returns_to_brush() {
+    let mut s = Session::new();
+    s.execute("node.create", &json!({"type": "rectangle", "x": 0, "y": 0, "width": 100, "height": 100, "props": {"fills": ["#3366CC"]}})).unwrap();
+    s.execute("tool.set", &json!({"tool": "brush"})).unwrap();
+    s.execute("edit.pickColor", &json!({"drawingTool": "brush"})).unwrap();
+    s.pointer(&PointerEvent::at(PointerKind::Down, 50.0, 50.0, 1.0)).unwrap();
+    assert_eq!(s.tool.tool.id(), "brush");
+    assert_eq!(s.tool.brush_style.color().to_hex(), "3366CC");
+}

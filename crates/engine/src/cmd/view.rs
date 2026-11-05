@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
 use crate::params::*;
-use crate::tools::{EyedropTarget, ToolId, selection_bounds};
+use crate::tools::{DrawLineStyle, EyedropTarget, ToolId, selection_bounds};
 use crate::{EngineError, Result, Session, ViewState, bad, spec};
 
 fn view(s: &mut Session) -> Result<&mut ViewState> {
@@ -483,6 +483,46 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         spec!(
+            "tool.drawStyle",
+            "Drawing tool style",
+            "{tool?: pen|brush|pencil, color?: CSS colour, weight?: 0.1..500, preset?: brush preset, lineStyle?: solid|dashed|dotted} (settings for the next drawn stroke; omit properties to read)",
+            false,
+            |s, p| {
+                let tool = match string(p, "tool") {
+                    Some(id) => ToolId::from_id(&id).ok_or_else(|| bad("tool.drawStyle", format!("unknown tool `{id}`")))?,
+                    None => s.tool.tool,
+                };
+                let mut style = s.tool.draw_style(tool).cloned().ok_or_else(|| bad("tool.drawStyle", "choose pen, brush or pencil"))?;
+                if let Some(value) = p.get("color") {
+                    style.color = Some(color_of(value).ok_or_else(|| bad("tool.drawStyle", "invalid colour"))?);
+                }
+                if p.get("weight").is_some() {
+                    let weight = req_num("tool.drawStyle", p, "weight")?;
+                    if !(0.1..=500.0).contains(&weight) {
+                        return Err(bad("tool.drawStyle", "weight must be between 0.1 and 500"));
+                    }
+                    style.weight = Some(weight);
+                }
+                if let Some(value) = p.get("preset") {
+                    if tool != ToolId::Brush {
+                        return Err(bad("tool.drawStyle", "presets belong to the brush tool"));
+                    }
+                    style.brush = super::props::brush_of(value).ok_or_else(|| bad("tool.drawStyle", super::props::BRUSH_HELP))?;
+                }
+                if let Some(id) = string(p, "lineStyle") {
+                    if tool != ToolId::Pencil {
+                        return Err(bad("tool.drawStyle", "line style belongs to the pencil tool"));
+                    }
+                    style.line_style = DrawLineStyle::from_id(&id).ok_or_else(|| bad("tool.drawStyle", "lineStyle: solid, dashed or dotted"))?;
+                }
+                let response = json!({"tool": tool.id(), "color": style.color().to_css_hex(), "weight": style.weight(tool), "preset": (tool == ToolId::Brush).then(|| style.brush().preset), "lineStyle": style.line_style.id()});
+                if let Some(slot) = s.tool.draw_style_mut(tool) {
+                    *slot = style;
+                }
+                Ok(response)
+            }
+        ),
+        spec!(
             "tool.pencilBrush",
             "Pencil brush",
             "{preset? (taper|ink|ribbon|bristle|dots|stars|confetti|leaves | null: plain), spacing?, sizeJitter?, rotationJitter?, scatter?, seed?} (the brush new Pencil strokes get; omit `preset` to read it)",
@@ -524,13 +564,18 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("tool.polygon", "Polygon", "{}", false, |s, _| tool(s, ToolId::Polygon)),
         spec!("tool.star", "Star", "{}", false, |s, _| tool(s, ToolId::Star)),
         spec!("tool.pen", "Pen", "{}", false, |s, _| tool(s, ToolId::Pen)),
+        spec!("tool.brush", "Brush", "{}", false, |s, _| tool(s, ToolId::Brush)),
         spec!("tool.pencil", "Pencil", "{}", false, |s, _| tool(s, ToolId::Pencil)),
         spec!("tool.text", "Text", "{}", false, |s, _| tool(s, ToolId::Text)),
         spec!("tool.comment", "Comment", "{}", false, |s, _| tool(s, ToolId::Comment)),
         spec!("tool.shapeBuilder", "Shape builder", "{}", false, |s, _| tool(s, ToolId::ShapeBuilder)),
-        spec!("edit.pickColor", "Pick color", "{targets?, stop?, pageBackground?}", false, |s, p| {
+        spec!("edit.pickColor", "Pick color", "{targets?, stop?, pageBackground?, drawingTool?: pen|brush|pencil}", false, |s, p| {
             let owner = s.ds()?.uid;
-            let destination = if boolean(p, "pageBackground") == Some(true) {
+            let destination = if let Some(id) = string(p, "drawingTool") {
+                let tool = ToolId::from_id(&id).filter(|tool| s.tool.draw_style(*tool).is_some())
+                    .ok_or_else(|| bad("edit.pickColor", "drawingTool: pen, brush or pencil"))?;
+                Some(EyedropTarget::DrawingTool { document: owner, tool })
+            } else if boolean(p, "pageBackground") == Some(true) {
                 Some(EyedropTarget::PageBackground { document: owner })
             } else if let Some(targets) = parse::<Vec<crate::selection_colors::PaintTarget>>("edit.pickColor", p, "targets")? {
                 let doc = s.doc()?;

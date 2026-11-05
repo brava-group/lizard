@@ -128,12 +128,12 @@ fn draw_mode_illustrations_select_pen_brush_and_plain_pencil() {
 
     let brush = mode_button(&mut u, "Brush");
     click(&mut u, brush);
-    assert_eq!(u.app.session.tool.tool, ToolId::Pencil);
-    assert!(u.app.session.tool.pencil_brush.is_some());
+    assert_eq!(u.app.session.tool.tool, ToolId::Brush);
+    assert_eq!(u.app.session.tool.draw_style(ToolId::Brush).map(|s| s.brush().preset), Some("bristle".to_string()));
 
     let pencil = mode_button(&mut u, "Pencil");
     click(&mut u, pencil);
-    assert!(u.app.session.tool.pencil_brush.is_none());
+    assert_eq!(u.app.session.tool.tool, ToolId::Pencil);
 
     let pen = mode_button(&mut u, "Pen");
     click(&mut u, pen);
@@ -142,4 +142,13 @@ fn draw_mode_illustrations_select_pen_brush_and_plain_pencil() {
     let design = mode_button(&mut u, "Design");
     click(&mut u, design);
     assert!(!u.app.ui.draw_mode);
+}
+
+#[test]
+fn drawing_color_swatch_opens_the_lizard_picker_for_the_active_tool() {
+    let mut u = Ui::new(Session::new());
+    u.app.run("tool.set", json!({"tool": "brush"}));
+    let swatch = mode_button(&mut u, "Stroke color");
+    click(&mut u, swatch);
+    assert!(matches!(u.app.ui.picker, Some(crate::colorpicker::PickerTarget::DrawingTool { tool: ToolId::Brush })));
 }

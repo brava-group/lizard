@@ -270,7 +270,18 @@ pub(super) fn show_standalone_solid(ctx: &egui::Context, color: Color, anchor: P
 fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
     let pos =
         stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)));
-    let height = if stop.is_some() { HEIGHT - 40.0 } else { HEIGHT };
+    let solid_only = stop.is_some()
+        || matches!(
+            target,
+            PickerTarget::DrawingTool { .. }
+                | PickerTarget::Effect { .. }
+                | PickerTarget::StyleEffect { .. }
+                | PickerTarget::PageBackground
+                | PickerTarget::Variable { .. }
+                | PickerTarget::DraftVariable
+                | PickerTarget::PluginField { .. }
+        );
+    let height = if solid_only { HEIGHT - 40.0 } else { HEIGHT };
     let mut open = true;
     let mut close_now = false;
     crate::primitives::FloatingPanel::new(Id::new(if stop.is_some() { "color_stop_picker" } else { "color_picker" }), pos)
@@ -283,18 +294,10 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
             let dialog = Rect::from_min_size(header.min, vec2(WIDTH, height));
             ui.allocate_exact_size(vec2(WIDTH, height - 40.0), Sense::hover());
             let header_origin = dialog.min;
-            let origin = if stop.is_some() { dialog.min - vec2(0.0, 40.0) } else { dialog.min };
-            let paint_types_allowed = !matches!(
-                target,
-                PickerTarget::Effect { .. }
-                    | PickerTarget::StyleEffect { .. }
-                    | PickerTarget::PageBackground
-                    | PickerTarget::Variable { .. }
-                    | PickerTarget::DraftVariable
-                    | PickerTarget::PluginField { .. }
-            );
+            let origin = if solid_only { dialog.min - vec2(0.0, 40.0) } else { dialog.min };
+            let paint_types_allowed = !solid_only;
 
-            let controls = paint_header(ui, header_origin, 0, stop.is_none().then_some(0), stop.is_some());
+            let controls = paint_header(ui, header_origin, 0, (!solid_only).then_some(0), stop.is_some());
             if controls.tab == Some(1) {
                 library_tab::activate(ctx);
             }
@@ -307,7 +310,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
             }
 
             // 40 pt paint-type and colour-tool row, with the reference's 24 pt cells.
-            if stop.is_none() {
+            if !solid_only {
                 for (i, response) in controls.kinds {
                     if i == 5 && response.clicked() && paint_types_allowed {
                         if super::shader_tab::supports(target) {
