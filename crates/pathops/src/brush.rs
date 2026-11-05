@@ -179,20 +179,20 @@ fn styled_stretch(p: &mut BezPath, style: usize) {
 
 fn styled_scatter(p: &mut BezPath, style: usize) {
     use std::f64::consts::PI;
-    let points = match style { 1 | 4 => 5, 2 | 8 => 8, 3 | 6 => 4, 7 => 3, _ => 16 };
-    let inner = match style { 1 | 4 => 0.43, 2 | 8 => 0.68, 3 | 6 => 0.78, 7 => 0.3, _ => 1.0 };
+    let points = match style { 1 | 4 => 5, 2 | 8 => 8, 3 | 6 => 4, 7 => 3, 5 => 12, 9 => 10, _ => 16 };
+    let inner = match style { 1 => 0.43, 2 => 0.68, 3 => 0.78, 4 => 0.25, 6 => 0.35, 7 => 0.3, 8 => 0.4, _ => 1.0 };
     let n = if inner < 1.0 { points * 2 } else { points };
     for i in 0..n {
         let a = 2.0 * PI * i as f64 / n as f64;
         let radius = if inner < 1.0 && i % 2 == 1 { 0.5 * inner } else { 0.5 };
-        let point = (radius * a.cos(), radius * a.sin());
+        let point = (radius * a.cos(), radius * a.sin() * if style == 5 { 0.62 } else { 1.0 });
         if i == 0 { p.move_to(point) } else { p.line_to(point) }
     }
     p.close_path();
     if matches!(style, 0 | 5 | 9) {
         // A smaller second mark gives these stamps a distinct rhythm at low zoom.
-        let x = if style == 5 { 0.22 } else { -0.24 };
-        p.extend(kurbo::Shape::path_elements(&kurbo::Circle::new((x, 0.26), 0.12), 0.01));
+        let (x, y, size) = match style { 5 => (0.22, 0.24, 0.09), 9 => (0.27, -0.27, 0.14), _ => (-0.24, 0.26, 0.12) };
+        p.extend(kurbo::Shape::path_elements(&kurbo::Circle::new((x, y), size), 0.01));
     }
 }
 

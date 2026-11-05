@@ -18,6 +18,13 @@ fn reference_catalog_has_distinct_stretch_and_scatter_presets() {
         if (15..25).contains(&index) { assert_eq!(entry.kind, BrushKind::Scatter); }
     }
     assert!(preset("unknown").is_none());
+    let mut outlines = Vec::new();
+    for entry in &PRESETS[15..25] {
+        let b = brush(entry.id);
+        let drawing = outline(&line(120.0), 9.0, &props(9.0, &b), &b).unwrap();
+        assert!(!outlines.contains(&drawing), "duplicate scatter silhouette: {}", entry.id);
+        outlines.push(drawing);
+    }
 }
 
 fn line(len: f64) -> BezPath {
