@@ -145,11 +145,12 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
         if rect.is_positive() && rect.intersects(app.canvas.rect) {
             let elapsed = now.saturating_duration_since(shimmer.started).as_secs_f32();
             let fade = if shimmer.ongoing { 1.0 } else { (1.0 - elapsed / 2.0).clamp(0.0, 1.0) };
+            painter.with_clip_rect(app.canvas.rect).rect_filled(rect, CornerRadius::same(6), brand.gamma_multiply(0.20 * fade));
             painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, brand.gamma_multiply(0.65 * fade)), StrokeKind::Outside);
             if !reduce_motion {
                 let visible = rect.intersect(app.canvas.rect);
                 let clipped = painter.with_clip_rect(visible);
-                let band = visible.width().clamp(36.0, 180.0) * 0.4;
+                let band = visible.width().clamp(64.0, 240.0) * 0.7;
                 let progress = (elapsed / 1.1).fract();
                 let center = visible.left() - band + (visible.width() + 2.0 * band) * progress;
                 for strip in 0..9 {
