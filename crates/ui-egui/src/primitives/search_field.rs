@@ -88,10 +88,10 @@ impl<'a> SearchField<'a> {
                 .min_size(vec2(0.0, height)),
         );
         if show_clear {
-            let clear = Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), vec2(18.0, 18.0));
+            let clear = Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), vec2(22.0, 22.0));
             let action = ui.interact(clear, self.id.with("clear"), Sense::click()).lizard_tooltip(tr("Clear search"));
-            ui.painter().circle_stroke(clear.center(), 7.5, Stroke::new(1.0, t.icon_secondary));
-            icons::paint(ui.painter(), Rect::from_center_size(clear.center(), vec2(10.0, 10.0)), Icon::Close, t.icon_secondary);
+            ui.painter().circle_stroke(clear.center(), 5.5, Stroke::new(1.0, t.icon_secondary));
+            icons::paint(ui.painter(), Rect::from_center_size(clear.center(), vec2(7.0, 7.0)), Icon::Close, t.icon_secondary);
             if action.clicked() {
                 text.clear();
                 response.mark_changed();

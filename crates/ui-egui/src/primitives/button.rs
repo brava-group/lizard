@@ -5,7 +5,7 @@ use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, Str
 
 use super::{CONTROL_CHEVRON_SIZE, ControlWidth};
 use crate::a11y;
-use crate::icons::{self, HeaderIcon, Icon, LayoutIcon, VectorPointIcon};
+use crate::icons::{self, HeaderIcon, Icon, LayoutIcon, SettingsIcon, VectorPointIcon};
 use crate::theme::{ColorRole, Tokens, medium};
 use crate::widgets;
 
@@ -66,6 +66,7 @@ pub struct Button<'a> {
     size: ButtonSize,
     width: ControlWidth,
     leading: Option<Icon>,
+    settings_icon: Option<SettingsIcon>,
     header_icon: Option<HeaderIcon>,
     layout_icon: Option<LayoutIcon>,
     vector_point_icon: Option<VectorPointIcon>,
@@ -86,6 +87,7 @@ impl<'a> Button<'a> {
             size: ButtonSize::Regular,
             width: ControlWidth::Hug,
             leading: None,
+            settings_icon: None,
             header_icon: None,
             layout_icon: None,
             vector_point_icon: None,
@@ -159,6 +161,11 @@ impl<'a> Button<'a> {
         self
     }
 
+    pub fn leading_settings(mut self, value: SettingsIcon) -> Self {
+        self.settings_icon = Some(value);
+        self
+    }
+
     pub fn trailing(mut self, value: Icon) -> Self {
         self.trailing = Some(value);
         self
@@ -216,7 +223,12 @@ impl<'a> Button<'a> {
             return self.height();
         }
         let label = ui.painter().layout_no_wrap(self.label.to_owned(), medium(11.0), Color32::WHITE).size().x;
-        let leading = if self.leading.is_some() || self.header_icon.is_some() || self.layout_icon.is_some() || self.vector_point_icon.is_some() {
+        let leading = if self.leading.is_some()
+            || self.settings_icon.is_some()
+            || self.header_icon.is_some()
+            || self.layout_icon.is_some()
+            || self.vector_point_icon.is_some()
+        {
             18.0
         } else {
             0.0
@@ -259,7 +271,9 @@ impl<'a> Button<'a> {
         };
         if self.icon_only {
             let size = self.icon_size.unwrap_or(if self.size == ButtonSize::Large { 18.0 } else { 16.0 }).min(rect.width()).min(rect.height());
-            if let Some(icon) = self.header_icon {
+            if let Some(icon) = self.settings_icon {
+                icons::paint_settings_nav(ui.painter(), Rect::from_center_size(rect.center(), vec2(size, size)), icon, ink);
+            } else if let Some(icon) = self.header_icon {
                 icons::paint_header(ui.painter(), Rect::from_center_size(rect.center(), vec2(size, size)), icon, ink);
             } else if let Some(icon) = self.layout_icon {
                 icons::paint_layout(ui.painter(), Rect::from_center_size(rect.center(), vec2(size, size)), icon, ink);
@@ -275,7 +289,7 @@ impl<'a> Button<'a> {
         let trailing_at_end = select || self.trailing_at_end;
         let icon_w = if self.size == ButtonSize::Large { 16.0 } else { 14.0 };
         let gap = 4.0;
-        let leading_w = if self.leading.is_some() { icon_w + gap } else { 0.0 };
+        let leading_w = if self.leading.is_some() || self.settings_icon.is_some() { icon_w + gap } else { 0.0 };
         let trailing_w = if trailing.is_some() { icon_w + gap } else { 0.0 };
         let text_area = if trailing_at_end {
             Rect::from_min_max(content.min, pos2((content.max.x - trailing_w).max(content.min.x), content.max.y))
@@ -292,7 +306,9 @@ impl<'a> Button<'a> {
             ButtonAlign::End => text_area.max.x - group_w,
         };
         let clip = ui.painter().with_clip_rect(content);
-        if let Some(icon) = self.leading {
+        if let Some(icon) = self.settings_icon {
+            icons::paint_settings_nav(&clip, Rect::from_center_size(pos2(start + icon_w / 2.0, rect.center().y), vec2(icon_w, icon_w)), icon, ink);
+        } else if let Some(icon) = self.leading {
             clip_icon(&clip, icon, pos2(start + icon_w / 2.0, rect.center().y), ink, icon_w);
         }
         clip.text(pos2(start + leading_w, rect.center().y), Align2::LEFT_CENTER, shown, medium(11.0), ink);

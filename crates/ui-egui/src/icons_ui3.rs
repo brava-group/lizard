@@ -524,6 +524,30 @@ pub(super) fn paint_language_system(painter: &Painter, rect: Rect, color: Color3
     }
 }
 
+pub(super) fn paint_settings_nav(painter: &Painter, rect: Rect, icon: super::SettingsIcon, color: Color32) {
+    const SVGS: [(&str, [f32; 2]); 6] = [
+        (include_str!("../assets/settings-general.svg"), [20.0, 20.0]),
+        (include_str!("../assets/settings-agents.svg"), [24.0, 24.0]),
+        (include_str!("../assets/settings-appearance.svg"), [24.0, 24.0]),
+        (include_str!("../assets/language-system.svg"), [24.0, 24.0]),
+        (include_str!("../assets/settings-sharing.svg"), [24.0, 24.0]),
+        (include_str!("../assets/settings-shortcuts.svg"), [24.0, 24.0]),
+    ];
+    static GEOMETRY: OnceLock<[Option<Geometry>; 6]> = OnceLock::new();
+    let index = match icon {
+        super::SettingsIcon::General => 0,
+        super::SettingsIcon::Agents => 1,
+        super::SettingsIcon::Appearance => 2,
+        super::SettingsIcon::Language => 3,
+        super::SettingsIcon::Sharing => 4,
+        super::SettingsIcon::Shortcuts => 5,
+    };
+    let icons = GEOMETRY.get_or_init(|| std::array::from_fn(|i| build(SVGS[i].0, true)));
+    if let Some(geometry) = &icons[index] {
+        paint_geometry_optical(painter, rect, geometry, color, SVGS[index].1);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ChevronDirection {
     Down,

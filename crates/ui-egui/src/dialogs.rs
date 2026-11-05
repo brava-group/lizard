@@ -14,7 +14,7 @@ use crate::LizardApp;
 use crate::agent_panel::{AgentConnection, AgentKind};
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
-use crate::icons::{self, Icon};
+use crate::icons::{self, Icon, SettingsIcon};
 use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, NumberField, SearchField, Switch};
 use crate::theme::{Tokens, regular, semibold};
 
@@ -90,14 +90,14 @@ impl SettingsSection {
         }
     }
 
-    fn icon(self) -> Icon {
+    fn icon(self) -> SettingsIcon {
         match self {
-            Self::General => Icon::Adjust,
-            Self::Agents => Icon::Actions,
-            Self::Appearance => Icon::Sun,
-            Self::Language => Icon::Text,
-            Self::Sharing => Icon::Link,
-            Self::Shortcuts => Icon::Grid,
+            Self::General => SettingsIcon::General,
+            Self::Agents => SettingsIcon::Agents,
+            Self::Appearance => SettingsIcon::Appearance,
+            Self::Language => SettingsIcon::Language,
+            Self::Sharing => SettingsIcon::Sharing,
+            Self::Shortcuts => SettingsIcon::Shortcuts,
         }
     }
 }
@@ -419,7 +419,7 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 for choice in SettingsSection::ALL {
                     if Button::new(tr(choice.label()))
-                        .leading(choice.icon())
+                        .leading_settings(choice.icon())
                         .variant(ButtonVariant::Navigation)
                         .behavior(ButtonBehavior::Toggle { selected: section == choice })
                         .align(ButtonAlign::Start)

@@ -30,6 +30,17 @@ pub enum HeaderIcon {
     More,
 }
 
+/// Owner-supplied artwork for the Settings sidebar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsIcon {
+    General,
+    Agents,
+    Appearance,
+    Language,
+    Sharing,
+    Shortcuts,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PositionIcon {
     AlignLeft,
@@ -656,6 +667,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
 /// Paint the language selector's system option from its supplied SVG artwork.
 pub fn paint_language_system(painter: &Painter, rect: Rect, color: Color32) {
     ui3::paint_language_system(painter, rect, color);
+}
+
+pub fn paint_settings_nav(painter: &Painter, rect: Rect, icon: SettingsIcon, color: Color32) {
+    ui3::paint_settings_nav(painter, rect, icon, color);
 }
 
 /// Two overlapping sheets, scaled from the 24 × 24 copy icon used by Inspect.
