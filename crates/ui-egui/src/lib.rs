@@ -21,7 +21,6 @@ pub mod colorpicker;
 pub mod comments;
 pub mod component_panel;
 pub mod control;
-pub mod credits;
 pub mod cursors;
 pub mod dev_compare;
 pub mod dev_mode;
@@ -64,8 +63,8 @@ pub mod section_panel;
 mod selection_cache;
 pub mod selection_colors;
 mod selection_spacing;
+pub mod settings_shortcuts;
 pub mod shortcuts;
-pub mod shortcuts_panel;
 pub mod style_picker;
 pub mod tabs;
 pub mod theme;
@@ -567,9 +566,6 @@ pub struct UiState {
     pub actions_rect: Option<egui::Rect>,
     /// The Variables editor, when open.
     pub variables: Option<variables_panel::Editor>,
-    pub about: bool,
-    /// The tab the About window shows.
-    pub about_tab: dialogs::AboutTab,
     pub preferences: bool,
     /// A menu command that needs a value before the engine can run it.
     pub menu_input: Option<dialogs::MenuInput>,
@@ -578,8 +574,9 @@ pub struct UiState {
     /// What the interface size drew last frame and whether the window held it back. Set by
     /// [`LizardApp::logic`] for the main window.
     pub ui_scale: ui_scale::Plan,
-    pub shortcuts_panel: bool,
-    /// The Keyboard shortcuts panel's tab and search text.
+    /// Open Settings directly on its Keyboard shortcuts section.
+    pub settings_shortcuts_requested: bool,
+    /// The Keyboard shortcuts section's group and search text.
     pub shortcuts_tab: lizard_engine::keymap::Group,
     pub shortcuts_query: String,
     /// An opacity digit just typed and when (a second one soon after makes an exact percentage).
@@ -743,13 +740,11 @@ impl Default for UiState {
             palette_armed: false,
             actions_rect: None,
             variables: None,
-            about: false,
-            about_tab: dialogs::AboutTab::About,
             preferences: false,
             menu_input: None,
             rename_file: false,
             ui_scale: ui_scale::plan(1.0, None, None),
-            shortcuts_panel: false,
+            settings_shortcuts_requested: false,
             shortcuts_tab: lizard_engine::keymap::Group::Essential,
             shortcuts_query: String::new(),
             opacity_digit: None,
@@ -1066,13 +1061,12 @@ impl LizardApp {
         let reqs = std::mem::take(&mut self.session.ui_requests);
         for r in reqs {
             match r.kind.as_str() {
-                "dialog.about" => {
-                    self.ui.about = true;
-                    self.ui.about_tab = dialogs::AboutTab::About;
-                }
                 "dialog.preferences" => self.ui.preferences = true,
                 "dialog.missingFonts" => missing_fonts::request(self),
-                "panel.shortcuts" => self.ui.shortcuts_panel = !self.ui.shortcuts_panel,
+                "panel.shortcuts" => {
+                    self.ui.preferences = true;
+                    self.ui.settings_shortcuts_requested = true;
+                }
                 "palette.actions" => menus::toggle_palette(&mut self.ui),
                 "panel.design" => self.ui.right_tab = RightTab::Design,
                 "panel.prototype" => self.ui.right_tab = RightTab::Prototype,
@@ -1109,11 +1103,6 @@ impl LizardApp {
                 "home.templates" => {
                     self.ui.home = true;
                     self.ui.home_view.section = home::Section::Templates;
-                }
-                "home.gettingStarted" => {
-                    self.ui.home = true;
-                    self.ui.home_view.section = home::Section::Recents;
-                    self.services.save_prefs(&self.session.prefs);
                 }
                 "dialog.saveAs" => self.save_as_dialog(),
                 "dialog.colorProfile" => self.ui.color_profile = self.session.doc().ok().map(|d| d.color_profile),
@@ -1154,7 +1143,6 @@ impl LizardApp {
                     }
                 }
                 "preview.close" => self.ui.preview = None,
-                "open.help" => self.services.open_url("https://github.com/brava-group/lizard"),
                 "layers.collapseAll" => layers::collapse_all(self),
                 "contextMenu" => self.ui.key_menu = true,
                 "selectArea" => self.start_key_box(),
@@ -1727,9 +1715,6 @@ impl LizardApp {
         }
         if !self.has_files() || self.ui.home {
             home::show(self, ui);
-            // The shortcuts panel belongs to the canvas; it doesn't hang over the home screen
-            // (cleared after the home widgets, which may have just asked for it).
-            self.ui.shortcuts_panel = false;
             dialogs::keys(self, &ctx);
             dialogs::show(self, &ctx);
             self.toast_ui(&ctx);

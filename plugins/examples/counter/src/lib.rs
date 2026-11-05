@@ -3,7 +3,7 @@
 //! property menu (shown by the selected widget and in the Design panel) resets the count, picks
 //! the step of a click and the count's colour; the buttons have a hover style and a tooltip.
 
-use lizard_plugin_sdk::ui::{Node, menu_action, menu_color, menu_dropdown, menu_link, menu_separator, render};
+use lizard_plugin_sdk::ui::{Node, menu_action, menu_color, menu_dropdown, render};
 use lizard_plugin_sdk::{Input, Result, Value, WidgetEvent, entry, json};
 
 /// The count stays within ± this.
@@ -78,8 +78,6 @@ impl Counter {
             menu_action("reset", "Reset"),
             menu_dropdown("step", "Step", &STEPS, &self.step.to_string()),
             menu_color("tint", "Colour", &TINTS, &self.tint),
-            menu_separator(),
-            menu_link("help", "About Lizard", "https://getartcraft.com/apps/lizard"),
         ]
     }
 }

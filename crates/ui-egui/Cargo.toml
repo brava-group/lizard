@@ -44,7 +44,6 @@ rayon = "1"
 vtracer = "0.6.5"
 
 [build-dependencies]
-serde_json = { workspace = true }
 toml = "1"
 
 [dev-dependencies]

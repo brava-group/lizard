@@ -1,4 +1,4 @@
-//! Dialogs: About, Preferences, keyboard shortcuts, find & replace, rename layers, variables,
+//! Dialogs: Preferences, find & replace, rename layers, variables,
 //! export.
 
 use crate::primitives::TooltipResponseExt as _;
@@ -17,8 +17,6 @@ use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
 use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, SearchField};
 use crate::theme::{Tokens, regular, semibold};
-
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Where a report goes.
 const ISSUES: &str = "https://github.com/brava-group/lizard/issues";
@@ -67,15 +65,6 @@ pub(crate) fn floating<'a>(title: &'a str, ctx: &Context) -> egui::Window<'a> {
         .frame(egui::Frame::window(&ctx.global_style()).fill(t.panel).inner_margin(egui::Margin::same(20)))
 }
 
-/// The About window's tabs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AboutTab {
-    #[default]
-    About,
-    Contributors,
-    Models,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum SettingsSection {
     #[default]
@@ -84,10 +73,11 @@ enum SettingsSection {
     Appearance,
     Language,
     Sharing,
+    Shortcuts,
 }
 
 impl SettingsSection {
-    const ALL: [Self; 5] = [Self::General, Self::Agents, Self::Appearance, Self::Language, Self::Sharing];
+    const ALL: [Self; 6] = [Self::General, Self::Agents, Self::Appearance, Self::Language, Self::Sharing, Self::Shortcuts];
 
     fn label(self) -> &'static str {
         match self {
@@ -96,6 +86,7 @@ impl SettingsSection {
             Self::Appearance => tr_noop("Appearance"),
             Self::Language => tr_noop("Language"),
             Self::Sharing => tr_noop("Sharing"),
+            Self::Shortcuts => tr_noop("Keyboard shortcuts"),
         }
     }
 
@@ -106,6 +97,7 @@ impl SettingsSection {
             Self::Appearance => Icon::Sun,
             Self::Language => Icon::Text,
             Self::Sharing => Icon::Link,
+            Self::Shortcuts => Icon::Grid,
         }
     }
 }
@@ -136,23 +128,7 @@ pub enum MenuInput {
     MoveToPage,
 }
 
-impl AboutTab {
-    pub const ALL: [AboutTab; 3] = [AboutTab::About, AboutTab::Contributors, AboutTab::Models];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            AboutTab::About => tr("About"),
-            AboutTab::Contributors => tr("Contributors"),
-            AboutTab::Models => tr("Models"),
-        }
-    }
-}
-
-/// The About window's width, the same on every tab (the Contributors table needs the room).
-pub const ABOUT_WIDTH: f32 = 660.0;
-
-/// The About window's tab row, drawn like the Design / Prototype tabs of the right panel.
-/// A row of tabs (the About window's, the shortcuts panel's): the current one highlighted.
+/// A row of tabs: the current one highlighted.
 pub(crate) fn tab_strip<T: Copy + PartialEq>(ui: &mut egui::Ui, _t: &Tokens, tabs: &[T], label: fn(T) -> &'static str, current: &mut T) {
     let items: Vec<_> = tabs.iter().copied().map(|tab| crate::primitives::Tab::new(label(tab))).collect();
     let selected = tabs.iter().position(|tab| tab == current);
@@ -162,30 +138,6 @@ pub(crate) fn tab_strip<T: Copy + PartialEq>(ui: &mut egui::Ui, _t: &Tokens, tab
     {
         *current = *tab;
     }
-}
-
-/// About ▸ About: the logo, version, blurb and links.
-fn about_body(ui: &mut egui::Ui, t: &Tokens) {
-    ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
-        ui.painter().rect_filled(r, CornerRadius::same(10), t.field);
-        icons::paint(ui.painter(), r.shrink(10.0), Icon::Logo, t.icon);
-        ui.vertical(|ui| {
-            ui.label(RichText::new("Lizard").font(semibold(18.0)));
-            ui.label(RichText::new(trf("Version {version}", &[("version", &VERSION)])).color(t.text_secondary));
-        });
-    });
-    ui.add_space(12.0);
-    ui.label(tr("Lizard is an open-source interface design and prototyping app built with Rust."));
-    ui.add_space(8.0);
-    ui.hyperlink_to("getartcraft.com/apps/lizard", "https://getartcraft.com/apps/lizard");
-    ui.hyperlink_to(tr("Join us on Discord"), "https://discord.gg/artcraft");
-    ui.hyperlink_to("Background removal: withoutBG Open Model", "https://withoutbg.com/open-model/license");
-    ui.hyperlink_to("Built with DINOv3", "https://ai.meta.com/resources/models-and-libraries/dinov3-license/");
-    ui.add_space(8.0);
-    ui.label(
-        RichText::new(tr("Dual-licensed MIT OR Apache-2.0. Made by the ArtCraft team and community.")).color(t.text_secondary).font(regular(11.0)),
-    );
 }
 
 /// Escape closes the topmost simple dialog (one without menus of its own), before the canvas's
@@ -204,9 +156,7 @@ pub fn keys(app: &mut LizardApp, ctx: &Context) {
         || u.missing_fonts.is_some()
         || u.confirm_close
         || u.export_preview
-        || u.shortcuts_panel
-        || u.preferences
-        || u.about;
+        || u.preferences;
     if !open || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         return;
     }
@@ -219,7 +169,7 @@ pub fn keys(app: &mut LizardApp, ctx: &Context) {
     {
         return;
     }
-    for flag in [&mut u.confirm_close, &mut u.export_preview, &mut u.shortcuts_panel, &mut u.preferences, &mut u.about] {
+    for flag in [&mut u.confirm_close, &mut u.export_preview, &mut u.preferences] {
         if std::mem::take(flag) {
             return;
         }
@@ -232,28 +182,11 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
     crate::import_report::show(app, ctx);
     crate::missing_fonts::show(app, ctx);
     let t = Tokens::get(ctx);
-    if app.ui.about {
-        let mut open = true;
-        window(tr("About Lizard"), ctx).open(&mut open).show(ctx, |ui| {
-            ui.set_width(ABOUT_WIDTH);
-            tab_strip(ui, &t, &AboutTab::ALL, AboutTab::label, &mut app.ui.about_tab);
-            ui.add_space(12.0);
-            match app.ui.about_tab {
-                AboutTab::About => about_body(ui, &t),
-                AboutTab::Contributors => crate::credits::contributors_ui(ui),
-                AboutTab::Models => crate::credits::models_ui(ui),
-            }
-        });
-        if !open {
-            app.ui.about = false;
-        }
-    }
     if app.ui.preferences {
         settings_modal(app, ctx, &t);
     } else {
         ctx.data_mut(|data| data.remove::<AgentSettingsState>(Id::new("settings_agent_state")));
     }
-    crate::shortcuts_panel::show(app, ctx);
     find_replace_dialog(app, ctx);
     batch_rename_dialog(app, ctx);
     menu_input_dialog(app, ctx);
@@ -450,6 +383,9 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
     let id = Id::new("settings_modal");
     let section_id = id.with("section");
     let mut section = ctx.data(|data| data.get_temp::<SettingsSection>(section_id)).unwrap_or_default();
+    if std::mem::take(&mut app.ui.settings_shortcuts_requested) {
+        section = SettingsSection::Shortcuts;
+    }
     let agent_state_id = Id::new("settings_agent_state");
     let mut agent_state = ctx.data(|data| data.get_temp::<AgentSettingsState>(agent_state_id)).unwrap_or_default();
     let mut close = false;
@@ -512,6 +448,7 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
                             SettingsSection::Appearance => settings_appearance(app, ui),
                             SettingsSection::Language => settings_language(app, ui, t),
                             SettingsSection::Sharing => settings_sharing(app, ui, t),
+                            SettingsSection::Shortcuts => crate::settings_shortcuts::show(app, ui, t),
                         }
                     },
                 );

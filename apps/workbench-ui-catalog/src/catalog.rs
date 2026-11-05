@@ -105,7 +105,6 @@ enum Page {
     Shortcuts,
     Plugins,
     Preferences,
-    About,
     ExportDialog,
     FindReplace,
     BatchRename,
@@ -193,10 +192,9 @@ const PAGES: &[(Page, &str, &str, &str)] = &[
     (Page::PatternPicker, "Popovers", "Pattern editor", "colorpicker::show · pattern"),
     (Page::ColorLibrary, "Popovers", "Color libraries", "colorpicker::show · libraries tab"),
     (Page::Variables, "Windows", "Variables", "variables_panel::show"),
-    (Page::Shortcuts, "Windows", "Shortcuts", "shortcuts_panel::show"),
+    (Page::Shortcuts, "Windows", "Shortcuts in Settings", "dialogs::show"),
     (Page::Plugins, "Windows", "Plugins", "plugins_ui::show"),
     (Page::Preferences, "Windows", "Preferences", "dialogs::show"),
-    (Page::About, "Windows", "About", "dialogs::show"),
     (Page::ExportDialog, "Windows", "Export", "dialogs::show · export preview"),
     (Page::FindReplace, "Windows", "Find and replace", "dialogs::show · search"),
     (Page::BatchRename, "Windows", "Rename layers", "dialogs::show · batch rename"),
@@ -560,10 +558,9 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
     lizard_ui_egui::menus::set_palette(&mut fig.ui, false);
     lizard_ui_egui::colorpicker::close_library_preview(ctx);
     fig.ui.style_picker = None;
-    fig.ui.shortcuts_panel = false;
+    fig.ui.settings_shortcuts_requested = false;
     fig.ui.plugins_window = false;
     fig.ui.preferences = false;
-    fig.ui.about = false;
     fig.ui.export_preview = false;
     fig.ui.find = None;
     fig.ui.batch_rename = None;
@@ -661,10 +658,12 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
             })
         }
         Page::Variables => fig.ui.variables = Some(lizard_ui_egui::variables_panel::Editor::on(None)),
-        Page::Shortcuts => fig.ui.shortcuts_panel = true,
+        Page::Shortcuts => {
+            fig.ui.preferences = true;
+            fig.ui.settings_shortcuts_requested = true;
+        }
         Page::Plugins => fig.ui.plugins_window = true,
         Page::Preferences => fig.ui.preferences = true,
-        Page::About => fig.ui.about = true,
         Page::ExportDialog => fig.ui.export_preview = true,
         Page::FindReplace => fig.ui.find = Some(("card".into(), "tile".into())),
         Page::BatchRename => {
@@ -803,7 +802,6 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
                     | Page::Shortcuts
                     | Page::Plugins
                     | Page::Preferences
-                    | Page::About
                     | Page::ExportDialog
                     | Page::FindReplace
                     | Page::BatchRename
@@ -865,9 +863,8 @@ pub fn show(ui: &mut Ui, state: &mut State, fig: &mut LizardApp, fixture: &Fixtu
             lizard_ui_egui::colorpicker::show(fig, ui.ctx())
         }
         Page::Variables => lizard_ui_egui::variables_panel::show(fig, ui.ctx()),
-        Page::Shortcuts => lizard_ui_egui::shortcuts_panel::show(fig, ui.ctx()),
         Page::Plugins => lizard_ui_egui::plugins_ui::show(fig, ui.ctx()),
-        Page::Preferences | Page::About | Page::ExportDialog | Page::FindReplace | Page::BatchRename | Page::LinkDialog => {
+        Page::Preferences | Page::Shortcuts | Page::ExportDialog | Page::FindReplace | Page::BatchRename | Page::LinkDialog => {
             lizard_ui_egui::dialogs::show(fig, ui.ctx())
         }
         Page::ImportReport => lizard_ui_egui::import_report::show(fig, ui.ctx()),
@@ -950,7 +947,6 @@ fn production_preview(ui: &mut Ui, fig: &mut LizardApp, page: Page) {
             | Page::Shortcuts
             | Page::Plugins
             | Page::Preferences
-            | Page::About
             | Page::ExportDialog
             | Page::FindReplace
             | Page::BatchRename

@@ -172,11 +172,11 @@ fn hold_z_zoom_tool() {
 }
 
 #[test]
-fn shortcuts_panel_opens_switches_tabs_and_searches() {
+fn keyboard_shortcut_opens_the_shortcuts_section_in_settings() {
     let (mut u, _, _) = setup();
     // Ctrl+Shift+? (Control on macOS too).
     press(&mut u, Key::Questionmark, Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), shift: true, ..Modifiers::NONE });
-    assert!(u.app.ui.shortcuts_panel, "Ctrl+Shift+? opens the panel");
+    assert!(u.app.ui.preferences, "Ctrl+Shift+? opens Settings");
     for g in lizard_engine::keymap::Group::ALL {
         u.app.ui.shortcuts_tab = g;
         u.frame(vec![]);
@@ -185,15 +185,16 @@ fn shortcuts_panel_opens_switches_tabs_and_searches() {
     u.frame(vec![]);
     u.app.ui.shortcuts_query = "no such shortcut".into();
     u.frame(vec![]);
+    u.app.ui.preferences = false;
     u.app.run("help.shortcuts", json!({}));
-    assert!(!u.app.ui.shortcuts_panel, "the command toggles it");
+    assert!(u.app.ui.preferences, "the command opens Settings on Keyboard shortcuts");
 }
 
 #[test]
-fn shortcuts_panel_does_not_show_on_the_home_screen() {
+fn keyboard_shortcuts_are_available_from_the_home_screen() {
     let mut u = Ui::new(Session::empty());
     u.app.ui.home = true;
-    u.app.ui.shortcuts_panel = true;
+    u.app.run("help.shortcuts", json!({}));
     u.frame(vec![]);
-    assert!(!u.app.ui.shortcuts_panel, "the panel closes on the home screen");
+    assert!(u.app.ui.preferences, "Settings remains open over the home screen");
 }

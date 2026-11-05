@@ -691,9 +691,6 @@ pub struct Prefs {
     /// [`online`]), most recently opened first, at most [`online::MAX_ONLINE_FILES`].
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "online::read")]
     pub online_files: Vec<online::OnlineFile>,
-    /// The Getting started tips on the home screen were closed (Help ▸ Getting started shows them
-    /// again).
-    pub getting_started_dismissed: bool,
     /// How each home screen section shows its files, by section id (`"recents"`): `"grid"` (cards
     /// with the picture each file carries) or `"list"` (a table). Missing: the grid.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -743,7 +740,6 @@ impl Default for Prefs {
             publish_server: live::DEFAULT_SERVER.into(),
             recent_files: Vec::new(),
             online_files: Vec::new(),
-            getting_started_dismissed: false,
             home_views: BTreeMap::new(),
             home_sort: "modified".into(),
             home_order: "desc".into(),

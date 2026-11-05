@@ -1,7 +1,6 @@
 //! The home screen, drawn headless: the Templates grid (opened by click and by keyboard, searched,
 //! filtered, its empty state, its names for screen readers, thumbnails cached per theme and no
-//! frames once they are in), the first-run row (only without recent files) and the Getting
-//! started card (closed, kept closed, and brought back from the Help menu).
+//! frames once they are in), and the first-run row (only without recent files).
 
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Shape};
@@ -401,7 +400,6 @@ fn an_open_files_long_name_and_path_share_their_row_without_overlapping() {
     s.docs[1].path = Some(short.into());
     let mut u = Ui::new(s);
     u.app.ui.home = true;
-    u.app.session.prefs.getting_started_dismissed = true;
     let s = settle(&mut u);
     assert!(has_text(&s, "Open files"));
     // A row that fits shows its name and path in full.
@@ -426,37 +424,11 @@ fn an_open_files_long_name_and_path_share_their_row_without_overlapping() {
 }
 
 #[test]
-fn the_getting_started_card_closes_stays_closed_and_comes_back_from_help() {
+fn the_home_screen_has_no_getting_started_card() {
     let mut u = first_run();
     let s = settle(&mut u);
-    assert!(has_text(&s, "Getting started"));
-    for tip in ["Draw a frame", "Add auto layout", "Make a component", "Prototype", "Share with a code", "Export"] {
-        assert!(has_text(&s, tip), "{tip}");
-    }
-    // Shortcuts come from the keymap.
-    let key = crate::home::shortcut("layout.add").unwrap();
-    assert!(has_text(&s, &key), "the auto layout shortcut {key:?}");
-    // The close button is named, and closes the card.
-    u.ctx.enable_accesskit();
-    u.frame(vec![]);
-    let nodes = u.frame_output(vec![]).platform_output.accesskit_update.unwrap().nodes;
-    let close = nodes.iter().map(|(_, n)| n).find(|n| n.label().is_some_and(|l| l.starts_with("Hide these tips"))).expect("a named close button");
-    let b = close.bounds().unwrap();
-    click(&mut u, Pos2::new(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32));
-    assert!(u.app.session.prefs.getting_started_dismissed);
-    let s = settle(&mut u);
     assert!(!has_text(&s, "Getting started") && !has_text(&s, "Draw a frame"));
-    assert!(has_text(&s, "Start from a template"), "the rest of the screen stays");
-    // The preference is kept with the others, so it stays closed next time.
-    let kept: lizard_engine::Prefs = serde_json::from_value(serde_json::to_value(&u.app.session.prefs).unwrap()).unwrap();
-    assert!(kept.getting_started_dismissed);
-    // Help ▸ Getting started: back on the home screen, from wherever.
-    u.app.run("file.new", json!({}));
-    u.app.ui.home = false;
-    u.app.ui.home_view.section = Section::Templates;
-    crate::menus::invoke(&mut u.app, "help.gettingStarted");
-    assert!(u.app.ui.home && u.app.ui.home_view.section == Section::Recents && !u.app.session.prefs.getting_started_dismissed);
-    assert!(has_text(&settle(&mut u), "Getting started"));
+    assert!(has_text(&s, "Start from a template"));
 }
 
 #[test]

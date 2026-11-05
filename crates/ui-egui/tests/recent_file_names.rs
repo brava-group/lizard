@@ -10,7 +10,6 @@ use lizard_ui_egui::{LizardApp, NoServices};
 fn row(view: &str, path: &str, prefix: &str, exclude: &str) -> (String, Option<String>, String) {
     let mut session = Session::empty();
     session.prefs.recent_files = vec![path.into(), "Q3 report.lizard".into()];
-    session.prefs.getting_started_dismissed = true;
     session.prefs.home_views.insert("recents".into(), view.into());
     let mut app = LizardApp::new(session, Box::new(NoServices));
     app.ui.home = true;

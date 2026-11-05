@@ -80,7 +80,7 @@ const BROWSER_TAB: &str = "browsers keep it for their tabs and windows (web buil
 static ROWS: &[Row] = &[
     // Essential
     doc(Essential, "Open the actions menu", &["Cmd+K", "Cmd+/"], &[], Bound("app.actions"), "Cmd+/ is in the keyboard layout tables"),
-    doc(Essential, "Open the keyboard shortcuts panel", &["Ctrl+Shift+?"], &[], Bound("help.shortcuts"), "Control on macOS too (Shift+Cmd+? is the system's Help search)"),
+    doc(Essential, "Open keyboard shortcuts in Settings", &["Ctrl+Shift+?"], &[], Bound("help.shortcuts"), "Control on macOS too (Shift+Cmd+? is the system's Help search)"),
     doc(Essential, "Show or hide the interface", &["Cmd+\\"], &[], Bound("view.toggleUi"), ""),
     doc(Essential, "Find layers and text", &["Cmd+F"], &[], Bound("edit.findReplace"), ""),
     doc(Essential, "Chat at your cursor in a live session", &["/"], &[], Bound("collab.cursorChat"), ""),

@@ -1,33 +1,22 @@
-//! Help ▸ Keyboard shortcuts: a panel along the bottom of the window with a tab per group of the
-//! keymap (Essential, Tools, View…), each command's keys as keycaps for this platform, and a search
-//! across every group.
+//! The Keyboard shortcuts section in Settings: searchable keymap groups and platform keycaps.
 
 use crate::primitives::TooltipResponseExt as _;
-use egui::{Align2, Context, CornerRadius, Sense, Ui, pos2, vec2};
+use egui::{Align2, CornerRadius, Sense, Ui, pos2, vec2};
 use lizard_engine::keymap::{GESTURES, Group, KEYS, Platform};
 
 use crate::LizardApp;
-use crate::primitives::Shortcut;
 use crate::i18n::{self, tr};
+use crate::primitives::{ControlWidth, SearchField, Select, SelectPosition, SelectVariant, Shortcut};
 use crate::theme::{Tokens, regular};
 
 /// Most keys a row shows (a command's first bindings; the rest stay in the menus' alternates).
 const MAX_KEYS: usize = 2;
 const ROW_H: f32 = 26.0;
-const COLUMNS: usize = 3;
-/// Rows a column shows before the panel scrolls.
-const MAX_ROWS: usize = 9;
 
 /// One row: the action and its keys as written on this platform.
 struct Row {
     label: std::borrow::Cow<'static, str>,
     keys: Vec<String>,
-}
-
-/// Rows per column of the fullest tab, so switching tabs doesn't resize the panel.
-fn tallest_column() -> usize {
-    let count = |g: Group| KEYS.iter().filter(|b| b.group == g).count() + GESTURES.iter().filter(|x| x.0 == g).count();
-    Group::ALL.iter().map(|g| count(*g).div_ceil(COLUMNS)).max().unwrap_or(1)
 }
 
 fn rows(group: Option<Group>, query: &str, platform: Platform) -> Vec<Row> {
@@ -90,54 +79,38 @@ fn row(ui: &mut Ui, t: &Tokens, row: &Row, width: f32) {
     ui.painter().text(pos2(r.min.x + 6.0, cy), Align2::LEFT_CENTER, label, regular(12.0), t.text);
 }
 
-pub fn show(app: &mut LizardApp, ctx: &Context) {
-    if !app.ui.shortcuts_panel {
+pub fn show(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
+    let platform = crate::shortcuts::platform();
+    ui.horizontal(|ui| {
+        let groups = Group::ALL.map(|group| tr(group.label()));
+        let selected = Group::ALL.iter().position(|group| *group == app.ui.shortcuts_tab).unwrap_or(0);
+        if let Some(index) = Select::new(&groups, selected)
+            .label(tr("Keyboard shortcuts"))
+            .width(ControlWidth::Fixed(140.0))
+            .position(SelectPosition::BottomLeft)
+            .variant(SelectVariant::Ghost)
+            .show(ui)
+            && let Some(group) = Group::ALL.get(index)
+        {
+            app.ui.shortcuts_tab = *group;
+        }
+        ui.add_space(8.0);
+        let response = SearchField::new(ui.id().with("settings_shortcuts_search"), tr("Search shortcuts"))
+            .width(ControlWidth::Fill)
+            .compact()
+            .clearable()
+            .show(ui, &mut app.ui.shortcuts_query);
+        crate::widgets::select_all_on_focus(ui, &response, &app.ui.shortcuts_query);
+    });
+    ui.add_space(14.0);
+    let searching = !app.ui.shortcuts_query.trim().is_empty();
+    let list = rows((!searching).then_some(app.ui.shortcuts_tab), &app.ui.shortcuts_query, platform);
+    if list.is_empty() {
+        ui.label(egui::RichText::new(tr("No shortcuts match")).color(t.text_secondary).font(regular(12.0)));
         return;
     }
-    let t = Tokens::get(ctx);
-    let platform = crate::shortcuts::platform();
-    let width = (ctx.content_rect().width() - 48.0).clamp(480.0, 1040.0);
-    let mut open = true;
-    crate::dialogs::window(tr("Keyboard shortcuts"), ctx).anchor(Align2::CENTER_BOTTOM, vec2(0.0, -16.0)).open(&mut open).show(ctx, |ui| {
-        ui.set_width(width);
-        ui.horizontal(|ui| {
-            crate::dialogs::tab_strip(ui, &t, &Group::ALL, |g| tr(g.label()), &mut app.ui.shortcuts_tab);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let r = ui.add(egui::TextEdit::singleline(&mut app.ui.shortcuts_query).hint_text(tr("Search shortcuts")).desired_width(180.0));
-                crate::widgets::select_all_on_focus(ui, &r, &app.ui.shortcuts_query);
-            });
-        });
-        ui.add_space(10.0);
-        let searching = !app.ui.shortcuts_query.trim().is_empty();
-        let list = rows((!searching).then_some(app.ui.shortcuts_tab), &app.ui.shortcuts_query, platform);
-        let body_h = (ROW_H + 2.0) * tallest_column().min(MAX_ROWS) as f32;
-        if list.is_empty() {
-            ui.allocate_ui(vec2(width, body_h), |ui| {
-                ui.set_min_height(body_h);
-                ui.label(egui::RichText::new(tr("No shortcuts match")).color(t.text_secondary).font(regular(12.0)));
-            });
-            return;
-        }
-        let gap = 24.0;
-        let col_w = (width - gap * (COLUMNS as f32 - 1.0)) / COLUMNS as f32;
-        let per = list.len().div_ceil(COLUMNS);
-        egui::ScrollArea::vertical().min_scrolled_height(body_h).max_height(body_h).show(ui, |ui| {
-            ui.set_min_height(body_h);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                for chunk in list.chunks(per.max(1)) {
-                    ui.vertical(|ui| {
-                        ui.set_width(col_w);
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        for r in chunk {
-                            row(ui, &t, r, col_w);
-                        }
-                    });
-                }
-            });
-        });
-    });
-    if !open {
-        app.ui.shortcuts_panel = false;
+    for item in &list {
+        row(ui, t, item, ui.available_width());
+        ui.add_space(2.0);
     }
 }

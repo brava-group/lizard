@@ -1,4 +1,4 @@
-//! The home screen: Recents (new file, open, join with a code, the Getting started tips, open and
+//! The home screen: Recents (new file, open, join with a code, open and
 //! recent files ([`crate::home_recents`]), and templates to start from on a first run), Online (your online files:
 //! [`crate::online`]) and Templates (the starter templates as cards with thumbnails rendered from
 //! the documents themselves, searched and filtered by kind).
@@ -69,16 +69,6 @@ const CARD_H: f32 = THUMB_H + 86.0;
 const GAP: f32 = 20.0;
 /// Templates offered on a first run.
 const FIRST_RUN: usize = 4;
-
-/// The Getting started tips: (title, what to do, the command whose shortcut shows).
-const TIPS: [(&str, &str, &str); 6] = [
-    (tr_noop("Draw a frame"), tr_noop("Pick the Frame tool, then drag on the canvas or choose a device size"), "tool.frame"),
-    (tr_noop("Add auto layout"), tr_noop("Select layers and they space themselves as their content changes"), "layout.add"),
-    (tr_noop("Make a component"), tr_noop("Turn a layer into a component, reuse it, and change every copy at once"), "component.create"),
-    (tr_noop("Prototype"), tr_noop("Link frames on the Prototype tab, then present the flow"), "proto.present"),
-    (tr_noop("Share with a code"), tr_noop("Start sharing with the Share button, then pass on the code it gives"), "collab.share"),
-    (tr_noop("Export"), tr_noop("Export frames and layers as PNG, JPG, SVG or PDF"), "file.export"),
-];
 
 /// A row of the home screen's file lists.
 pub(crate) struct FileRow<'a> {
@@ -353,10 +343,6 @@ fn recents(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
         }
     });
     opened_join(app);
-    if !app.session.prefs.getting_started_dismissed {
-        ui.add_space(28.0);
-        getting_started(app, ui, t);
-    }
     open_files(app, ui, t, "");
     if crate::home_recents::listed(&app.session.prefs.recent_files).next().is_none() {
         // A first run: nothing to reopen yet, so offer something to start from.
@@ -414,55 +400,6 @@ fn opened_join(app: &mut LizardApp) {
         Some(None) => app.ui.live.home_join = None,
         _ => {}
     }
-}
-
-/// The Getting started card: short tips with their shortcuts as the keymap has them now, and a
-/// button that puts the card away (Help ▸ Getting started brings it back).
-fn getting_started(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
-    let width = ui.available_width().min(3.0 * CARD_W + 2.0 * GAP);
-    let columns = if width >= 720.0 { 3 } else { 1 };
-    let (cell_w, cell_h) = ((width - 32.0) / columns as f32, 62.0);
-    let rows = TIPS.len().div_ceil(columns);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 52.0 + rows as f32 * cell_h + 8.0), Sense::hover());
-    a11y::container_bounds(ui, rect);
-    ui.painter().rect_filled(rect, CornerRadius::same(8), t.field);
-    ui.painter().text(rect.min + vec2(16.0, 24.0), Align2::LEFT_CENTER, tr("Getting started"), semibold(13.0), t.text);
-    let close = Rect::from_min_size(pos2(rect.max.x - 36.0, rect.min.y + 12.0), vec2(24.0, 24.0));
-    if widgets::icon_button_at(
-        ui,
-        ui.id().with("tips_close"),
-        close,
-        Icon::Close,
-        tr("Hide these tips (Getting started in the Help menu shows them again)"),
-    ) {
-        app.run("help.gettingStarted", json!({"show": false}));
-        app.services.save_prefs(&app.session.prefs);
-    }
-    for (i, (title, line, command)) in TIPS.into_iter().enumerate() {
-        let cell = Rect::from_min_size(
-            rect.min + vec2(16.0 + (i % columns) as f32 * cell_w, 48.0 + (i / columns) as f32 * cell_h),
-            vec2(cell_w - 16.0, cell_h),
-        );
-        let badge = Rect::from_min_size(cell.min + vec2(0.0, 2.0), vec2(20.0, 20.0));
-        ui.painter().rect_filled(badge, CornerRadius::same(10), t.panel);
-        ui.painter().text(badge.center(), Align2::CENTER_CENTER, (i + 1).to_string(), semibold(10.0), t.text_secondary);
-        let x = cell.min.x + 30.0;
-        let title_end = ui.painter().text(pos2(x, cell.min.y + 12.0), Align2::LEFT_CENTER, tr(title), semibold(12.0), t.text).max.x;
-        if let Some(key) = shortcut(command) {
-            crate::primitives::Shortcut::new(&key).ink(t.text_tertiary).paint_right(
-                ui,
-                title_end + 8.0 + crate::primitives::Shortcut::new(&key).width(ui),
-                cell.min.y + 12.0,
-            );
-        }
-        let galley = lines(ui, tr(line), regular(11.0), t.text_secondary, cell.max.x - x, 2);
-        ui.painter().galley(pos2(x, cell.min.y + 24.0), galley, t.text_secondary);
-    }
-}
-
-/// A command's shortcut as this platform writes it, as the keymap has it now.
-pub(crate) fn shortcut(command: &str) -> Option<String> {
-    crate::shortcuts::shortcut(command).map(|key| lizard_engine::keymap::display(key, crate::shortcuts::platform()))
 }
 
 /// `text` wrapped at `width`, at most `rows` lines (the last one ends with an ellipsis).

@@ -455,22 +455,6 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("app.preferences", "Preferences", "{}", false, |s, _| ui(s, "dialog.preferences")),
         spec!("app.actions", "Actions", "{}", false, |s, _| ui(s, "palette.actions")),
         spec!("help.shortcuts", "Keyboard shortcuts", "{}", false, |s, _| ui(s, "panel.shortcuts")),
-        spec!("help.about", "About Lizard", "{}", false, |s, _| ui(s, "dialog.about")),
-        spec!("help.page", "Help page", "{}", false, |s, _| ui(s, "open.help")),
-        spec!(
-            "help.gettingStarted",
-            "Getting started",
-            "{show? (default true; false closes them)}  the Getting started tips on the home screen: shows them again (the app opens the home screen), or closes them until asked for → {shown}",
-            false,
-            |s, p| {
-                let show = boolean(p, "show").unwrap_or(true);
-                s.prefs.getting_started_dismissed = !show;
-                if show {
-                    s.request_ui("home.gettingStarted", json!({}));
-                }
-                Ok(json!({"shown": show}))
-            }
-        ),
         spec!("libraries.open", "Libraries", "{}", false, |s, _| ui(s, "panel.libraries")),
         spec!(
             "tool.set",

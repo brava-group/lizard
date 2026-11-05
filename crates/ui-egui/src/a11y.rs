@@ -564,7 +564,6 @@ pub fn end(app: &mut LizardApp, ctx: &Context) {
 fn blocked(app: &LizardApp) -> bool {
     let u = &app.ui;
     u.palette.is_some()
-        || u.about
         || u.preferences
         || u.variables.is_some()
         || u.export_preview

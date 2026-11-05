@@ -409,25 +409,6 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             }
         }
     }
-    // Floating help button at the bottom right of the canvas.
-    let hr = Rect::from_center_size(pos2(canvas.max.x - 32.0, canvas.max.y - 32.0), vec2(32.0, 32.0));
-    let hresp = ui.interact(hr, ui.id().with("help"), Sense::click()).tip(tr("Help and resources"));
-    ui.painter().circle_filled(hr.center() + vec2(0.0, 1.0), 17.0, Color32::from_black_alpha(20));
-    ui.painter().circle_filled(hr.center(), 16.0, t.panel);
-    ui.painter().text(hr.center(), Align2::CENTER_CENTER, "?", crate::theme::regular(15.0), t.text);
-    crate::right::menu_popup(&hresp).show(|ui| {
-        for (l, c) in [
-            (tr("Getting started"), "help.gettingStarted"),
-            (tr("Keyboard shortcuts"), "help.shortcuts"),
-            (tr("Help page"), "help.page"),
-            (tr("About Lizard"), "help.about"),
-        ] {
-            if crate::right::menu_item(ui, l, crate::shortcuts::shortcut(c).unwrap_or("")) {
-                app.run(c, json!({}));
-                ui.close();
-            }
-        }
-    });
 }
 
 /// The pill shown for a file you can't edit now: Move and Hand, and a badge saying why ("View

@@ -1,5 +1,5 @@
 //! Default keyboard shortcuts, grouped like the public shortcut reference, with the macOS keys and
-//! the Windows/Linux keys where they differ. The menus, the Keyboard shortcuts panel, the canvas,
+//! the Windows/Linux keys where they differ. The menus, Settings shortcuts, the canvas,
 //! the control channel and the MCP `key` tool all resolve keys here, so a binding is defined once.
 //!
 //! Notation: modifiers then the key, joined by `+` (`Shift+Cmd+K`). `Cmd` is the platform's
@@ -24,7 +24,7 @@ impl Platform {
     }
 }
 
-/// The tabs of the Keyboard shortcuts panel.
+/// The groups shown in Settings ▸ Keyboard shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Group {
     Essential,

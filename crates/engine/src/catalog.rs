@@ -253,15 +253,11 @@ pub static MENU: &[MenuItem] = &[
     m!("Preferences", "Use number keys for opacity", "pref.numberKeysOpacity"),
     m!("Preferences", "Nudge amount…", "pref.nudge"),
     m!("Preferences", "Preferences…", "app.preferences"),
+    m!("Preferences", "Keyboard shortcuts", "help.shortcuts"),
     // Libraries
     m!("Libraries", "Open libraries", "libraries.open"),
     m!("Libraries", "Publish library…", "libraries.publish"),
     m!("Libraries", "Hide when publishing", "component.hideWhenPublishing"),
-    // Help
-    m!("Help", "Getting started", "help.gettingStarted"),
-    m!("Help", "Keyboard shortcuts", "help.shortcuts"),
-    m!("Help", "Help page", "help.page"),
-    m!("Help", "About Lizard", "help.about"),
     // Toolbar
     m!("Tools", "Move", "tool.move"),
     m!("Tools", "Scale", "tool.scale"),
@@ -289,7 +285,7 @@ pub fn items() -> impl Iterator<Item = &'static MenuItem> {
 }
 
 /// Items of Lizard's own that the parity count leaves out (as it does the `collab.` ones).
-const OWN: [&str; 3] = ["file.newFromTemplate", "help.gettingStarted", "text.missingFonts"];
+const OWN: [&str; 2] = ["file.newFromTemplate", "text.missingFonts"];
 
 /// Coverage: (implemented, total, missing ids). `extra` lists ids implemented by the UI layer.
 pub fn parity(extra: &[&str]) -> (usize, usize, Vec<&'static str>) {

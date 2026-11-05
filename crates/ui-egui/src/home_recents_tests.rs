@@ -177,7 +177,6 @@ fn home(name: &str) -> (Ui, Vec<String>, Arc<Mutex<Log>>) {
     let (_, paths) = files(name);
     let mut s = Session::empty();
     s.prefs.recent_files = paths.clone();
-    s.prefs.getting_started_dismissed = true;
     let mut u = Ui::new(s);
     u.app.ui.home = true;
     let log = Arc::new(Mutex::new(Log::default()));
@@ -312,7 +311,6 @@ fn only_cards_in_view_read_their_pictures() {
     }
     let mut s = Session::empty();
     s.prefs.recent_files = paths;
-    s.prefs.getting_started_dismissed = true;
     s.prefs.home_sort = "name".into();
     s.prefs.home_order = "asc".into();
     let mut u = Ui::new(s);
@@ -523,7 +521,6 @@ fn the_home_screen_draws_no_frames_once_the_pictures_are_in() {
     let (_, paths) = files("idle");
     let (mut h, _) = crate::live_tests::Harness::new();
     h.app.session.prefs.recent_files = paths;
-    h.app.session.prefs.getting_started_dismissed = true;
     h.app.ui.home = true;
     for _ in 0..400 {
         h.frame(vec![]);
@@ -549,7 +546,6 @@ fn files_deleted_while_in_view_show_as_gone() {
     let (_, paths) = files("deleted");
     let (mut h, _) = crate::live_tests::Harness::new();
     h.app.session.prefs.recent_files = paths.clone();
-    h.app.session.prefs.getting_started_dismissed = true;
     h.app.ui.home = true;
     let exists = |h: &mut crate::live_tests::Harness, name: &str| file(&h.app.inspect()["homeRecents"], name)["exists"].clone();
     // Up to `n` frames (1/60 s of UI time each), giving the reader thread time between them.
