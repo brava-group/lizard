@@ -117,6 +117,28 @@ fn first_native_save_uses_chosen_filename_for_an_untitled_document() {
 }
 
 #[test]
+fn new_native_extension_and_legacy_cursor_files() {
+    let mut files = SaveFiles::new();
+    let new = files.path("New.lzd");
+    let old = files.path("Cursors.figcraft");
+    let mut source = Session::new();
+    rect(&mut source, "Cursor");
+    std::fs::write(&old, lizard_format::save_bytes(source.doc().unwrap(), None).unwrap()).unwrap();
+
+    let mut opened = Session::empty();
+    opened.execute("file.open", &json!({"path": old.to_string_lossy()})).unwrap();
+    assert!(opened.ds().unwrap().path.is_none(), "legacy file opens for Save As without overwriting it");
+    opened.execute("file.saveAs", &json!({"path": files.dir.join("New").to_string_lossy()})).unwrap();
+    assert!(new.is_file());
+    assert_eq!(opened.ds().unwrap().path.as_deref(), new.to_str());
+    assert!(old.is_file(), "the legacy source is preserved");
+
+    let mut reopened = Session::empty();
+    reopened.execute("file.open", &json!({"path": new.to_string_lossy()})).unwrap();
+    assert_eq!(reopened.doc().unwrap().nodes().count(), source.doc().unwrap().nodes().count());
+}
+
+#[test]
 fn opening_an_older_file_uses_its_filename_only_for_the_default_title() {
     let mut files = SaveFiles::new();
     let old_path = files.path("Redis.lizard");

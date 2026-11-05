@@ -6,6 +6,8 @@
   <mime-type type="application/x-lizard">
     <comment>Lizard document</comment>
     <icon name="com.brava.lizard"/>
+    <glob pattern="*.lzd"/>
     <glob pattern="*.lizard"/>
+    <glob pattern="*.figcraft"/>
   </mime-type>
 </mime-info>

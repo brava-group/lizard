@@ -1,6 +1,6 @@
 # Lizard — instructions for agents
 
-Lizard is an independent Rust/egui interface design editor. The desktop executable and public product name are Lizard. Native documents use `.lizard`, and internal workspace crates use `lizard-*` names. Workbench UI is the reusable egui component library and its separate catalog.
+Lizard is an independent Rust/egui interface design editor. The desktop executable and public product name are Lizard. New native documents use `.lzd`; legacy `.lizard` and `.figcraft` documents still open. Internal workspace crates use `lizard-*` names. Workbench UI is the reusable egui component library and its separate catalog.
 
 ## Start here
 
@@ -28,5 +28,7 @@ Lizard is an independent Rust/egui interface design editor. The desktop executab
 ```sh
 cargo run -p lizard --bin lizard -- --control <port>
 ```
+
+On macOS, `packaging/macos/dev-app.sh --control <port>` launches the app bundle with its **Lizard** Dock name.
 
 The JSON control channel and screenshot method are documented in `docs/control-protocol.md`. The CLI workspace package is still `lizard-cli`.

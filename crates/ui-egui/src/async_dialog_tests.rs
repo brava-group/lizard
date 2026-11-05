@@ -17,7 +17,7 @@ fn open_dialog_finishes_after_the_async_picker_returns() {
     let dir = std::env::temp_dir().join(format!("lizard-async-open-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("opened.lizard");
+    let path = dir.join("opened.lzd");
     let doc = lizard_doc::Document::new("Opened");
     std::fs::write(&path, lizard_format::save_bytes(&doc, None).unwrap()).unwrap();
 
@@ -50,7 +50,7 @@ fn two_files(tag: &str) -> (LizardApp, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("lizard-async-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("a.lizard");
+    let path = dir.join("a.lzd");
     let mut app = LizardApp::new(Session::empty(), Box::new(Picks(path.clone())));
     for _ in 0..2 {
         app.session.execute("file.new", &serde_json::json!({})).unwrap();
@@ -124,7 +124,7 @@ fn the_browser_reads_files_up_to_512_mib() {
 #[test]
 fn open_dialog_opens_picked_contents_as_a_new_unsaved_document() {
     let bytes = lizard_format::save_bytes(&lizard_doc::Document::new("Picked"), None).unwrap();
-    let mut app = LizardApp::new(Session::empty(), Box::new(Contents("Picked.lizard", bytes)));
+    let mut app = LizardApp::new(Session::empty(), Box::new(Contents("Picked.lzd", bytes)));
     app.ui.home = true;
     app.open_dialog();
     assert!(app.session.docs.is_empty(), "opening waits for the picker result");

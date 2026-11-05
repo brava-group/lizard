@@ -65,7 +65,7 @@
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
-        <array><string>lizard</string></array>
+        <array><string>lzd</string><string>lizard</string><string>figcraft</string></array>
         <key>public.mime-type</key>
         <array><string>application/x-lizard</string></array>
       </dict>

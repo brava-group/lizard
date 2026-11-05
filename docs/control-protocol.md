@@ -4,7 +4,7 @@ The desktop app can be driven by other programs (tests, scripts, `lizard-cli mcp
 sibling Crafting Apps) through a loopback socket:
 
 ```sh
-cargo run -p lizard -- --control 7979 [file.lizard|file.svg|image]
+cargo run -p lizard -- --control 7979 [file.lzd|file.svg|image]
 ```
 
 The app listens on `127.0.0.1:<port>` only. Each connection carries **newline-delimited JSON**:

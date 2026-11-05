@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.open",
             "Open",
-            "{path | data (base64) + name (tells the format; opens as a new unsaved document), variables? (REST: the local variables JSON as an object, JSON text or a path; default `<name>.variables.json` or `variables.json` next to the file)} (.lizard, .json: Lizard or REST API file JSON, .fig (best effort), .svg, .png, .jpg …); REST and .fig imports return `warnings`; a file opened anew returns `summary` {name, pages, layers, images} (one that was already open just returns its `index`)",
+            "{path | data (base64) + name (tells the format; opens as a new unsaved document), variables? (REST: the local variables JSON as an object, JSON text or a path; default `<name>.variables.json` or `variables.json` next to the file)} (.lzd native, .lizard/.figcraft legacy, .json: Lizard or REST API file JSON, .fig (best effort), .svg, .png, .jpg …); REST and .fig imports return `warnings`; a file opened anew returns `summary` {name, pages, layers, images} (one that was already open just returns its `index`)",
             false,
             open
         ),
@@ -51,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.saveAs",
             "Save as",
-            "{path} (no extension adds .lizard); a .fig path writes an experimental export copy of the shown document with `warnings`, keeping the native path, unsaved changes and version preview",
+            "{path} (no extension adds .lzd); a .fig path writes an experimental export copy of the shown document with `warnings`, keeping the native path, unsaved changes and version preview",
             false,
             save_as
         ),
@@ -86,7 +86,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.import",
             "Import",
-            "{path | data (base64) + name, x?, y?, center? (SVG: centre it on x, y), variables? (REST: the local variables JSON as an object, JSON text or a path)}  SVG becomes an editable frame (shapes, text, gradients, masks, effects; with `warnings` for what it left out), images become image layers, .lizard, REST API file JSON and .fig pages are appended with their variables and flows (REST and .fig: with `warnings`; those return `summary` {name, pages, layers, images} of the file read)",
+            "{path | data (base64) + name, x?, y?, center? (SVG: centre it on x, y), variables? (REST: the local variables JSON as an object, JSON text or a path)}  SVG becomes an editable frame (shapes, text, gradients, masks, effects; with `warnings` for what it left out), images become image layers, .lzd, legacy .lizard/.figcraft, REST API file JSON and .fig pages are appended with their variables and flows (REST and .fig: with `warnings`; those return `summary` {name, pages, layers, images} of the file read)",
             true,
             import
         ),
@@ -709,7 +709,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (loaded, rest) = load_path(&path, variables.as_ref())?;
     remember(s, &path);
-    let native = !rest && matches!(ext(&path).as_str(), "lizard" | "json");
+    let native = !rest && matches!(ext(&path).as_str(), "lzd" | "lizard" | "json");
     let warnings = rest || ext(&path) == "svg";
     // A native file that lost something (a damaged image, say): the app says so, not only the result.
     if native && !loaded.issues.is_empty() {
@@ -892,7 +892,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     match string(p, "path") {
         Some(mut path) => {
             if ext(&path).is_empty() {
-                path.push_str(".lizard");
+                path.push_str(".lzd");
             }
             save_to(s, path)
         }
@@ -1454,7 +1454,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             }
             Ok(out)
         }
-        "lizard" | "json" | "fig" => {
+        "lzd" | "lizard" | "figcraft" | "json" | "fig" => {
             let resolver = path.as_deref().map(rest_images);
             let images: lizard_format::rest::ImageResolver = match &resolver {
                 Some(r) => r,

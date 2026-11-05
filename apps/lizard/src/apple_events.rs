@@ -1,6 +1,6 @@
 //! macOS open-documents and quit Apple events (#289).
 //!
-//! Finder double-clicks, Open With, drops on the Dock icon and `open -a Lizard file.lizard`
+//! Finder double-clicks, Open With, drops on the Dock icon and `open -a Lizard file.lzd`
 //! don't pass paths on the command line: LaunchServices sends the running (or just-launched) app a
 //! `kAEOpenDocuments` ('odoc') Apple event. winit 0.30 doesn't handle it and owns the
 //! `NSApplicationDelegate`, so AppKit answered "Lizard cannot open files in the Lizard Document

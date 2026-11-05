@@ -324,8 +324,8 @@ fn read_clipboard<T>(c: &mut arboard::Clipboard, read: fn(&mut arboard::Clipboar
 
 /// Native Save as filters; other callers keep their existing combined filter.
 fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
-    if exts == ["lizard", "fig"] {
-        vec![("Lizard (.lizard)", &exts[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &exts[1..])]
+    if exts == ["lzd", "fig"] {
+        vec![("Lizard (.lzd)", &exts[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &exts[1..])]
     } else {
         vec![("File", exts)]
     }
@@ -630,10 +630,10 @@ mod save_filter_tests {
 
     #[test]
     fn native_and_fig_save_filters_are_separate_with_native_first() {
-        let extensions = ["lizard", "fig"];
+        let extensions = ["lzd", "fig"];
         assert_eq!(
             save_filters(&extensions),
-            vec![("Lizard (.lizard)", &extensions[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &extensions[1..])]
+            vec![("Lizard (.lzd)", &extensions[..1]), (lizard_ui_egui::i18n::tr(".fig (experimental)"), &extensions[1..])]
         );
     }
 

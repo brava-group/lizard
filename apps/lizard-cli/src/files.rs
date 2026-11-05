@@ -105,7 +105,7 @@ fn encode(doc: &Document, pix: &lizard_render::Pixmap, e: &str) -> CliResult<Vec
 pub fn write_doc(doc: &Document, page: NodeId, out: &str) -> CliResult<()> {
     let e = ext(out);
     let bytes = match e.as_str() {
-        "lizard" => {
+        "lzd" | "lizard" => {
             let thumb = lizard_engine::cmd::file::thumbnail(doc);
             lizard_format::save_bytes(doc, thumb.as_deref()).map_err(|e| CliError::Failed(e.to_string()))?
         }
@@ -380,7 +380,7 @@ pub fn run_script(script: &str, input: Option<&str>, out: Option<&str>) -> CliRe
     }
     if let Some(out) = out {
         let ds = s.ds().map_err(|e| CliError::Failed(e.to_string()))?;
-        if ext(out) == "lizard" {
+        if matches!(ext(out).as_str(), "lzd" | "lizard") {
             // Through the engine, so the version history is kept.
             write(out, &lizard_engine::cmd::file::file_bytes(ds).map_err(|e| CliError::Failed(e.to_string()))?)?;
         } else {

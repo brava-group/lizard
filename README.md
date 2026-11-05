@@ -14,7 +14,13 @@ Install a current Rust toolchain, then run from the repository root:
 cargo run -p lizard --bin lizard
 ```
 
-The desktop executable and product name are **Lizard**. Native documents use `.lizard`. The CLI and browser build are available through the workspace:
+On macOS, launch the local app bundle to show **Lizard** in the Dock:
+
+```sh
+packaging/macos/dev-app.sh
+```
+
+The desktop executable and product name are **Lizard**. New native documents use `.lzd`; existing `.lizard` and `.figcraft` documents still open. The CLI and browser build are available through the workspace:
 
 ```sh
 cargo run -p lizard-cli -- --help

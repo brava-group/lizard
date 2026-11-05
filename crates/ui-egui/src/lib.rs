@@ -1240,17 +1240,17 @@ impl LizardApp {
 
     pub fn save_as_dialog(&mut self) {
         let Ok(name) = self.session.doc().map(|d| d.name.clone()) else { return };
-        self.pick_save(i18n::tr("Save as"), &format!("{name}.lizard"), &["lizard", "fig"], |app, mut p| {
+        self.pick_save(i18n::tr("Save as"), &format!("{name}.lzd"), &["lzd", "fig"], |app, mut p| {
             if p.extension().is_none_or(|e| e.is_empty()) {
-                if !p.set_extension("lizard") {
-                    app.toast(i18n::tr("Use the .lizard or .fig extension."));
+                if !p.set_extension("lzd") {
+                    app.toast(i18n::tr("Use the .lzd or .fig extension."));
                     return;
                 }
                 // This name wasn't confirmed by the system dialog: don't replace an existing file.
                 match p.try_exists() {
                     Ok(false) => {}
                     Ok(true) => {
-                        app.toast(i18n::tr("A .lizard file with this name already exists. Choose its full name to confirm replacement."));
+                        app.toast(i18n::tr("A .lzd file with this name already exists. Choose its full name to confirm replacement."));
                         return;
                     }
                     Err(e) => {
@@ -1258,8 +1258,8 @@ impl LizardApp {
                         return;
                     }
                 }
-            } else if !p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("lizard") || e.eq_ignore_ascii_case("fig")) {
-                app.toast(i18n::tr("Use the .lizard or .fig extension."));
+            } else if !p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("lzd") || e.eq_ignore_ascii_case("fig")) {
+                app.toast(i18n::tr("Use the .lzd or .fig extension."));
                 return;
             }
             if let Some(r) = app.run("file.saveAs", json!({"path": p.to_string_lossy()})) {
@@ -1300,7 +1300,7 @@ impl LizardApp {
         let exts: &[&str] = if place {
             &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"]
         } else {
-            &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "lizard", "fig"]
+            &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "lzd", "lizard", "figcraft", "fig"]
         };
         let title = if place { i18n::tr("Place image") } else { i18n::tr("Import") };
         self.pick_file(title, exts, true, |app, file| {
@@ -1966,17 +1966,17 @@ impl LizardApp {
 }
 
 /// The file types File ▸ Open and a drop on the home screen open.
-pub(crate) const OPEN_EXTENSIONS: &[&str] = &["lizard", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"];
+pub(crate) const OPEN_EXTENSIONS: &[&str] = &["lzd", "lizard", "figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"];
 
 /// Whether `path` names a file type that opens as a document (the extension, in any case).
 pub(crate) fn opens(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| OPEN_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-/// Whether `path` is a whole document (`.lizard`, `.fig`, file JSON) rather than an image or SVG:
+/// Whether `path` is a whole document (`.lzd`, legacy formats, `.fig`, file JSON) rather than an image or SVG:
 /// dropped on the canvas it opens as a file of its own instead of adding its pages to the open one.
 pub(crate) fn is_document(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lizard", "fig", "json"].iter().any(|x| x.eq_ignore_ascii_case(e)))
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["lzd", "lizard", "figcraft", "fig", "json"].iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
 /// Reads the contents of dropped file `name` that has no file on disk to read by path.

@@ -10,7 +10,7 @@
   Per-machine install with a setup wizard that names the version: Welcome, install folder
   (Program Files\Lizard by default, remembered for upgrades), Ready, a progress page, and a
   Finish page with a ticked "Launch Lizard" box. Installs a Start Menu shortcut, makes
-  Lizard the owner of `.lizard`, and offers it under "Open with" for SVG, PNG and JPEG
+  Lizard the owner of `.lzd`, and offers it under "Open with" for older documents, SVG, PNG and JPEG
   (without taking over the user's default app for them), plus lizard-cli when HasCli=1.
   `msiexec /qn` still installs silently.
 
@@ -93,9 +93,15 @@
         <File Id="LizardAttribution" Source="$(var.BinDir)\ATTRIBUTION.md" />
         <File Id="LizardLegibleNextLicense" Source="$(var.BinDir)\OFL-NV-Legible-Next.txt" />
 
-        <!-- .lizard: Lizard's own format; Lizard is its default app. -->
+        <!-- .lzd: Lizard's own format; legacy extensions remain openable. -->
         <ProgId Id="Lizard.Document" Description="Lizard Document" Icon="LizardExe" IconIndex="0">
+          <Extension Id="lzd" ContentType="application/x-lizard">
+            <Verb Id="open" Command="Open" TargetFile="LizardExe" Argument="&quot;%1&quot;" />
+          </Extension>
           <Extension Id="lizard" ContentType="application/x-lizard">
+            <Verb Id="open" Command="Open" TargetFile="LizardExe" Argument="&quot;%1&quot;" />
+          </Extension>
+          <Extension Id="figcraft" ContentType="application/x-lizard">
             <Verb Id="open" Command="Open" TargetFile="LizardExe" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
@@ -110,7 +116,9 @@
         <!-- "Open with" app list and the Run dialog (Win+R "lizard"). -->
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe" Name="FriendlyAppName" Value="Lizard" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\shell\open\command" Value="&quot;[#LizardExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".lzd" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".lizard" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".figcraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".svg" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".png" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lizard.exe\SupportedTypes" Name=".jpg" Value="" Type="string" />

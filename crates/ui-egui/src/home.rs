@@ -179,7 +179,7 @@ fn dropped(app: &mut LizardApp, ctx: &egui::Context) {
     let files = ctx.input(|i| i.raw.dropped_files.clone());
     for f in files {
         if !crate::opens(f.path()) {
-            app.toast(tr("Drop a .lizard, .fig, .json, .svg or image file."));
+            app.toast(tr("Drop a .lzd, .fig, .json, .svg or image file."));
             continue;
         }
         crate::pending_open::open_dropped(app, &f);
@@ -322,7 +322,7 @@ fn recents(app: &mut LizardApp, ui: &mut Ui, t: &Tokens) {
     let (mut new_file, mut open) = (false, false);
     ui.horizontal(|ui| {
         new_file = action_card(ui, t, Icon::Plus, tr("New design file"), tr("Start from a blank canvas"));
-        open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .lizard, .svg or images"));
+        open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .lzd, .svg or images"));
     });
     if new_file {
         app.run("file.new", json!({}));

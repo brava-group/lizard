@@ -21,7 +21,7 @@ craftrules `release/cut-a-release.md`.
 | Display name | Lizard |
 | Packages / binaries | `lizard` (app), `lizard-cli` (headless CLI), `lizard-web` (browser) |
 | Bundle / app id | `com.brava.lizard` (CLI signing identifier `com.brava.lizard-cli`) |
-| Native document | `.lizard`, MIME `application/x-lizard`, UTI `com.brava.lizard.document` |
+| Native document | `.lzd`, MIME `application/x-lizard`, UTI `com.brava.lizard.document` (also opens legacy `.lizard` and `.figcraft`) |
 | Also opens | `.svg`, `.png`, `.jpg`/`.jpeg` ("Open with", never the default app) |
 | WiX UpgradeCode | `7F8B9827-D065-41B7-A514-2A454B21F484` (fixed forever; never reuse it in another app) |
 | Linux categories | `Graphics;2DGraphics;VectorGraphics;X-Design;` (`Design` isn't a registered freedesktop category, so `desktop-file-validate` rejects it) |
@@ -148,7 +148,7 @@ hdiutil attach -nobrowse -readonly dist/release/lizard-*-macos-aarch64.dmg   # i
 `packaging/windows/package.ps1 -Arch x64|x86|arm64` builds with `+crt-static` (no VC++
 redistributable), checks each exe's PE machine and subsystem (app GUI, CLI console), signs the
 exes, builds the MSI with WiX v5 (`lizard.wxs`: per-machine, Start Menu shortcut, owner of
-`.lizard`, "Open with" for SVG/PNG/JPEG, App Paths, setup wizard with art drawn from the app
+`.lzd`, "Open with" for SVG/PNG/JPEG, App Paths, setup wizard with art drawn from the app
 icon), validates ICE50, signs the MSI and zips a portable build. `sign.ps1` uses a `.pfx`
 (`WINDOWS_CERTIFICATE*`) or Azure Trusted Signing (`AZURE_*`), else warns and leaves files
 unsigned. `apps/lizard/build.rs` embeds the icon and version info with `winresource`.
@@ -162,7 +162,7 @@ Locally on Windows: `dotnet tool install -g wix --version 5.0.2`,
 
 `packaging/linux/package.sh [--formats "appimage deb rpm tar"]` stages one FHS tree (binaries,
 `com.brava.lizard.desktop`, hicolor icons 16–512 px, AppStream metainfo, a
-shared-mime-info file for `.lizard`) and builds every format from it: `.tar.gz`; `.deb` and
+shared-mime-info file for `.lzd`) and builds every format from it: `.tar.gz`; `.deb` and
 `.rpm` with [nfpm](https://nfpm.goreleaser.com/) (`nfpm.yaml` lists the dlopen'd runtime
 libraries as dependencies); and an `.AppImage` with update information and a `.zsync`, whose
 `AppRun` registers the desktop entry and icons on launch so Wayland docks show the right icon

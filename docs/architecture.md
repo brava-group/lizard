@@ -23,7 +23,7 @@ replaced.
 | L2 | `lizard-plugin` | ~1.0k | Plugin manifest and the WebAssembly sandbox (wasmi, metered, memory cap, no file system, network or clock) |
 | L2 | `lizard-pathops` | ~1.1k | Booleans (linesweeper), outline stroke with alignment, arrowheads |
 | L3 | `lizard-render` | ~5.4k | Scene → pixels on tiny-skia (CPU): isolated layers for opacity/blend/effects, clips, masks, shadows, blurs (uniform, progressive, background), noise, texture, glass, text; banded in parallel; retained rendering of only what changed; levels of detail when zoomed out |
-| L3 | `lizard-format` | ~5.2k | Native `.lizard` (zip of `document.json` + images; streamed JSON), local library files, versions, REST API file JSON import (`rest/`) |
+| L3 | `lizard-format` | ~5.2k | Native `.lzd` (zip of `document.json` + images; streamed JSON), local library files, versions, REST API file JSON import (`rest/`) |
 | L4 | `lizard-svg` | ~3.7k | SVG export and import (usvg) |
 | L4 | `lizard-pdf` | ~2.3k | PDF export (krilla) with print options |
 | L5 | `lizard-engine` | ~39.3k | Sessions, undo history (`Arc` snapshots), the command registry (`cmd/*`, `spec!`), pointer tools and vector edit mode, snapping and measuring, components sync, libraries, prototype runtime, Dev Mode code generation, the menu catalog (`catalog.rs`) and the keymap (`keymap.rs`), a panic guard |
@@ -65,7 +65,7 @@ express an effect.
 
 ## File I/O
 
-`.lizard` is the native format (atomic saves, autosave checkpoints; the desktop app keeps
+`.lzd` is the native format (`.lizard` and `.figcraft` remain readable; atomic saves, autosave checkpoints; the desktop app keeps
 recovery copies of unsaved documents that reopen after a crash or a forced quit). Imports: REST API
 file JSON with variables and images, SVG, raster images, clipboard
 content. Exports: PNG, JPG, WebP, SVG, PDF, code. There is no `.fig` reader yet

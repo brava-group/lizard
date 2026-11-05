@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build and open a local Lizard.app with the committed macOS icon.
+# Pass application arguments after the script name, for example --control 7979.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -24,5 +25,5 @@ sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   "$ROOT/packaging/macos/Info.plist.in" >"$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"
-open -n "$APP"
+open -n "$APP" --args "$@"
 echo "Opened $APP"

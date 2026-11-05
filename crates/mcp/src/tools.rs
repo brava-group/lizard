@@ -256,7 +256,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "open_file",
             "Open file",
-            "Open a .lizard or .json document (Lizard or REST API file JSON), a .fig file (best effort, with `warnings` for what wasn't imported), an .svg (becomes vectors) or an image (becomes an image layer) as the active document. Returns the new document's summary.",
+            "Open a .lzd document (or legacy .lizard/.figcraft), .json document, .fig file (best effort), .svg or image as the active document. Returns the new document's summary.",
             obj(
                 json!({
                     "path": string("File path"),
@@ -269,8 +269,8 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "save_file",
             "Save file",
-            "Save the active document as a .lizard file. `path` is required the first time (an untitled document has no path); later saves reuse it. A `path` ending in .fig writes an experimental .fig export copy instead and leaves the document's own path and unsaved changes alone.",
-            obj(json!({"path": string("Output .lizard path, or a .fig path for an experimental export copy")}), &[]),
+            "Save the active document as a .lzd file. `path` is required the first time (an untitled document has no path); later saves reuse it. A `path` ending in .fig writes an experimental .fig export copy instead and leaves the document's own path and unsaved changes alone.",
+            obj(json!({"path": string("Output .lzd path, or a .fig path for an experimental export copy")}), &[]),
             false,
         ),
         tool("undo", "Undo", "Undo the last change (one command, batch or gesture). Returns {undone: bool}.", empty(), false),
