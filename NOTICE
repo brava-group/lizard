@@ -53,6 +53,13 @@ to run provider-supplied agent helpers. Release packaging verifies the pinned SH
 before signing. The original Node.js and bundled dependency licences are included at
 Lizard.app/Contents/Resources/Licenses/Node-LICENSE and in the bundled npm package.
 
+Language flag icons
+-------------------
+The rounded PNG flags in crates/ui-egui/assets/language-flags/ come from
+open-assets-hub/country-flag-collection (https://github.com/open-assets-hub/country-flag-collection).
+Its SVG sources come from lipis/flag-icons (https://github.com/lipis/flag-icons).
+Both are distributed under the MIT License; copies are kept beside the PNGs.
+
 Linux Wayland window decorations
 -------------------------------
 sctk-adwaita 0.10.1 (https://github.com/PolyMeilex/sctk-adwaita,

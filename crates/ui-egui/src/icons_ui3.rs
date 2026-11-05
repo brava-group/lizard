@@ -517,6 +517,13 @@ fn build(svg: &str, exact: bool) -> Option<Geometry> {
     (!geometry.0.is_empty()).then_some(geometry)
 }
 
+pub(super) fn paint_language_system(painter: &Painter, rect: Rect, color: Color32) {
+    static GEOMETRY: OnceLock<Option<Geometry>> = OnceLock::new();
+    if let Some(geometry) = GEOMETRY.get_or_init(|| build(include_str!("../assets/language-system.svg"), true)) {
+        paint_geometry_optical(painter, rect, geometry, color, [24.0, 24.0]);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ChevronDirection {
     Down,

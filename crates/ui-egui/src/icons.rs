@@ -653,6 +653,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     draw(&p, icon);
 }
 
+/// Paint the language selector's system option from its supplied SVG artwork.
+pub fn paint_language_system(painter: &Painter, rect: Rect, color: Color32) {
+    ui3::paint_language_system(painter, rect, color);
+}
+
 /// Two overlapping sheets, scaled from the 24 × 24 copy icon used by Inspect.
 pub fn paint_copy(painter: &Painter, rect: Rect, color: Color32) {
     let scale = rect.width().min(rect.height()) / 24.0;

@@ -15,7 +15,7 @@ use crate::agent_panel::{AgentConnection, AgentKind};
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
-use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, SearchField};
+use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, NumberField, SearchField, Switch};
 use crate::theme::{Tokens, regular, semibold};
 
 /// Where a report goes.
@@ -472,35 +472,58 @@ fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
         (tr("Use number keys for opacity"), prefs.number_keys_opacity, "pref.numberKeysOpacity"),
         (tr("Reduce motion"), prefs.reduce_motion, "pref.reduceMotion"),
     ] {
-        if crate::widgets::checkbox(ui, val, label) {
+        if Switch::new(ui.id().with(cmd), val, label).show(ui).clicked() {
             toggles.push(cmd);
         }
+        ui.add_space(8.0);
     }
     if app.services.reduce_motion() {
         crate::widgets::label(ui, tr("Your system asks for reduced motion: animations stay off."), t.text_secondary);
     }
-    if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.auto_save, tr("Save files automatically")) {
-        toggles.push("pref.autoSave");
-    }
-    if !cfg!(target_arch = "wasm32") && crate::widgets::checkbox(ui, prefs.start_on_home, tr("Start on the Home screen")) {
-        toggles.push("pref.startOnHome");
+    if !cfg!(target_arch = "wasm32") {
+        for (label, value, cmd) in [
+            (tr("Save files automatically"), prefs.auto_save, "pref.autoSave"),
+            (tr("Start on the Home screen"), prefs.start_on_home, "pref.startOnHome"),
+        ] {
+            if Switch::new(ui.id().with(cmd), value, label).show(ui).clicked() {
+                toggles.push(cmd);
+            }
+            ui.add_space(8.0);
+        }
     }
     for cmd in toggles {
         app.run(cmd, json!({}));
     }
-    ui.add_space(18.0);
-    ui.label(RichText::new(tr("Nudge amount")).font(semibold(12.0)));
-    ui.add_space(8.0);
+    ui.add_space(12.0);
+    ui.separator();
+    ui.add_space(20.0);
+    ui.label(RichText::new(tr("Nudge amount")).font(semibold(13.0)));
+    ui.add_space(14.0);
+    let gap = 16.0;
+    let field_width = ((ui.available_width() - gap) / 2.0).max(96.0);
     ui.horizontal(|ui| {
-        let mut small = prefs.nudge_small;
-        let mut big = prefs.nudge_big;
-        ui.label(tr("Small"));
-        let a = ui.add(egui::DragValue::new(&mut small).range(0.1..=100.0));
-        ui.add_space(20.0);
-        ui.label(tr("Large"));
-        let b = ui.add(egui::DragValue::new(&mut big).range(1.0..=1000.0));
-        if a.changed() || b.changed() {
-            app.run("pref.nudge", json!({"small": small, "big": big}));
+        for (index, label, value, key, step) in [
+            (0, tr("Small"), prefs.nudge_small, "small", 1.0),
+            (1, tr("Large"), prefs.nudge_big, "big", 10.0),
+        ] {
+            if index > 0 {
+                ui.add_space(gap);
+            }
+            ui.vertical(|ui| {
+                ui.set_width(field_width);
+                ui.label(RichText::new(label).font(regular(11.0)).color(t.text_secondary));
+                ui.add_space(7.0);
+                let field = NumberField::new(ui.id().with(("nudge", key)), crate::widgets::Lead::Named(label), Some(value), "px")
+                    .step(step)
+                    .show(ui, ControlWidth::Fill);
+                if let Some(edit) = field.edit.and_then(|edit| edit.settled()) {
+                    let next = match edit {
+                        crate::widgets::FieldEdit::Set(value) | crate::widgets::FieldEdit::Scrub(value, _) => value,
+                    };
+                    let params = if key == "small" { json!({"small": next}) } else { json!({"big": next}) };
+                    app.run("pref.nudge", params);
+                }
+            });
         }
     });
 }
@@ -764,46 +787,127 @@ fn settings_agent_detail(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens, sta
 
 fn settings_appearance(app: &mut LizardApp, ui: &mut egui::Ui) {
     let prefs = app.session.prefs.clone();
-    ui.label(RichText::new(tr("Theme")).font(semibold(12.0)));
-    ui.add_space(8.0);
+    ui.label(RichText::new(tr("Theme")).font(semibold(13.0)));
+    ui.add_space(14.0);
+    let gap = 14.0;
+    let card_width = ((ui.available_width() - 2.0 * gap) / 3.0).min(172.0).max(88.0);
     ui.horizontal(|ui| {
         for (label, value, cmd) in [
             (tr_noop("Light"), "light", "view.themeLight"),
             (tr_noop("Dark"), "dark", "view.themeDark"),
             (tr_noop("System"), "system", "view.themeSystem"),
         ] {
-            if Button::new(tr(label))
-                .variant(ButtonVariant::Ghost)
-                .behavior(ButtonBehavior::Toggle { selected: prefs.theme.eq_ignore_ascii_case(value) })
-                .show(ui)
-                .clicked()
-            {
+            let selected = prefs.theme.eq_ignore_ascii_case(value);
+            if theme_preview_card(ui, tr(label), value, selected, card_width).clicked() {
                 app.run(cmd, json!({}));
             }
-            ui.add_space(8.0);
+            ui.add_space(gap);
         }
     });
-    ui.add_space(20.0);
+    ui.add_space(28.0);
+    ui.separator();
+    ui.add_space(22.0);
     interface_size(app, ui, prefs.ui_scale);
+}
+
+/// A miniature window makes each theme understandable before applying it.
+fn theme_preview_card(ui: &mut egui::Ui, label: &str, theme: &str, selected: bool, width: f32) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 150.0), Sense::click());
+    crate::a11y::radio(&response, label, selected);
+    let preview = Rect::from_min_size(rect.min, vec2(width, 116.0));
+    let light = Color32::from_rgb(238, 238, 241);
+    let dark = Color32::from_rgb(64, 64, 69);
+    let light_window = Color32::from_rgb(252, 252, 253);
+    let dark_window = Color32::from_rgb(29, 29, 32);
+    let painter = ui.painter();
+    painter.rect_filled(preview, CornerRadius::same(14), if theme == "light" { light } else { dark });
+    if theme == "system" {
+        let right = Rect::from_min_max(pos2(preview.center().x, preview.top()), preview.max);
+        painter.rect_filled(right, CornerRadius { nw: 0, ne: 14, sw: 0, se: 14 }, light);
+    }
+    let window = Rect::from_min_max(pos2(preview.left() + 22.0, preview.top() + 33.0), pos2(preview.right() - 12.0, preview.bottom() + 15.0));
+    let clipped = painter.with_clip_rect(preview);
+    clipped.rect_filled(window, CornerRadius::same(12), if theme == "light" { light_window } else { dark_window });
+    if theme == "system" {
+        let right = Rect::from_min_max(pos2(preview.center().x, window.top()), window.max);
+        clipped.rect_filled(right, CornerRadius { nw: 0, ne: 12, sw: 0, se: 12 }, light_window);
+    }
+    let window_border = if theme == "light" { Color32::from_rgb(213, 213, 218) } else { Color32::from_rgb(86, 86, 91) };
+    clipped.rect_stroke(window, CornerRadius::same(12), Stroke::new(1.0, window_border), egui::StrokeKind::Inside);
+    let sample_y = window.top() + 25.0;
+    if theme == "system" {
+        for (x, color) in [(window.left() + 17.0, Color32::WHITE), (preview.center().x + 12.0, Color32::from_rgb(30, 30, 33))] {
+            clipped.text(pos2(x, sample_y), Align2::LEFT_CENTER, "Aa", semibold(22.0), color);
+        }
+    } else {
+        let ink = if theme == "light" { Color32::from_rgb(30, 30, 33) } else { Color32::WHITE };
+        clipped.text(pos2(window.left() + 17.0, sample_y), Align2::LEFT_CENTER, "Aa", semibold(22.0), ink);
+    }
+    painter.rect_stroke(preview, CornerRadius::same(14), Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { t.accent } else { t.border_strong }), egui::StrokeKind::Inside);
+    if selected {
+        let center = pos2(preview.right() - 16.0, preview.bottom() - 16.0);
+        painter.circle_filled(center, 11.0, t.accent);
+        icons::paint(painter, Rect::from_center_size(center, vec2(14.0, 14.0)), Icon::Check, t.accent_on);
+    }
+    painter.text(pos2(rect.left(), preview.bottom() + 18.0), Align2::LEFT_CENTER, label, semibold(12.0), t.text);
+    if response.hovered() && !selected {
+        painter.rect_stroke(preview, CornerRadius::same(14), Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    if response.has_focus() {
+        painter.rect_stroke(preview.expand(2.0), CornerRadius::same(16), Stroke::new(1.0, t.focus), egui::StrokeKind::Outside);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn settings_language(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
     crate::widgets::label(ui, tr("Choose the language used throughout Lizard."), t.text_secondary);
+    ui.add_space(16.0);
+    let search_id = Id::new("settings_language_search");
+    let query_id = search_id.with("query");
+    let mut search = ui.ctx().data(|data| data.get_temp::<String>(query_id)).unwrap_or_default();
+    SearchField::new(search_id, tr("Search languages")).clearable().width(ControlWidth::Fill).show(ui, &mut search);
+    ui.ctx().data_mut(|data| data.insert_temp(query_id, search.clone()));
     ui.add_space(12.0);
-    let langs =
-        || [("system", tr("System"))].into_iter().chain(i18n::languages().iter().filter(|l| crate::cjk::can_show(l.code)).map(|l| (l.code, l.name)));
-    let on = |code: &str| app.session.prefs.language.eq_ignore_ascii_case(code);
-    let selected = langs().find(|(code, _)| on(code)).map_or(tr("System"), |(_, name)| name);
-    let resp = crate::primitives::Select::trigger(ui, selected, ui.available_width().min(280.0), None);
+
+    let needle = search.trim().to_lowercase();
+    let matches = |code: &str, name: &str| {
+        needle.is_empty()
+            || name.to_lowercase().contains(&needle)
+            || code.to_lowercase().contains(&needle)
+            || language_search_alias(code).contains(&needle)
+    };
+    let languages = [("system", tr("System"))]
+        .into_iter()
+        .chain(i18n::languages().iter().filter(|lang| crate::cjk::can_show(lang.code)).map(|lang| (lang.code, lang.name)))
+        .filter(|(code, name)| matches(code, name))
+        .collect::<Vec<_>>();
     let mut pick = None;
-    crate::right::menu_popup(&resp).show(|ui| {
-        for (code, name) in langs() {
-            if crate::right::menu_check(ui, on(code), name, "") {
-                pick = Some(code);
-                ui.close();
+    if languages.is_empty() {
+        ui.add_space(24.0);
+        crate::widgets::label(ui, tr("No languages found"), t.text_secondary);
+    } else {
+        egui::ScrollArea::vertical().id_salt("settings_languages").max_height(310.0).show(ui, |ui| {
+            for (code, name) in languages {
+                let selected = app.session.prefs.language.eq_ignore_ascii_case(code);
+                let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width() - 8.0, 42.0), Sense::click());
+                crate::a11y::radio(&response, name, selected);
+                if selected || response.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(7), if selected { t.selected_row } else { t.hover });
+                }
+                let flag = Rect::from_center_size(pos2(rect.left() + 22.0, rect.center().y), vec2(24.0, 24.0));
+                paint_language_flag(ui, code, flag, t);
+                ui.painter().text(pos2(rect.left() + 46.0, rect.center().y), Align2::LEFT_CENTER, name, regular(12.0), t.text);
+                if selected {
+                    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), vec2(16.0, 16.0)), Icon::Check, t.accent);
+                }
+                if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    pick = Some(code);
+                }
+                ui.add_space(3.0);
             }
-        }
-    });
+        });
+    }
     if let Some(code) = pick {
         app.run("pref.language", json!({"language": code}));
         ui.ctx().request_repaint();
@@ -813,6 +917,75 @@ fn settings_language(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
         let note = trf("{language}: draft translation, waiting for a native speaker's review.", &[("language", &lang.name)]);
         crate::widgets::label(ui, &note, t.text_secondary);
     }
+}
+
+fn language_search_alias(code: &str) -> &'static str {
+    match code {
+        "system" => "automatic default",
+        "en" => "english united states",
+        "es" => "spanish spain",
+        "es-419" => "latin american spanish mexico",
+        "pt-BR" => "portuguese brazil",
+        "zh-Hans" => "simplified chinese china",
+        "ko" => "korean south korea",
+        "cs" => "czech czechia",
+        "bn" => "bengali bangladesh",
+        "fi" => "finnish finland",
+        "fr" => "french france",
+        "nl" => "dutch netherlands",
+        "pl" => "polish poland",
+        "de" => "german germany",
+        "id" => "indonesian indonesia",
+        "ja" => "japanese japan",
+        "sv" => "swedish sweden",
+        "ru" => "russian russia",
+        "tr" => "turkish turkey",
+        "ka" => "georgian georgia",
+        _ => "",
+    }
+}
+
+fn language_flag_bytes(code: &str) -> Option<&'static [u8]> {
+    Some(match code {
+        "en" => include_bytes!("../assets/language-flags/us.png"),
+        "es" => include_bytes!("../assets/language-flags/es.png"),
+        "es-419" => include_bytes!("../assets/language-flags/mx.png"),
+        "pt-BR" => include_bytes!("../assets/language-flags/br.png"),
+        "zh-Hans" => include_bytes!("../assets/language-flags/cn.png"),
+        "ko" => include_bytes!("../assets/language-flags/kr.png"),
+        "cs" => include_bytes!("../assets/language-flags/cz.png"),
+        "bn" => include_bytes!("../assets/language-flags/bd.png"),
+        "fi" => include_bytes!("../assets/language-flags/fi.png"),
+        "fr" => include_bytes!("../assets/language-flags/fr.png"),
+        "nl" => include_bytes!("../assets/language-flags/nl.png"),
+        "pl" => include_bytes!("../assets/language-flags/pl.png"),
+        "de" => include_bytes!("../assets/language-flags/de.png"),
+        "id" => include_bytes!("../assets/language-flags/id.png"),
+        "ja" => include_bytes!("../assets/language-flags/jp.png"),
+        "sv" => include_bytes!("../assets/language-flags/se.png"),
+        "ru" => include_bytes!("../assets/language-flags/ru.png"),
+        "tr" => include_bytes!("../assets/language-flags/tr.png"),
+        "ka" => include_bytes!("../assets/language-flags/ge.png"),
+        _ => return None,
+    })
+}
+
+fn paint_language_flag(ui: &egui::Ui, code: &str, rect: Rect, t: &Tokens) {
+    if let Some(bytes) = language_flag_bytes(code) {
+        let id = Id::new(("language_flag", code));
+        let texture = ui.ctx().data(|data| data.get_temp::<egui::TextureHandle>(id)).or_else(|| {
+            let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+            let image = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+            let texture = ui.ctx().load_texture(format!("language-flag-{code}"), image, egui::TextureOptions::LINEAR);
+            ui.ctx().data_mut(|data| data.insert_temp(id, texture.clone()));
+            Some(texture)
+        });
+        if let Some(texture) = texture {
+            ui.painter().image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            return;
+        }
+    }
+    icons::paint_language_system(ui.painter(), rect, t.icon_secondary);
 }
 
 fn settings_sharing(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
@@ -856,30 +1029,38 @@ fn settings_sharing(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
 fn interface_size(app: &mut LizardApp, ui: &mut egui::Ui, chosen: f64) {
     let t = Tokens::get(ui.ctx());
     if cfg!(target_arch = "wasm32") {
-        ui.label(tr("Interface size"));
+        ui.label(RichText::new(tr("Interface size")).font(semibold(13.0)));
+        ui.add_space(10.0);
         crate::widgets::label(ui, tr("Use your browser's zoom to change the interface size."), t.text_secondary);
         return;
     }
     let percent = |size: f64| trf("{percent}%", &[("percent", &crate::ui_scale::percent(size as f32))]);
     let shown = percent(chosen);
     ui.horizontal(|ui| {
-        ui.label(tr("Interface size"));
-        let resp = crate::primitives::Select::trigger(ui, &shown, 120.0, None);
-        crate::a11y::combo(&resp, tr("Interface size"), &shown, crate::a11y::menu_open(&resp));
-        crate::right::menu_popup(&resp).show(|ui| {
-            for size in crate::ui_scale::SIZES {
-                if crate::right::menu_check(ui, (chosen - size).abs() < 1e-6, &percent(size), "") {
-                    app.run("pref.uiScale", json!({"scale": size}));
-                    ui.close();
+        ui.set_min_height(32.0);
+        ui.label(RichText::new(tr("Interface size")).font(semibold(13.0)));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let resp = crate::primitives::Select::trigger(ui, &shown, 120.0, None);
+            crate::a11y::combo(&resp, tr("Interface size"), &shown, crate::a11y::menu_open(&resp));
+            crate::right::menu_popup(&resp).show(|ui| {
+                for size in crate::ui_scale::SIZES {
+                    if crate::right::menu_check(ui, (chosen - size).abs() < 1e-6, &percent(size), "") {
+                        app.run("pref.uiScale", json!({"scale": size}));
+                        ui.close();
+                    }
                 }
-            }
+            });
         });
     });
-    crate::widgets::label(
-        ui,
-        tr("Relative to your system's display scaling (100% is the system's own size). Document zoom is separate."),
-        t.text_secondary,
-    );
+    ui.add_space(8.0);
+    ui.vertical(|ui| {
+        ui.set_max_width(450.0);
+        crate::widgets::label(
+            ui,
+            tr("Relative to your system's display scaling (100% is the system's own size). Document zoom is separate."),
+            t.text_secondary,
+        );
+    });
     // Said in words, not only by the menu's value: the window is too small for the size chosen.
     if app.ui.ui_scale.limited {
         let note = trf(
