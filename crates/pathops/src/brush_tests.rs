@@ -6,6 +6,20 @@ use lizard_geom::kurbo::{BezPath, Point, Shape};
 
 use crate::brush::{MAX_COPIES, PRESETS, outline};
 
+#[test]
+fn reference_catalog_has_distinct_stretch_and_scatter_presets() {
+    use crate::brush::{BrushKind, preset};
+    let mut ids = std::collections::HashSet::new();
+    assert_eq!(PRESETS.len(), 33);
+    for (index, entry) in PRESETS.iter().enumerate() {
+        assert!(ids.insert(entry.id), "duplicate brush id: {}", entry.id);
+        assert!(preset(entry.id).is_some());
+        if index < 15 { assert_eq!(entry.kind, BrushKind::Stretch); }
+        if (15..25).contains(&index) { assert_eq!(entry.kind, BrushKind::Scatter); }
+    }
+    assert!(preset("unknown").is_none());
+}
+
 fn line(len: f64) -> BezPath {
     let mut p = BezPath::new();
     p.move_to((0.0, 0.0));

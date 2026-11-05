@@ -24,6 +24,31 @@ pub struct Preset {
 
 /// The built-in brushes, stretch first.
 pub const PRESETS: &[Preset] = &[
+    Preset { id: "heist", label: "Heist", kind: BrushKind::Stretch },
+    Preset { id: "blockbuster", label: "Blockbuster", kind: BrushKind::Stretch },
+    Preset { id: "grindhouse", label: "Grindhouse", kind: BrushKind::Stretch },
+    Preset { id: "biopic", label: "Biopic", kind: BrushKind::Stretch },
+    Preset { id: "spaghetti_western", label: "Spaghetti Western", kind: BrushKind::Stretch },
+    Preset { id: "slasher", label: "Slasher", kind: BrushKind::Stretch },
+    Preset { id: "hardboiled", label: "Hardboiled", kind: BrushKind::Stretch },
+    Preset { id: "verite", label: "Vérité", kind: BrushKind::Stretch },
+    Preset { id: "epic", label: "Epic", kind: BrushKind::Stretch },
+    Preset { id: "screwball", label: "Screwball", kind: BrushKind::Stretch },
+    Preset { id: "rom_com", label: "Rom Com", kind: BrushKind::Stretch },
+    Preset { id: "noir", label: "Noir", kind: BrushKind::Stretch },
+    Preset { id: "propaganda", label: "Propaganda", kind: BrushKind::Stretch },
+    Preset { id: "melodrama", label: "Melodrama", kind: BrushKind::Stretch },
+    Preset { id: "new_wave", label: "New Wave", kind: BrushKind::Stretch },
+    Preset { id: "bubblegum", label: "Bubblegum", kind: BrushKind::Scatter },
+    Preset { id: "witch_house", label: "Witch House", kind: BrushKind::Scatter },
+    Preset { id: "shoegaze", label: "Shoegaze", kind: BrushKind::Scatter },
+    Preset { id: "honky_tonk", label: "Honky Tonk", kind: BrushKind::Scatter },
+    Preset { id: "screamo", label: "Screamo", kind: BrushKind::Scatter },
+    Preset { id: "drone", label: "Drone", kind: BrushKind::Scatter },
+    Preset { id: "doo_wop", label: "Doo Wop", kind: BrushKind::Scatter },
+    Preset { id: "spoken_word", label: "Spoken Word", kind: BrushKind::Scatter },
+    Preset { id: "vaporwave", label: "Vaporwave", kind: BrushKind::Scatter },
+    Preset { id: "oi", label: "Oi", kind: BrushKind::Scatter },
     Preset { id: "taper", label: "Taper", kind: BrushKind::Stretch },
     Preset { id: "ink", label: "Ink", kind: BrushKind::Stretch },
     Preset { id: "ribbon", label: "Ribbon", kind: BrushKind::Stretch },
@@ -50,6 +75,14 @@ pub fn preset(id: &str) -> Option<&'static Preset> {
 /// stroke weight); scatter shapes are about one unit wide, centred on the origin, pointing along x.
 fn shape(id: &str) -> Option<BezPath> {
     let mut p = BezPath::new();
+    if let Some(index) = PRESETS[..15].iter().position(|preset| preset.id == id) {
+        styled_stretch(&mut p, index);
+        return Some(p);
+    }
+    if let Some(index) = PRESETS[15..25].iter().position(|preset| preset.id == id) {
+        styled_scatter(&mut p, index);
+        return Some(p);
+    }
     match id {
         "taper" => {
             p.move_to((0.0, 0.0));
@@ -100,6 +133,67 @@ fn shape(id: &str) -> Option<BezPath> {
         _ => return None,
     }
     Some(p)
+}
+
+// Original procedural silhouettes. The names match the reference's categories, while the
+// geometry remains ours and is shared by the canvas renderer and the selector previews.
+fn styled_stretch(p: &mut BezPath, style: usize) {
+    use std::f64::consts::PI;
+    if style == 4 || style == 5 || style == 7 || style == 14 {
+        let count = match style { 4 => 4, 5 => 3, 7 => 6, _ => 3 };
+        for strand in 0..count {
+            let y = (strand as f64 - (count - 1) as f64 / 2.0) * (0.7 / count as f64);
+            band(p, |x| {
+                let wave = 0.085 * (2.0 * PI * (1.5 * x + strand as f64 * 0.07)).sin();
+                let taper = (x / 0.06).min(1.0) * ((1.0 - x) / 0.07).min(1.0);
+                let half = 0.038 * taper * (1.0 + 0.3 * (52.0 * x + strand as f64).sin());
+                (y + wave - half, y + wave + half)
+            });
+        }
+        return;
+    }
+    let rough = match style { 0 => 0.065, 1 => 0.02, 2 => 0.085, 3 => 0.005, 6 => 0.07, 8 => 0.012, 9 => 0.055, 10 => 0.025, 11 => 0.045, 12 => 0.075, 13 => 0.01, _ => 0.03 };
+    let thickness = match style { 1 | 8 | 12 => 0.44, 3 | 10 | 13 => 0.30, _ => 0.36 };
+    band(p, |x| {
+        let fade_in = (x / if style == 3 { 0.13 } else { 0.035 }).min(1.0);
+        let fade_out = ((1.0 - x) / if style == 0 || style == 3 { 0.12 } else { 0.04 }).min(1.0);
+        let taper = fade_in * fade_out;
+        let pulse = 1.0 + 0.17 * (2.0 * PI * (2.0 + style as f64 * 0.12) * x).sin();
+        let center = if style == 2 || style == 9 { 0.09 * (2.0 * PI * 2.0 * x).sin() } else { 0.0 };
+        let top = rough * ((73.0 * x + style as f64).sin() * 0.6 + (131.0 * x).sin() * 0.4);
+        let bottom = rough * ((81.0 * x + style as f64).cos() * 0.6 + (147.0 * x).sin() * 0.4);
+        ((center + (-thickness * pulse + top) * taper).clamp(-0.5, 0.5),
+         (center + (thickness * pulse + bottom) * taper).clamp(-0.5, 0.5))
+    });
+    if matches!(style, 0 | 2 | 6 | 9 | 11 | 12) {
+        for strand in 0..3 {
+            let y = (strand as f64 - 1.0) * 0.15;
+            band(p, |x| {
+                let span = (x / 0.07).min(1.0) * ((1.0 - x) / (0.06 + strand as f64 * 0.04)).min(1.0);
+                let jitter = 0.025 * (83.0 * x + strand as f64 * 2.0).sin();
+                (y + jitter - 0.018 * span, y + jitter + 0.018 * span)
+            });
+        }
+    }
+}
+
+fn styled_scatter(p: &mut BezPath, style: usize) {
+    use std::f64::consts::PI;
+    let points = match style { 1 | 4 => 5, 2 | 8 => 8, 3 | 6 => 4, 7 => 3, _ => 16 };
+    let inner = match style { 1 | 4 => 0.43, 2 | 8 => 0.68, 3 | 6 => 0.78, 7 => 0.3, _ => 1.0 };
+    let n = if inner < 1.0 { points * 2 } else { points };
+    for i in 0..n {
+        let a = 2.0 * PI * i as f64 / n as f64;
+        let radius = if inner < 1.0 && i % 2 == 1 { 0.5 * inner } else { 0.5 };
+        let point = (radius * a.cos(), radius * a.sin());
+        if i == 0 { p.move_to(point) } else { p.line_to(point) }
+    }
+    p.close_path();
+    if matches!(style, 0 | 5 | 9) {
+        // A smaller second mark gives these stamps a distinct rhythm at low zoom.
+        let x = if style == 5 { 0.22 } else { -0.24 };
+        p.extend(kurbo::Shape::path_elements(&kurbo::Circle::new((x, 0.26), 0.12), 0.01));
+    }
 }
 
 /// A closed band from x 0 to 1 between edges `f(x) = (top, bottom)`.

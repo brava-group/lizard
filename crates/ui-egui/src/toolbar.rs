@@ -588,19 +588,56 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                 if tool == ToolId::Brush {
                     vector_edit_separator(ui, &t);
                     let label = lizard_pathops::brush::preset(&preset).map_or(tr("Brush"), |p| tr(p.label));
-                    let trigger = Button::new(label).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(195.0)).show(ui);
-                    Menu::popup(&trigger).width(230.0).align(egui::RectAlign::TOP_START).show(|ui| {
-                        Menu::heading(ui, tr("Brushes"));
-                        for brush in lizard_pathops::brush::PRESETS {
-                            let art = |painter: &egui::Painter, rect: Rect, color: Color32| {
-                                let preview = Rect::from_center_size(rect.center(), vec2(62.0, 8.0));
-                                crate::right::brush_art(painter, preview, brush.id, color);
-                            };
-                            if MenuItem::new(tr(brush.label)).checked(preset == brush.id).show_with(ui, 70.0, art).clicked() {
-                                app.run("tool.drawStyle", json!({"tool": "brush", "preset": brush.id}));
-                                ui.close();
+                    let trigger = Button::new(" ").trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(195.0)).show(ui);
+                    a11y::combo(&trigger, tr("Brush"), label, a11y::menu_open(&trigger));
+                    crate::right::brush_art(
+                        ui.painter(),
+                        Rect::from_min_size(pos2(trigger.rect.min.x + 12.0, trigger.rect.center().y - 10.0), vec2(150.0, 20.0)),
+                        &preset,
+                        Color32::WHITE,
+                    );
+                    Menu::popup(&trigger).width(278.0).align(egui::RectAlign::TOP_START).show(|ui| {
+                        ui.set_width(278.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(tr("Brushes")).font(crate::theme::medium(13.0)));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if Button::icon(Icon::Close, tr("Close")).width(ControlWidth::Fixed(25.0)).show(ui).clicked() { ui.close(); }
+                            });
+                        });
+                        Menu::separator(ui, None);
+                        egui::ScrollArea::vertical().max_height(440.0).show(ui, |ui| {
+                            let brushes = lizard_pathops::brush::PRESETS;
+                            for (title, group) in [
+                                (tr("Stretch brushes"), &brushes[..15]),
+                                (tr("Scatter brushes"), &brushes[15..25]),
+                                (tr("Other brushes"), &brushes[25..]),
+                            ] {
+                                Menu::heading(ui, title);
+                                for brush in group {
+                                    let (row, response) = ui.allocate_exact_size(vec2(262.0, 70.0), Sense::click());
+                                    let active = preset == brush.id;
+                                    if active || response.hovered() {
+                                        let background = if active { Color32::from_rgb(48, 58, 86) } else { Color32::from_gray(52) };
+                                        ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(6), background);
+                                    }
+                                    if active {
+                                        ui.painter().text(pos2(row.min.x + 14.0, row.min.y + 19.0), Align2::CENTER_CENTER, "✓", regular(13.0), Color32::WHITE);
+                                    }
+                                    ui.painter().text(pos2(row.min.x + 30.0, row.min.y + 19.0), Align2::LEFT_CENTER, tr(brush.label), regular(13.0), Color32::WHITE);
+                                    crate::right::brush_art(
+                                        ui.painter(),
+                                        Rect::from_min_size(pos2(row.min.x + 30.0, row.min.y + 35.0), vec2(212.0, 28.0)),
+                                        brush.id,
+                                        Color32::WHITE,
+                                    );
+                                    if response.clicked() {
+                                        app.run("tool.drawStyle", json!({"tool": "brush", "preset": brush.id}));
+                                        ui.close();
+                                    }
+                                }
                             }
-                        }
+                        });
                     });
                 } else if tool == ToolId::Pencil {
                     vector_edit_separator(ui, &t);

@@ -186,7 +186,7 @@ fn set_operand_op(doc: &mut Document, id: NodeId, v: &Value, cmd: &str) -> Resul
 
 pub(crate) const WIDTH_PROFILE_HELP: &str = "widthProfile: a preset (uniform|wedge|taper|eye|rounded|pinch), points [[t (0-1 along the path), scale (× stroke weight)] | [t, left, right] (one-sided: each side's scale, looking along the path), ...] or [{t, scale} | {t, left, right}], {preset} | {points}, or null (uniform)";
 
-pub(crate) const BRUSH_HELP: &str = "brush: a preset (taper|ink|ribbon|bristle: stretched; dots|stars|confetti|leaves: scattered), {preset, spacing? (× weight), sizeJitter? (0-1), rotationJitter? (0-1), scatter? (0-4 × weight), seed?}, or null (a plain stroke)";
+pub(crate) const BRUSH_HELP: &str = "brush: a built-in stretch or scatter preset id (see the Brush selector), {preset, spacing? (× weight), sizeJitter? (0-1), rotationJitter? (0-1), scatter? (0-4 × weight), seed?}, or null (a plain stroke)";
 
 /// A brush from a preset id, `{preset, spacing?, sizeJitter?, rotationJitter?, scatter?, seed?}`
 /// or null. `Some(None)` = no brush; `None` = not a brush (or an unknown preset).

@@ -525,7 +525,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "tool.pencilBrush",
             "Pencil brush",
-            "{preset? (taper|ink|ribbon|bristle|dots|stars|confetti|leaves | null: plain), spacing?, sizeJitter?, rotationJitter?, scatter?, seed?} (the brush new Pencil strokes get; omit `preset` to read it)",
+            "{preset? (a built-in stretch or scatter brush id | null: plain), spacing?, sizeJitter?, rotationJitter?, scatter?, seed?} (the brush new Pencil strokes get; omit `preset` to read it)",
             false,
             |s, p| {
                 // `null` (unlike a missing preset) clears the brush.

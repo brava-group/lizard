@@ -1980,24 +1980,43 @@ fn width_profile_row(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], profile: 
     });
 }
 
-/// A brush drawn along a short line across `rect`, as outlines (egui fills only convex shapes).
+/// A filled preview rasterized from the same outline used by the canvas renderer.
 pub(crate) fn brush_art(painter: &egui::Painter, rect: Rect, preset: &str, col: Color32) {
-    use lizard_geom::kurbo::{self, PathEl};
+    let width = rect.width().ceil().max(1.0) as u32;
+    let height = rect.height().ceil().max(1.0) as u32;
+    let cache_id = egui::Id::new(("brush_preview", preset, width, height));
+    let cached = painter.ctx().data_mut(|data| data.get_temp::<egui::TextureHandle>(cache_id));
+    let texture = if let Some(texture) = cached {
+        texture
+    } else {
+        let Some(texture) = brush_preview_texture(painter.ctx(), preset, width, height) else { return };
+        painter.ctx().data_mut(|data| data.insert_temp(cache_id, texture.clone()));
+        texture
+    };
+    painter.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), col);
+}
+
+fn brush_preview_texture(ctx: &egui::Context, preset: &str, width: u32, height: u32) -> Option<egui::TextureHandle> {
+    use tiny_skia::{FillRule, Paint as SkPaint, Pixmap, Transform};
     let mut line = lizard_geom::BezPath::new();
-    line.move_to((0.0, 0.0));
-    line.line_to((f64::from(rect.width()), 0.0));
+    line.move_to((4.0, f64::from(height) * 0.5));
+    line.curve_to(
+        (f64::from(width) * 0.28, f64::from(height) * 0.07),
+        (f64::from(width) * 0.72, f64::from(height) * 0.93),
+        (f64::from(width) - 4.0, f64::from(height) * 0.5),
+    );
     let brush = Brush::new(preset);
-    let props = StrokeProps { weight: f64::from(rect.height()), align: StrokeAlign::Center, brush: Some(brush.clone()), ..Default::default() };
-    let Some(out) = lizard_pathops::brush::outline(&line, props.weight, &props, &brush) else { return };
-    for sub in lizard_geom::split_subpaths(&out) {
-        let mut pts = Vec::new();
-        kurbo::flatten(sub.iter(), 0.25, |el| {
-            if let PathEl::MoveTo(p) | PathEl::LineTo(p) = el {
-                pts.push(pos2(rect.min.x + p.x as f32, rect.center().y + p.y as f32));
-            }
-        });
-        painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, col)));
-    }
+    let weight = f64::from(height) * 0.46;
+    let props = StrokeProps { weight, align: StrokeAlign::Center, brush: Some(brush.clone()), ..Default::default() };
+    let out = lizard_pathops::brush::outline(&line, weight, &props, &brush)?;
+    let path = lizard_render::ts_path(&out)?;
+    let mut pixmap = Pixmap::new(width, height)?;
+    let mut paint = SkPaint::default();
+    paint.set_color_rgba8(255, 255, 255, 255);
+    paint.anti_alias = true;
+    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &lizard_render::to_rgba8(&pixmap));
+    Some(ctx.load_texture(format!("brush-preview-{preset}-{width}-{height}"), image, egui::TextureOptions::LINEAR))
 }
 
 /// Stroke settings ▸ Brush: a plain stroke, a stretch brush or a scatter brush, each with its look.
