@@ -112,3 +112,29 @@ fn a_press_on_the_mode_switcher_does_not_reach_the_canvas() {
         assert_eq!(layers(&u), 0, "{label}: the click adds nothing");
     }
 }
+
+#[test]
+fn draw_mode_illustrations_select_pen_brush_and_plain_pencil() {
+    let mut u = Ui::new(Session::new());
+    let draw = mode_button(&mut u, "Draw");
+    click(&mut u, draw);
+    assert!(u.app.ui.draw_mode);
+    assert_eq!(u.app.session.tool.tool, ToolId::Pencil);
+
+    let brush = mode_button(&mut u, "Brush");
+    click(&mut u, brush);
+    assert_eq!(u.app.session.tool.tool, ToolId::Pencil);
+    assert!(u.app.session.tool.pencil_brush.is_some());
+
+    let pencil = mode_button(&mut u, "Pencil");
+    click(&mut u, pencil);
+    assert!(u.app.session.tool.pencil_brush.is_none());
+
+    let pen = mode_button(&mut u, "Pen");
+    click(&mut u, pen);
+    assert_eq!(u.app.session.tool.tool, ToolId::Pen);
+
+    let design = mode_button(&mut u, "Design");
+    click(&mut u, design);
+    assert!(!u.app.ui.draw_mode);
+}

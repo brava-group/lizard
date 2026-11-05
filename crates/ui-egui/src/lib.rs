@@ -531,6 +531,8 @@ pub struct UiState {
     pub left_width: f32,
     pub right_width: f32,
     pub right_tab: RightTab,
+    /// Draw mode keeps its illustrated tools visible while Pen or Brush is selected.
+    pub draw_mode: bool,
     /// The tab of the previous frame, to see the right panel change mode.
     pub last_right_tab: RightTab,
     pub left_tab: LeftTab,
@@ -719,6 +721,7 @@ impl Default for UiState {
             left_width: PANEL_DEFAULT,
             right_width: PANEL_DEFAULT,
             right_tab: RightTab::Design,
+            draw_mode: false,
             last_right_tab: RightTab::Design,
             left_tab: LeftTab::File,
             explorer_width: None,

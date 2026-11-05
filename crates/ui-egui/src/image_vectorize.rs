@@ -222,8 +222,9 @@ pub(crate) fn paint_preview(app: &LizardApp, painter: &egui::Painter, canvas_bac
 }
 
 pub(crate) fn toolbar(app: &mut LizardApp, ui: &mut Ui) {
+    let bar_width = crate::toolbar::width_for(app);
     let Some(pending) = app.pending_image_vectorize.as_mut() else { return };
-    let main = crate::toolbar::pill_rect(app.canvas.rect, crate::toolbar::main_width());
+    let main = crate::toolbar::pill_rect(app.canvas.rect, bar_width);
     // Surface margins plus the exact width of every cell and separator.
     let width = 16.0 + 28.0 + 83.0 + 3.0 * 17.0 + 3.0 * 32.0 + 174.0 + 32.0;
     let at = pos2(app.canvas.rect.center().x - width / 2.0, main.min.y - 48.0);

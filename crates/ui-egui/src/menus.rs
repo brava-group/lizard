@@ -1182,7 +1182,7 @@ fn palette(app: &mut LizardApp, ctx: &egui::Context) {
     let Some(mut q) = app.ui.palette.clone() else { return };
     let t = Tokens::get(ctx);
     // Centre on the canvas toolbar, 8 px above it. Tab changes keep the same panel size.
-    let bar_w = crate::toolbar::main_width();
+    let bar_w = crate::toolbar::width_for(app);
     let bar = crate::toolbar::pill_rect(app.canvas.rect, bar_w);
     let area = Rect::from_min_size(pos2(bar.center().x - PALETTE_W / 2.0, bar.min.y - 8.0 - PALETTE_H), vec2(PALETTE_W, PALETTE_H));
     let mut run: Option<String> = None;

@@ -60,6 +60,8 @@ const MODE_SEGMENT_WIDTH: f32 = 3.0 * MODE_CELL + 2.0 * MODE_GAP + 4.0;
 const MODE_SECTION_WIDTH: f32 = MODE_SEGMENT_WIDTH + 16.0;
 const TOOL_GAP: f32 = 8.0;
 const FLYOUT_WIDTH: f32 = 16.0;
+const DRAW_NIB_CELL: f32 = 54.0;
+const DRAW_NIB_LIFT: f32 = 8.0;
 
 fn toolbar_icon_index(icon: Icon) -> Option<usize> {
     match icon {
@@ -124,11 +126,93 @@ pub(crate) fn main_width() -> f32 {
     16.0 + 5.0 * (32.0 + 1.0 + FLYOUT_WIDTH) + 2.0 * 32.0 + 6.0 * TOOL_GAP + MODE_SECTION_WIDTH
 }
 
+fn drawing_mode(app: &LizardApp) -> bool {
+    app.ui.right_tab == crate::RightTab::Design && (app.ui.draw_mode || app.session.tool.tool == ToolId::Pencil)
+}
+
+pub(crate) fn width_for(app: &LizardApp) -> f32 {
+    // Draw replaces the Pen flyout with three 54 px illustrated tool cells and two separators.
+    main_width() + if drawing_mode(app) { 125.0 } else { 0.0 }
+}
+
+fn brush_texture(ui: &Ui, index: usize) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new(("draw-brush-art", index));
+    if let Some(texture) = ui.ctx().data(|data| data.get_temp::<egui::TextureHandle>(id)) {
+        return Some(texture);
+    }
+    let bytes: &[u8] = match index {
+        0 => include_bytes!("../assets/draw-pen.png"),
+        1 => include_bytes!("../assets/draw-brush.png"),
+        _ => include_bytes!("../assets/draw-pencil.png"),
+    };
+    let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let texture = ui.ctx().load_texture(format!("draw-brush-art-{index}"), image, egui::TextureOptions::LINEAR);
+    ui.ctx().data_mut(|data| data.insert_temp(id, texture.clone()));
+    Some(texture)
+}
+
+fn draw_brushes(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, rect: Rect, mut x: f32) -> f32 {
+    let cy = rect.center().y;
+    divider(ui, t, x - 4.0, cy);
+    x += 8.0;
+    for (index, label) in [tr("Pen"), tr("Brush"), tr("Pencil")].into_iter().enumerate() {
+        let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(DRAW_NIB_CELL, rect.height()));
+        let active = match index {
+            0 => app.session.tool.tool == ToolId::Pen,
+            1 => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_some(),
+            _ => app.session.tool.tool == ToolId::Pencil && app.session.tool.pencil_brush.is_none(),
+        };
+        let response = ui.interact(cell, ui.id().with(("draw_art", index)), Sense::click()).lizard_tooltip(label);
+        a11y::toggle(&response, label, active);
+        let hover = if app.reduce_motion() {
+            if response.hovered() { 1.0 } else { 0.0 }
+        } else {
+            ui.ctx().animate_value_with_time(ui.id().with(("draw_art_hover", index)), if response.hovered() { 1.0 } else { 0.0 }, 0.22)
+        };
+        let hover_eased = hover * hover * (3.0 - 2.0 * hover);
+        if active {
+            let selected = if t.dark { Color32::from_rgb(0x40, 0x40, 0x40) } else { t.pressed };
+            let selected_rect = Rect::from_min_max(pos2(cell.min.x + 4.0, cell.min.y - 4.0), pos2(cell.max.x - 4.0, cell.max.y - 3.0));
+            ui.painter().rect_filled(selected_rect, CornerRadius::same(5), selected);
+            a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+        } else if hover > 0.0 {
+            let hover_rect = Rect::from_min_max(pos2(cell.min.x + 4.0, cell.min.y - 4.0 * hover_eased), pos2(cell.max.x - 4.0, cell.max.y - 3.0));
+            ui.painter().rect_filled(hover_rect, CornerRadius::same(5), t.hover.gamma_multiply(hover));
+        }
+        if let Some(texture) = brush_texture(ui, index) {
+            let height = 60.0;
+            let width = height * texture.size()[0] as f32 / texture.size()[1] as f32;
+            // The exported brush and pencil have transparent pixels above their visible tips.
+            let optical_top = [0.0, 2.0, 4.0][index];
+            let lift = optical_top + (if active { DRAW_NIB_LIFT } else { DRAW_NIB_LIFT * hover_eased });
+            let art = Rect::from_min_size(pos2(cell.center().x - width / 2.0, rect.min.y + 1.0 - lift), vec2(width, height));
+            let clip = Rect::from_min_max(pos2(rect.min.x, rect.min.y - 20.0), rect.max);
+            ui.painter().with_clip_rect(clip).image(texture.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        if response.clicked() {
+            app.ui.draw_mode = true;
+            if index == 0 {
+                app.run("tool.set", json!({"tool":"pen"}));
+            } else {
+                let brush = if index == 1 { json!({"preset":"bristle"}) } else { json!({"preset":null}) };
+                app.run("tool.pencilBrush", brush);
+                app.run("tool.set", json!({"tool":"pencil"}));
+            }
+        }
+        x += DRAW_NIB_CELL;
+    }
+    divider(ui, t, x, cy);
+    x + 12.0
+}
+
 /// The main toolbar pill: the tool groups with their flyouts, Comment and Actions, then the
 /// Draw · Design · Inspect mode switcher.
 fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let cell = 32.0;
-    let width = main_width();
+    let draw = drawing_mode(app);
+    let width = width_for(app);
     let rect = pill(ui, &mut app.ui.nav, canvas, width, t);
     let current = match app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).map(|ve| ve.tool) {
         Some(VTool::Pen) => ToolId::Pen,
@@ -137,6 +221,9 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     let mut x = rect.min.x + 8.0;
     let cy = rect.center().y;
     for g in GROUPS {
+        if draw && g.key == "pen" {
+            continue;
+        }
         let in_group = g.tools.iter().any(|(tid, _)| *tid == current);
         let shown = if in_group { current } else { remembered(ui, g.key, g.tools.first().map(|x| x.0).unwrap_or(ToolId::Move)) };
         let icon = g.tools.iter().find(|(tid, _)| *tid == shown).map(|(_, i)| *i).unwrap_or(Icon::Move);
@@ -184,6 +271,9 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             x += FLYOUT_WIDTH;
         }
         x += TOOL_GAP;
+        if draw && g.key == "move" {
+            x = draw_brushes(app, ui, t, rect, x);
+        }
     }
     let actions = Rect::from_center_size(pos2(x + cell / 2.0, cy), vec2(cell, cell));
     let resp = ui.interact(actions, ui.id().with("actions"), Sense::click()).tip(crate::shortcuts::tip(tr("Actions"), "app.actions"));
@@ -217,7 +307,7 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
     // Mode switcher: Draw · Design · Inspect (code).
     let modes = [tr("Draw"), tr("Design"), tr("Inspect")];
     let active = match app.ui.right_tab {
-        crate::RightTab::Design if app.session.tool.tool == ToolId::Pencil => Some(0),
+        crate::RightTab::Design if draw => Some(0),
         crate::RightTab::Design => Some(1),
         crate::RightTab::Prototype => None,
         crate::RightTab::Inspect => Some(2),
@@ -274,15 +364,20 @@ fn main_toolbar(app: &mut LizardApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
             match i {
                 0 => {
                     app.ui.right_tab = crate::RightTab::Design;
+                    app.ui.draw_mode = true;
                     app.run("tool.set", json!({"tool": "pencil"}));
                 }
                 1 => {
                     app.ui.right_tab = crate::RightTab::Design;
+                    app.ui.draw_mode = false;
                     if app.session.tool.tool == ToolId::Pencil {
                         app.run("tool.set", json!({"tool": "move"}));
                     }
                 }
-                _ => app.ui.right_tab = crate::RightTab::Inspect,
+                _ => {
+                    app.ui.draw_mode = false;
+                    app.ui.right_tab = crate::RightTab::Inspect;
+                }
             }
         }
     }
@@ -370,7 +465,7 @@ fn edit_toolbar(app: &mut LizardApp, ui: &mut Ui, current: VTool) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
     let width = vector_edit_toolbar_width();
-    let main = pill_rect(canvas, main_width());
+    let main = pill_rect(canvas, width_for(app));
     let top_left = pos2(canvas.center().x - width / 2.0, main.min.y - 8.0 - 40.0);
     // Holding Cmd with the Move tool bends: show it.
     let held = current == VTool::Move && ui.input(|i| i.modifiers.command);
@@ -512,7 +607,7 @@ fn image_toolbar(app: &mut LizardApp, ui: &mut Ui, id: NodeId, index: usize, pai
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;
     let width = image_toolbar_width();
-    let main = pill_rect(canvas, main_width());
+    let main = pill_rect(canvas, width_for(app));
     let top_left = pos2(canvas.center().x - width / 2.0, main.min.y - 48.0);
     Menu::area(egui::Id::new("image_toolbar"), top_left).show(ui.ctx(), |ui| {
         let bounds = Rect::from_min_size(top_left, vec2(width, 40.0));
