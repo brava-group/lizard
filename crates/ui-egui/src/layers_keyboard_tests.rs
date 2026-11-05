@@ -61,6 +61,39 @@ fn to_layers(u: &mut Ui) {
 }
 
 #[test]
+fn focused_layer_row_runs_arrange_and_edit_shortcuts() {
+    let (mut u, a, b) = setup();
+    let order = |u: &Ui| {
+        let doc = u.app.session.doc().unwrap();
+        doc.node(u.app.session.page().unwrap()).unwrap().children.clone()
+    };
+    assert_eq!(order(&u), vec![a, b]);
+    let cmd = if cfg!(target_os = "macos") { Modifiers::MAC_CMD | Modifiers::COMMAND } else { Modifiers::CTRL | Modifiers::COMMAND };
+    press(&mut u, Key::CloseBracket, cmd);
+    assert_eq!(order(&u), vec![b, a], "Cmd/Ctrl+] works on the canvas");
+    press(&mut u, Key::OpenBracket, cmd);
+    assert_eq!(order(&u), vec![a, b], "Cmd/Ctrl+[ works on the canvas");
+    to_layers(&mut u);
+    settle(&mut u);
+    press(&mut u, Key::CloseBracket, cmd);
+    assert_eq!(order(&u), vec![b, a], "Cmd/Ctrl+] brings the focused layer forward");
+    press(&mut u, Key::OpenBracket, cmd);
+    assert_eq!(order(&u), vec![a, b], "Cmd/Ctrl+[ sends it backward");
+    press(&mut u, Key::D, cmd);
+    assert_eq!(order(&u).len(), 3, "Cmd/Ctrl+D duplicates from the focused row");
+    press(&mut u, Key::Z, cmd);
+    assert_eq!(order(&u), vec![a, b], "Cmd/Ctrl+Z undoes from the focused row");
+    u.frame(vec![Event::Copy]);
+    let copied = u.app.ui.last_copy.clone().expect("the focused row copies its layer");
+    u.frame(vec![
+        Event::Key { key: Key::V, physical_key: None, pressed: true, repeat: false, modifiers: cmd },
+        Event::Paste(copied),
+        Event::Key { key: Key::V, physical_key: None, pressed: false, repeat: false, modifiers: cmd },
+    ]);
+    assert_eq!(order(&u).len(), 3, "a paste event and its key press insert only one copy");
+}
+
+#[test]
 fn f2_renames_from_the_canvas_and_from_a_row_with_the_keyboard() {
     let (mut u, a, _) = setup();
     press(&mut u, Key::F2, Modifiers::NONE);

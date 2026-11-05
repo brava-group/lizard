@@ -94,8 +94,8 @@ struct Drawn {
     canvas: Option<Id>,
     /// An open popup the app draws itself: (the control that opened it, the popup's area id).
     popup: Option<(Id, Id)>,
-    /// A layer row had the keyboard.
-    row_focused: bool,
+    /// The layer row that had the keyboard.
+    focused_row: Option<Id>,
 }
 
 /// Where the keyboard goes on the next frame.
@@ -217,7 +217,7 @@ pub fn popup(nav: &mut Nav, opener: Id, area: Id) {
 /// A layer row: while it has the keyboard, the arrows move through the layers.
 pub fn layer_row(nav: &mut Nav, resp: &Response) {
     if resp.has_focus() {
-        nav.next.row_focused = true;
+        nav.next.focused_row = Some(resp.id);
     }
 }
 
@@ -402,12 +402,42 @@ fn keys(app: &mut LizardApp, ctx: &Context) {
                 }
             }
         }
-        Region::Layers if in_region && app.ui.nav.last.row_focused => {
-            // The canvas shortcuts are off while a row has the keyboard: rename (F2, Cmd/Ctrl+R)
-            // and the context menu (Shift+F10) work on its layer here.
-            if let Some((id, key, m)) = binding_pressed(ctx, &["object.rename", "view.contextMenu"]) {
-                ctx.input_mut(|i| i.consume_key(m, key));
-                crate::shortcuts::run_binding(app, id);
+        Region::Layers if in_region && app.ui.nav.last.focused_row == focused => {
+            // A layer row owns keyboard focus, so the canvas shortcut handler skips it. Forward
+            // selection and editing commands here; Tab, arrows, Escape and F6 belong to the
+            // region navigation below or above this branch.
+            if app.ui.rename.is_none() {
+                let clipboard = ctx.input(|i| {
+                    i.events.iter().find_map(|event| match event {
+                        Event::Copy => Some(("edit.copy", None)),
+                        Event::Cut => Some(("edit.cut", None)),
+                        Event::Paste(text) => Some(("edit.paste", Some(text.clone()))),
+                        _ => None,
+                    })
+                });
+                let shortcut = binding_pressed(ctx, &[]);
+                if let Some((id, text)) = &clipboard {
+                    if *id == "edit.paste" {
+                        let paste_id = shortcut
+                            .filter(|(_, key, _)| *key == Key::V)
+                            .map(|(id, _, _)| id)
+                            .or_else(|| crate::shortcuts::lookup(keymap::Context::Canvas, Key::V, Some(Key::V), app.ui.held).map(|b| b.id))
+                            .unwrap_or("edit.paste");
+                        if paste_id == "edit.paste" {
+                            crate::menus::paste(app, text.as_deref(), None);
+                        } else {
+                            crate::shortcuts::run_binding(app, paste_id);
+                        }
+                    } else {
+                        crate::menus::invoke(app, id);
+                    }
+                }
+                if let Some((id, key, m)) = shortcut {
+                    ctx.input_mut(|i| i.consume_key(m, key));
+                    if clipboard.as_ref().is_none_or(|(event_id, _)| *event_id != id && !(*event_id == "edit.paste" && key == Key::V)) {
+                        crate::shortcuts::run_binding(app, id);
+                    }
+                }
             }
             for k in arrows {
                 let shift = matches!(k, Key::ArrowUp | Key::ArrowDown) && pressed(k, Modifiers::SHIFT);
@@ -454,7 +484,11 @@ fn binding_pressed(ctx: &Context, ids: &[&str]) -> Option<(&'static str, Key, Mo
         i.events.iter().find_map(|e| match e {
             Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
                 crate::shortcuts::lookup(keymap::Context::Canvas, *key, *physical_key, *modifiers)
-                    .filter(|b| ids.contains(&b.id))
+                    .filter(|b| ids.is_empty() || ids.contains(&b.id))
+                    .filter(|b| {
+                        !ids.is_empty()
+                            || !matches!(b.id, "select.next" | "select.previous" | "select.none" | "view.nextRegion" | "view.previousRegion")
+                    })
                     .map(|b| (b.id, *key, *modifiers))
             }
             _ => None,
