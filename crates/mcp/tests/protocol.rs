@@ -61,6 +61,10 @@ fn icon_search_and_creation_render_the_requested_library_asset() {
     assert_eq!(same["search"]["matches"][0]["library"], "lucide");
     let fallback = c.ok("search_icons", json!({"query":"analytics", "preferredLibrary":"feather"}));
     assert_eq!(fallback["search"]["usedFallback"], true);
+    let group = c.ok("search_icons", json!({"queries":["home", "search", "settings"], "preferredLibrary":"lucide", "limit":2}));
+    assert_eq!(group["searches"].as_array().map(Vec::len), Some(3));
+    assert_eq!(group["searches"][0]["query"], "home");
+    assert_eq!(group["searches"][0]["search"]["matches"][0]["library"], "lucide");
     let id = c.create(json!({"type":"icon", "library":"lucide", "icon":"home", "color":"#E32636", "x":30, "y":40, "width":48}));
     let node = c.node(&id);
     assert_eq!(node["width"].as_f64(), Some(48.0));

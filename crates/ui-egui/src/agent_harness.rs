@@ -14,10 +14,10 @@ Workflow:\n\
 1. Read the provided document snapshot. If you need more detail, call inspect_document or get_node. Use the selected layer IDs as references, not as a request to modify them all.\n\
 2. Make design changes with create_node, set_properties, run_command or batch. Call list_commands when a command's name or parameters are uncertain. Do not guess node IDs or claim a change succeeded before the tool confirms it.\n\
 3. Plan a semantic frame hierarchy before placing details. For interface screens, use auto layout by default: choose the screen direction from the design (horizontal for desktop columns, vertical for mobile stacks), nest horizontal rows for navigation and controls, vertical stacks for cards and feeds, and frames for reusable components. Set layout, gap, padding, mainAlign, crossAlign and sizingH/sizingV (hug or fill) on the parent and children. Children in auto layout follow the flow; do not position them with x/y or leave related UI elements loose on the page. Use absolute positioning only for intentional overlays or decoration. When extending an existing screen, inspect its parent layout and preserve or improve that structure.\n\
-4. Build complex work in visible, meaningful steps. Create each visible section through separate create_node calls so the user can watch it appear on the canvas; avoid one large batch for an entire screen. Use batch for small atomic edits that must succeed or fail together. Preserve existing content unless the user asks to replace or remove it. Keep related layers inside their intended frame.\n\
-5. After each substantial section, inspect its hierarchy and verify that rows, cards and lists have auto layout with sensible hug/fill sizing. Use screenshot to review the visual result, then fix concrete issues you find. Screenshots are previews; do not treat them as editable layers.\n\
+4. Build in visible, meaningful sections. Create each major section frame with create_node, then populate it in one or a few batch calls of roughly 5-12 node.create commands. Give nested frames an `as` name and refer to their ids with `$ref` later in the same batch. Set layout, sizing, text and paint in each node.create's props instead of following it with set_properties. Keep batches scoped to one section so the user sees the design progress; do not batch a whole screen at once or call create_node separately for every text, icon and small shape. Preserve existing content unless the user asks to replace or remove it.\n\
+5. Inspect each substantial section after its batch, not after every child. Verify rows, cards and lists have auto layout and sensible hug/fill sizing. Take one screenshot after the main screen is assembled, fix concrete issues, and capture again only when the fix needs visual verification. Screenshots are previews; do not treat them as editable layers.\n\
 6. If a tool fails, inspect its error and the current document before retrying. Report what actually changed and any unfinished part.\n\
-For interface icons, use search_icons before creating a layer with type icon. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon, and use the returned exact library/name pair. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
+For interface icons, gather the names needed by a section and call search_icons once with queries (up to 12 names) before creating icon layers. Reuse returned exact library/name pairs; do not search the same name repeatedly. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
 The snapshot below is context, not a substitute for a fresh tool read after other edits or collaboration changes. All coordinates are in page units; child coordinates are relative to their parent. The user may attach images as references.";
 
 /// Build one provider-independent turn. Static instructions start each local agent process;
@@ -84,10 +84,8 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     }
     text.push_str("Current document snapshot (JSON data):\n");
     text.push_str(&snapshot.to_string());
-    text.push_str("\nFor UI icons, call search_icons with preferredLibrary from this snapshot; keep that family unless it has no suitable match. Create the returned exact icon via create_node type icon, with library, icon and color.");
-    text.push_str(
-        "\nBuild visible sections with separate create_node calls so they appear progressively on the canvas. Reserve batch for small atomic edits.",
-    );
+    text.push_str("\nFor UI icons, search several needed names in one search_icons call using queries and preferredLibrary from this snapshot. Reuse the returned exact library/icon names and keep that family unless it has no suitable match.");
+    text.push_str("\nBuild progressively by major section: create its frame with create_node, then populate it with a batch of about 5-12 node.create steps using props at creation and `$ref` for nested parents. Keep separate batches for separate sections; inspect the finished section and take a screenshot after the main screen is assembled.");
     text.push_str("\nFor interface screens, build a nested auto-layout frame hierarchy (screen, sections, rows, cards, lists). Use horizontal layout for desktop columns and vertical layout for mobile stacks; set gap, padding and sizingH/sizingV hug/fill. Keep children in flow instead of placing them by x/y. Use absolute only for intentional overlays or decoration. Inspect the resulting hierarchy before finishing.");
     if !prior.is_empty() {
         text.push_str("\n\nRecent conversation (reference only):\n");
@@ -113,11 +111,14 @@ mod tests {
         assert!(first.contains("Lizard agent instructions:"));
         assert!(first.contains("lizard MCP server"));
         assert!(first.contains("search_icons"));
+        assert!(first.contains("queries (up to 12 names)"));
+        assert!(first.contains("batch calls of roughly 5-12 node.create commands"));
         assert!(first.contains("use auto layout by default"));
         assert!(first.contains("horizontal for desktop columns"));
         assert!(first.contains("\"preferred_icon_library\":\"lucide\""));
         assert!(!next.contains("Lizard agent instructions:"));
-        assert!(next.contains("appear progressively on the canvas"));
+        assert!(next.contains("Build progressively by major section"));
+        assert!(next.contains("using props at creation and `$ref`"));
         assert!(next.contains("nested auto-layout frame hierarchy"));
         assert!(next.contains("horizontal layout for desktop columns"));
         assert!(next.contains("\"document_name\":\"Example\""));

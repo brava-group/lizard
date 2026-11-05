@@ -119,14 +119,15 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "search_icons",
             "Search UI icons",
-            "Search the bundled Lucide, Feather, Phosphor and Material Symbols icon catalogs by English name. Give preferredLibrary to keep one visual family across a screen: matches from that family are returned first, and other families are used only when it has no match. The response contains exact library/name pairs for create_node {type: icon} or icon.create. A document's current preferred family is in the agent snapshot.",
+            "Search the bundled Lucide, Feather, Phosphor and Material Symbols icon catalogs by English name. Use queries for up to 12 names in one call (default 4 matches each), or query for one name (default 12 matches). Give preferredLibrary to keep one visual family across a screen: matches from that family are returned first, and other families are used only when it has no match. The response contains exact library/name pairs for create_node {type: icon} or icon.create. A document's current preferred family is in the agent snapshot.",
             obj(
                 json!({
                     "query": string("Icon meaning or name, for example home, settings, arrow-right, analytics"),
+                    "queries": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "string"}, "description": "Up to 12 icon meanings to search together, e.g. [home, search, settings]. Use instead of query."},
                     "preferredLibrary": string("Preferred library, default lucide: lucide, feather, phosphor, material-symbols-outlined, material-symbols-rounded or material-symbols-sharp"),
-                    "limit": int("Maximum matches (default 12, maximum 40)"),
+                    "limit": int("Matches per query (single default 12, maximum 40; multiple default 4, maximum 12)"),
                 }),
-                &["query"],
+                &[],
             ),
             true,
         ),
@@ -551,8 +552,24 @@ fn list_commands(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResu
 }
 
 fn search_icons(a: &Map<String, Value>) -> Result<ToolResult, String> {
-    let query = req_s(a, "query")?;
     let preferred = Some(s_arg(a, "preferredLibrary")?.unwrap_or("lucide"));
+    if let Some(queries) = a.get("queries").filter(|value| !value.is_null()) {
+        if a.get("query").is_some_and(|value| !value.is_null()) {
+            return Err("use either `query` or `queries`".into());
+        }
+        let queries = queries.as_array().filter(|queries| (1..=12).contains(&queries.len())).ok_or("`queries` must contain 1 to 12 names")?;
+        let limit = match a.get("limit") {
+            None | Some(Value::Null) => 4,
+            Some(value) => value.as_u64().filter(|limit| (1..=12).contains(limit)).ok_or("`limit` must be between 1 and 12 for `queries`")? as usize,
+        };
+        let mut searches = Vec::with_capacity(queries.len());
+        for query in queries {
+            let query = query.as_str().filter(|query| !query.trim().is_empty()).ok_or("each `queries` entry must be a non-empty string")?;
+            searches.push(json!({"query": query, "search": lizard_engine::icon_catalog::search(query, preferred, limit)?}));
+        }
+        return Ok(ToolResult::json(&json!({"searches": searches})));
+    }
+    let query = req_s(a, "query")?;
     let limit = match a.get("limit") {
         None | Some(Value::Null) => 12,
         Some(value) => value.as_u64().filter(|limit| (1..=40).contains(limit)).ok_or("`limit` must be between 1 and 40")? as usize,
