@@ -2459,11 +2459,18 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     }
     if let Some((_, add)) = actions.iter().find(|(index, _)| *index == 1) {
         crate::primitives::Menu::popup(add).width(216.0).show(|ui| {
-            let icons = [Icon::Effects, Icon::Rectangle, Icon::Ellipse, Icon::Image, Icon::Dots, Icon::Grid, Icon::PaintBucket];
-            for ((label, effect_type), icon) in Effect::TYPES.into_iter().zip(icons) {
-                if menu_item_with(ui, tr(label), "", 24.0, |painter, rect, color| {
-                    icons::paint(painter, Rect::from_center_size(rect.right_center() - vec2(15.0, 0.0), vec2(14.0, 14.0)), icon, color);
-                }) {
+            for (label, effect_type) in Effect::TYPES {
+                let Some(effect) = Effect::of_type(effect_type) else { continue };
+                if crate::primitives::MenuItem::new(tr(label))
+                    .show_with_parts(
+                        ui,
+                        28.0,
+                        |painter, rect, color| paint_effect_kind_icon(painter, rect.center(), &effect.kind, color),
+                        0.0,
+                        |_, _, _| {},
+                    )
+                    .clicked()
+                {
                     app.run("effect.add", json!({"ids": ids, "type": effect_type}));
                     ui.close();
                 }
@@ -2564,6 +2571,34 @@ pub(crate) struct EffectRow {
     pub remove: bool,
 }
 
+fn paint_effect_kind_icon(painter: &egui::Painter, center: egui::Pos2, kind: &EffectKind, color: Color32) {
+    let (index, size) = match kind {
+        EffectKind::Glass(_) => (3, 14.0),
+        EffectKind::Texture(_) => (7, 11.0),
+        EffectKind::Noise(_) => (11, 12.0),
+        EffectKind::BackgroundBlur(_) => (15, 12.0),
+        EffectKind::LayerBlur(_) => (19, 12.0),
+        EffectKind::DropShadow(_) => (23, 12.0),
+        EffectKind::InnerShadow(_) => (28, 12.0),
+    };
+    icons::paint_panel_reference(painter, Rect::from_center_size(center, vec2(size, size)), index, color);
+    match kind {
+        EffectKind::DropShadow(_) => icons::paint_panel_reference(
+            painter,
+            Rect::from_center_size(center + vec2(0.0, 6.5), vec2(12.0, 5.0)),
+            24,
+            Color32::from_white_alpha(102),
+        ),
+        EffectKind::InnerShadow(_) => icons::paint_panel_reference(
+            painter,
+            Rect::from_center_size(center + vec2(0.0, -3.0), vec2(10.0, 4.0)),
+            29,
+            Color32::from_white_alpha(102),
+        ),
+        _ => {}
+    }
+}
+
 /// One effect-list row, shared by the properties panel and effect-style editor.
 pub(crate) fn effect_row(ui: &mut Ui, id: Id, effect: &Effect, open: bool) -> EffectRow {
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
@@ -2596,27 +2631,7 @@ pub(crate) fn effect_row(ui: &mut Ui, id: Id, effect: &Effect, open: bool) -> Ef
     }
     ui.painter().rect_stroke(button_rect, CornerRadius::same(5), Stroke::new(1.0, Color32::from_white_alpha(26)), egui::StrokeKind::Inside);
     let icon_center = pos2(button_rect.min.x + 20.0, button_rect.center().y);
-    let icon_size = match kind_icon {
-        3 => vec2(14.0, 14.0),
-        7 => vec2(11.0, 11.0),
-        _ => vec2(12.0, 12.0),
-    };
-    icons::paint_panel_reference(ui.painter(), Rect::from_center_size(icon_center, icon_size), kind_icon, Tokens::get(ui.ctx()).text_secondary);
-    match effect.kind {
-        EffectKind::DropShadow(_) => icons::paint_panel_reference(
-            ui.painter(),
-            Rect::from_center_size(icon_center + vec2(0.0, 6.5), vec2(12.0, 5.0)),
-            24,
-            Color32::from_white_alpha(102),
-        ),
-        EffectKind::InnerShadow(_) => icons::paint_panel_reference(
-            ui.painter(),
-            Rect::from_center_size(icon_center + vec2(0.0, -3.0), vec2(10.0, 4.0)),
-            29,
-            Color32::from_white_alpha(102),
-        ),
-        _ => {}
-    }
+    paint_effect_kind_icon(ui.painter(), icon_center, &effect.kind, Tokens::get(ui.ctx()).text_secondary);
     ui.painter().text(
         pos2(button_rect.min.x + 32.0, button_rect.center().y),
         Align2::LEFT_CENTER,
