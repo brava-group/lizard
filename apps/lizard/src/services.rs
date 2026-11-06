@@ -28,6 +28,7 @@ pub struct Desktop {
     /// Recovery copies of unsaved files (written at once after a panic).
     recovery: crate::recovery::Shared,
     agents: Vec<crate::agent::Agent>,
+    pending_parallel: Option<(AgentKind, AgentPrompt, u64)>,
     agent_control: Option<(ControlQueue, ContextSlot)>,
     agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
     agent_login_events: Option<std::sync::mpsc::Receiver<AgentEvent>>,
@@ -100,6 +101,7 @@ impl Desktop {
             language: system_language(),
             recovery,
             agents: Vec::new(),
+            pending_parallel: None,
             agent_control: None,
             agent_bridges: Vec::new(),
             agent_login_events: None,
@@ -336,6 +338,19 @@ fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
     }
 }
 
+fn parallel_lead_instructions(count: usize, mode: lizard_ui_egui::agent_panel::ParallelMode) -> String {
+    match mode {
+        lizard_ui_egui::agent_panel::ParallelMode::Split => format!(
+            "Parallel design run with {count} agents. You are the lead designer. Inspect the document and divide the user request into exactly {count} distinct parts before detailed design. Create a separate frame container for each part; related sections of one screen should be sibling frames inside their shared screen frame, while independent screens can each be root frames. Call spawn_agents once with exactly {} config entries: each entry has a brief, different prompt and the existing containerNodes assigned to one other agent. Then design the remaining part yourself in its own container. Never work in the other agents' containers. Give each task the same relevant style guidance, but let the agent determine its internal layout. If the request cannot be divided safely, explain why and continue alone.",
+            count - 1
+        ),
+        lizard_ui_egui::agent_panel::ParallelMode::SideBySide => format!(
+            "Parallel alternatives with {count} agents. You are the lead designer. Create exactly {count} separate root frames for complete versions of the same request. Call spawn_agents once with exactly {} config entries, each with a different root ID in containerNodes and a brief prompt asking for a complete independent version. Then make your own complete version inside the remaining root. Do not edit other agents' roots.",
+            count - 1
+        ),
+    }
+}
+
 impl Services for Desktop {
     fn update_status(&mut self) -> UpdateStatus {
         #[cfg(target_os = "macos")]
@@ -371,6 +386,9 @@ impl Services for Desktop {
     }
     fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
         let count = usize::from(prompt.agent_count.clamp(1, 6));
+        if count > 1 {
+            self.agent_reset();
+        }
         if !self.agents.is_empty()
             && (self.agents.len() != count
                 || self.agents.iter().any(|agent| agent.document != document || agent.kind != kind || agent.conversation != prompt.conversation))
@@ -387,7 +405,7 @@ impl Services for Desktop {
                 .into_owned();
             let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
             std::fs::create_dir_all(&cwd).map_err(|error| trf("Could not prepare the agent folder: {error}", &[("error", &error)]))?;
-            for index in 0..count {
+            for index in 0..if count > 1 { 1 } else { count } {
                 let port = match self.agent_port(document, index) {
                     Ok(port) => port,
                     Err(error) => {
@@ -407,36 +425,87 @@ impl Services for Desktop {
         for index in 0..self.agents.len() {
             let mut assigned = prompt.clone();
             if count > 1 {
-                let role = match prompt.parallel_mode {
-                    lizard_ui_egui::agent_panel::ParallelMode::SideBySide => trf(
-                        "You are agent {index} of {count}. Create a complete, independent version of the request. Work in a new root frame named 'Alternative {index}'. Preserve the other agents' frames and do not change their work.",
-                        &[("index", &(index + 1)), ("count", &count)],
-                    ),
-                    lizard_ui_egui::agent_panel::ParallelMode::Split => trf(
-                        "You are agent {index} of {count}. Do a distinct, proportional part of the requested work. Clearly identify your part before editing. Do not change the other agents' work. When finished, report which part you did.",
-                        &[("index", &(index + 1)), ("count", &count)],
-                    ),
-                };
                 assigned.text.push_str("\n\n");
-                assigned.text.push_str(&trf("Round coordination: {role}", &[("role", &role)]));
-                assigned.resume = prompt.resumes.get(index).cloned().flatten().or_else(|| if index == 0 { prompt.resume.clone() } else { None });
+                assigned.text.push_str(&parallel_lead_instructions(count, prompt.parallel_mode));
+                assigned.resume = prompt.resumes.get(index).cloned().flatten().or_else(|| prompt.resume.clone());
             }
             if let Err(error) = self.agents[index].send(assigned) {
                 self.agent_reset();
                 return Err(error);
             }
         }
+        if count > 1 {
+            self.pending_parallel = Some((kind, prompt, document));
+        }
+        Ok(())
+    }
+
+    fn agent_spawn(&mut self, document: u64, config: &[Value]) -> Result<(), String> {
+        let (kind, prompt, expected_document) = self.pending_parallel.clone().ok_or("No parallel run is waiting for agents")?;
+        let count = usize::from(prompt.agent_count.clamp(1, 6));
+        if document != expected_document || self.agents.len() != 1 || config.len() != count - 1 {
+            return Err(format!("Expected {} assigned agents in the active document", count - 1));
+        }
+        let cli = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|parent| parent.join(if cfg!(windows) { "lizard-cli.exe" } else { "lizard-cli" })))
+            .filter(|p| p.is_file())
+            .ok_or("Lizard's agent bridge is missing")?
+            .to_string_lossy()
+            .into_owned();
+        let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
+        let old_bridges = self.agent_bridges.len();
+        let mut children = Vec::with_capacity(config.len());
+        let prepared = (|| -> Result<(), String> {
+            for (offset, task) in config.iter().enumerate() {
+                let index = offset + 1;
+                let port = self.agent_port(document, index)?;
+                let agent = crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli)?;
+                let mut assigned = prompt.clone();
+                let roots = task.get("containerNodes").and_then(Value::as_array).cloned().unwrap_or_default();
+                let description = task
+                    .get("prompt")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| prompt.text.rsplit_once("User request:\n").map_or(prompt.text.as_str(), |(_, request)| request));
+                assigned.text.push_str(&format!("\n\nYou are designer agent {} of {}. Your exclusive task: {}. Work only inside the assigned root frame IDs: {}. Do not move, delete, or edit another agent's roots. The assigned frame snapshot below was fetched immediately before this turn; verify the document ID and page before editing. Preserve shared styles and variables. Report only your assigned result.\nAssigned frame snapshot: {}", index + 1, count, description, Value::Array(roots), task.get("bootstrap").unwrap_or(&Value::Null)));
+                assigned.resume = None;
+                agent.send(assigned)?;
+                children.push(agent);
+            }
+            Ok(())
+        })();
+        if let Err(error) = prepared {
+            drop(children);
+            for (_, enabled) in self.agent_bridges.drain(old_bridges..) {
+                enabled.store(false, Ordering::Release);
+            }
+            return Err(error);
+        }
+        self.agents.extend(children);
+        self.pending_parallel = None;
         Ok(())
     }
 
     fn agent_poll(&mut self) -> Vec<AgentEvent> {
         let mut events = Vec::new();
+        let mut lead_finished_without_spawn = false;
         for (index, agent) in self.agents.iter().enumerate() {
             for event in agent.poll() {
+                if index == 0 && matches!(event, AgentEvent::Done(_) | AgentEvent::Error(_)) && self.pending_parallel.is_some() {
+                    lead_finished_without_spawn = true;
+                }
                 if self.agents.len() > 1 {
                     events.push(AgentEvent::Scoped { index, event: Box::new(event) });
                 } else {
                     events.push(event);
+                }
+            }
+        }
+        if lead_finished_without_spawn {
+            if let Some((_, prompt, _)) = self.pending_parallel.take() {
+                for index in 1..usize::from(prompt.agent_count.clamp(1, 6)) {
+                    events.push(AgentEvent::Scoped { index, event: Box::new(AgentEvent::Done("Not started".into())) });
                 }
             }
         }
@@ -548,6 +617,7 @@ impl Services for Desktop {
 
     fn agent_reset(&mut self) {
         self.agents.clear();
+        self.pending_parallel = None;
         for (_, enabled) in self.agent_bridges.drain(..) {
             enabled.store(false, Ordering::Release);
         }

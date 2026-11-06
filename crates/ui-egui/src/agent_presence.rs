@@ -234,7 +234,27 @@ fn advance_idle_strength(current: f32, idle: bool, dt: Duration, reduce_motion: 
 }
 
 pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
-    let brand = Tokens::get(ctx).accent_text;
+    draw_one(app, painter, ctx, 0);
+    for index in 0..app.ui.agent.other_presences.len() {
+        std::mem::swap(&mut app.ui.agent.presence, &mut app.ui.agent.other_presences[index]);
+        draw_one(app, painter, ctx, index + 1);
+        std::mem::swap(&mut app.ui.agent.presence, &mut app.ui.agent.other_presences[index]);
+    }
+}
+
+fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_index: usize) {
+    let brand = if agent_index == 0 {
+        Tokens::get(ctx).accent_text
+    } else {
+        const COLORS: [Color32; 5] = [
+            Color32::from_rgb(0x4D, 0xB6, 0xF2),
+            Color32::from_rgb(0xF2, 0x9A, 0x62),
+            Color32::from_rgb(0x72, 0xCE, 0x9F),
+            Color32::from_rgb(0xEE, 0x83, 0xBB),
+            Color32::from_rgb(0xD5, 0xBE, 0x70),
+        ];
+        COLORS[(agent_index - 1) % COLORS.len()]
+    };
     let now = Instant::now();
     let Some(document) = app.session.ds().ok().map(|ds| ds.uid) else { return };
     let presence = &app.ui.agent.presence;
@@ -354,7 +374,8 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
                 .runtime_conversation
                 .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
                 .map_or(crate::i18n::tr("Agent"), |chat| chat.agent.label());
-            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
+            let label = if app.ui.agent.active_agent_count > 1 { format!("{name} {}", agent_index + 1) } else { name.to_string() };
+            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, &label, brand.gamma_multiply(fade));
         }
     }
     let cursor_visible = shown.is_some_and(|(x, y)| app.canvas.rect.contains(app.to_screen(x, y)));

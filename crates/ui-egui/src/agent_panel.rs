@@ -294,6 +294,7 @@ pub struct Conversation {
 #[derive(Default)]
 pub struct AgentUi {
     pub presence: AgentPresence,
+    pub other_presences: Vec<AgentPresence>,
     pub draft: String,
     pub images: Vec<DraftImage>,
     pub pending_images: Vec<DraftImage>,
@@ -486,16 +487,22 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
             }
             AgentEvent::Tool { id, title, status, input, output, content } => {
                 let source = if app.ui.agent.agent == AgentKind::Codex { "mcp-create-node" } else { &id };
+                let presence =
+                    if agent_index == 0 { Some(&mut app.ui.agent.presence) } else { app.ui.agent.other_presences.get_mut(agent_index - 1) };
                 let creating = title.as_deref().is_some_and(|title| {
                     let title = title.to_lowercase();
                     title.contains("create") || title.contains("criar") || title.contains("adicionar camada")
-                }) || app.ui.agent.presence.draft.as_ref().is_some_and(|draft| draft.source == source);
+                }) || presence.as_ref().is_some_and(|presence| presence.draft.as_ref().is_some_and(|draft| draft.source == source));
                 if creating && !matches!(status.as_deref(), Some("completed" | "failed")) {
                     if let Some(Some(raw)) = input.as_ref() {
-                        crate::agent_presence::update_draft(&mut app.ui.agent.presence, source, raw);
+                        if let Some(presence) = presence {
+                            crate::agent_presence::update_draft(presence, source, raw);
+                        }
                     }
                 } else if creating && matches!(status.as_deref(), Some("completed" | "failed")) {
-                    app.ui.agent.presence.draft = None;
+                    if let Some(presence) = presence {
+                        presence.draft = None;
+                    }
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
                     if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == id) {
@@ -541,6 +548,13 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 if let Some(finished) = app.ui.agent.finished_agents.get_mut(agent_index) {
                     *finished = true;
                 }
+                if agent_index == 0 {
+                    app.ui.agent.presence.active = false;
+                    app.ui.agent.presence.updated = Some(web_time::Instant::now());
+                } else if let Some(presence) = app.ui.agent.other_presences.get_mut(agent_index - 1) {
+                    presence.active = false;
+                    presence.updated = Some(web_time::Instant::now());
+                }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
                     message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
                     if let Ok(ds) = app.session.ds() {
@@ -575,6 +589,11 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 }
                 if let Some(finished) = app.ui.agent.finished_agents.get_mut(agent_index) {
                     *finished = true;
+                }
+                if agent_index == 0 {
+                    app.ui.agent.presence.active = false;
+                } else if let Some(presence) = app.ui.agent.other_presences.get_mut(agent_index - 1) {
+                    presence.active = false;
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
                     message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
@@ -847,6 +866,8 @@ fn send_prompt(app: &mut LizardApp) {
             }
             app.ui.agent.active = Some(id);
             app.ui.agent.active_agent_count = agent_count;
+            app.ui.agent.other_presences =
+                (1..agent_count).map(|_| AgentPresence { document: Some(document), conversation: Some(id), ..Default::default() }).collect();
             app.ui.agent.remaining_agents = agent_count;
             app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
             app.ui.agent.remaining_variants = variant_count;
@@ -974,6 +995,8 @@ fn begin_next_variant(app: &mut LizardApp) {
     app.ui.agent.remaining_variants = app.ui.agent.remaining_variants.saturating_sub(1);
     app.ui.agent.remaining_agents = agent_count;
     app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
+    app.ui.agent.other_presences =
+        (1..agent_count).map(|_| AgentPresence { document: Some(document), conversation: Some(conversation), ..Default::default() }).collect();
     app.ui.agent.turn_started = Some(web_time::Instant::now());
     app.ui.agent.presence.active = true;
     app.ui.agent.presence.point = None;
@@ -985,6 +1008,16 @@ fn begin_next_variant(app: &mut LizardApp) {
 }
 
 impl AgentUi {
+    pub(crate) fn presence_mut(&mut self, index: usize) -> &mut AgentPresence {
+        if index == 0 {
+            &mut self.presence
+        } else {
+            if self.other_presences.len() < index {
+                self.other_presences.resize_with(index, AgentPresence::default);
+            }
+            &mut self.other_presences[index - 1]
+        }
+    }
     fn new_chat(&mut self) {
         self.draft.clear();
         self.images.clear();

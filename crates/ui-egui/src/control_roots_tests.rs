@@ -90,3 +90,82 @@ fn window_captures_are_written_through_the_roots_or_returned() {
     });
     assert!(d.0.join("out/shot.png").is_file() && !d.0.join("outside/shot.png").exists());
 }
+
+#[test]
+fn parallel_spawn_requires_distinct_existing_frames() {
+    let (mut app, _dirs) = confined_app("parallel");
+    let ds = app.session.ds().unwrap();
+    let document = ds.uid;
+    app.ui.agent.busy = true;
+    app.ui.agent.runtime_document = Some(document);
+    app.ui.agent.active_agent_count = 3;
+    let frame = app.session.execute("node.create", &json!({"type":"frame", "name":"First task"})).unwrap()["id"].clone();
+    let request = |second: Value| {
+        json!({
+            "__agent_document": document,
+            "__agent_index": 0,
+            "config": [
+                {"prompt":"Build the first screen", "containerNodes":[frame]},
+                {"prompt":"Build the second screen", "containerNodes":[second]}
+            ]
+        })
+    };
+    let duplicate = handle(&mut app, "agent.spawn", request(frame.clone())).unwrap_err();
+    assert!(duplicate.contains("non-overlapping frame"), "{duplicate}");
+    let missing = handle(&mut app, "agent.spawn", request(json!(999_999))).unwrap_err();
+    assert!(missing.contains("does not exist"), "{missing}");
+    let second = app.session.execute("node.create", &json!({"type":"frame", "name":"Second task"})).unwrap()["id"].clone();
+    let valid = handle(&mut app, "agent.spawn", request(second)).unwrap_err();
+    assert!(valid.contains("desktop app"), "{valid}");
+}
+
+#[test]
+fn parallel_spawn_accepts_sibling_sections_but_rejects_ancestor_overlap() {
+    let (mut app, _dirs) = confined_app("parallel-sections");
+    let document = app.session.ds().unwrap().uid;
+    app.ui.agent.busy = true;
+    app.ui.agent.runtime_document = Some(document);
+    app.ui.agent.active_agent_count = 3;
+    let screen = app.session.execute("node.create", &json!({"type":"frame", "name":"Screen"})).unwrap()["id"].clone();
+    let first = app.session.execute("node.create", &json!({"type":"frame", "name":"Header", "parent":screen})).unwrap()["id"].clone();
+    let second = app.session.execute("node.create", &json!({"type":"frame", "name":"Body", "parent":screen})).unwrap()["id"].clone();
+    let request = |left: Value, right: Value| {
+        json!({
+            "__agent_document": document,
+            "__agent_index": 0,
+            "config": [
+                {"prompt":"Build the header", "containerNodes":[left]},
+                {"prompt":"Build the body", "containerNodes":[right]}
+            ]
+        })
+    };
+    let overlap = handle(&mut app, "agent.spawn", request(screen, first.clone())).unwrap_err();
+    assert!(overlap.contains("non-overlapping frame"), "{overlap}");
+    let siblings = handle(&mut app, "agent.spawn", request(first, second)).unwrap_err();
+    assert!(siblings.contains("desktop app"), "{siblings}");
+}
+
+#[test]
+fn parallel_activity_keeps_each_cursor_at_its_own_work() {
+    let (mut app, _dirs) = confined_app("cursors");
+    let document = app.session.ds().unwrap().uid;
+    app.ui.agent.busy = true;
+    app.ui.agent.runtime_document = Some(document);
+    app.ui.agent.runtime_conversation = Some(42);
+    for (index, x) in [(0, 100), (1, 400)] {
+        handle(
+            &mut app,
+            "agent.activity",
+            json!({
+                "__agent_document":document,
+                "__agent_index":index,
+                "phase":"start",
+                "tool":"create_node",
+                "position":{"x":x,"y":20}
+            }),
+        )
+        .unwrap();
+    }
+    assert_eq!(app.ui.agent.presence.point, Some((100.0, 20.0)));
+    assert_eq!(app.ui.agent.other_presences[0].point, Some((400.0, 20.0)));
+}

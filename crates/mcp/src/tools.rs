@@ -103,6 +103,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "key",
     "type_text",
     "inspect_ui",
+    "spawn_agents",
 ];
 
 /// All tools, in `tools/list` order.
@@ -115,6 +116,16 @@ pub fn tool_definitions() -> Vec<Value> {
             "List Lizard commands: id, label, menu path, shortcut, whether it is undoable, and a parameter description. Every menu item, panel action and shortcut is a command; run one with run_command (or several as one undo step with batch). Most commands act on `ids` when given, else on the selection. Use `filter` to narrow (e.g. \"align\", \"layout\", \"variable\", \"style\", \"component\", \"proto\").",
             obj(json!({"filter": string("Case-insensitive substring matched against id, label, menu path and parameter docs")}), &[]),
             true,
+        ),
+        tool(
+            "spawn_agents",
+            "Split design work",
+            "Only the lead agent in an in-app parallel run can use this. Create distinct frame containers first; related sections may be sibling frames inside one screen. Assign one distinct task and at least one non-overlapping existing frame to each additional agent. Spawn one fewer agent than the selected count; continue the remaining part yourself. Keep shared visual guidance in each task. In Side by side mode, each agent makes a complete alternative in its own frame.",
+            obj(
+                json!({"config": {"type":"array","minItems":1,"maxItems":5,"items":obj(json!({"prompt":string("A brief, distinct design task"),"containerNodes":ids_schema("Existing frame IDs reserved for this agent")}), &["prompt","containerNodes"])}}),
+                &["config"],
+            ),
+            false,
         ),
         tool(
             "search_icons",
@@ -484,6 +495,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         "key" => key(b, &a),
         "type_text" => type_text(b, &a),
         "inspect_ui" => b.call("ui.inspect", json!({})).map(|v| ToolResult::json(&v)),
+        "spawn_agents" => b.call("agent.spawn", args.clone()).map(|v| ToolResult::json(&v)),
         other => Err(format!("unknown tool `{other}` (tools/list has: {})", TOOL_NAMES.join(", "))),
     };
     let result = r.unwrap_or_else(ToolResult::error);

@@ -385,7 +385,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                 Vec::new()
             };
             let now = web_time::Instant::now();
-            let presence = &mut app.ui.agent.presence;
+            let agent_index = p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0).min(5);
+            let conversation = app.ui.agent.runtime_conversation;
+            let presence = app.ui.agent.presence_mut(agent_index);
             if tool == "create_node" {
                 if phase == "start" {
                     if let Some(arguments) = p.get("arguments").filter(|arguments| arguments.is_object()) {
@@ -396,7 +398,7 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                 }
             }
             presence.document = Some(document);
-            presence.conversation = app.ui.agent.runtime_conversation;
+            presence.conversation = conversation;
             presence.updated = Some(now);
             presence.active = true;
             presence.generating = phase == "start" && matches!(tool, "create_node" | "set_properties");
@@ -447,6 +449,75 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             ctx.request_repaint();
             Ok(json!({"accepted": true}))
         }
+        "agent.spawn" => {
+            let document = p.get("__agent_document").and_then(Value::as_u64).ok_or("An attached lead agent is required")?;
+            if p.get("__agent_index").and_then(Value::as_u64) != Some(0)
+                || !app.ui.agent.busy
+                || app.ui.agent.runtime_document != Some(document)
+                || app.ui.agent.active_agent_count < 2
+            {
+                return Err("Only the lead agent of an active parallel run can spawn designers".into());
+            }
+            let config = p.get("config").and_then(Value::as_array).ok_or("config must be an array")?;
+            if config.len() != usize::from(app.ui.agent.active_agent_count - 1) {
+                return Err("Provide exactly one assignment for each additional agent".into());
+            }
+            let ds = app.session.ds().map_err(|error| error.to_string())?;
+            if ds.uid != document {
+                return Err("The open document changed".into());
+            }
+            let mut assigned = std::collections::HashSet::new();
+            let mut assignments = Vec::with_capacity(config.len());
+            for task in config {
+                let description = task.get("prompt").and_then(Value::as_str).ok_or("Each assignment needs a prompt")?;
+                if description.trim().is_empty() && app.ui.agent.active_parallel_mode == crate::agent_panel::ParallelMode::Split {
+                    return Err("Each split-work assignment needs a distinct task".into());
+                }
+                let roots = task
+                    .get("containerNodes")
+                    .and_then(Value::as_array)
+                    .filter(|roots| !roots.is_empty())
+                    .ok_or("Each agent needs at least one containerNodes ID")?;
+                let mut snapshot = Vec::with_capacity(roots.len());
+                for value in roots {
+                    let id = lizard_engine::params::id_of(value).ok_or("Invalid container node ID")?;
+                    let node = ds.doc.node(id).ok_or("Assigned container does not exist")?;
+                    let ancestors = ds.doc.ancestors(id);
+                    if !node.kind.is_frame_like()
+                        || !ancestors.contains(&ds.page)
+                        || assigned.contains(&id)
+                        || assigned.iter().any(|other| ancestors.contains(other) || ds.doc.ancestors(*other).contains(&id))
+                    {
+                        return Err("Each assigned container must be a non-overlapping frame on the current page".into());
+                    }
+                    assigned.insert(id);
+                    let bounds = ds.doc.world_bounds(id);
+                    snapshot.push(json!({
+                        "id": id.0,
+                        "name": node.name,
+                        "children": node.children.iter().map(|child| child.0).collect::<Vec<_>>(),
+                        "absoluteBounds": bounds.map(|bounds| json!({"x":bounds.x0,"y":bounds.y0,"width":bounds.width(),"height":bounds.height()})),
+                    }));
+                }
+                let mut assignment = task.clone();
+                assignment["bootstrap"] = json!({"documentId": document, "currentPage": ds.page.0, "frames": snapshot});
+                assignments.push(assignment);
+            }
+            app.services.agent_spawn(document, &assignments)?;
+            let conversation = app.ui.agent.runtime_conversation;
+            for (offset, task) in config.iter().enumerate() {
+                let target =
+                    task.get("containerNodes").and_then(Value::as_array).and_then(|roots| roots.first()).and_then(lizard_engine::params::id_of);
+                let presence = app.ui.agent.presence_mut(offset + 1);
+                presence.document = Some(document);
+                presence.conversation = conversation;
+                presence.target = target;
+                presence.active = true;
+                presence.updated = Some(web_time::Instant::now());
+            }
+            ctx.request_repaint();
+            Ok(json!({"spawned": config.len(), "assignedRoots": assigned.iter().map(|id| id.0).collect::<Vec<_>>() }))
+        }
         "engine.execute" => {
             let cmd = p.get("command").and_then(Value::as_str).ok_or("`command` required")?;
             let params = p.get("params").cloned().unwrap_or(json!({}));
@@ -457,7 +528,8 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                 && let Ok(result) = &r
                 && let Some(id) = result.get("id").and_then(Value::as_u64)
             {
-                crate::agent_presence::start_entrance(&mut app.ui.agent.presence, lizard_doc::NodeId(id));
+                let agent_index = p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0).min(5);
+                crate::agent_presence::start_entrance(app.ui.agent.presence_mut(agent_index), lizard_doc::NodeId(id));
             }
             app.clear_comment_draft_after_tool_set(cmd, r.is_ok());
             if r.is_ok()

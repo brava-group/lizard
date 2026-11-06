@@ -52,6 +52,13 @@ fn tools_list_is_complete_and_schemas_are_objects() {
 }
 
 #[test]
+fn parallel_spawn_is_only_available_through_an_attached_lead_session() {
+    let mut c = Client::new();
+    let error = c.err("spawn_agents", json!({"config":[{"prompt":"Build the account screen","containerNodes":[7]}]}));
+    assert!(error.contains("agent") || error.contains("unknown"), "{error}");
+}
+
+#[test]
 fn icon_search_and_creation_render_the_requested_library_asset() {
     use base64::Engine as _;
 
