@@ -898,8 +898,12 @@ fn share_ui(app: &mut LizardApp, ui: &mut Ui, t: &Tokens, share: &Share) {
         Some(code) => {
             ui.vertical_centered(|ui| {
                 ui.add_space(2.0);
-                ui.label(egui::RichText::new(&code).font(egui::FontId::monospace(crate::theme::ui_font_size(if online { 24.0 } else { 15.0 }))).color(t.text))
-                    .lizard_tooltip(tr("Others type this under Share ▸ Join with a code"));
+                ui.label(
+                    egui::RichText::new(&code)
+                        .font(egui::FontId::monospace(crate::theme::ui_font_size(if online { 24.0 } else { 15.0 })))
+                        .color(t.text),
+                )
+                .lizard_tooltip(tr("Others type this under Share ▸ Join with a code"));
             });
             ui.horizontal(|ui| {
                 if widgets::button(ui, tr("Copy code"), true, true).clicked() {

@@ -9,13 +9,13 @@ use lizard_doc::{Document, NodeId, StyleKind};
 use lizard_engine::selection_colors::{PaintTarget, SelectionColor, collect};
 use serde_json::json;
 
-use crate::a11y::Tip;
 use crate::a11y;
+use crate::a11y::Tip;
 use crate::colorpicker::PickerTarget;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
-use crate::theme::Tokens;
 use crate::primitives::{ColorControl, ColorValue};
+use crate::theme::Tokens;
 use crate::widgets::FieldEdit;
 use crate::{LizardApp, widgets};
 
@@ -25,7 +25,13 @@ fn header(ui: &mut Ui, colors: &[SelectionColor], open: bool) -> bool {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     a11y::disclosure(&response, title, open);
     let hovered = response.hovered();
-    let ink = if hovered && t.dark { Color32::WHITE } else if hovered { t.text } else { t.text_secondary };
+    let ink = if hovered && t.dark {
+        Color32::WHITE
+    } else if hovered {
+        t.text
+    } else {
+        t.text_secondary
+    };
     ui.painter().text(pos2(rect.left() + widgets::PAD, rect.center().y), Align2::LEFT_CENTER, title, crate::theme::property_section_title(), ink);
     if hovered {
         let chevron = Rect::from_center_size(pos2(rect.left() + widgets::PAD - 10.0, rect.center().y), vec2(10.0, 10.0));
@@ -36,7 +42,8 @@ fn header(ui: &mut Ui, colors: &[SelectionColor], open: bool) -> bool {
         let mut right = rect.right() - widgets::PAD;
         if extra > 0 {
             let label = format!("+{extra}");
-            let label_rect = ui.painter().text(pos2(right, rect.center().y), Align2::RIGHT_CENTER, label, crate::theme::regular(11.0), t.text_secondary);
+            let label_rect =
+                ui.painter().text(pos2(right, rect.center().y), Align2::RIGHT_CENTER, label, crate::theme::regular(11.0), t.text_secondary);
             right = label_rect.left() - 8.0;
         }
         for color in colors.iter().take(3).rev() {

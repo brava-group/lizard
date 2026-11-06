@@ -93,7 +93,9 @@ mod shader_tab;
 pub enum PickerTarget {
     PageBackground,
     /// Colour used by the next stroke of the active drawing tool.
-    DrawingTool { tool: ToolId },
+    DrawingTool {
+        tool: ToolId,
+    },
     /// The shared Color libraries browser opened from a Fill or Stroke style control.
     ColorLibraryStyle {
         fills: bool,
@@ -559,9 +561,9 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
 /// Keep a style's colour picker beside its editor. Other targets retain their usual position.
 fn initial_position(app: &LizardApp, ctx: &egui::Context, target: &PickerTarget) -> Pos2 {
     let beside = match target {
-        PickerTarget::DrawingTool { .. } => ctx
-            .memory(|memory| memory.area_rect(Id::new("drawing_toolbar")))
-            .map(|rect| pos2(rect.left(), (rect.top() - 460.0).max(8.0))),
+        PickerTarget::DrawingTool { .. } => {
+            ctx.memory(|memory| memory.area_rect(Id::new("drawing_toolbar"))).map(|rect| pos2(rect.left(), (rect.top() - 460.0).max(8.0)))
+        }
         PickerTarget::Style { .. } => {
             ctx.memory(|memory| memory.area_rect(Id::new("color_style_editor_area"))).map(|rect| pos2(rect.left() - 248.0, rect.top()))
         }

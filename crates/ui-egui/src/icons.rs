@@ -1612,7 +1612,13 @@ pub fn gallery(ctx: &egui::Context) {
             for (dx, size) in [(0.0, 12.0), (16.0, 16.0), (40.0, 24.0), (72.0, 32.0)] {
                 paint(ui.painter(), Rect::from_min_size(pos2(x + dx, y), Vec2::splat(size)), *icon, t.icon);
             }
-            ui.painter().text(pos2(x, y + 40.0), egui::Align2::LEFT_TOP, format!("{icon:?}"), egui::FontId::proportional(crate::theme::ui_font_size(10.0)), t.text);
+            ui.painter().text(
+                pos2(x, y + 40.0),
+                egui::Align2::LEFT_TOP,
+                format!("{icon:?}"),
+                egui::FontId::proportional(crate::theme::ui_font_size(10.0)),
+                t.text,
+            );
         }
     });
 }

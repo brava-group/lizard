@@ -874,7 +874,11 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let h = c.map(|c| format!("{:?}", c.horizontal)).unwrap_or_else(|| "Mixed".into());
                 let resp = crate::primitives::Select::trigger_with_variant(
-                    ui, tr(&pretty(&h)), col, Some(crate::primitives::SelectLead::Icon(Icon::MoveHorizontal)), crate::primitives::SelectVariant::Outlined,
+                    ui,
+                    tr(&pretty(&h)),
+                    col,
+                    Some(crate::primitives::SelectLead::Icon(Icon::MoveHorizontal)),
+                    crate::primitives::SelectVariant::Outlined,
                 );
                 menu_popup(&resp).show(|ui| {
                     for (l, v) in [
@@ -893,7 +897,11 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                 ui.add_space(8.0);
                 let v = c.map(|c| format!("{:?}", c.vertical)).unwrap_or_else(|| "Mixed".into());
                 let resp = crate::primitives::Select::trigger_with_variant(
-                    ui, tr(&pretty(&v)), col, Some(crate::primitives::SelectLead::Icon(Icon::MoveVertical)), crate::primitives::SelectVariant::Outlined,
+                    ui,
+                    tr(&pretty(&v)),
+                    col,
+                    Some(crate::primitives::SelectLead::Icon(Icon::MoveVertical)),
+                    crate::primitives::SelectVariant::Outlined,
                 );
                 menu_popup(&resp).show(|ui| {
                     for (l, val) in [
@@ -960,13 +968,20 @@ fn constraint_preview(ui: &mut Ui, value: Option<Constraints>, width: f32) -> (O
         let half = if is_horizontal { vec2(5.0, 0.0) } else { vec2(0.0, 5.0) };
         ui.painter().line_segment([centre - half, centre + half], Stroke::new(if active { 3.0 } else { 1.5 }, color));
         if response.clicked() {
-            if is_horizontal { horizontal = Some(name); } else { vertical = Some(name); }
+            if is_horizontal {
+                horizontal = Some(name);
+            } else {
+                vertical = Some(name);
+            }
         }
     }
     let center = child.center();
     let center_hit = Rect::from_center_size(center, vec2(22.0, 22.0));
     let response = ui.interact(center_hit, ui.id().with("constraint_center"), Sense::click()).tip(tr("Center"));
-    let cross = Stroke::new(1.0, if matches!(h, Some(HConstraint::Center)) || matches!(v, Some(VConstraint::Center)) { tokens.accent } else { tokens.icon_secondary });
+    let cross = Stroke::new(
+        1.0,
+        if matches!(h, Some(HConstraint::Center)) || matches!(v, Some(VConstraint::Center)) { tokens.accent } else { tokens.icon_secondary },
+    );
     ui.painter().line_segment([center - vec2(7.0, 0.0), center + vec2(7.0, 0.0)], cross);
     ui.painter().line_segment([center - vec2(0.0, 7.0), center + vec2(0.0, 7.0)], cross);
     if response.clicked() {

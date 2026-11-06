@@ -228,13 +228,10 @@ pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
 
     let footer_y = (r.bottom() - 128.0).max(y + 16.0);
     separator(ui, footer_y - 16.0);
-    for (index, (icon, label)) in [
-        (NavIcon::Shortcuts, tr("Keyboard shortcuts")),
-        (NavIcon::Theme, tr("Change theme")),
-        (NavIcon::Profile, tr("Profile")),
-    ]
-    .into_iter()
-    .enumerate()
+    for (index, (icon, label)) in
+        [(NavIcon::Shortcuts, tr("Keyboard shortcuts")), (NavIcon::Theme, tr("Change theme")), (NavIcon::Profile, tr("Profile"))]
+            .into_iter()
+            .enumerate()
     {
         let hit = Rect::from_min_size(pos2(r.min.x, footer_y + index as f32 * 40.0), vec2(r.width(), 40.0));
         let ir = Rect::from_center_size(hit.center(), vec2(32.0, 32.0));
@@ -1021,7 +1018,8 @@ fn layers(app: &mut LizardApp, ui: &mut Ui) {
             let selected_ancestor = ancestors.iter().copied().find(|a| sel.contains(a));
             let in_selected = !selected && selected_ancestor.is_some();
             let in_selected_component = selected_ancestor.is_some_and(|id| {
-                doc.node(id).is_some_and(|node| matches!(&node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. }))
+                doc.node(id)
+                    .is_some_and(|node| matches!(&node.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. }))
             });
             let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. } | NodeKind::Instance { .. });
             let component_member = is_comp || has_component_ancestor(&doc, &ancestors);

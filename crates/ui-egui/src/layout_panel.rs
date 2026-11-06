@@ -153,14 +153,7 @@ fn layout_button_at(ui: &mut Ui, rect: Rect, icon: LayoutIcon, selected: bool, t
     paint_layout_button(ui, rect, response, icon, selected, tip)
 }
 
-fn paint_layout_button(
-    ui: &Ui,
-    rect: Rect,
-    response: egui::Response,
-    icon: LayoutIcon,
-    selected: bool,
-    tip: &str,
-) -> egui::Response {
+fn paint_layout_button(ui: &Ui, rect: Rect, response: egui::Response, icon: LayoutIcon, selected: bool, tip: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let response = response.tip(tip);
     if selected || response.hovered() {
@@ -211,13 +204,7 @@ fn direction(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
         }
     });
     if l.mode != LayoutMode::Grid {
-        let resp = layout_button_at(
-            ui,
-            widgets::section_action_rect(direction_row, 0),
-            LayoutIcon::Wrap,
-            l.wrap,
-            tr("Wrap"),
-        );
+        let resp = layout_button_at(ui, widgets::section_action_rect(direction_row, 0), LayoutIcon::Wrap, l.wrap, tr("Wrap"));
         crate::a11y::toggle(&resp, tr("Wrap"), l.wrap);
         if resp.clicked() {
             app.set_props(ids, json!({"wrap": !l.wrap}));
@@ -641,13 +628,8 @@ fn spacing(app: &mut LizardApp, ui: &mut Ui, ids: &[NodeId], l: &AutoLayout) {
             app.field(ids, "paddingVertical", e, |v| json!(v.max(0.0)));
         }
     });
-    let toggle = layout_button_at(
-        ui,
-        widgets::section_action_rect(padding_row, 0),
-        LayoutIcon::PaddingIndividual,
-        individual,
-        tr("Individual padding"),
-    );
+    let toggle =
+        layout_button_at(ui, widgets::section_action_rect(padding_row, 0), LayoutIcon::PaddingIndividual, individual, tr("Individual padding"));
     crate::a11y::toggle(&toggle, tr("Individual padding"), individual);
     if toggle.clicked() {
         individual = !individual;

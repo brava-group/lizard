@@ -211,7 +211,9 @@ fn slot_settings_are_imported_and_external_preferred_keys_are_noted() {
         json!([{"type": "COMPONENT", "key": "abc"}]);
     let (doc, warnings) = import(&v, &no_images).unwrap();
     let main = by_rest(&doc, &v, "1:2");
-    assert!(matches!(&main.kind, NodeKind::Component { props, .. } if matches!(props.get("Slot"), Some(PropDef::Slot { settings, .. }) if settings.description == "Drop content here" && settings.max_layers == Some(3) && settings.min_layers.is_none() && settings.show_empty && settings.fill_counter_axis)));
+    assert!(
+        matches!(&main.kind, NodeKind::Component { props, .. } if matches!(props.get("Slot"), Some(PropDef::Slot { settings, .. }) if settings.description == "Drop content here" && settings.max_layers == Some(3) && settings.min_layers.is_none() && settings.show_empty && settings.fill_counter_axis))
+    );
     assert!(warnings.iter().any(|w| w == "preferred slot component keys cannot be resolved to file nodes and were skipped"), "{warnings:?}");
     let mut plain = container_file(Vec::new());
     plain["document"]["children"][0]["children"][1]["componentPropertyDefinitions"]["Slot#1:3"]["slotSettings"] =

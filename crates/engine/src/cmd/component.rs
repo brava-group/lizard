@@ -731,11 +731,19 @@ fn preferred_arg(cmd: &str, doc: &Document, p: &Value) -> Result<Vec<NodeId>> {
 
 fn slot_settings_arg(cmd: &str, p: &Value, mut settings: SlotSettings) -> Result<SlotSettings> {
     if let Some(value) = get(p, "description") {
-        settings.description = value.as_str().filter(|s| s.chars().count() <= 1000).ok_or_else(|| bad(cmd, "`description`: text of at most 1000 characters"))?.to_string();
+        settings.description = value
+            .as_str()
+            .filter(|s| s.chars().count() <= 1000)
+            .ok_or_else(|| bad(cmd, "`description`: text of at most 1000 characters"))?
+            .to_string();
     }
     for (key, limit) in [("minLayers", &mut settings.min_layers), ("maxLayers", &mut settings.max_layers)] {
         if let Some(value) = get(p, key) {
-            *limit = if value.is_null() { None } else { Some(value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(cmd, format!("`{key}`: a non-negative integer or null")))?) };
+            *limit = if value.is_null() {
+                None
+            } else {
+                Some(value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(cmd, format!("`{key}`: a non-negative integer or null")))?)
+            };
         }
     }
     for (key, flag) in [
@@ -788,8 +796,9 @@ fn wrap_in_slot(s: &mut Session, p: &Value) -> Result<Value> {
     let owner = Owner::resolve(doc, first).ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
     let main = owning_component(doc, first).ok_or_else(|| bad(cmd, "select layers inside a main component"))?;
     if roots.iter().any(|id| {
-        doc.node(*id).is_none_or(|n| n.parent != Some(parent) || matches!(n.kind, NodeKind::Section { .. } | NodeKind::Component { .. } | NodeKind::ComponentSet { .. }))
-            || owning_instance(doc, *id).is_some()
+        doc.node(*id).is_none_or(|n| {
+            n.parent != Some(parent) || matches!(n.kind, NodeKind::Section { .. } | NodeKind::Component { .. } | NodeKind::ComponentSet { .. })
+        }) || owning_instance(doc, *id).is_some()
             || owning_component(doc, *id).is_none_or(|component| !owner.components(doc).contains(&component))
             || doc.ancestors(*id).into_iter().any(|ancestor| is_slot(doc, ancestor))
     }) {

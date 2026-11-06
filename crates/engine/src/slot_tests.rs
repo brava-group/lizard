@@ -69,8 +69,12 @@ fn slot_property_can_be_created_before_a_frame_is_assigned() {
 fn slot_settings_round_trip_validate_and_fill_new_instances() {
     let mut s = Session::new();
     let (card, _, content, _) = slot_card(&mut s);
-    ex(&mut s, "component.editProperty", json!({"id": card, "name": "Content", "description": "Actions", "minLayers": 1,
-        "maxLayers": 3, "onlyPreferred": true, "showEmpty": true, "fillCounterAxis": true}));
+    ex(
+        &mut s,
+        "component.editProperty",
+        json!({"id": card, "name": "Content", "description": "Actions", "minLayers": 1,
+        "maxLayers": 3, "onlyPreferred": true, "showEmpty": true, "fillCounterAxis": true}),
+    );
     let props = props_of(&mut s, card);
     assert_eq!(props[0]["description"], "Actions");
     assert_eq!(props[0]["minLayers"], 1);

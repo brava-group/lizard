@@ -571,7 +571,9 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                     .step(1.0)
                     .show(ui, ControlWidth::Fixed(72.0));
                 if let Some(edit) = field.edit.and_then(|edit| edit.settled()) {
-                    let next = match edit { FieldEdit::Set(value) | FieldEdit::Scrub(value, _) => value };
+                    let next = match edit {
+                        FieldEdit::Set(value) | FieldEdit::Scrub(value, _) => value,
+                    };
                     app.run("tool.drawStyle", json!({"tool": tool.id(), "weight": next.clamp(0.1, 500.0)}));
                 }
                 let slider = Slider::new(ui.id().with(("draw_slider", tool.id())), tr("Stroke width"))
@@ -588,7 +590,8 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                 if tool == ToolId::Brush {
                     vector_edit_separator(ui, &t);
                     let label = lizard_pathops::brush::preset(&preset).map_or(tr("Brush"), |p| tr(p.label));
-                    let trigger = Button::new(" ").trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(195.0)).show(ui);
+                    let trigger =
+                        Button::new(" ").trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(195.0)).show(ui);
                     a11y::combo(&trigger, tr("Brush"), label, a11y::menu_open(&trigger));
                     crate::right::brush_art(
                         ui.painter(),
@@ -602,7 +605,9 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new(tr("Brushes")).font(crate::theme::medium(13.0)));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if Button::icon(Icon::Close, tr("Close")).width(ControlWidth::Fixed(25.0)).show(ui).clicked() { ui.close(); }
+                                if Button::icon(Icon::Close, tr("Close")).width(ControlWidth::Fixed(25.0)).show(ui).clicked() {
+                                    ui.close();
+                                }
                             });
                         });
                         Menu::separator(ui, None);
@@ -622,9 +627,21 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                                         ui.painter().rect_filled(row.shrink2(vec2(2.0, 2.0)), CornerRadius::same(6), background);
                                     }
                                     if active {
-                                        ui.painter().text(pos2(row.min.x + 14.0, row.min.y + 19.0), Align2::CENTER_CENTER, "✓", regular(13.0), Color32::WHITE);
+                                        ui.painter().text(
+                                            pos2(row.min.x + 14.0, row.min.y + 19.0),
+                                            Align2::CENTER_CENTER,
+                                            "✓",
+                                            regular(13.0),
+                                            Color32::WHITE,
+                                        );
                                     }
-                                    ui.painter().text(pos2(row.min.x + 30.0, row.min.y + 19.0), Align2::LEFT_CENTER, tr(brush.label), regular(13.0), Color32::WHITE);
+                                    ui.painter().text(
+                                        pos2(row.min.x + 30.0, row.min.y + 19.0),
+                                        Align2::LEFT_CENTER,
+                                        tr(brush.label),
+                                        regular(13.0),
+                                        Color32::WHITE,
+                                    );
                                     crate::right::brush_art(
                                         ui.painter(),
                                         Rect::from_min_size(pos2(row.min.x + 30.0, row.min.y + 35.0), vec2(212.0, 28.0)),
@@ -646,7 +663,8 @@ fn drawing_toolbar(app: &mut LizardApp, ui: &mut Ui) {
                         DrawLineStyle::Dashed => tr("Dashed"),
                         DrawLineStyle::Dotted => tr("Dotted"),
                     };
-                    let trigger = Button::new(label).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(155.0)).show(ui);
+                    let trigger =
+                        Button::new(label).trailing(Icon::Chevron).variant(ButtonVariant::Secondary).width(ControlWidth::Fixed(155.0)).show(ui);
                     Menu::popup(&trigger).width(155.0).align(egui::RectAlign::TOP_START).show(|ui| {
                         for (id, label) in [("solid", tr("Solid")), ("dashed", tr("Dashed")), ("dotted", tr("Dotted"))] {
                             if MenuItem::new(label).checked(style.line_style.id() == id).show(ui).clicked() {

@@ -104,7 +104,13 @@ fn contrasted_canvas_accent(base: Color32, background: Color32) -> Color32 {
         Some((blend(toward, high), high))
     };
     match (fit(Color32::WHITE), fit(Color32::BLACK)) {
-        (Some(light), Some(dark)) => if light.1 < dark.1 { light.0 } else { dark.0 },
+        (Some(light), Some(dark)) => {
+            if light.1 < dark.1 {
+                light.0
+            } else {
+                dark.0
+            }
+        }
         (Some(light), None) => light.0,
         (None, Some(dark)) => dark.0,
         (None, None) => base,
@@ -417,16 +423,17 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     let ui_font_tweak = FontTweak { y_offset_factor: 0.20, ..Default::default() };
     fonts.font_data.insert(
         "nv-legible-next-regular".into(),
-        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Regular.ttf")).tweak(ui_font_tweak.clone())),
+        Arc::new(
+            FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Regular.ttf")).tweak(ui_font_tweak.clone()),
+        ),
     );
     fonts.font_data.insert(
         "nv-legible-next-bold".into(),
         Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/nv-legible-next/NV_Legible_Next-Bold.ttf")).tweak(ui_font_tweak)),
     );
-    fonts.font_data.insert(
-        "shortcuts-font".into(),
-        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/shortcuts-font/ShortcutsFont.ttf"))),
-    );
+    fonts
+        .font_data
+        .insert("shortcuts-font".into(), Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/shortcuts-font/ShortcutsFont.ttf"))));
     if let Some(list) = fonts.families.get_mut(&FontFamily::Proportional) {
         list.insert(0, "nv-legible-next-regular".into());
     }
@@ -467,7 +474,9 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     extra.extend(craft(true));
     for (key, data) in extra {
         fonts.font_data.insert(key.clone(), Arc::new(data));
-        for fam in [FontFamily::Proportional, FontFamily::Name("medium".into()), FontFamily::Name("semibold".into()), FontFamily::Name("shortcuts".into())] {
+        for fam in
+            [FontFamily::Proportional, FontFamily::Name("medium".into()), FontFamily::Name("semibold".into()), FontFamily::Name("shortcuts".into())]
+        {
             if let Some(list) = fonts.families.get_mut(&fam) {
                 list.push(key.clone());
             }

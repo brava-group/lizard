@@ -15,8 +15,8 @@ use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
-    PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slot_metadata, slots_of, variant_conflicts,
-    variant_options, variant_props, variant_set,
+    PROP_BINDING, default_variant, inside_instance, owning_component, owning_instance, slot_def, slot_edited, slot_metadata, slots_of,
+    variant_conflicts, variant_options, variant_props, variant_set,
 };
 use serde_json::{Value, json};
 
@@ -24,7 +24,10 @@ use crate::LizardApp;
 use crate::i18n::{tr, trn};
 use crate::icons::{self, HeaderIcon, Icon};
 use crate::list_drag::ListDrag;
-use crate::primitives::{Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyBinding, PropertyController, PropertyControllerKind, Select, Switch, TextFieldWithPresets};
+use crate::primitives::{
+    Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyBinding, PropertyController,
+    PropertyControllerKind, Select, Switch, TextFieldWithPresets,
+};
 use crate::right::{menu_item, menu_popup, row, row_rect};
 use crate::theme::{COMPONENT, Tokens, semibold};
 use crate::widgets;
@@ -167,9 +170,7 @@ fn header_with_plus(ui: &mut Ui, title: &str, tip: &str) -> egui::Response {
         t.text,
     );
     let button = widgets::section_action_rect(rect, 0);
-    crate::primitives::Button::icon(Icon::Plus, tip)
-        .icon_size(14.0)
-        .show_at(ui, ui.id().with(("component_properties_add", title)), button)
+    crate::primitives::Button::icon(Icon::Plus, tip).icon_size(14.0).show_at(ui, ui.id().with(("component_properties_add", title)), button)
 }
 
 fn type_kind(d: &PropDef) -> PropertyControllerKind {
@@ -199,12 +200,12 @@ fn slot_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, slot: NodeId, 
         && let Some(node) = doc.node(slot)
     {
         let count = node.children.len();
-        let out_of_range = settings.min_layers.is_some_and(|min| count < min as usize)
-            || settings.max_layers.is_some_and(|max| count > max as usize);
-        let unexpected = settings.only_preferred && node.children.iter().any(|id| {
-            let Some(NodeKind::Instance { component, .. }) = doc.node(*id).map(|node| &node.kind) else { return true };
-            !preferred.contains(component) && !variant_set(doc, *component).is_some_and(|set| preferred.contains(&set))
-        });
+        let out_of_range = settings.min_layers.is_some_and(|min| count < min as usize) || settings.max_layers.is_some_and(|max| count > max as usize);
+        let unexpected = settings.only_preferred
+            && node.children.iter().any(|id| {
+                let Some(NodeKind::Instance { component, .. }) = doc.node(*id).map(|node| &node.kind) else { return true };
+                !preferred.contains(component) && !variant_set(doc, *component).is_some_and(|set| preferred.contains(&set))
+            });
         if out_of_range {
             widgets::note(ui, tr("Slot content is outside the suggested layer count"), t.warning);
         }
@@ -277,15 +278,14 @@ fn property_is_used(doc: &Document, owner: NodeId, name: &str) -> bool {
     let components: Vec<NodeId> = match doc.node(owner).map(|node| &node.kind) {
         Some(NodeKind::ComponentSet { .. }) => doc
             .node(owner)
-            .map(|set| set.children.iter().copied().filter(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))).collect())
+            .map(|set| {
+                set.children.iter().copied().filter(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))).collect()
+            })
             .unwrap_or_default(),
         _ => vec![owner],
     };
     components.into_iter().any(|component| {
-        doc.subtree(component)
-            .into_iter()
-            .filter_map(|id| doc.node(id))
-            .any(|node| node.prop_refs.values().any(|property| property == name))
+        doc.subtree(component).into_iter().filter_map(|id| doc.node(id)).any(|node| node.prop_refs.values().any(|property| property == name))
     })
 }
 
@@ -321,16 +321,14 @@ fn property_draft_id() -> Id {
 /// Menu shared by the Properties add button and the component header settings action.
 pub(crate) fn add_property_menu(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
     let first = if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) {
-        doc.node(owner).and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|n| &n.kind), Some(NodeKind::Component { .. }))))
+        doc.node(owner)
+            .and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|n| &n.kind), Some(NodeKind::Component { .. }))))
     } else {
         Some(owner)
     };
     let defs = first.map(|id| prop_defs(doc, id)).unwrap_or_default();
-    let variants = if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) {
-        variant_options(doc, owner)
-    } else {
-        Vec::new()
-    };
+    let variants =
+        if matches!(doc.node(owner).map(|n| &n.kind), Some(NodeKind::ComponentSet { .. })) { variant_options(doc, owner) } else { Vec::new() };
     let existing: Vec<String> = defs.keys().cloned().chain(variants.iter().map(|(key, _)| key.clone())).collect();
     let fresh = (1..).map(|index| format!("Property {index}")).find(|name| !existing.contains(name)).unwrap_or_else(|| "Property".into());
     let comps = local_components(app, ui, doc);
@@ -379,7 +377,13 @@ pub(crate) fn add_property_menu(app: &mut LizardApp, ui: &mut Ui, doc: &Document
 
 fn property_form_label(ui: &mut Ui, label: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(110.0, 24.0), Sense::hover());
-    ui.painter().text(pos2(rect.left(), rect.center().y), Align2::LEFT_CENTER, label, crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+    ui.painter().text(
+        pos2(rect.left(), rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        crate::theme::regular(11.0),
+        Tokens::get(ui.ctx()).text_secondary,
+    );
 }
 
 fn property_form_field(ui: &mut Ui, id: Id, label: &str, value: &str) -> Option<String> {
@@ -400,7 +404,13 @@ fn preferred_instances_field(ui: &mut Ui, draft: &mut PropertyDraft, comps: &[(N
     ui.horizontal(|ui| {
         ui.add_space(16.0);
         let (label, _) = ui.allocate_exact_size(vec2(264.0, 24.0), Sense::hover());
-        ui.painter().text(label.left_center(), Align2::LEFT_CENTER, tr("Preferred instances"), crate::theme::regular(11.0), Tokens::get(ui.ctx()).text_secondary);
+        ui.painter().text(
+            label.left_center(),
+            Align2::LEFT_CENTER,
+            tr("Preferred instances"),
+            crate::theme::regular(11.0),
+            Tokens::get(ui.ctx()).text_secondary,
+        );
         let plus = Button::icon(Icon::Plus, tr("Add preferred instance")).show(ui);
         menu_popup(&plus).width(220.0).show(|ui| {
             for (id, name) in comps.iter().filter(|(id, _)| *id != owner && first != Some(*id)) {
@@ -424,7 +434,8 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
         return;
     }
     let first = if matches!(doc.node(owner).map(|node| &node.kind), Some(NodeKind::ComponentSet { .. })) {
-        doc.node(owner).and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))))
+        doc.node(owner)
+            .and_then(|set| set.children.iter().copied().find(|id| matches!(doc.node(*id).map(|node| &node.kind), Some(NodeKind::Component { .. }))))
     } else {
         Some(owner)
     };
@@ -437,7 +448,11 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
     let mut create = false;
     FloatingPanel::new(panel_id, pos2(0.0, ui.cursor().min.y))
         .width(FloatingPanelWidth::Fixed(320.0))
-        .height(FloatingPanelHeight::Fixed(match draft.kind { "instanceSwap" => 252.0, "slot" => 240.0, _ => 202.0 }))
+        .height(FloatingPanelHeight::Fixed(match draft.kind {
+            "instanceSwap" => 252.0,
+            "slot" => 240.0,
+            _ => 202.0,
+        }))
         .header_height(42.0)
         .anchor_to_properties()
         .open(&mut open)
@@ -460,7 +475,10 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
                         ui.add_space(16.0);
                         property_form_label(ui, tr("Value"));
                         let (rect, _) = ui.allocate_exact_size(vec2(178.0, 24.0), Sense::hover());
-                        if Switch::new(panel_id.with("boolean"), draft.boolean, if draft.boolean { tr("True") } else { tr("False") }).show_at(ui, rect).clicked() {
+                        if Switch::new(panel_id.with("boolean"), draft.boolean, if draft.boolean { tr("True") } else { tr("False") })
+                            .show_at(ui, rect)
+                            .clicked()
+                        {
                             draft.boolean = !draft.boolean;
                         }
                     });
@@ -490,9 +508,8 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
             ui.add_space(20.0);
             widgets::separator(ui);
             ui.add_space(14.0);
-            let valid_name = !draft.name.trim().is_empty()
-                && !defs.contains_key(draft.name.trim())
-                && !variants.iter().any(|(name, _)| name == draft.name.trim());
+            let valid_name =
+                !draft.name.trim().is_empty() && !defs.contains_key(draft.name.trim()) && !variants.iter().any(|(name, _)| name == draft.name.trim());
             let enabled = valid_name && (draft.kind != "instanceSwap" || draft.instance.is_some());
             let (footer, _) = ui.allocate_exact_size(vec2(320.0, 32.0), Sense::hover());
             let button = Rect::from_min_size(pos2(footer.right() - 166.0, footer.top() + 4.0), vec2(150.0, 24.0));
@@ -511,7 +528,13 @@ fn property_create_dialog(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owne
             _ => Value::Null,
         };
         let preferred: Vec<u64> = draft.preferred.iter().map(|id| id.0).collect();
-        if app.run("component.addProperty", json!({"id": owner, "name": draft.name.trim(), "type": draft.kind, "default": default, "preferred": preferred})).is_some() {
+        if app
+            .run(
+                "component.addProperty",
+                json!({"id": owner, "name": draft.name.trim(), "type": draft.kind, "default": default, "preferred": preferred}),
+            )
+            .is_some()
+        {
             close = true;
         }
     }
@@ -532,7 +555,9 @@ fn slot_settings_ui(app: &mut LizardApp, ui: &mut Ui, owner: NodeId, name: &str,
     row(ui, 30.0, |ui| {
         ui.label(tr("Description"));
         let width = ui.available_width().max(60.0);
-        if let Some(value) = widgets::text_field(ui, Id::new(("slot_description", owner, name)), &settings.description, width, tr("Describe this slot")) {
+        if let Some(value) =
+            widgets::text_field(ui, Id::new(("slot_description", owner, name)), &settings.description, width, tr("Describe this slot"))
+        {
             edit(app, "description", json!(value));
         }
     });
@@ -670,7 +695,9 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
         let value = match d {
             PropDef::Text { default } => Some(default.clone()),
             PropDef::Boolean { default } => Some(tr(if *default { "True" } else { "False" }).to_string()),
-            PropDef::InstanceSwap { default, .. } => Some(doc.node(*default).map(|node| node.name.clone()).unwrap_or_else(|| tr("Missing").to_string())),
+            PropDef::InstanceSwap { default, .. } => {
+                Some(doc.node(*default).map(|node| node.name.clone()).unwrap_or_else(|| tr("Missing").to_string()))
+            }
             PropDef::Slot { .. } | PropDef::Variant { .. } => None,
         };
         let expanded_id = Id::new(("component_property_expanded", owner, k.as_str()));
@@ -822,7 +849,8 @@ pub(crate) fn visibility_value_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Docume
 fn value_binding_button(ui: &mut Ui, id: NodeId, field: &str, kind: VariableType, rect: Rect) {
     let button = widgets::section_action_rect(rect, 0);
     let t = Tokens::get(ui.ctx());
-    let response = ui.interact(button, Id::new(("component_value_binding", id, field)), Sense::click())
+    let response = ui
+        .interact(button, Id::new(("component_value_binding", id, field)), Sense::click())
         .lizard_tooltip(tr("Apply a component property or variable"));
     if response.hovered() {
         ui.painter().rect_filled(button.shrink(2.0), egui::CornerRadius::same(5), t.hover);

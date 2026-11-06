@@ -81,9 +81,7 @@ impl<'a> Shortcut<'a> {
         let galley = ui.painter().layout_no_wrap(self.display_text(), Self::font(), ink);
         let width = galley.size().x + HORIZONTAL_PADDING * 2.0;
         let rect = egui::Rect::from_center_size(pos2(right - width / 2.0, center_y), vec2(width, HEIGHT));
-        let background = self.background.unwrap_or_else(|| {
-            if t.dark { Color32::from_white_alpha(26) } else { Color32::from_black_alpha(13) }
-        });
+        let background = self.background.unwrap_or_else(|| if t.dark { Color32::from_white_alpha(26) } else { Color32::from_black_alpha(13) });
         ui.painter().rect_filled(rect, CornerRadius::same(4), background);
         ui.painter().galley(pos2(rect.left() + HORIZONTAL_PADDING, center_y - galley.size().y / 2.0), galley, ink);
         rect.left()

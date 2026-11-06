@@ -14,8 +14,12 @@ fn reference_catalog_has_distinct_stretch_and_scatter_presets() {
     for (index, entry) in PRESETS.iter().enumerate() {
         assert!(ids.insert(entry.id), "duplicate brush id: {}", entry.id);
         assert!(preset(entry.id).is_some());
-        if index < 15 { assert_eq!(entry.kind, BrushKind::Stretch); }
-        if (15..25).contains(&index) { assert_eq!(entry.kind, BrushKind::Scatter); }
+        if index < 15 {
+            assert_eq!(entry.kind, BrushKind::Stretch);
+        }
+        if (15..25).contains(&index) {
+            assert_eq!(entry.kind, BrushKind::Scatter);
+        }
     }
     assert!(preset("unknown").is_none());
     let mut outlines = Vec::new();

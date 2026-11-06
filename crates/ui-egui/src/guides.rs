@@ -291,7 +291,8 @@ pub fn input(app: &mut LizardApp, ctx: &egui::Context, pos: Pos2) -> bool {
 /// Finish a guide drag released outside the canvas. Crossing the guide's own ruler edge removes
 /// a moved guide; releases through the other edges cancel the gesture.
 pub fn end_released(app: &mut LizardApp, ctx: &egui::Context) {
-    let (down, released, pos) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.button_released(egui::PointerButton::Primary), i.pointer.latest_pos()));
+    let (down, released, pos) =
+        ctx.input(|i| (i.pointer.primary_down(), i.pointer.button_released(egui::PointerButton::Primary), i.pointer.latest_pos()));
     if down {
         return;
     }

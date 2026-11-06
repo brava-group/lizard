@@ -410,9 +410,7 @@ fn binding_pick_row(ui: &mut Ui, label: &str, value: &str, icon: Icon, icon_colo
     ui.painter().text(pos2(name_rect.left(), rect.center().y), Align2::LEFT_CENTER, name, regular(11.0), t.menu_text);
     let value_rect = Rect::from_min_max(pos2(rect.right() - 88.0, rect.top()), pos2(rect.right() - 12.0, rect.bottom()));
     let value = crate::widgets::elide_font(ui, value, value_rect.width(), regular(11.0));
-    ui.painter().with_clip_rect(value_rect).text(
-        pos2(value_rect.right(), rect.center().y), Align2::RIGHT_CENTER, value, regular(11.0), t.menu_dim,
-    );
+    ui.painter().with_clip_rect(value_rect).text(pos2(value_rect.right(), rect.center().y), Align2::RIGHT_CENTER, value, regular(11.0), t.menu_dim);
     response.clicked()
 }
 
@@ -518,12 +516,7 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
         let (search_row, _) = ui.allocate_exact_size(vec2(WIDTH, 40.0), Sense::hover());
         let search_rect = Rect::from_min_size(pos2(search_row.left() + 16.0, search_row.top() + 8.0), vec2(WIDTH - 32.0, 24.0));
         let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(search_rect));
-        SearchField::new(query_id, tr("Search"))
-            .width(ControlWidth::Fill)
-            .compact()
-            .clearable()
-            .ghost()
-            .show(&mut search_ui, &mut query);
+        SearchField::new(query_id, tr("Search")).width(ControlWidth::Fill).compact().clearable().ghost().show(&mut search_ui, &mut query);
         ui.painter().hline(search_row.x_range(), search_row.bottom() - 0.5, border);
 
         let (filter_row, _) = ui.allocate_exact_size(vec2(WIDTH, 40.0), Sense::hover());
@@ -607,7 +600,9 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
             }
             ui.add_space(8.0);
         });
-    }) else { return };
+    }) else {
+        return;
+    };
     let rect = area.response.rect;
     let clicked_outside = ctx.cumulative_frame_nr() > p.opened_frame
         && ctx.input(|i| {

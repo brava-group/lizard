@@ -2296,7 +2296,9 @@ impl Session {
             Some(EyedropTarget::PageBackground { document: owner }) if document == *owner => {
                 self.execute("page.setBackground", &json!({"color": c.to_css_hex()}))?;
             }
-            Some(EyedropTarget::Paint { document: owner, selection, targets, stop }) if document == *owner && sel.as_slice() == selection.as_slice() => {
+            Some(EyedropTarget::Paint { document: owner, selection, targets, stop })
+                if document == *owner && sel.as_slice() == selection.as_slice() =>
+            {
                 if let Some(mut paint) = targets.first().and_then(|target| target.paint(&doc)) {
                     if let Some(index) = *stop {
                         if let lizard_color::PaintKind::Gradient(gradient) = &mut paint.kind

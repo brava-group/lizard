@@ -35,9 +35,7 @@ fn paint_live_brush(app: &LizardApp, painter: &egui::Painter, revision: u64, zoo
     let pixels_per_point = painter.ctx().pixels_per_point();
     let cache_id = egui::Id::new("lizard-live-brush-texture");
     let cached = painter.ctx().data_mut(|data| data.get_temp::<LiveBrushTexture>(cache_id));
-    let current = cached.as_ref().is_some_and(|entry| {
-        entry.revision == revision && entry.zoom == zoom && entry.pixels_per_point == pixels_per_point
-    });
+    let current = cached.as_ref().is_some_and(|entry| entry.revision == revision && entry.zoom == zoom && entry.pixels_per_point == pixels_per_point);
     let entry = if current {
         cached
     } else {
@@ -70,10 +68,7 @@ fn paint_live_brush(app: &LizardApp, painter: &egui::Painter, revision: u64, zoo
         Some(entry)
     };
     if let Some(entry) = entry {
-        let rect = Rect::from_min_max(
-            app.to_screen(entry.bounds.x0, entry.bounds.y0),
-            app.to_screen(entry.bounds.x1, entry.bounds.y1),
-        );
+        let rect = Rect::from_min_max(app.to_screen(entry.bounds.x0, entry.bounds.y0), app.to_screen(entry.bounds.x1, entry.bounds.y1));
         painter.image(entry.texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), color);
     }
 }

@@ -2,8 +2,8 @@
 
 use egui::{Color32, Frame, InnerResponse, Margin, Pos2, Rect, Response, RichText, Shape, Stroke, Ui, WidgetText, pos2};
 
-use crate::theme::{Tokens, regular};
 use super::Shortcut;
+use crate::theme::{Tokens, regular};
 
 pub struct Tooltip<'a> {
     title: &'a str,

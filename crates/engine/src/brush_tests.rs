@@ -134,10 +134,9 @@ fn drawing_tools_keep_independent_stroke_styles() {
     assert!(s.execute("tool.drawStyle", &json!({"tool": "brush", "color": "#FF0000", "preset": "missing"})).is_err());
     assert_eq!(s.tool.brush_style.color().to_hex(), "000000", "an invalid style does not change the tool");
 
-    for (tool, color, weight, extra) in [
-        ("brush", "#FF0000", 19.0, json!({"preset": "ink"})),
-        ("pencil", "#00CC66", 3.0, json!({"lineStyle": "dashed"})),
-    ] {
+    for (tool, color, weight, extra) in
+        [("brush", "#FF0000", 19.0, json!({"preset": "ink"})), ("pencil", "#00CC66", 3.0, json!({"lineStyle": "dashed"}))]
+    {
         s.execute("tool.set", &json!({"tool": tool})).unwrap();
         let mut style = json!({"tool": tool, "color": color, "weight": weight});
         style.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());

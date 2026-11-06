@@ -15,7 +15,10 @@ use crate::agent_panel::{AgentConnection, AgentKind};
 use crate::export_panel::{export_layers, save_one, suggested_name};
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon, SettingsIcon};
-use crate::primitives::{Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, NumberField, SearchField, Switch};
+use crate::primitives::{
+    Button, ButtonAlign, ButtonBehavior, ButtonSize, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth,
+    NumberField, SearchField, Switch,
+};
 use crate::theme::{Tokens, regular, semibold};
 
 /// Where a report goes.
@@ -238,7 +241,8 @@ fn find_replace_dialog(app: &mut LizardApp, ctx: &Context) {
             let body_rect = Rect::from_min_size(pos2(header.left() + 16.0, header.bottom() + 12.0), vec2(308.0, 92.0));
             let mut body = ui.new_child(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)));
             body.spacing_mut().item_spacing.y = 8.0;
-            let find_response = SearchField::new(panel_id.with("find"), tr("Find")).width(ControlWidth::Fill).compact().clearable().show(&mut body, &mut find);
+            let find_response =
+                SearchField::new(panel_id.with("find"), tr("Find")).width(ControlWidth::Fill).compact().clearable().show(&mut body, &mut find);
             crate::widgets::select_all_on_focus(&body, &find_response, &find);
             if find_response.has_focus() && body.input(|input| input.key_pressed(egui::Key::Enter)) {
                 action = Some(false);
@@ -507,10 +511,7 @@ fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
     let gap = 16.0;
     let field_width = ((ui.available_width() - gap) / 2.0).max(96.0);
     ui.horizontal(|ui| {
-        for (index, label, value, key, step) in [
-            (0, tr("Small"), prefs.nudge_small, "small", 1.0),
-            (1, tr("Large"), prefs.nudge_big, "big", 10.0),
-        ] {
+        for (index, label, value, key, step) in [(0, tr("Small"), prefs.nudge_small, "small", 1.0), (1, tr("Large"), prefs.nudge_big, "big", 10.0)] {
             if index > 0 {
                 ui.add_space(gap);
             }
@@ -582,14 +583,7 @@ fn provider_emblem(ui: &egui::Ui, t: &Tokens, kind: AgentKind, rect: Rect) {
     icons::paint_provider(ui.painter(), rect.shrink(6.5), provider_index(kind), t.icon);
 }
 
-fn provider_row(
-    ui: &mut egui::Ui,
-    t: &Tokens,
-    kind: AgentKind,
-    connection: &AgentConnection,
-    pending: bool,
-    login_error: bool,
-) -> bool {
+fn provider_row(ui: &mut egui::Ui, t: &Tokens, kind: AgentKind, connection: &AgentConnection, pending: bool, login_error: bool) -> bool {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, 78.0), Sense::click());
     let fill = if response.hovered() { t.hover } else { t.field };
@@ -850,7 +844,12 @@ fn theme_preview_card(ui: &mut egui::Ui, label: &str, theme: &str, selected: boo
         let ink = if theme == "light" { Color32::from_rgb(30, 30, 33) } else { Color32::WHITE };
         clipped.text(pos2(window.left() + 17.0, sample_y), Align2::LEFT_CENTER, "Aa", semibold(22.0), ink);
     }
-    painter.rect_stroke(preview, CornerRadius::same(14), Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { t.accent } else { t.border_strong }), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        preview,
+        CornerRadius::same(14),
+        Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { t.accent } else { t.border_strong }),
+        egui::StrokeKind::Inside,
+    );
     if selected {
         let center = pos2(preview.right() - 16.0, preview.bottom() - 16.0);
         painter.circle_filled(center, 11.0, t.accent);
@@ -905,7 +904,12 @@ fn settings_language(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
                 paint_language_flag(ui, code, flag, t);
                 ui.painter().text(pos2(rect.left() + 46.0, rect.center().y), Align2::LEFT_CENTER, name, regular(12.0), t.text);
                 if selected {
-                    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), vec2(16.0, 16.0)), Icon::Check, t.accent);
+                    icons::paint(
+                        ui.painter(),
+                        Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), vec2(16.0, 16.0)),
+                        Icon::Check,
+                        t.accent,
+                    );
                 }
                 if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     pick = Some(code);
@@ -1143,7 +1147,9 @@ fn batch_rename_dialog(app: &mut LizardApp, ctx: &Context) {
                 let number = crate::primitives::NumberField::new(panel_id.with("start"), crate::widgets::Lead::None, Some(f64::from(b.start)), "")
                     .show(ui, ControlWidth::Fixed(64.0));
                 let next = match number.edit {
-                    Some(crate::widgets::Edit::All(crate::widgets::FieldEdit::Set(value) | crate::widgets::FieldEdit::Scrub(value, _))) => Some(value),
+                    Some(crate::widgets::Edit::All(crate::widgets::FieldEdit::Set(value) | crate::widgets::FieldEdit::Scrub(value, _))) => {
+                        Some(value)
+                    }
                     Some(crate::widgets::Edit::Each(relative)) => relative.apply(f64::from(b.start)),
                     None => None,
                 };

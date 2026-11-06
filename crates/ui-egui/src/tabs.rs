@@ -246,7 +246,12 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 if cresp.hovered() {
                     ui.painter().rect_filled(cr, CornerRadius::same(4), t.pressed);
                 }
-                icons::paint_colorpicker(&painter, Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)), 9, t.icon_secondary.linear_multiply(progress));
+                icons::paint_colorpicker(
+                    &painter,
+                    Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)),
+                    9,
+                    t.icon_secondary.linear_multiply(progress),
+                );
             }
             if cresp.clicked() {
                 close = Some(i);
@@ -313,7 +318,12 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
                 if close_resp.hovered() {
                     ui.painter().rect_filled(cr, CornerRadius::same(4), t.pressed);
                 }
-                icons::paint_colorpicker(ui.painter(), Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)), 9, t.icon_secondary);
+                icons::paint_colorpicker(
+                    ui.painter(),
+                    Rect::from_center_size(cr.center(), vec2(TAB_CLOSE_GLYPH, TAB_CLOSE_GLYPH)),
+                    9,
+                    t.icon_secondary,
+                );
             }
             if close_resp.clicked() {
                 app.ui.present = None;
@@ -340,7 +350,8 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
         }
         // Right side: settings (left of the window buttons).
         let settings_r = Rect::from_min_size(pos2(rect.max.x - buttons_w - settings_width - 8.0, rect.min.y), vec2(settings_width, HEIGHT));
-        let settings_resp = ui.interact(settings_r, ui.id().with("settings"), Sense::click()).tip(crate::shortcuts::tip(settings_label, "app.preferences"));
+        let settings_resp =
+            ui.interact(settings_r, ui.id().with("settings"), Sense::click()).tip(crate::shortcuts::tip(settings_label, "app.preferences"));
         if settings_resp.hovered() {
             ui.painter().rect_filled(settings_r.shrink(TAB_INSET), CornerRadius::same(TAB_RADIUS), t.hover);
         }

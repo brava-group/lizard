@@ -572,7 +572,8 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("edit.pickColor", "Pick color", "{targets?, stop?, pageBackground?, drawingTool?: pen|brush|pencil}", false, |s, p| {
             let owner = s.ds()?.uid;
             let destination = if let Some(id) = string(p, "drawingTool") {
-                let tool = ToolId::from_id(&id).filter(|tool| s.tool.draw_style(*tool).is_some())
+                let tool = ToolId::from_id(&id)
+                    .filter(|tool| s.tool.draw_style(*tool).is_some())
                     .ok_or_else(|| bad("edit.pickColor", "drawingTool: pen, brush or pencil"))?;
                 Some(EyedropTarget::DrawingTool { document: owner, tool })
             } else if boolean(p, "pageBackground") == Some(true) {

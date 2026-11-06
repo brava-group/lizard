@@ -140,7 +140,12 @@ fn shape(id: &str) -> Option<BezPath> {
 fn styled_stretch(p: &mut BezPath, style: usize) {
     use std::f64::consts::PI;
     if style == 4 || style == 5 || style == 7 || style == 14 {
-        let count = match style { 4 => 4, 5 => 3, 7 => 6, _ => 3 };
+        let count = match style {
+            4 => 4,
+            5 => 3,
+            7 => 6,
+            _ => 3,
+        };
         for strand in 0..count {
             let y = (strand as f64 - (count - 1) as f64 / 2.0) * (0.7 / count as f64);
             band(p, |x| {
@@ -152,8 +157,25 @@ fn styled_stretch(p: &mut BezPath, style: usize) {
         }
         return;
     }
-    let rough = match style { 0 => 0.065, 1 => 0.02, 2 => 0.085, 3 => 0.005, 6 => 0.07, 8 => 0.012, 9 => 0.055, 10 => 0.025, 11 => 0.045, 12 => 0.075, 13 => 0.01, _ => 0.03 };
-    let thickness = match style { 1 | 8 | 12 => 0.44, 3 | 10 | 13 => 0.30, _ => 0.36 };
+    let rough = match style {
+        0 => 0.065,
+        1 => 0.02,
+        2 => 0.085,
+        3 => 0.005,
+        6 => 0.07,
+        8 => 0.012,
+        9 => 0.055,
+        10 => 0.025,
+        11 => 0.045,
+        12 => 0.075,
+        13 => 0.01,
+        _ => 0.03,
+    };
+    let thickness = match style {
+        1 | 8 | 12 => 0.44,
+        3 | 10 | 13 => 0.30,
+        _ => 0.36,
+    };
     band(p, |x| {
         let fade_in = (x / if style == 3 { 0.13 } else { 0.035 }).min(1.0);
         let fade_out = ((1.0 - x) / if style == 0 || style == 3 { 0.12 } else { 0.04 }).min(1.0);
@@ -162,8 +184,7 @@ fn styled_stretch(p: &mut BezPath, style: usize) {
         let center = if style == 2 || style == 9 { 0.09 * (2.0 * PI * 2.0 * x).sin() } else { 0.0 };
         let top = rough * ((73.0 * x + style as f64).sin() * 0.6 + (131.0 * x).sin() * 0.4);
         let bottom = rough * ((81.0 * x + style as f64).cos() * 0.6 + (147.0 * x).sin() * 0.4);
-        ((center + (-thickness * pulse + top) * taper).clamp(-0.5, 0.5),
-         (center + (thickness * pulse + bottom) * taper).clamp(-0.5, 0.5))
+        ((center + (-thickness * pulse + top) * taper).clamp(-0.5, 0.5), (center + (thickness * pulse + bottom) * taper).clamp(-0.5, 0.5))
     });
     if matches!(style, 0 | 2 | 6 | 9 | 11 | 12) {
         for strand in 0..3 {
@@ -179,8 +200,25 @@ fn styled_stretch(p: &mut BezPath, style: usize) {
 
 fn styled_scatter(p: &mut BezPath, style: usize) {
     use std::f64::consts::PI;
-    let points = match style { 1 | 4 => 5, 2 | 8 => 8, 3 | 6 => 4, 7 => 3, 5 => 12, 9 => 10, _ => 16 };
-    let inner = match style { 1 => 0.43, 2 => 0.68, 3 => 0.78, 4 => 0.25, 6 => 0.35, 7 => 0.3, 8 => 0.4, _ => 1.0 };
+    let points = match style {
+        1 | 4 => 5,
+        2 | 8 => 8,
+        3 | 6 => 4,
+        7 => 3,
+        5 => 12,
+        9 => 10,
+        _ => 16,
+    };
+    let inner = match style {
+        1 => 0.43,
+        2 => 0.68,
+        3 => 0.78,
+        4 => 0.25,
+        6 => 0.35,
+        7 => 0.3,
+        8 => 0.4,
+        _ => 1.0,
+    };
     let n = if inner < 1.0 { points * 2 } else { points };
     for i in 0..n {
         let a = 2.0 * PI * i as f64 / n as f64;
@@ -191,7 +229,11 @@ fn styled_scatter(p: &mut BezPath, style: usize) {
     p.close_path();
     if matches!(style, 0 | 5 | 9) {
         // A smaller second mark gives these stamps a distinct rhythm at low zoom.
-        let (x, y, size) = match style { 5 => (0.22, 0.24, 0.09), 9 => (0.27, -0.27, 0.14), _ => (-0.24, 0.26, 0.12) };
+        let (x, y, size) = match style {
+            5 => (0.22, 0.24, 0.09),
+            9 => (0.27, -0.27, 0.14),
+            _ => (-0.24, 0.26, 0.12),
+        };
         p.extend(kurbo::Shape::path_elements(&kurbo::Circle::new((x, y), size), 0.01));
     }
 }

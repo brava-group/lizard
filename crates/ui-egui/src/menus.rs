@@ -13,9 +13,9 @@ use crate::LizardApp;
 use crate::a11y;
 use crate::i18n::{self, tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
+use crate::primitives::Shortcut;
 use crate::theme::{Tokens, regular};
 use crate::toolbar::pretty_shortcut;
-use crate::primitives::Shortcut;
 
 /// Commands the UI layer implements itself (dialogs and platform actions).
 pub const UI_COMMANDS: &[&str] = &[
@@ -974,9 +974,15 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                     });
                     if !eligible {
                         None
-                    } else if nodes.len() == 1 && matches!(nodes[0].kind, lizard_doc::NodeKind::Frame) && !lizard_engine::components::is_slot(doc, nodes[0].id) {
+                    } else if nodes.len() == 1
+                        && matches!(nodes[0].kind, lizard_doc::NodeKind::Frame)
+                        && !lizard_engine::components::is_slot(doc, nodes[0].id)
+                    {
                         Some((tr("Convert to slot"), "component.makeSlot"))
-                    } else if nodes.iter().all(|node| !matches!(node.kind, lizard_doc::NodeKind::Component { .. } | lizard_doc::NodeKind::ComponentSet { .. })) {
+                    } else if nodes
+                        .iter()
+                        .all(|node| !matches!(node.kind, lizard_doc::NodeKind::Component { .. } | lizard_doc::NodeKind::ComponentSet { .. }))
+                    {
                         Some((tr("Wrap in new slot"), "component.wrapInSlot"))
                     } else {
                         None
