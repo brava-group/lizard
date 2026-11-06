@@ -874,7 +874,7 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let h = c.map(|c| format!("{:?}", c.horizontal)).unwrap_or_else(|| "Mixed".into());
                 let resp = crate::primitives::Select::trigger_with_variant(
-                    ui, tr(&pretty(&h)), col, Some(crate::primitives::SelectLead::Icon(Icon::AlignLeft)), crate::primitives::SelectVariant::Outlined,
+                    ui, tr(&pretty(&h)), col, Some(crate::primitives::SelectLead::Icon(Icon::MoveHorizontal)), crate::primitives::SelectVariant::Outlined,
                 );
                 menu_popup(&resp).show(|ui| {
                     for (l, v) in [
@@ -893,7 +893,7 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                 ui.add_space(8.0);
                 let v = c.map(|c| format!("{:?}", c.vertical)).unwrap_or_else(|| "Mixed".into());
                 let resp = crate::primitives::Select::trigger_with_variant(
-                    ui, tr(&pretty(&v)), col, Some(crate::primitives::SelectLead::Icon(Icon::AlignTop)), crate::primitives::SelectVariant::Outlined,
+                    ui, tr(&pretty(&v)), col, Some(crate::primitives::SelectLead::Icon(Icon::MoveVertical)), crate::primitives::SelectVariant::Outlined,
                 );
                 menu_popup(&resp).show(|ui| {
                     for (l, val) in [
@@ -941,7 +941,7 @@ fn constraint_preview(ui: &mut Ui, value: Option<Constraints>, width: f32) -> (O
     let tokens = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, CornerRadius::same(5), tokens.field);
     let child = rect.shrink2(vec2(16.0, 16.0));
-    ui.painter().rect_stroke(child, CornerRadius::same(5), Stroke::new(1.0, tokens.icon_secondary), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(child, CornerRadius::same(5), Stroke::new(1.0, tokens.icon_secondary.gamma_multiply(0.4)), egui::StrokeKind::Inside);
 
     let h = value.map(|c| c.horizontal);
     let v = value.map(|c| c.vertical);

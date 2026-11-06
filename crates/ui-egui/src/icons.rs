@@ -265,6 +265,8 @@ icons! {
     WinRestore,
     Search,
     Grid,
+    MoveHorizontal,
+    MoveVertical,
     AlignLeft,
     AlignHCenter,
     AlignRight,
@@ -1080,6 +1082,16 @@ fn draw(p: &P, icon: Icon) {
                     p.rect(i, j, i + 3.0, j + 3.0, 0.0);
                 }
             }
+        }
+        MoveHorizontal => {
+            p.line(1.5, 8.0, 14.5, 8.0);
+            p.poly(&[(4.0, 5.3), (1.3, 8.0), (4.0, 10.7)], false);
+            p.poly(&[(12.0, 5.3), (14.7, 8.0), (12.0, 10.7)], false);
+        }
+        MoveVertical => {
+            p.line(8.0, 1.5, 8.0, 14.5);
+            p.poly(&[(5.3, 4.0), (8.0, 1.3), (10.7, 4.0)], false);
+            p.poly(&[(5.3, 12.0), (8.0, 14.7), (10.7, 12.0)], false);
         }
         AlignLeft => {
             p.line(2.5, 2.0, 2.5, 14.0);

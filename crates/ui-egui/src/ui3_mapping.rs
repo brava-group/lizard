@@ -176,6 +176,8 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         | super::super::Icon::GoToComponentSet
         | super::super::Icon::SelectionSpacingH
         | super::super::Icon::SelectionSpacingV
+        | super::super::Icon::MoveHorizontal
+        | super::super::Icon::MoveVertical
         | super::super::Icon::Trash => None,
     }
 }
