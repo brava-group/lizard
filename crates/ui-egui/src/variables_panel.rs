@@ -7,6 +7,8 @@
 //! variables JSON (or CSS). Everything goes through `variable.*` / `library.*` commands, so it's
 //! undoable and the same over MCP.
 
+use std::collections::HashMap;
+
 use crate::primitives::TooltipResponseExt as _;
 use egui::{Align2, Context, CornerRadius, Id, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use lizard_doc::{Collection, Document, PublishedLibrary, Variable, VariableType, VariableValue, Variables, scopes_for};
@@ -28,6 +30,10 @@ use crate::widgets::{self, FieldEdit};
 const SIDEBAR_W: f32 = 240.0;
 const NAME_W: f32 = 200.0;
 const MODE_W: f32 = 280.0;
+const MIN_NAME_W: f32 = 120.0;
+const MIN_MODE_W: f32 = 120.0;
+const MAX_COLUMN_W: f32 = 800.0;
+const TRAILING_W: f32 = 40.0;
 const ROW_H: f32 = 40.0;
 const EXPANDED_MARGIN: f32 = 16.0;
 const TYPES: [VariableType; 4] = [VariableType::Color, VariableType::Number, VariableType::String, VariableType::Boolean];
@@ -61,6 +67,44 @@ pub struct Editor {
     kind_filter: Option<VariableType>,
     expanded: bool,
     center_on_restore: bool,
+    column_widths: HashMap<String, f32>,
+}
+
+struct TableColumns {
+    name: f32,
+    mode_widths: Vec<f32>,
+    mode_lefts: Vec<f32>,
+    content_width: f32,
+}
+
+impl TableColumns {
+    fn for_collection(view: &View<'_>, coll: &Collection, st: &Editor) -> Self {
+        let name = st.column_widths.get(&column_key(view, &coll.id, "name")).copied().unwrap_or(NAME_W);
+        let mut mode_lefts = Vec::with_capacity(coll.modes.len());
+        let mut mode_widths = Vec::with_capacity(coll.modes.len());
+        let mut x = name;
+        for mode in &coll.modes {
+            mode_lefts.push(x);
+            let width = st.column_widths.get(&column_key(view, &coll.id, &mode.id)).copied().unwrap_or(MODE_W);
+            mode_widths.push(width);
+            x += width;
+        }
+        Self { name, mode_widths, mode_lefts, content_width: x + TRAILING_W }
+    }
+
+    fn nearest_mode(&self, x: f32) -> usize {
+        self.mode_lefts
+            .iter()
+            .zip(&self.mode_widths)
+            .enumerate()
+            .map(|(index, (left, width))| (index, (x - (*left + *width * 0.5)).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map_or(0, |(index, _)| index)
+    }
+}
+
+fn column_key(view: &View<'_>, collection: &str, column: &str) -> String {
+    format!("{}:{collection}:{column}", view.id().unwrap_or("local"))
 }
 
 impl Editor {
@@ -134,6 +178,10 @@ impl<'a> View<'a> {
 /// Show the editor while it's open (call once per frame).
 pub fn show(app: &mut LizardApp, ctx: &Context) {
     let Some(mut st) = app.ui.variables.take() else { return };
+    let widths_id = Id::new("variables_column_widths");
+    if st.column_widths.is_empty() {
+        st.column_widths = ctx.data(|data| data.get_temp::<HashMap<String, f32>>(widths_id)).unwrap_or_default();
+    }
     let Ok(doc) = app.session.ds().map(|d| d.doc.clone()) else { return };
     let libs = crate::variable_ui::libraries(app, &doc);
     let views: Vec<View> = std::iter::once(View::local(&doc)).chain(libs.iter().map(|l| View::of(l))).collect();
@@ -186,6 +234,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         Surface::palette().paint_top_highlight(ui.painter(), ui.max_rect());
     });
     details(app, ctx, &doc.variables, &mut st);
+    ctx.data_mut(|data| data.insert_temp(widths_id, st.column_widths.clone()));
     app.ui.variables = open.then_some(st);
 }
 
@@ -636,13 +685,14 @@ fn table(app: &mut LizardApp, ui: &mut Ui, view: &View, st: &mut Editor) {
         .filter(|v| in_group(v) && st.kind_filter.is_none_or(|kind| v.kind == kind) && (q.is_empty() || v.name.to_lowercase().contains(&q)))
         .collect();
     list.sort_by(|a, b| group_of(&a.name).cmp(group_of(&b.name)));
-    let width = (NAME_W + coll.modes.len() as f32 * MODE_W + 40.0).max(ui.available_width());
+    let columns = TableColumns::for_collection(view, coll, st);
+    let width = columns.content_width.max(ui.available_width());
     let table_height = (ui.available_height() - 41.0).max(80.0);
     egui::ScrollArea::both().id_salt("vars_table").auto_shrink([false, false]).max_height(table_height).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        header_row(app, ui, view, coll, st, width);
+        header_row(app, ui, view, coll, st, &columns, width);
         for v in &list {
-            var_row(app, ui, view, coll, v, st, width);
+            var_row(app, ui, view, coll, v, st, &columns, width);
         }
         if list.is_empty() && (!q.is_empty() || st.kind_filter.is_some()) {
             let (r, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
@@ -652,15 +702,16 @@ fn table(app: &mut LizardApp, ui: &mut Ui, view: &View, st: &mut Editor) {
     create_row(app, ui, view, coll, st);
 }
 
-fn header_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor, width: f32) {
+fn header_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, st: &mut Editor, columns: &TableColumns, width: f32) {
     let t = Tokens::get(ui.ctx());
     // An extended collection has the modes of the one it extends.
     let editable = view.editable() && coll.extends.is_none();
     let (r, _) = ui.allocate_exact_size(vec2(width, 40.0), Sense::hover());
     ui.painter().text(pos2(r.min.x + 16.0, r.center().y), Align2::LEFT_CENTER, tr("Name"), semibold(11.0), t.text);
     for (i, m) in coll.modes.iter().enumerate() {
-        let x = r.min.x + NAME_W + i as f32 * MODE_W;
-        let cell = Rect::from_min_max(pos2(x + 12.0, r.min.y + 4.0), pos2(x + MODE_W - 8.0, r.max.y - 4.0));
+        let x = r.min.x + columns.mode_lefts[i];
+        let mode_width = columns.mode_widths[i];
+        let cell = Rect::from_min_max(pos2(x + 12.0, r.min.y + 4.0), pos2(x + mode_width - 8.0, r.max.y - 4.0));
         let target = Rename::Mode(coll.id.clone(), m.id.clone());
         if editable && st.rename.as_ref() == Some(&target) {
             if let Some(name) = rename_field(ui, st, &target, &m.name, cell.shrink2(vec2(4.0, 2.0)), regular(11.0)) {
@@ -674,11 +725,32 @@ fn header_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
             ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, label, semibold(11.0), t.text);
             continue;
         }
-        let resp = ui.interact(cell, Id::new(("vars_mode", &m.id)), Sense::click());
-        if resp.hovered() {
+        let resp = ui.interact(cell, Id::new(("vars_mode", &m.id)), Sense::click_and_drag());
+        if resp.hovered() || resp.dragged() {
             ui.painter().rect_filled(cell, CornerRadius::same(4), t.hover);
         }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        } else if resp.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
         ui.painter().with_clip_rect(cell).text(name_pos, Align2::LEFT_CENTER, label, semibold(11.0), t.text);
+        if resp.dragged()
+            && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
+        {
+            let target = columns.nearest_mode(pointer.x - r.min.x);
+            let edge = if target > i { columns.mode_lefts[target] + columns.mode_widths[target] } else { columns.mode_lefts[target] };
+            let line_x = r.min.x + edge;
+            ui.painter().line_segment([pos2(line_x, r.top() + 4.0), pos2(line_x, r.bottom() - 4.0)], Stroke::new(2.0, t.accent));
+        }
+        if resp.drag_stopped()
+            && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
+        {
+            let target = columns.nearest_mode(pointer.x - r.min.x);
+            if target != i {
+                app.run("variable.moveMode", json!({"collection": coll.id, "mode": m.id, "to": target}));
+            }
+        }
         if resp.double_clicked() {
             start_rename(st, target.clone());
         }
@@ -725,23 +797,49 @@ fn header_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
             start_rename(st, Rename::Mode(coll.id.clone(), id));
         }
     }
-    table_grid(ui, r, coll.modes.len());
+    table_grid(ui, r, columns);
+    resize_handles(ui, view, coll, st, columns, r);
 }
 
-fn table_grid(ui: &Ui, row: Rect, mode_count: usize) {
+fn resize_handles(ui: &mut Ui, view: &View<'_>, coll: &Collection, st: &mut Editor, columns: &TableColumns, header: Rect) {
+    let t = Tokens::get(ui.ctx());
+    let boundaries = std::iter::once((column_key(view, &coll.id, "name"), columns.name, columns.name, MIN_NAME_W)).chain(
+        coll.modes.iter().enumerate().map(|(index, mode)| {
+            let width = columns.mode_widths[index];
+            (column_key(view, &coll.id, &mode.id), columns.mode_lefts[index] + width, width, MIN_MODE_W)
+        }),
+    );
+    for (key, edge, current, minimum) in boundaries {
+        let x = header.left() + edge;
+        let handle = Rect::from_center_size(pos2(x, header.center().y), vec2(10.0, header.height()));
+        let response = ui.interact(handle, Id::new(("vars_resize_column", &key)), Sense::drag());
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ui.painter().line_segment([pos2(x, header.top() + 4.0), pos2(x, header.bottom() - 4.0)], Stroke::new(2.0, t.accent));
+        }
+        if response.dragged() {
+            let next = (current + response.drag_delta().x).clamp(minimum, MAX_COLUMN_W);
+            st.column_widths.insert(key, next);
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+fn table_grid(ui: &Ui, row: Rect, columns: &TableColumns) {
     let stroke = Stroke::new(1.0, Tokens::get(ui.ctx()).border);
     ui.painter().line_segment([row.left_bottom(), row.right_bottom()], stroke);
-    for index in 0..=mode_count {
-        let x = row.left() + NAME_W + index as f32 * MODE_W;
-        if x < row.right() - 40.0 {
+    let mut x = row.left() + columns.name;
+    for width in std::iter::once(0.0).chain(columns.mode_widths.iter().copied()) {
+        x += width;
+        if x < row.right() - TRAILING_W {
             ui.painter().line_segment([pos2(x, row.top()), pos2(x, row.bottom())], stroke);
         }
     }
-    let trailing = row.right() - 40.0;
+    let trailing = row.right() - TRAILING_W;
     ui.painter().line_segment([pos2(trailing, row.top()), pos2(trailing, row.bottom())], stroke);
 }
 
-fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Variable, st: &mut Editor, width: f32) {
+fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: &Variable, st: &mut Editor, columns: &TableColumns, width: f32) {
     let t = Tokens::get(ui.ctx());
     let editable = view.editable();
     let (r, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click());
@@ -749,7 +847,7 @@ fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: 
         ui.painter().rect_filled(r, CornerRadius::ZERO, t.hover);
     }
     kind_glyph(ui, view.vars, v, coll, Rect::from_center_size(pos2(r.min.x + 24.0, r.center().y), vec2(14.0, 14.0)));
-    let name_r = Rect::from_min_max(pos2(r.min.x + 44.0, r.min.y + 8.0), pos2(r.min.x + NAME_W - 8.0, r.max.y - 8.0));
+    let name_r = Rect::from_min_max(pos2(r.min.x + 44.0, r.min.y + 8.0), pos2(r.min.x + columns.name - 8.0, r.max.y - 8.0));
     let target = Rename::Variable(v.id.clone());
     // An inherited variable is named (and deleted) in the collection it extends.
     let inherited = v.extends.is_some();
@@ -763,8 +861,8 @@ fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: 
         ui.painter().with_clip_rect(name_r).text(name_r.left_center(), Align2::LEFT_CENTER, short, regular(11.0), t.text);
     }
     for (i, m) in coll.modes.iter().enumerate() {
-        let x = r.min.x + NAME_W + i as f32 * MODE_W;
-        let cell = Rect::from_min_max(pos2(x + 16.0, r.center().y - 12.0), pos2(x + MODE_W - 8.0, r.center().y + 12.0));
+        let x = r.min.x + columns.mode_lefts[i];
+        let cell = Rect::from_min_max(pos2(x + 16.0, r.center().y - 12.0), pos2(x + columns.mode_widths[i] - 8.0, r.center().y + 12.0));
         value_cell(app, ui, view, v, coll, &m.id, cell);
     }
     if editable {
@@ -794,7 +892,7 @@ fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: 
             }
         });
     }
-    table_grid(ui, r, coll.modes.len());
+    table_grid(ui, r, columns);
 }
 
 /// The type marker before a variable's name: its colour (default mode), or a type glyph.
