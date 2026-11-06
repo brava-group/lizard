@@ -861,18 +861,6 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
         app.field_of(&ids, "y", e, y_of, |v| json!(v));
     });
     ui.add_space(8.0);
-    block(ui, 24.0, 0.0, |ui| {
-        let e = widgets::number_field_mixed(ui, Id::new("pos_rot"), Lead::PositionIcon(PositionIcon::Rotation, tr("Rotation")), rot, "°", col, 1.0);
-        app.field_of(&ids, "rotation", e, rot_of, |v| json!(v));
-        let items = [
-            (PositionIcon::RotateRight, tr("Rotate 90° right")),
-            (PositionIcon::FlipH, crate::shortcuts::tip(tr("Flip horizontal"), "object.flipH")),
-            (PositionIcon::FlipV, crate::shortcuts::tip(tr("Flip vertical"), "object.flipV")),
-        ];
-        if let Some(i) = position_segments(ui, &items, col) {
-            app.run(["object.rotateRight", "object.flipH", "object.flipV"][i], json!({"ids": ids}));
-        }
-    });
     // Constraints (children of frames without auto layout, or ignoring it).
     let in_frame = sel.iter().all(|i| {
         doc.node(*i).is_some_and(|n| {
@@ -881,20 +869,13 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
     });
     if in_frame {
         let c = common(doc, sel, |n| n.constraints);
-        widgets::sublabels(ui, tr("Constraints"), None);
-        block(ui, 98.0, 0.0, |ui| {
-            let (horizontal, vertical) = constraint_preview(ui, c);
-            if let Some(value) = horizontal {
-                app.set_props(&ids, json!({"constraints": {"horizontal": value}}));
-            }
-            if let Some(value) = vertical {
-                app.set_props(&ids, json!({"constraints": {"vertical": value}}));
-            }
+        block(ui, 56.0, 0.0, |ui| {
             ui.vertical(|ui| {
-                ui.add_space(13.0);
+                ui.spacing_mut().item_spacing.y = 0.0;
                 let h = c.map(|c| format!("{:?}", c.horizontal)).unwrap_or_else(|| "Mixed".into());
-                let width = ui.available_width().max(72.0);
-                let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&h)), width, None);
+                let resp = crate::primitives::Select::trigger_with_variant(
+                    ui, tr(&pretty(&h)), col, Some(crate::primitives::SelectLead::Icon(Icon::AlignLeft)), crate::primitives::SelectVariant::Outlined,
+                );
                 menu_popup(&resp).show(|ui| {
                     for (l, v) in [
                         (tr("Left"), "left"),
@@ -911,7 +892,9 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                 });
                 ui.add_space(8.0);
                 let v = c.map(|c| format!("{:?}", c.vertical)).unwrap_or_else(|| "Mixed".into());
-                let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&v)), width, None);
+                let resp = crate::primitives::Select::trigger_with_variant(
+                    ui, tr(&pretty(&v)), col, Some(crate::primitives::SelectLead::Icon(Icon::AlignTop)), crate::primitives::SelectVariant::Outlined,
+                );
                 menu_popup(&resp).show(|ui| {
                     for (l, val) in [
                         (tr("Top"), "top"),
@@ -927,66 +910,68 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
                     }
                 });
             });
+            let (horizontal, vertical) = constraint_preview(ui, c, col);
+            if let Some(value) = horizontal {
+                app.set_props(&ids, json!({"constraints": {"horizontal": value}}));
+            }
+            if let Some(value) = vertical {
+                app.set_props(&ids, json!({"constraints": {"vertical": value}}));
+            }
         });
+        ui.add_space(8.0);
     }
+    block(ui, 24.0, 0.0, |ui| {
+        let e = widgets::number_field_mixed(ui, Id::new("pos_rot"), Lead::PositionIcon(PositionIcon::Rotation, tr("Rotation")), rot, "°", col, 1.0);
+        app.field_of(&ids, "rotation", e, rot_of, |v| json!(v));
+        let items = [
+            (PositionIcon::RotateRight, tr("Rotate 90° right")),
+            (PositionIcon::FlipH, crate::shortcuts::tip(tr("Flip horizontal"), "object.flipH")),
+            (PositionIcon::FlipV, crate::shortcuts::tip(tr("Flip vertical"), "object.flipV")),
+        ];
+        if let Some(i) = position_segments(ui, &items, col) {
+            app.run(["object.rotateRight", "object.flipH", "object.flipV"][i], json!({"ids": ids}));
+        }
+    });
 }
 
-/// Parent and child bounds with clickable horizontal and vertical pins, like the canvas
-/// constraints preview. Stretch and Scale remain available in the adjacent selectors.
-fn constraint_preview(ui: &mut Ui, value: Option<Constraints>) -> (Option<&'static str>, Option<&'static str>) {
-    let (rect, _) = ui.allocate_exact_size(vec2(92.0, 92.0), Sense::hover());
+/// The compact parent/child diagram sits beside the two constraint selectors.
+/// Its edge bars set the four pins; the centre bars set centred positioning.
+fn constraint_preview(ui: &mut Ui, value: Option<Constraints>, width: f32) -> (Option<&'static str>, Option<&'static str>) {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 56.0), Sense::hover());
     let tokens = Tokens::get(ui.ctx());
-    let parent = Rect::from_min_max(rect.min + vec2(5.0, 5.0), rect.min + vec2(66.0, 66.0));
-    let child = Rect::from_center_size(parent.center(), vec2(25.0, 25.0));
-    ui.painter().rect_stroke(parent, CornerRadius::same(3), Stroke::new(1.0, tokens.icon_secondary), egui::StrokeKind::Inside);
-    if let Some(constraints) = value {
-        let pin = Stroke::new(1.5, tokens.accent);
-        if matches!(constraints.horizontal, HConstraint::Left | HConstraint::LeftRight) {
-            ui.painter().line_segment([pos2(parent.left(), child.center().y), child.left_center()], pin);
-        }
-        if matches!(constraints.horizontal, HConstraint::Right | HConstraint::LeftRight) {
-            ui.painter().line_segment([child.right_center(), pos2(parent.right(), child.center().y)], pin);
-        }
-        if matches!(constraints.vertical, VConstraint::Top | VConstraint::TopBottom) {
-            ui.painter().line_segment([pos2(child.center().x, parent.top()), pos2(child.center().x, child.top())], pin);
-        }
-        if matches!(constraints.vertical, VConstraint::Bottom | VConstraint::TopBottom) {
-            ui.painter().line_segment([pos2(child.center().x, child.bottom()), pos2(child.center().x, parent.bottom())], pin);
-        }
-    }
-    ui.painter().rect_filled(child, CornerRadius::same(2), tokens.hover);
-    ui.painter().rect_stroke(child, CornerRadius::same(2), Stroke::new(1.0, tokens.icon), egui::StrokeKind::Inside);
+    ui.painter().rect_filled(rect, CornerRadius::same(5), tokens.field);
+    let child = rect.shrink2(vec2(16.0, 16.0));
+    ui.painter().rect_stroke(child, CornerRadius::same(5), Stroke::new(1.0, tokens.icon_secondary), egui::StrokeKind::Inside);
+
+    let h = value.map(|c| c.horizontal);
+    let v = value.map(|c| c.vertical);
+    let pins = [
+        ("left", pos2(rect.left() + 8.0, rect.center().y), true, matches!(h, Some(HConstraint::Left | HConstraint::LeftRight))),
+        ("right", pos2(rect.right() - 8.0, rect.center().y), true, matches!(h, Some(HConstraint::Right | HConstraint::LeftRight))),
+        ("top", pos2(rect.center().x, rect.top() + 8.0), false, matches!(v, Some(VConstraint::Top | VConstraint::TopBottom))),
+        ("bottom", pos2(rect.center().x, rect.bottom() - 8.0), false, matches!(v, Some(VConstraint::Bottom | VConstraint::TopBottom))),
+    ];
     let mut horizontal = None;
     let mut vertical = None;
-    for (index, (name, x)) in [("left", parent.left()), ("center", parent.center().x), ("right", parent.right())].into_iter().enumerate() {
-        let marker = Rect::from_center_size(pos2(x, rect.top() + 81.0), vec2(20.0, 20.0));
-        let response = ui.interact(marker, ui.id().with(("constraint_h_pin", index)), Sense::click()).tip(tr(name));
-        let active = value.is_some_and(|c| match c.horizontal {
-            HConstraint::Left => index == 0,
-            HConstraint::Center => index == 1,
-            HConstraint::Right => index == 2,
-            HConstraint::LeftRight => index != 1,
-            HConstraint::Scale => false,
-        });
-        ui.painter().circle_filled(marker.center(), if active { 4.0 } else { 2.5 }, if active { tokens.accent } else { tokens.icon_secondary });
+    for (name, centre, is_horizontal, active) in pins {
+        let hit = Rect::from_center_size(centre, vec2(22.0, 22.0));
+        let response = ui.interact(hit, ui.id().with(("constraint_pin", name)), Sense::click()).tip(tr(name));
+        let color = if active { tokens.accent } else { tokens.icon_secondary };
+        let half = if is_horizontal { vec2(5.0, 0.0) } else { vec2(0.0, 5.0) };
+        ui.painter().line_segment([centre - half, centre + half], Stroke::new(if active { 3.0 } else { 1.5 }, color));
         if response.clicked() {
-            horizontal = Some(name);
+            if is_horizontal { horizontal = Some(name); } else { vertical = Some(name); }
         }
     }
-    for (index, (name, y)) in [("top", parent.top()), ("center", parent.center().y), ("bottom", parent.bottom())].into_iter().enumerate() {
-        let marker = Rect::from_center_size(pos2(rect.left() + 81.0, y), vec2(20.0, 20.0));
-        let response = ui.interact(marker, ui.id().with(("constraint_v_pin", index)), Sense::click()).tip(tr(name));
-        let active = value.is_some_and(|c| match c.vertical {
-            VConstraint::Top => index == 0,
-            VConstraint::Center => index == 1,
-            VConstraint::Bottom => index == 2,
-            VConstraint::TopBottom => index != 1,
-            VConstraint::Scale => false,
-        });
-        ui.painter().circle_filled(marker.center(), if active { 4.0 } else { 2.5 }, if active { tokens.accent } else { tokens.icon_secondary });
-        if response.clicked() {
-            vertical = Some(name);
-        }
+    let center = child.center();
+    let center_hit = Rect::from_center_size(center, vec2(22.0, 22.0));
+    let response = ui.interact(center_hit, ui.id().with("constraint_center"), Sense::click()).tip(tr("Center"));
+    let cross = Stroke::new(1.0, if matches!(h, Some(HConstraint::Center)) || matches!(v, Some(VConstraint::Center)) { tokens.accent } else { tokens.icon_secondary });
+    ui.painter().line_segment([center - vec2(7.0, 0.0), center + vec2(7.0, 0.0)], cross);
+    ui.painter().line_segment([center - vec2(0.0, 7.0), center + vec2(0.0, 7.0)], cross);
+    if response.clicked() {
+        horizontal = Some("center");
+        vertical = Some("center");
     }
     (horizontal, vertical)
 }
