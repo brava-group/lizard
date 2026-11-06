@@ -1081,55 +1081,76 @@ fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     let comps = local_components(app, ui, doc);
     let nested = inside_instance(doc, id);
     widgets::separator(ui);
-    row(ui, 36.0, |ui| {
-        ui.label(egui::RichText::new(if nested { tr("Nested instance") } else { tr("Instance") }).font(semibold(11.0)).color(t.text));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let more = icons::button(ui, Icon::Dots, 24.0, false, tr("More instance actions"));
-            menu_popup(&more).width(220.0).show(|ui| {
-                if !missing && menu_item(ui, tr("Go to main component"), "") {
-                    app.run("component.goToMain", json!({"id": id}));
-                    ui.close();
-                }
-                if !missing && menu_item(ui, tr("Push changes to main component"), "") {
-                    app.run("component.pushChanges", json!({"id": id}));
-                    ui.close();
-                }
-                if missing && !nested && menu_item(ui, tr("Restore main component"), "") {
-                    app.run("component.restoreMain", json!({"id": id}));
-                    ui.close();
-                }
-                if menu_item(ui, tr("Reset all changes"), "") {
-                    app.run("component.resetInstance", json!({"ids": [id]}));
-                    ui.close();
-                }
-                if !nested && menu_item(ui, tr("Detach instance"), "Alt+Cmd+B") {
-                    app.run("component.detach", json!({"ids": [id]}));
-                    ui.close();
-                }
-            });
-            if !nested && icons::button(ui, Icon::Detach, 24.0, false, crate::shortcuts::tip(tr("Detach instance"), "component.detach")).clicked() {
-                app.run("component.detach", json!({"ids": [id]}));
-            }
-            if icons::button(ui, Icon::Reset, 24.0, false, tr("Reset all changes")).clicked() {
-                app.run("component.resetInstance", json!({"ids": [id]}));
-            }
-        });
-    });
-    // Main component with a swap menu, and "go to main".
-    row(ui, 32.0, |ui| {
-        let w = ui.available_width().max(80.0);
-        let resp = crate::primitives::Select::trigger(ui, &comp_name, w, Some(Icon::Instance)).lizard_tooltip(tr("Swap instance"));
-        if let Some(chosen) = swap_picker(app, &resp, doc, set.or(Some(*component)), &[], &comps, Id::new(("main_swap_query", id))) {
-            app.run("instance.swap", json!({"ids": [id], "component": chosen.0}));
-        }
-        if missing {
-            if icons::button(ui, Icon::Component, 24.0, false, tr("Restore main component")).clicked() {
-                app.run("component.restoreMain", json!({"id": id}));
-            }
-        } else if icons::button(ui, Icon::Component, 24.0, false, tr("Go to main component")).clicked() {
+    let (header, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(
+        pos2(header.left() + widgets::PAD, header.center().y),
+        egui::Align2::LEFT_CENTER,
+        tr("Properties"),
+        crate::theme::property_section_title(),
+        t.text,
+    );
+    let more = Button::icon(Icon::Dots, tr("More instance actions")).variant(ButtonVariant::Ghost).show_at(
+        ui,
+        Id::new(("instance_more", id)),
+        widgets::section_action_rect(header, 0),
+    );
+    menu_popup(&more).width(220.0).show(|ui| {
+        if !missing && menu_item(ui, tr("Go to main component"), "") {
             app.run("component.goToMain", json!({"id": id}));
+            ui.close();
+        }
+        if !missing && menu_item(ui, tr("Push changes to main component"), "") {
+            app.run("component.pushChanges", json!({"id": id}));
+            ui.close();
+        }
+        if missing && !nested && menu_item(ui, tr("Restore main component"), "") {
+            app.run("component.restoreMain", json!({"id": id}));
+            ui.close();
+        }
+        if menu_item(ui, tr("Reset all changes"), "") {
+            app.run("component.resetInstance", json!({"ids": [id]}));
+            ui.close();
+        }
+        if !nested && menu_item(ui, tr("Detach instance"), "Alt+Cmd+B") {
+            app.run("component.detach", json!({"ids": [id]}));
+            ui.close();
         }
     });
+    if !nested
+        && Button::icon(Icon::Detach, crate::shortcuts::tip(tr("Detach instance"), "component.detach"))
+            .variant(ButtonVariant::Ghost)
+            .show_at(ui, Id::new(("instance_detach", id)), widgets::section_action_rect(header, 1))
+            .clicked()
+    {
+        app.run("component.detach", json!({"ids": [id]}));
+    }
+    if Button::icon(Icon::Reset, tr("Reset all changes"))
+        .variant(ButtonVariant::Ghost)
+        .show_at(ui, Id::new(("instance_reset", id)), widgets::section_action_rect(header, if nested { 1 } else { 2 }))
+        .clicked()
+    {
+        app.run("component.resetInstance", json!({"ids": [id]}));
+    }
+    // Main component with a swap menu, and "go to main".
+    let (main_row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    let main_action = widgets::section_action_rect(main_row, 0);
+    let select_rect = Rect::from_min_max(
+        pos2(main_row.left() + widgets::PAD, main_row.center().y - 12.0),
+        pos2(main_action.left() - 8.0, main_row.center().y + 12.0),
+    );
+    let mut select_ui = ui.new_child(egui::UiBuilder::new().max_rect(select_rect));
+    let resp =
+        crate::primitives::Select::trigger(&mut select_ui, &comp_name, select_rect.width(), Some(Icon::Instance)).lizard_tooltip(tr("Swap instance"));
+    if let Some(chosen) = swap_picker(app, &resp, doc, set.or(Some(*component)), &[], &comps, Id::new(("main_swap_query", id))) {
+        app.run("instance.swap", json!({"ids": [id], "component": chosen.0}));
+    }
+    if Button::icon(Icon::Component, if missing { tr("Restore main component") } else { tr("Go to main component") })
+        .variant(ButtonVariant::Ghost)
+        .show_at(ui, Id::new(("instance_main", id)), main_action)
+        .clicked()
+    {
+        app.run(if missing { "component.restoreMain" } else { "component.goToMain" }, json!({"id": id}));
+    }
     if nested_in_main(doc, id) {
         scoped_property_row(app, ui, doc, n, "mainComponent", "instanceSwap", tr("Instance"));
     }
@@ -1170,6 +1191,7 @@ fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
             instance_props(app, ui, doc, cn, &comps);
         }
     }
+    ui.add_space(12.0);
 }
 
 /// An instance placed inside a main component (not inside another instance).
