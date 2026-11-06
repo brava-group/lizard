@@ -17,9 +17,6 @@ use crate::theme::{Tokens, regular, semibold};
 
 const MUTED: Color32 = Color32::from_rgba_premultiplied(178, 178, 178, 178);
 const DIM: Color32 = Color32::from_rgba_premultiplied(102, 102, 102, 102);
-const CHAT_BUBBLE: Color32 = Color32::from_rgb(0x40, 0x40, 0x40);
-const RECEIPT_BG: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
-const RECEIPT_BORDER: Color32 = Color32::from_rgb(0x3D, 0x3D, 0x42);
 const RECEIPT_GREEN: Color32 = Color32::from_rgb(0x00, 0xD4, 0x82);
 const TRANSCRIPT_SCROLL_GUTTER: f32 = 16.0;
 const WORK_WORDS: [&str; 7] = [
@@ -1196,15 +1193,28 @@ fn connection_detail(connection: &AgentConnection, kind: AgentKind) -> String {
 }
 
 fn receipt_detail(ui: &mut Ui, label: &str, text: &str) {
+    let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
-    ui.label(egui::RichText::new(label).size(crate::theme::ui_font_size(11.0)).strong().color(Color32::from_rgb(0xA5, 0xA5, 0xA9)));
+    ui.label(egui::RichText::new(label).size(crate::theme::ui_font_size(11.0)).strong().color(if t.dark {
+        Color32::from_rgb(0xA5, 0xA5, 0xA9)
+    } else {
+        t.text_secondary
+    }));
     ui.add_space(5.0);
-    egui::Frame::new().fill(Color32::from_rgb(0x26, 0x26, 0x26)).corner_radius(5).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
-        ui.add(
-            egui::Label::new(egui::RichText::new(text).monospace().size(crate::theme::ui_font_size(11.0)).color(Color32::from_rgb(0xC9, 0xC9, 0xCD)))
+    egui::Frame::new()
+        .fill(if t.dark { Color32::from_rgb(0x26, 0x26, 0x26) } else { t.panel })
+        .corner_radius(5)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(egui::RichText::new(text).monospace().size(crate::theme::ui_font_size(11.0)).color(if t.dark {
+                    Color32::from_rgb(0xC9, 0xC9, 0xCD)
+                } else {
+                    t.text
+                }))
                 .wrap_mode(egui::TextWrapMode::Extend),
-        );
-    });
+            );
+        });
 }
 
 fn tool_icon(title: &str) -> ToolIcon {
@@ -1250,10 +1260,15 @@ fn attempted_edit_without_document_change(message: &ChatMessage) -> bool {
 }
 
 fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&AgentPreview>, max_width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let bg = if t.dark { Color32::from_rgb(0x30, 0x30, 0x30) } else { t.field };
+    let border = if t.dark { Color32::from_rgb(0x3D, 0x3D, 0x42) } else { t.border };
+    let foreground = if t.dark { Color32::from_rgb(0xB9, 0xB9, 0xBC) } else { t.text };
+    let muted = if t.dark { Color32::from_rgb(0x94, 0x94, 0x98) } else { t.text_secondary };
     let mut is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(preview.is_some());
     let width = max_width.min(ui.available_width()).max(1.0);
     let compact = receipt_is_compact(tool, preview);
-    egui::Frame::new().fill(RECEIPT_BG).stroke(Stroke::new(1.0, RECEIPT_BORDER)).corner_radius(11).show(ui, |ui| {
+    egui::Frame::new().fill(bg).stroke(Stroke::new(1.0, border)).corner_radius(11).show(ui, |ui| {
         ui.set_width(width);
         let header = ui.allocate_exact_size(vec2(width, if compact { 28.0 } else { 36.0 }), if compact { Sense::hover() } else { Sense::click() });
         if !compact && header.1.clicked() {
@@ -1274,10 +1289,10 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
             ui.painter(),
             Rect::from_center_size(pos2(rect.min.x + 18.0, rect.center().y), vec2(16.0, 16.0)),
             tool_icon(&tool.title),
-            Color32::from_rgb(0xB9, 0xB9, 0xBC),
+            foreground,
         );
-        ui.painter().text(pos2(rect.min.x + 31.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), Color32::from_rgb(0xB9, 0xB9, 0xBC));
-        let status_color = if tool.status == "completed" { RECEIPT_GREEN } else { Color32::from_rgb(0x94, 0x94, 0x98) };
+        ui.painter().text(pos2(rect.min.x + 31.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), foreground);
+        let status_color = if tool.status == "completed" { if t.dark { RECEIPT_GREEN } else { t.success } } else { muted };
         ui.painter().text(
             pos2(rect.max.x - if compact { 17.0 } else { 35.0 }, rect.center().y),
             Align2::CENTER_CENTER,
@@ -1293,7 +1308,7 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
             Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)),
             if is_open { AgentIcon::Up } else { AgentIcon::Down },
             vec2(14.0, 14.0),
-            Color32::from_rgb(0x85, 0x85, 0x89),
+            muted,
         );
         let animation_time = if ui.style().animation_time > 0.0 { 0.2 } else { 0.0 };
         let openness = ui.ctx().animate_bool_with_time_and_easing(id.with("open"), is_open, animation_time, egui::emath::easing::cubic_in_out);
@@ -1315,8 +1330,7 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
                 + if input.is_none() && output.is_none() { 28.0 } else { 0.0 }
                 + if preview.and_then(|item| item.texture.as_ref()).is_some() { 196.0 } else { 0.0 })
             .min(300.0);
-            ui.painter()
-                .line_segment([pos2(rect.min.x, rect.max.y), pos2(rect.max.x, rect.max.y)], Stroke::new(1.0, Color32::from_rgb(0x3A, 0x3A, 0x3E)));
+            ui.painter().line_segment([pos2(rect.min.x, rect.max.y), pos2(rect.max.x, rect.max.y)], Stroke::new(1.0, border));
             egui::ScrollArea::both()
                 .id_salt(id.with("details"))
                 .max_width(width)
@@ -1340,7 +1354,7 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
                                 tr("The tool sent no details.")
                             })
                             .size(crate::theme::ui_font_size(11.0))
-                            .color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                            .color(muted),
                         );
                     }
                     if let Some(texture) = preview.and_then(|item| item.texture.as_ref()) {
@@ -1395,6 +1409,9 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let dim = if t.dark { DIM } else { t.text_tertiary };
     let panel = t.panel;
     let border = t.border;
+    let transcript_text = if t.dark { Color32::from_rgb(0xB9, 0xB9, 0xBC) } else { t.text };
+    let transcript_secondary = if t.dark { Color32::from_rgb(0x94, 0x94, 0x98) } else { t.text_secondary };
+    let transcript_heading = if t.dark { Color32::from_rgb(0xD1, 0xD1, 0xD4) } else { t.text };
     let selected_nodes = selected_context(app);
     let context_height = if selected_nodes.is_empty() { 0.0 } else { 34.0 };
     let image_size = 72.0_f32.min((width - 56.0).max(24.0));
@@ -1500,18 +1517,13 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                 ui.label(
                                     egui::RichText::new(message_timestamp(message.created_at))
                                         .size(crate::theme::ui_font_size(12.0))
-                                        .color(Color32::from_rgb(0x92, 0x92, 0x98)),
+                                        .color(transcript_secondary),
                                 );
-                                ui.label(
-                                    egui::RichText::new(tr("You"))
-                                        .size(crate::theme::ui_font_size(12.0))
-                                        .strong()
-                                        .color(Color32::from_rgb(0xC9, 0xC9, 0xCD)),
-                                );
+                                ui.label(egui::RichText::new(tr("You")).size(crate::theme::ui_font_size(12.0)).strong().color(transcript_heading));
                             });
                             ui.add_space(5.0);
                             egui::Frame::new()
-                                .fill(CHAT_BUBBLE)
+                                .fill(if t.dark { Color32::from_rgb(0x40, 0x40, 0x40) } else { t.field })
                                 .corner_radius(CornerRadius { nw: 24, ne: 0, sw: 24, se: 24 })
                                 .inner_margin(egui::Margin::symmetric(16, 12))
                                 .show(ui, |ui| {
@@ -1530,11 +1542,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         }
                                     }
                                     if !message.text.is_empty() {
-                                        ui.label(
-                                            egui::RichText::new(&message.text)
-                                                .size(crate::theme::ui_font_size(14.0))
-                                                .color(Color32::from_rgb(0xD1, 0xD1, 0xD4)),
-                                        );
+                                        ui.label(egui::RichText::new(&message.text).size(crate::theme::ui_font_size(14.0)).color(transcript_heading));
                                     }
                                     for image in &message.attached_images {
                                         ui.label(
@@ -1554,19 +1562,15 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         ui.add_space(1.0);
                         let agent_name =
                             if message.parallel { format!("Lizard Agent {}", message.agent_index + 1) } else { "Lizard Agent".to_string() };
-                        ui.label(egui::RichText::new(agent_name).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0xD1, 0xD1, 0xD4)));
+                        ui.label(egui::RichText::new(agent_name).size(crate::theme::ui_font_size(12.0)).color(transcript_heading));
                         if !message.model_label.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&message.model_label)
-                                    .size(crate::theme::ui_font_size(12.0))
-                                    .color(Color32::from_rgb(0x85, 0x85, 0x8A)),
-                            );
+                            ui.label(egui::RichText::new(&message.model_label).size(crate::theme::ui_font_size(12.0)).color(transcript_secondary));
                         }
                         if message.variant_total > 1 {
                             ui.label(
                                 egui::RichText::new(trf("Variation {n}", &[("n", &message.variant_index)]))
                                     .size(crate::theme::ui_font_size(12.0))
-                                    .color(Color32::from_rgb(0x85, 0x85, 0x8A)),
+                                    .color(transcript_secondary),
                             );
                         }
                     });
@@ -1582,7 +1586,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     .direction(ShimmerDirection::Diagonal)
                                     .duration(0.6)
                                     .size(crate::theme::ui_font_size(12.0))
-                                    .colors(Color32::from_rgb(0x94, 0x94, 0x98), Color32::from_rgb(0xD1, 0xD1, 0xD4))
+                                    .colors(transcript_secondary, transcript_heading)
                                     .show(ui);
                             } else if working {
                                 ui.vertical(|ui| {
@@ -1598,7 +1602,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                             .direction(ShimmerDirection::Diagonal)
                                             .duration(0.6)
                                             .size(crate::theme::ui_font_size(12.0))
-                                            .colors(Color32::from_rgb(0x94, 0x94, 0x98), Color32::from_rgb(0xD1, 0xD1, 0xD4))
+                                            .colors(transcript_secondary, transcript_heading)
                                             .show(ui);
                                         let click = ui.interact(shimmer.rect, header_id.with("label"), Sense::click());
                                         if click.clicked() {
@@ -1617,7 +1621,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                     .work_seconds
                                     .map_or_else(|| tr("Thinking…").to_string(), |s| trf("Thought for {seconds}s", &[("seconds", &s)]));
                                 egui::CollapsingHeader::new(
-                                    egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                                    egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(transcript_secondary),
                                 )
                                 .id_salt(("agent_work", chat.id, index))
                                 .default_open(false)
@@ -1653,7 +1657,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             ChatPart::Text(text) if !text.is_empty() => {
                                 ui.add_space(9.0);
                                 let accent = Tokens::get(ui.ctx()).accent_text;
-                                crate::agent_markdown::show(ui, text, Color32::from_rgb(0xB9, 0xB9, 0xBC), accent);
+                                crate::agent_markdown::show(ui, text, transcript_text, accent);
                             }
                             _ => {}
                         }
@@ -1686,7 +1690,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         ui.label(
                             egui::RichText::new(trf("Designed for {seconds}s", &[("seconds", &seconds)]))
                                 .size(crate::theme::ui_font_size(14.0))
-                                .color(Color32::from_rgb(0x94, 0x94, 0x98)),
+                                .color(transcript_secondary),
                         );
                     }
                     if !app.ui.agent.busy
