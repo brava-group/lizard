@@ -1,5 +1,0 @@
-# Vetorização de imagens
-
-No Lizard desktop, selecione uma camada de imagem sem elementos internos e escolha **Mais → Vetorizar** na barra contextual. O aplicativo renderiza a aparência atual da camada, incluindo recorte, rotação e ajustes de cor, e executa o [VTracer](https://github.com/visioncortex/vtracer) localmente em segundo plano. A nova barra permite escolher cor, tons de cinza ou preto e branco; o controle à direita ajusta o número de cores/cinzas ou o limiar do preto e branco. A prévia aparece no canvas sem modificar o documento. Clique no check para substituir a camada por caminhos vetoriais editáveis na mesma posição e ordem de camadas. O botão de fechar ou Esc cancela a prévia. A confirmação pode ser desfeita em uma etapa.
-
-O raster enviado ao VTracer tem no máximo 1024 pixels no lado maior, para limitar o custo de processamento e o número de caminhos gerados. A transparência é tratada como máscara binária com limiar em 50%; bordas semitransparentes não preservam todos os níveis de alfa. Camadas com filhos não são substituídas, para evitar a perda desses elementos.

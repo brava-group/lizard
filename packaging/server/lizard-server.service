@@ -1,11 +1,11 @@
-# systemd unit for lizard-server; setup in docs/server.md ("Deploy on a Linux server").
+# systemd unit for lizard-server; setup overview in README.md.
 # Install: sudo cp lizard-server.service /etc/systemd/system/ && sudo systemctl daemon-reload
 #          sudo systemctl enable --now lizard-server
 # Logs:    journalctl -u lizard-server
 
 [Unit]
 Description=Lizard collaboration server
-Documentation=https://github.com/brava-group/lizard/blob/main/docs/server.md
+Documentation=https://github.com/brava-group/lizard#self-host-on-a-vps
 Wants=network-online.target
 After=network-online.target
 

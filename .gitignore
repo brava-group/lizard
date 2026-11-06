@@ -17,3 +17,6 @@ plans/
 /docs/gpu-renderer-checklist.md
 /docs/local-figma-plugin-compatibility.md
 /docs/rendering-backend-evaluation.md
+
+# Internal implementation notes kept locally.
+/docs/

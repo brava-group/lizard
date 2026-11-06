@@ -1,4 +1,4 @@
-# Nightly backup of lizard-server's data directory (an example; docs/server.md, "Backups").
+# Nightly backup of lizard-server's data directory.
 # Install it with lizard-backup.timer; turn it on with
 #   sudo systemctl enable --now lizard-backup.timer
 # It checks there is room for the copy (twice the data directory's size free), stops the server

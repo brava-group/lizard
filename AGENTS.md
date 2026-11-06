@@ -4,7 +4,7 @@ Lizard is an independent Rust/egui interface design editor. The desktop executab
 
 ## Start here
 
-1. Read `ROADMAP.md`, `docs/gaps.md`, and any local `plan/STATUS.md` or `plan/execution-plan.md` before planning work.
+1. Read `ROADMAP.md`, any local `docs/gaps.md`, and any local `plan/STATUS.md` or `plan/execution-plan.md` before planning work. `docs/` and `plan/` are local working notes and may be absent from a fresh clone.
 2. Inspect the working tree and preserve user changes. Implement the requested work, test it, and inspect screenshots for UI changes.
 3. Keep the configured `upstream` remote read-only. Never push Lizard work to it.
 
@@ -31,4 +31,4 @@ cargo run -p lizard --bin lizard -- --control <port>
 
 On macOS, `packaging/macos/dev-app.sh --control <port>` launches the app bundle with its **Lizard** Dock name.
 
-The JSON control channel and screenshot method are documented in `docs/control-protocol.md`. The CLI workspace package is still `lizard-cli`.
+If present, local `docs/control-protocol.md` describes the JSON control channel and screenshot method. The CLI workspace package is still `lizard-cli`.

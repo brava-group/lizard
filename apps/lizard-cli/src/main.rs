@@ -50,7 +50,7 @@ altogether. They are taken by `mcp`, to confine the agent's commands, and by `in
 `convert`, `render` and `run`, to confine that one run; without them a subcommand reads and writes
 as the user who started it, as before. A running app confines itself: start it with
 `lizard --control PORT` and the same flags (`--attach` refuses them).
-See docs/cli.md and docs/mcp.md.";
+See README.md for installation and `lizard-cli --help` for commands.";
 
 /// The automation roots a file subcommand was given, if any. Omitting both leaves the run
 /// unconfined, as before; giving either confines every file the subcommand touches (#833).

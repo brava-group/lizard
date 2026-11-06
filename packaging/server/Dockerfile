@@ -1,4 +1,4 @@
-# lizard-server in a container; setup in docs/server.md ("Deploy on a Linux server"). Build from
+# lizard-server in a container; setup overview in README.md. Build from
 # the repository root:
 #
 #   docker build -f packaging/server/Dockerfile -t lizard-server .

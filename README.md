@@ -8,7 +8,15 @@ Lizard has a vector canvas, auto layout, components, styles, prototyping, plugin
 
 ![Lizard editor in dark mode with the Ridgeline Studio dashboard open](assets/screenshots/editor-dark.png)
 
-## Run the editor
+## Download
+
+Get the latest published installer from [GitHub Releases](https://github.com/brava-group/lizard/releases). macOS releases include a universal `Lizard.app` for Apple silicon and Intel Macs. Drag the app into Applications.
+
+Packaged macOS builds check for newer stable releases on startup and periodically afterward. When an update is available, Lizard offers to download and verify it, then restarts to install it after open documents are saved. Updates require a Developer ID signed and notarized release; the app verifies the GitHub asset digest, signature, team, bundle identity, version, and Gatekeeper approval before installation.
+
+New native documents use `.lzd`. Legacy `.lizard` and `.figcraft` files still open.
+
+## Build from source
 
 Install a current Rust toolchain, then run from the repository root:
 
@@ -22,9 +30,7 @@ On macOS, launch the local app bundle to show **Lizard** in the Dock:
 packaging/macos/dev-app.sh
 ```
 
-Packaged macOS releases check for newer published versions and offer an in-app update. See [how updates are verified and installed](docs/auto-updates.md).
-
-The desktop executable and product name are **Lizard**. New native documents use `.lzd`; existing `.lizard` and `.figcraft` documents still open. The CLI and browser build are available through the workspace:
+The CLI and browser build are available through the workspace:
 
 ```sh
 cargo run -p lizard-cli -- --help
@@ -35,11 +41,11 @@ cargo xtask wasm
 
 Lizard has **no default online collaboration server**. Local editing and local network sharing work without one. To publish a document online, configure a server you operate or trust under **Preferences → Server for online sharing**, or use **File → Publish to server** with that server's address. Builds can optionally embed an organization-specific default with `LIZARD_DEFAULT_SERVER=wss://your-host/`.
 
-The collaboration server source is included in [`apps/lizard-server`](apps/lizard-server). Its executable is `lizard-server`. It stores shared files, manages edit and view links, and serves live sessions. Each server operator controls their own storage, access, retention, and terms. See [online sharing and privacy](docs/online-sharing-terms.md).
+The collaboration server source is included in [`apps/lizard-server`](apps/lizard-server). Its executable is `lizard-server`. It stores shared files, manages edit and view links, and serves live sessions. Each server operator controls their own storage, access, retention, and terms.
 
 ## Self-host on a VPS
 
-A Linux VPS with a DNS name, Rust, and a TLS reverse proxy is sufficient. The commands below assume Debian or Ubuntu and a private team server. Replace `design.example.com` with your DNS name. If this repository is private, authenticate Git before cloning or copy a verified checkout to the VPS.
+A Linux VPS with a DNS name, Rust, and a TLS reverse proxy is sufficient. The commands below assume Debian or Ubuntu. Replace `design.example.com` with your DNS name.
 
 ```sh
 sudo apt update
@@ -79,15 +85,11 @@ curl https://design.example.com/healthz
 sudo -u lizard lizard-server --config /etc/lizard-server/server.toml key
 ```
 
-The final command prints the address and server key for publishing. Keep the key private. Only expose ports 80 and 443; keep port 47900 on loopback. Keep `/var/lib/lizard-server` backed up. The [full server guide](docs/server.md) covers configuration, Docker, nginx, backups, public hosting, and administration.
+The final command prints the address and server key for publishing. Keep the key private. Only expose ports 80 and 443; keep port 47900 on loopback. Keep `/var/lib/lizard-server` backed up.
 
 ## Development
 
-- [Roadmap](ROADMAP.md) and [known gaps](docs/gaps.md)
-- [Architecture](docs/architecture.md)
-- [Workbench UI component library and catalog](docs/ui-library.md)
-- [Control protocol](docs/control-protocol.md) and [MCP](docs/mcp.md)
-- [Plugin support](docs/plugins.md)
+- [Roadmap](ROADMAP.md)
 - [Contributor instructions](AGENTS.md)
 
 Run `cargo xtask ci` before committing when resources permit. The editor targets macOS, Windows, Linux, FreeBSD, and WebAssembly.

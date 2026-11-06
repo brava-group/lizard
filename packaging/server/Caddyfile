@@ -1,4 +1,4 @@
-# Caddy in front of lizard-server; setup in docs/server.md ("Deploy on a Linux server").
+# Caddy in front of lizard-server; setup overview in README.md.
 # Replace the host name with yours (its DNS must point at this machine). Caddy obtains and renews
 # the certificate and passes WebSocket upgrades through by itself. Put this in /etc/caddy/Caddyfile
 # and run `sudo systemctl reload caddy`.

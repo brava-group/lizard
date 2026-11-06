@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build and package the collaboration server for this machine (see docs/server.md):
+# Build and package the collaboration server for this machine (see README.md):
 #
 #   $DIST/lizard-server-<version>-<os>-<arch>.tar.gz
 #
-# One directory with the lizard-server binary, the licences, docs/server.md and the deployment
+# One directory with the lizard-server binary, the licences, README and the deployment
 # files (systemd units, Caddyfile, nginx). A headless binary: no desktop files, no fonts.
 #
 # Usage: packaging/server/package.sh [--skip-build]
@@ -38,7 +38,7 @@ rm -rf "$WORK"
 mkdir -p "$STAGE"
 cp "$CARGO_TARGET_DIR/release/lizard-server" "$STAGE/"
 strip "$STAGE/lizard-server" 2>/dev/null || true
-for f in LICENSE-MIT LICENSE-APACHE NOTICE docs/server.md; do cp "$ROOT/$f" "$STAGE/"; done
+for f in LICENSE-MIT LICENSE-APACHE NOTICE README.md; do cp "$ROOT/$f" "$STAGE/"; done
 cp "$HERE/lizard-server.service" "$HERE/lizard-backup.service" "$HERE/lizard-backup.timer" "$HERE/Caddyfile" "$HERE/nginx.conf" "$STAGE/"
 
 # Smoke test: the binary runs and reports the version being shipped.

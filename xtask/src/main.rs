@@ -240,6 +240,12 @@ fn parity() -> bool {
     }
     md.push_str("\nMenu coverage measures breadth only; see docs/target-app-parity.md for depth and fidelity.\n");
     let path = root().join("docs/parity-checklist.md");
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("{}: {e}", parent.display());
+        return false;
+    }
     if let Err(e) = std::fs::write(&path, md) {
         eprintln!("{}: {e}", path.display());
         return false;
