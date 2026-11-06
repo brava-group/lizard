@@ -147,6 +147,21 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 codesign --verify --strict --deep --verbose=2 "$APP"
+if [ "$HAS_CLI" = 1 ]; then
+  bundled_cli="$APP/Contents/MacOS/lizard-cli"
+  if [ ! -x "$bundled_cli" ]; then
+    echo "error: Lizard.app is missing the agent's lizard-cli bridge" >&2
+    exit 1
+  fi
+  codesign --verify --strict --verbose=2 "$bundled_cli" || fail "the bundled agent bridge has an invalid signature"
+  bundled_cli_archs="$(lipo -archs "$bundled_cli")"
+  for a in $WANT_ARCHS; do
+    case " $bundled_cli_archs " in
+      *" $a "*) ;;
+      *) fail "the bundled agent bridge lacks $a (has: $bundled_cli_archs)" ;;
+    esac
+  done
+fi
 bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")"
 if [ "$bundle_id" != com.brava.lizard ]; then
   echo "error: wrong bundle identifier: $bundle_id" >&2

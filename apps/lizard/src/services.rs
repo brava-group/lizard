@@ -382,8 +382,9 @@ impl Services for Desktop {
                 .ok()
                 .and_then(|p| p.parent().map(|parent| parent.join(if cfg!(windows) { "lizard-cli.exe" } else { "lizard-cli" })))
                 .filter(|p| p.is_file())
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "lizard-cli".into());
+                .ok_or(tr("Lizard's agent bridge is missing. Reinstall Lizard or rebuild the app bundle with lizard-cli."))?
+                .to_string_lossy()
+                .into_owned();
             let cwd = self.dir.as_ref().map(|d| d.join("Agent")).unwrap_or_else(|| std::env::temp_dir().join("Lizard Agent"));
             std::fs::create_dir_all(&cwd).map_err(|error| trf("Could not prepare the agent folder: {error}", &[("error", &error)]))?;
             for index in 0..count {

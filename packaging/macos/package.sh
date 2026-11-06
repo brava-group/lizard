@@ -139,6 +139,9 @@ echo "==> assembling $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/lizard" "$APP/Contents/MacOS/Lizard"
+if [ "$HAS_CLI" = 1 ]; then
+  cp "$WORK/bin/lizard-cli" "$APP/Contents/MacOS/lizard-cli"
+fi
 cp "$WORK/Lizard.icns" "$APP/Contents/Resources/Lizard.icns"
 NODE_RUNTIME="$APP/Contents/Resources/Agents/runtime"
 mkdir -p "$NODE_RUNTIME/bin" "$NODE_RUNTIME/lib/node_modules" "$APP/Contents/Resources/Licenses"
@@ -184,6 +187,9 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
 sign --options runtime "$NODE_RUNTIME/bin/node"
+if [ "$HAS_CLI" = 1 ]; then
+  sign --options runtime --identifier com.brava.lizard.agent-cli "$APP/Contents/MacOS/lizard-cli"
+fi
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/Lizard"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
