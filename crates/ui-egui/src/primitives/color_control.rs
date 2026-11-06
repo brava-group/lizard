@@ -103,7 +103,7 @@ impl<'a> ColorControl<'a> {
             ColorValue::BoundVariable(name) => (name, 32.0),
             ColorValue::Model(_) => return 144.0,
         };
-        let label_width = ui.painter().layout_no_wrap(label.to_owned(), medium(11.0), Color32::WHITE).size().x;
+        let label_width = ui.painter().layout_no_wrap(label.to_owned(), medium(10.0), Color32::WHITE).size().x;
         (28.0 + label_width + trailing).max(96.0)
     }
 
@@ -118,9 +118,9 @@ impl<'a> ColorControl<'a> {
                 .clicked();
             let value_rect = Rect::from_min_max(pos2(swatch.right() + 4.0, rect.top()), rect.max);
             let edited_hex = match self.value {
-                ColorValue::EditableHex(hex) => widgets::text_field_inline(ui, self.id.with("hex"), hex, value_rect, medium(11.0)),
+                ColorValue::EditableHex(hex) => widgets::text_field_inline(ui, self.id.with("hex"), hex, value_rect, medium(10.0)),
                 ColorValue::Label(label) | ColorValue::StyleName(label) | ColorValue::BoundVariable(label) => {
-                    ui.painter().with_clip_rect(value_rect).text(value_rect.left_center(), Align2::LEFT_CENTER, label, medium(11.0), t.text);
+                    ui.painter().with_clip_rect(value_rect).text(value_rect.left_center(), Align2::LEFT_CENTER, label, medium(10.0), t.text);
                     None
                 }
                 ColorValue::Model(_) => None,
@@ -165,14 +165,14 @@ impl<'a> ColorControl<'a> {
             ColorValue::EditableHex(hex) => {
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(value_rect));
                 result.edited_hex =
-                    widgets::text_field_inline_without_ring(&mut child, self.id.with("hex"), hex, value_rect.shrink2(vec2(0.0, 4.0)), medium(11.0));
+                    widgets::text_field_inline_without_ring(&mut child, self.id.with("hex"), hex, value_rect.shrink2(vec2(0.0, 4.0)), medium(10.0));
             }
             ColorValue::Label(label) => {
                 ui.painter().with_clip_rect(value_rect).text(
                     pos2(value_rect.min.x, rect.center().y),
                     Align2::LEFT_CENTER,
                     label,
-                    medium(11.0),
+                    medium(10.0),
                     t.text,
                 );
                 if self.label_opens_picker {
@@ -191,7 +191,15 @@ impl<'a> ColorControl<'a> {
             Rect::from_min_size(pos2(opacity_rect.min.x + 1.0, opacity_rect.min.y), vec2((number_width - 1.0).max(0.0), opacity_rect.height()));
         let mut opacity_ui = ui.new_child(egui::UiBuilder::new().max_rect(number_rect));
         let opacity_id = self.id.with("opacity");
-        result.opacity_edit = widgets::number_field_without_ring(&mut opacity_ui, opacity_id, self.opacity_percent.round(), number_width);
+        result.opacity_edit = widgets::number_field_without_ring_with_padding_and_font(
+            &mut opacity_ui,
+            opacity_id,
+            self.opacity_percent.round(),
+            number_width,
+            7.0,
+            0.0,
+            10.0,
+        );
         let suffix = Rect::from_min_max(pos2(number_rect.max.x, opacity_rect.min.y), opacity_rect.max);
         let suffix_response = ui.interact(suffix, self.id.with("opacity_suffix"), Sense::CLICK | Sense::DRAG);
         if suffix_response.hovered() || suffix_response.dragged() {
@@ -200,8 +208,8 @@ impl<'a> ColorControl<'a> {
         if let Some(edit) = widgets::scrub(ui, self.id.with("opacity_suffix"), &suffix_response, Some(self.opacity_percent), 1.0) {
             result.opacity_edit = Some(edit);
         }
-        let suffix_color = if t.dark { Color32::from_rgba_unmultiplied(255, 255, 255, 178) } else { t.text_secondary };
-        ui.painter().text(pos2(suffix.right() - 3.0, suffix.center().y), Align2::RIGHT_CENTER, "%", medium(11.0), suffix_color);
+        let suffix_color = if t.dark { Color32::from_white_alpha(150) } else { Color32::from_black_alpha(130) };
+        ui.painter().text(pos2(suffix.right() - 7.0, suffix.center().y), Align2::RIGHT_CENTER, "%", medium(9.5), suffix_color);
 
         let focused = ui
             .memory(|m| m.has_focus(self.id.with("hex").with("te")) || m.has_focus(opacity_id.with("te")) || m.has_focus(opacity_id.with("field")))
@@ -226,8 +234,8 @@ fn show_style_name(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &str, t
         widgets::paint_swatch(ui.painter(), swatch, paint);
     }
     let label_rect = Rect::from_min_max(pos2(swatch.right() + 7.0, rect.top()), pos2(rect.right() - 8.0, rect.bottom()));
-    let label = widgets::elide_font(ui, name, label_rect.width().max(0.0), medium(11.0));
-    ui.painter().with_clip_rect(label_rect).text(label_rect.left_center(), Align2::LEFT_CENTER, label, medium(11.0), t.text);
+    let label = widgets::elide_font(ui, name, label_rect.width().max(0.0), medium(10.0));
+    ui.painter().with_clip_rect(label_rect).text(label_rect.left_center(), Align2::LEFT_CENTER, label, medium(10.0), t.text);
     if response.has_focus() {
         ui.painter().rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, t.focus), StrokeKind::Inside);
     } else if response.hovered() {
@@ -237,7 +245,7 @@ fn show_style_name(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &str, t
 }
 
 fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, opacity_editable: bool, t: Tokens) -> ColorControlResponse {
-    const OPACITY_WIDTH: f32 = 45.0;
+    const OPACITY_WIDTH: f32 = 52.0;
     let hovered = ui.is_enabled() && ui.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     let value_right = (rect.right() - OPACITY_WIDTH).max(rect.left() + 24.0);
@@ -256,7 +264,7 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
             let edit_rect =
                 Rect::from_min_max(pos2(value_rect.left() + 8.0, value_rect.top() + 4.0), pos2(value_rect.right() - 4.0, value_rect.bottom() - 4.0));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(value_rect));
-            if let Some(text) = widgets::text_field_inline_without_ring(&mut child, id.with("model_value"), &value, edit_rect, medium(11.0)) {
+            if let Some(text) = widgets::text_field_inline_without_ring(&mut child, id.with("model_value"), &value, edit_rect, medium(10.0)) {
                 result.edited_color = if model == ColorModel::Hex {
                     Color::from_hex_or_name(&text).map(|next| (next.with_alpha(if next.a < 1.0 { next.a } else { color.a }), true))
                 } else {
@@ -289,13 +297,14 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(segment));
                 let channel_id = id.with(("channel", index));
                 let (leading_padding, trailing_padding) = if index == 0 { (6.0, 4.0) } else { (4.0, 1.0) };
-                if let Some(edit) = widgets::number_field_without_ring_with_padding(
+                if let Some(edit) = widgets::number_field_without_ring_with_padding_and_font(
                     &mut child,
                     channel_id,
                     values[index].round(),
                     segment_width,
                     leading_padding,
                     trailing_padding,
+                    10.0,
                 ) {
                     let (value, done) = match edit {
                         FieldEdit::Set(value) => (value, true),
@@ -336,9 +345,17 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
         let opacity_id = id.with("model_opacity");
         if opacity_editable {
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(number_rect));
-            result.opacity_edit = widgets::number_field_without_ring(&mut child, opacity_id, f64::from(color.a) * 100.0, number_width);
+            result.opacity_edit = widgets::number_field_without_ring_with_padding_and_font(
+                &mut child,
+                opacity_id,
+                f64::from(color.a) * 100.0,
+                number_width,
+                7.0,
+                0.0,
+                10.0,
+            );
         } else {
-            ui.painter().text(number_rect.center(), Align2::CENTER_CENTER, format!("{:.0}", color.a * 100.0), medium(11.0), t.text_secondary);
+            ui.painter().text(number_rect.center(), Align2::CENTER_CENTER, format!("{:.0}", color.a * 100.0), medium(10.0), t.text_secondary);
         }
         let suffix = Rect::from_min_max(pos2(number_rect.right(), rect.top()), rect.max);
         let suffix_response =
@@ -351,8 +368,8 @@ fn show_model(ui: &mut Ui, rect: Rect, id: Id, color: Color, model: ColorModel, 
         {
             result.opacity_edit = Some(edit);
         }
-        let suffix_color = if t.dark { Color32::from_white_alpha(178) } else { t.text_secondary };
-        ui.painter().text(pos2(suffix.right() - 3.0, suffix.center().y), Align2::RIGHT_CENTER, "%", medium(11.0), suffix_color);
+        let suffix_color = if t.dark { Color32::from_white_alpha(150) } else { Color32::from_black_alpha(130) };
+        ui.painter().text(pos2(suffix.right() - 7.0, suffix.center().y), Align2::RIGHT_CENTER, "%", medium(9.5), suffix_color);
         let separator =
             if matches!(model, ColorModel::Rgb | ColorModel::Hsl | ColorModel::Hsb) { if t.dark { t.panel } else { t.border } } else { t.bg };
         ui.painter().line_segment([pos2(value_right, rect.top()), pos2(value_right, rect.bottom())], Stroke::new(1.0, separator));
@@ -385,8 +402,8 @@ fn show_bound_variable(ui: &mut Ui, rect: Rect, id: Id, paint: &Paint, name: &st
     let swatch = Rect::from_min_size(pos2(button.min.x + 5.0, button.center().y - 7.0), vec2(14.0, 14.0));
     widgets::paint_swatch(ui.painter(), swatch, paint);
     let label_rect = Rect::from_min_max(pos2(swatch.max.x + 5.0, button.min.y), pos2(button.max.x - 4.0, button.max.y));
-    let label = widgets::elide_font(ui, name, label_rect.width().max(0.0), medium(11.0));
-    ui.painter().with_clip_rect(label_rect).text(pos2(label_rect.min.x, label_rect.center().y), Align2::LEFT_CENTER, label, medium(11.0), t.text);
+    let label = widgets::elide_font(ui, name, label_rect.width().max(0.0), medium(10.0));
+    ui.painter().with_clip_rect(label_rect).text(pos2(label_rect.min.x, label_rect.center().y), Align2::LEFT_CENTER, label, medium(10.0), t.text);
     let open_picker = ui.interact(button, id.with("bound"), Sense::click()).lizard_tooltip(name).clicked();
     let mut response = ColorControlResponse { open_picker, ..Default::default() };
     if show_detach && rect.width() >= 80.0 {

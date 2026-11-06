@@ -197,19 +197,15 @@ pub fn number_field(ui: &mut Ui, id: Id, lead: Lead, value: Option<f64>, suffix:
     number_field_mixed(ui, id, lead, value, suffix, width, step)?.settled()
 }
 
-/// Number editor used inside a composite control whose outer border owns focus feedback.
-pub(crate) fn number_field_without_ring(ui: &mut Ui, id: Id, value: f64, width: f32) -> Option<FieldEdit> {
-    number_field_without_ring_with_padding(ui, id, value, width, 7.0, 0.0)
-}
-
-/// Numeric editor for a segmented control whose design defines each channel's inset.
-pub(crate) fn number_field_without_ring_with_padding(
+/// Numeric editor with a control-specific font size while preserving the shared edit behavior.
+pub(crate) fn number_field_without_ring_with_padding_and_font(
     ui: &mut Ui,
     id: Id,
     value: f64,
     width: f32,
     leading_padding: f32,
     trailing_padding: f32,
+    font_size: f32,
 ) -> Option<FieldEdit> {
     number_field_impl(
         ui,
@@ -221,7 +217,7 @@ pub(crate) fn number_field_without_ring_with_padding(
         1.0,
         None,
         Empty::Text(""),
-        FieldDecoration::ExternalRing { leading_padding, trailing_padding },
+        FieldDecoration::ExternalRing { leading_padding, trailing_padding, font_size },
     )
     .0?
     .settled()
@@ -296,7 +292,7 @@ enum FieldDecoration<'a> {
     Plain,
     Sizing(&'a str),
     Dropdown,
-    ExternalRing { leading_padding: f32, trailing_padding: f32 },
+    ExternalRing { leading_padding: f32, trailing_padding: f32, font_size: f32 },
 }
 
 fn number_field_impl(
@@ -312,12 +308,15 @@ fn number_field_impl(
     decoration: FieldDecoration<'_>,
 ) -> (Option<Edit>, Option<BindEvent>, Option<egui::Response>) {
     let external_padding = match &decoration {
-        FieldDecoration::ExternalRing { leading_padding, trailing_padding } => Some((*leading_padding, *trailing_padding)),
+        FieldDecoration::ExternalRing { leading_padding, trailing_padding, .. } => Some((*leading_padding, *trailing_padding)),
         FieldDecoration::Plain | FieldDecoration::Sizing(_) | FieldDecoration::Dropdown => None,
     };
     let external_ring = external_padding.is_some();
     let dropdown = matches!(&decoration, FieldDecoration::Dropdown);
-    let value_font = medium(11.0);
+    let value_font = medium(match decoration {
+        FieldDecoration::ExternalRing { font_size, .. } => font_size,
+        _ => 11.0,
+    });
     let (sizing, own_focus_ring) = match decoration {
         FieldDecoration::Plain => (None, true),
         FieldDecoration::Sizing(label) => (Some(label), true),
