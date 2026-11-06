@@ -11,7 +11,7 @@
 //!   (preferred ones first), select it, reset it to the main's default content.
 
 use crate::primitives::TooltipResponseExt as _;
-use egui::{Align2, Id, Rect, Sense, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Ui, pos2, vec2};
 use lizard_doc::*;
 use lizard_engine::cmd::component::can_combine_variants;
 use lizard_engine::components::{
@@ -26,10 +26,10 @@ use crate::icons::{self, HeaderIcon, Icon};
 use crate::list_drag::ListDrag;
 use crate::primitives::{
     Button, ButtonVariant, ControlWidth, FloatingPanel, FloatingPanelHeight, FloatingPanelWidth, MenuItem, PropertyBinding, PropertyController,
-    PropertyControllerKind, Select, Switch, TextFieldWithPresets,
+    PropertyControllerKind, SearchField, Select, Switch, TextFieldWithPresets,
 };
 use crate::right::{menu_item, menu_popup, row, row_rect};
-use crate::theme::{COMPONENT, Tokens, semibold};
+use crate::theme::{COMPONENT, Tokens, regular, semibold};
 use crate::widgets;
 
 /// Entry point (called from the Design panel header for every selection).
@@ -156,6 +156,114 @@ fn list_components(doc: &Document) -> Vec<(NodeId, String)> {
         }
     }
     out
+}
+
+/// A compact visual picker for the main component and instance-swap properties.
+fn swap_picker(
+    app: &LizardApp,
+    trigger: &egui::Response,
+    doc: &Document,
+    current: Option<NodeId>,
+    preferred: &[NodeId],
+    components: &[(NodeId, String)],
+    query_id: Id,
+) -> Option<NodeId> {
+    let mut picked = None;
+    menu_popup(trigger).width(280.0).show(|ui| {
+        let t = Tokens::get(ui.ctx());
+        let width = ui.available_width();
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new(tr("Choose instance")).font(semibold(12.0)).color(t.text));
+        });
+        ui.add_space(8.0);
+        let (search_row, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
+        let search_rect = Rect::from_min_size(search_row.min + vec2(10.0, 2.0), vec2((width - 20.0).max(0.0), 28.0));
+        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(search_rect));
+        let mut query = ui.data(|data| data.get_temp::<String>(query_id)).unwrap_or_default();
+        SearchField::new(query_id.with("field"), tr("Search components"))
+            .width(ControlWidth::Fill)
+            .compact()
+            .clearable()
+            .show(&mut search_ui, &mut query);
+        ui.data_mut(|data| data.insert_temp(query_id, query.clone()));
+        ui.add_space(8.0);
+
+        let query_lower = query.to_lowercase();
+        let matches = |name: &str| name.to_lowercase().contains(&query_lower);
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+            if !preferred.is_empty() {
+                swap_heading(ui, tr("Preferred"));
+                for component in preferred.iter().copied().filter(|component| doc.contains(*component)) {
+                    let Some(node) = doc.node(component) else { continue };
+                    if matches(&node.name) && swap_option(app, ui, doc, component, &node.name, current == Some(component)) {
+                        picked = Some(component);
+                    }
+                }
+                ui.add_space(6.0);
+            }
+            swap_heading(ui, tr("All components"));
+            for (component, name) in components {
+                if matches(name) && swap_option(app, ui, doc, *component, name, current == Some(*component)) {
+                    picked = Some(*component);
+                }
+            }
+        });
+        ui.add_space(6.0);
+        if picked.is_some() {
+            ui.close();
+        }
+    });
+    picked
+}
+
+fn swap_heading(ui: &mut Ui, title: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    ui.painter().text(pos2(rect.min.x + 12.0, rect.center().y), Align2::LEFT_CENTER, title, semibold(11.0), t.text_secondary);
+}
+
+fn swap_option(app: &LizardApp, ui: &mut Ui, doc: &Document, component: NodeId, name: &str, selected: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
+    crate::a11y::button(&response, name);
+    if selected || response.hovered() {
+        ui.painter().rect_filled(rect.shrink2(vec2(5.0, 1.0)), CornerRadius::same(6), if selected { t.selected_row } else { t.hover });
+    }
+    if ui.is_rect_visible(rect) {
+        let image = Rect::from_center_size(pos2(rect.min.x + 30.0, rect.center().y), vec2(36.0, 36.0));
+        ui.painter().rect_filled(image, CornerRadius::same(5), t.field);
+        let key = app.session.ds().map(|ds| (ds.uid, ds.revision)).unwrap_or_default();
+        let cache_id = Id::new(("component_swap_preview", component));
+        let cached = ui.data(|data| data.get_temp::<((u64, u64), Option<egui::TextureHandle>)>(cache_id));
+        let texture = if let Some((_, texture)) = cached.filter(|(old_key, _)| *old_key == key) {
+            texture
+        } else {
+            let shown = if matches!(doc.node(component).map(|node| &node.kind), Some(NodeKind::ComponentSet { .. })) {
+                default_variant(doc, component).unwrap_or(component)
+            } else {
+                component
+            };
+            let texture = crate::assets_panel::thumbnail(ui.ctx(), doc, shown, 36.0 * ui.ctx().pixels_per_point());
+            ui.data_mut(|data| data.insert_temp(cache_id, (key, texture.clone())));
+            texture
+        };
+        if let Some(texture) = texture {
+            let size = texture.size_vec2();
+            let scale = (34.0 / size.x.max(size.y)).min(1.0);
+            let image_rect = Rect::from_center_size(image.center(), size * scale);
+            ui.painter().image(texture.id(), image_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        } else {
+            icons::paint(ui.painter(), image.shrink(9.0), Icon::Component, t.icon_secondary);
+        }
+        let label = widgets::elide_font(ui, name, (rect.width() - 86.0).max(0.0), regular(11.0));
+        ui.painter().text(pos2(rect.min.x + 56.0, rect.center().y), Align2::LEFT_CENTER, label, regular(11.0), t.text);
+        if selected {
+            icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.max.x - 20.0, rect.center().y), vec2(14.0, 14.0)), Icon::Check, t.text);
+        }
+    }
+    response.clicked() && !selected
 }
 
 /// A section header row with a title and a "+" button; returns the button response.
@@ -1011,24 +1119,9 @@ fn instance_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node) {
     row(ui, 32.0, |ui| {
         let w = ui.available_width().max(80.0);
         let resp = crate::primitives::Select::trigger(ui, &comp_name, w, Some(Icon::Instance)).lizard_tooltip(tr("Swap instance"));
-        menu_popup(&resp).width(w.max(200.0)).show(|ui| {
-            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                let mut page = None;
-                for (c, name) in comps.iter() {
-                    let pg = doc.page_of(*c);
-                    if pg != page {
-                        page = pg;
-                        let pname = pg.and_then(|p| doc.node(p)).map(|p| p.name.clone()).unwrap_or_default();
-                        ui.label(egui::RichText::new(pname).font(semibold(11.0)).color(t.text_secondary));
-                    }
-                    let current = Some(*c) == set || *c == *component;
-                    if menu_item(ui, &format!("{}{name}", if current { "✓ " } else { "" }), "") && !current {
-                        app.run("instance.swap", json!({"ids": [id], "component": c.0}));
-                        ui.close();
-                    }
-                }
-            });
-        });
+        if let Some(chosen) = swap_picker(app, &resp, doc, set.or(Some(*component)), &[], &comps, Id::new(("main_swap_query", id))) {
+            app.run("instance.swap", json!({"ids": [id], "component": chosen.0}));
+        }
         if missing {
             if icons::button(ui, Icon::Component, 24.0, false, tr("Restore main component")).clicked() {
                 app.run("component.restoreMain", json!({"id": id}));
@@ -1144,32 +1237,9 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
                     let cur = lizard_engine::params::id_of(&v);
                     let label = cur.and_then(|c| doc.node(c)).map(|c| c.name.clone()).unwrap_or_else(|| tr("None").into());
                     let resp = crate::primitives::Select::trigger(ui, &label, w, Some(Icon::Instance));
-                    menu_popup(&resp).width(200.0).show(|ui| {
-                        let t = Tokens::get(ui.ctx());
-                        let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));
-                        let mut pick = |ui: &mut Ui, c: NodeId, name: &str| {
-                            let current = cur == Some(c);
-                            if menu_item(ui, &format!("{}{name}", if current { "✓ " } else { "" }), "") {
-                                if !current {
-                                    app.run("instance.setProperties", json!({"ids": [id], "properties": {k.clone(): c.0}}));
-                                }
-                                ui.close();
-                            }
-                        };
-                        let preferred: Vec<(NodeId, String)> = preferred.iter().filter_map(|c| doc.node(*c).map(|n| (*c, n.name.clone()))).collect();
-                        if !preferred.is_empty() {
-                            heading(ui, tr("Preferred"));
-                            for (c, name) in &preferred {
-                                pick(ui, *c, name);
-                            }
-                            heading(ui, tr("All components"));
-                        }
-                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                            for (c, name) in comps {
-                                pick(ui, *c, name);
-                            }
-                        });
-                    });
+                    if let Some(chosen) = swap_picker(app, &resp, doc, cur, &preferred, comps, Id::new(("property_swap_query", id, k.as_str()))) {
+                        app.run("instance.setProperties", json!({"ids": [id], "properties": {k.clone(): chosen.0}}));
+                    }
                 }
                 PropDef::Variant { .. } => {}
                 PropDef::Slot { preferred, .. } => {
