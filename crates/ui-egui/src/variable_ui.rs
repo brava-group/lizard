@@ -540,65 +540,68 @@ pub fn picker(app: &mut LizardApp, ctx: &egui::Context) {
 
         egui::ScrollArea::vertical().id_salt("variable_picker_scroll").max_height(300.0).show(ui, |ui| {
             ui.set_width(WIDTH);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.add_space(4.0);
-            if let Some(name) = &component_name {
-                picker_heading(ui, &format!("{} {name}", tr("Properties in")));
-                if let Some((layer, _, field)) = component {
-                    for (property, default) in &component_properties {
-                        let icon = if field == "visible" { Icon::VariableBoolean } else { Icon::VariableString };
-                        if binding_pick_row(ui, property, default, icon, COMPONENT) {
-                            chosen_property = Some((layer, field.to_string(), property.clone()));
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 0)).show(ui, |ui| {
+                ui.set_width(WIDTH - 24.0);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add_space(4.0);
+                if let Some(name) = &component_name {
+                    picker_heading(ui, &format!("{} {name}", tr("Properties in")));
+                    if let Some((layer, _, field)) = component {
+                        for (property, default) in &component_properties {
+                            let icon = if field == "visible" { Icon::VariableBoolean } else { Icon::VariableString };
+                            if binding_pick_row(ui, property, default, icon, COMPONENT) {
+                                chosen_property = Some((layer, field.to_string(), property.clone()));
+                            }
+                        }
+                    }
+                    ui.add_space(8.0);
+                }
+                picker_heading(ui, tr("Variables in this file"));
+                let mut library_heading = false;
+                for (lib, c, vars) in &groups {
+                    if lib.is_some() && !library_heading {
+                        ui.add_space(8.0);
+                        picker_heading(ui, tr("Library variables"));
+                        library_heading = true;
+                    }
+                    if lib.is_some() || component_name.is_none() {
+                        group_caption(ui, *lib, c);
+                    }
+                    let all = lib.map_or(&doc.variables, |l| &l.doc.variables);
+                    for v in vars {
+                        let value = all.resolve(&v.id, &std::collections::BTreeMap::new()).map(|value| value.display()).unwrap_or_default();
+                        let icon = match v.kind {
+                            VariableType::String => Icon::VariableString,
+                            VariableType::Boolean => Icon::VariableBoolean,
+                            VariableType::Number => Icon::VariableNumber,
+                            VariableType::Color => Icon::VariableColor,
+                        };
+                        if binding_pick_row(ui, &v.name, &value, icon, t.icon) {
+                            chosen = Some(Pick { library: lib.map(|l| l.manifest.id.clone()), id: v.id.clone() });
                         }
                     }
                 }
-                ui.add_space(8.0);
-            }
-            picker_heading(ui, tr("Variables in this file"));
-            let mut library_heading = false;
-            for (lib, c, vars) in &groups {
-                if lib.is_some() && !library_heading {
-                    ui.add_space(8.0);
-                    picker_heading(ui, tr("Library variables"));
-                    library_heading = true;
-                }
-                if lib.is_some() || component_name.is_none() {
-                    group_caption(ui, *lib, c);
-                }
-                let all = lib.map_or(&doc.variables, |l| &l.doc.variables);
-                for v in vars {
-                    let value = all.resolve(&v.id, &std::collections::BTreeMap::new()).map(|value| value.display()).unwrap_or_default();
-                    let icon = match v.kind {
-                        VariableType::String => Icon::VariableString,
-                        VariableType::Boolean => Icon::VariableBoolean,
-                        VariableType::Number => Icon::VariableNumber,
-                        VariableType::Color => Icon::VariableColor,
+                if groups.is_empty() && component_properties.is_empty() {
+                    let (fit, none) = match p.kind {
+                        Some(VariableType::Color) => {
+                            (tr("No colour variables fit here."), tr("No colour variables yet. Create them in Local variables."))
+                        }
+                        Some(VariableType::Number) => {
+                            (tr("No number variables fit here."), tr("No number variables yet. Create them in Local variables."))
+                        }
+                        Some(VariableType::String) => {
+                            (tr("No string variables fit here."), tr("No string variables yet. Create them in Local variables."))
+                        }
+                        Some(VariableType::Boolean) => {
+                            (tr("No boolean variables fit here."), tr("No boolean variables yet. Create them in Local variables."))
+                        }
+                        None => (tr("No variables fit here."), tr("No variables yet. Create them in Local variables.")),
                     };
-                    if binding_pick_row(ui, &v.name, &value, icon, t.icon) {
-                        chosen = Some(Pick { library: lib.map(|l| l.manifest.id.clone()), id: v.id.clone() });
-                    }
+                    let msg = if groups_any_kind(&doc, &libs, p.kind) { fit } else { none };
+                    ui.label(egui::RichText::new(msg).font(regular(11.0)).color(t.menu_dim));
                 }
-            }
-            if groups.is_empty() && component_properties.is_empty() {
-                let (fit, none) = match p.kind {
-                    Some(VariableType::Color) => {
-                        (tr("No colour variables fit here."), tr("No colour variables yet. Create them in Local variables."))
-                    }
-                    Some(VariableType::Number) => {
-                        (tr("No number variables fit here."), tr("No number variables yet. Create them in Local variables."))
-                    }
-                    Some(VariableType::String) => {
-                        (tr("No string variables fit here."), tr("No string variables yet. Create them in Local variables."))
-                    }
-                    Some(VariableType::Boolean) => {
-                        (tr("No boolean variables fit here."), tr("No boolean variables yet. Create them in Local variables."))
-                    }
-                    None => (tr("No variables fit here."), tr("No variables yet. Create them in Local variables.")),
-                };
-                let msg = if groups_any_kind(&doc, &libs, p.kind) { fit } else { none };
-                ui.label(egui::RichText::new(msg).font(regular(11.0)).color(t.menu_dim));
-            }
-            ui.add_space(8.0);
+                ui.add_space(8.0);
+            });
         });
     }) else {
         return;
