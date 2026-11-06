@@ -732,6 +732,10 @@ impl NativeGpuCanvas {
             let cache_started = Instant::now();
             let canvas = self.direct.as_mut().ok_or("direct GPU canvas missing after creation")?;
             if changed_doc {
+                // A shader value changes its texture key. Effect reuse may still classify the
+                // rest of the document as unchanged, but the new key must be registered before
+                // building the scene or the fill has no texture for this frame.
+                canvas.register_images_at_scale(&doc, frame_time, view.scale)?;
                 let translated = self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_translated_effects(previous, &doc));
                 let duplicated = !translated
                     && gesture_active
@@ -759,9 +763,6 @@ impl NativeGpuCanvas {
                     && self.direct_document.as_deref().is_some_and(|previous| canvas.reuse_resized_effects(previous, &doc));
                 if duplicated || rotated || scaled || resized {
                     self.direct_provisional_effects = true;
-                }
-                if animation_changed || (!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) {
-                    canvas.register_images_at_scale(&doc, frame_time, view.scale)?;
                 }
                 if (!translated && !duplicated && !unaffected && !rotated && !scaled && !resized) || finish_preview {
                     let (blur, drop, inner) = canvas.prepare_static_effects(&doc)?;

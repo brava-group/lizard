@@ -1,31 +1,11 @@
 //! Compact gradient editor, laid out on the 240 × 329 reference dialog.
 
-use super::custom::{BORDER, FIELD, MUTED, WIDTH, at, field, paint_header, panel, vector_button};
+use super::custom::{BORDER, FIELD, WIDTH, at, field, paint_header, panel, vector_button};
 use super::*;
 use crate::primitives::TooltipResponseExt as _;
 
 const BASE_HEIGHT: f32 = 329.0;
 const MAX_STOPS: usize = 32;
-
-fn entry(ui: &mut Ui, rect: Rect, id: Id, value: String) -> Option<String> {
-    let focused = ui.memory(|m| m.has_focus(id));
-    let mut text: String = if focused { ui.data(|d| d.get_temp(id)).unwrap_or(value) } else { value };
-    let response = ui.put(
-        rect,
-        egui::TextEdit::singleline(&mut text)
-            .id(id)
-            .font(regular(11.0))
-            .text_color(Color32::WHITE)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin::ZERO),
-    );
-    if response.has_focus() {
-        ui.data_mut(|d| d.insert_temp(id, text.clone()));
-    } else {
-        ui.data_mut(|d| d.remove::<String>(id));
-    }
-    response.changed().then_some(text)
-}
 
 fn kind_label(kind: GradientKind) -> &'static str {
     match kind {
@@ -156,34 +136,44 @@ fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut 
         }
         let position = at(origin, 16.0, y + 4.0, 48.0, 24.0);
         let color = at(origin, 72.0, y + 4.0, 128.0, 24.0);
-        field(ui, position, CornerRadius::same(5), false);
-        field(ui, color, CornerRadius::same(5), false);
-        if let Some(text) = entry(
-            ui,
-            at(origin, 23.0, y + 8.0, 35.0, 16.0),
+        let mut position_ui = ui.new_child(egui::UiBuilder::new().max_rect(position));
+        let position_edit = crate::primitives::NumberField::new(
             Id::new(("cp_gradient_position", index)),
-            format!("{}%", (stop.position * 100.0).round()),
-        ) && let Ok(value) = text.trim().trim_end_matches('%').parse::<f32>()
-            && value.is_finite()
+            widgets::Lead::None,
+            Some(f64::from(stop.position) * 100.0),
+            "%",
+        )
+        .show(&mut position_ui, crate::primitives::ControlWidth::Fixed(position.width()))
+        .edit
+        .and_then(|edit| edit.settled());
+        if let Some(edit) = position_edit
             && let Some(current) = gradient.stops.get_mut(index)
         {
-            current.position = (value / 100.0).clamp(0.0, 1.0);
+            let (value, finished) = match edit {
+                widgets::FieldEdit::Set(value) => (value, true),
+                widgets::FieldEdit::Scrub(value, done) => (value, done),
+            };
+            current.position = (value / 100.0).clamp(0.0, 1.0) as f32;
             *selected = index;
             *changed = true;
-            *done = true;
+            *done |= finished;
         }
-        let swatch = at(origin, 77.0, y + 8.0, 16.0, 16.0);
-        widgets::paint_swatch(ui.painter(), swatch, &Paint::solid(stop.color));
-        if ui.interact(swatch, Id::new(("cp_gradient_swatch", index)), Sense::click()).lizard_tooltip("Edit stop color").clicked() {
+        let hex = stop.color.to_hex().trim_start_matches('#').to_uppercase();
+        let stop_paint = Paint::solid(stop.color);
+        let control = crate::primitives::ColorControl::new(
+            Id::new(("cp_gradient_color", index)),
+            &stop_paint,
+            crate::primitives::ColorValue::EditableHex(&hex),
+            f64::from(stop.color.a) * 100.0,
+        )
+        .swatch_id(Id::new(("cp_gradient_swatch", index)))
+        .show_at(ui, color);
+        if control.open_picker {
             *selected = index;
             ui.data_mut(|data| data.insert_temp(Id::new("cp_gradient_stop_popup"), index));
         }
-        if let Some(text) = entry(
-            ui,
-            at(origin, 97.0, y + 8.0, 55.0, 16.0),
-            Id::new(("cp_gradient_hex", index)),
-            stop.color.to_hex().trim_start_matches('#').to_uppercase(),
-        ) && let Some(color) = Color::from_hex_or_name(text.trim())
+        if let Some(text) = control.edited_hex
+            && let Some(color) = Color::from_hex_or_name(text.trim())
             && let Some(current) = gradient.stops.get_mut(index)
         {
             current.color = color.with_alpha(current.color.a);
@@ -191,18 +181,18 @@ fn stop_rows(ui: &mut Ui, origin: Pos2, gradient: &mut Gradient, selected: &mut 
             *changed = true;
             *done = true;
         }
-        if let Some(text) =
-            entry(ui, at(origin, 157.0, y + 8.0, 22.0, 16.0), Id::new(("cp_gradient_alpha", index)), format!("{:.0}", stop.color.a * 100.0))
-            && let Ok(value) = text.trim().trim_end_matches('%').parse::<f32>()
-            && value.is_finite()
+        if let Some(edit) = control.opacity_edit
             && let Some(current) = gradient.stops.get_mut(index)
         {
-            current.color = current.color.with_alpha((value / 100.0).clamp(0.0, 1.0));
+            let (value, finished) = match edit {
+                widgets::FieldEdit::Set(value) => (value, true),
+                widgets::FieldEdit::Scrub(value, done) => (value, done),
+            };
+            current.color = current.color.with_alpha((value / 100.0).clamp(0.0, 1.0) as f32);
             *selected = index;
             *changed = true;
-            *done = true;
+            *done |= finished;
         }
-        ui.painter().text(pos2(origin.x + 189.0, origin.y + y + 16.0), Align2::CENTER_CENTER, "%", regular(11.0), MUTED);
         let remove_rect = at(origin, 208.0, y + 4.0, 24.0, 24.0);
         let remove_response = ui.interact(remove_rect, Id::new(("cp_gradient_remove_button", index)), Sense::click()).tip("Remove stop");
         ui.painter().rect_filled(
@@ -355,7 +345,8 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
         if let PaintKind::Gradient(ref gradient) = current.kind
             && index < gradient.stops.len()
         {
-            custom::show_stop(app, ctx, target, current, index, pos);
+            let parent = crate::primitives::FloatingPanel::position(ctx, Id::new("color_picker"), pos);
+            custom::show_stop(app, ctx, target, current, index, parent);
         } else {
             ctx.data_mut(|data| data.remove::<usize>(Id::new("cp_gradient_stop_popup")));
         }

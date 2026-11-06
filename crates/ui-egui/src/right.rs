@@ -882,41 +882,113 @@ fn position_fields(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[Node
     if in_frame {
         let c = common(doc, sel, |n| n.constraints);
         widgets::sublabels(ui, tr("Constraints"), None);
-        row(ui, 32.0, |ui| {
-            let h = c.map(|c| format!("{:?}", c.horizontal)).unwrap_or_else(|| "Mixed".into());
-            let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&h)), col, None);
-            menu_popup(&resp).show(|ui| {
-                for (l, v) in [
-                    (tr("Left"), "left"),
-                    (tr("Right"), "right"),
-                    (tr("Left & right"), "leftRight"),
-                    (tr("Center"), "center"),
-                    (tr("Scale"), "scale"),
-                ] {
-                    if menu_item(ui, l, "") {
-                        app.set_props(&ids, json!({"constraints": {"horizontal": v}}));
-                        ui.close();
+        block(ui, 98.0, 0.0, |ui| {
+            let (horizontal, vertical) = constraint_preview(ui, c);
+            if let Some(value) = horizontal {
+                app.set_props(&ids, json!({"constraints": {"horizontal": value}}));
+            }
+            if let Some(value) = vertical {
+                app.set_props(&ids, json!({"constraints": {"vertical": value}}));
+            }
+            ui.vertical(|ui| {
+                ui.add_space(13.0);
+                let h = c.map(|c| format!("{:?}", c.horizontal)).unwrap_or_else(|| "Mixed".into());
+                let width = ui.available_width().max(72.0);
+                let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&h)), width, None);
+                menu_popup(&resp).show(|ui| {
+                    for (l, v) in [
+                        (tr("Left"), "left"),
+                        (tr("Right"), "right"),
+                        (tr("Left & right"), "leftRight"),
+                        (tr("Center"), "center"),
+                        (tr("Scale"), "scale"),
+                    ] {
+                        if menu_item(ui, l, "") {
+                            app.set_props(&ids, json!({"constraints": {"horizontal": v}}));
+                            ui.close();
+                        }
                     }
-                }
-            });
-            let v = c.map(|c| format!("{:?}", c.vertical)).unwrap_or_else(|| "Mixed".into());
-            let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&v)), col, None);
-            menu_popup(&resp).show(|ui| {
-                for (l, val) in [
-                    (tr("Top"), "top"),
-                    (tr("Bottom"), "bottom"),
-                    (tr("Top & bottom"), "topBottom"),
-                    (tr("Center"), "center"),
-                    (tr("Scale"), "scale"),
-                ] {
-                    if menu_item(ui, l, "") {
-                        app.set_props(&ids, json!({"constraints": {"vertical": val}}));
-                        ui.close();
+                });
+                ui.add_space(8.0);
+                let v = c.map(|c| format!("{:?}", c.vertical)).unwrap_or_else(|| "Mixed".into());
+                let resp = crate::primitives::Select::trigger(ui, tr(&pretty(&v)), width, None);
+                menu_popup(&resp).show(|ui| {
+                    for (l, val) in [
+                        (tr("Top"), "top"),
+                        (tr("Bottom"), "bottom"),
+                        (tr("Top & bottom"), "topBottom"),
+                        (tr("Center"), "center"),
+                        (tr("Scale"), "scale"),
+                    ] {
+                        if menu_item(ui, l, "") {
+                            app.set_props(&ids, json!({"constraints": {"vertical": val}}));
+                            ui.close();
+                        }
                     }
-                }
+                });
             });
         });
     }
+}
+
+/// Parent and child bounds with clickable horizontal and vertical pins, like the canvas
+/// constraints preview. Stretch and Scale remain available in the adjacent selectors.
+fn constraint_preview(ui: &mut Ui, value: Option<Constraints>) -> (Option<&'static str>, Option<&'static str>) {
+    let (rect, _) = ui.allocate_exact_size(vec2(92.0, 92.0), Sense::hover());
+    let tokens = Tokens::get(ui.ctx());
+    let parent = Rect::from_min_max(rect.min + vec2(5.0, 5.0), rect.min + vec2(66.0, 66.0));
+    let child = Rect::from_center_size(parent.center(), vec2(25.0, 25.0));
+    ui.painter().rect_stroke(parent, CornerRadius::same(3), Stroke::new(1.0, tokens.icon_secondary), egui::StrokeKind::Inside);
+    if let Some(constraints) = value {
+        let pin = Stroke::new(1.5, tokens.accent);
+        if matches!(constraints.horizontal, HConstraint::Left | HConstraint::LeftRight) {
+            ui.painter().line_segment([pos2(parent.left(), child.center().y), child.left_center()], pin);
+        }
+        if matches!(constraints.horizontal, HConstraint::Right | HConstraint::LeftRight) {
+            ui.painter().line_segment([child.right_center(), pos2(parent.right(), child.center().y)], pin);
+        }
+        if matches!(constraints.vertical, VConstraint::Top | VConstraint::TopBottom) {
+            ui.painter().line_segment([pos2(child.center().x, parent.top()), pos2(child.center().x, child.top())], pin);
+        }
+        if matches!(constraints.vertical, VConstraint::Bottom | VConstraint::TopBottom) {
+            ui.painter().line_segment([pos2(child.center().x, child.bottom()), pos2(child.center().x, parent.bottom())], pin);
+        }
+    }
+    ui.painter().rect_filled(child, CornerRadius::same(2), tokens.hover);
+    ui.painter().rect_stroke(child, CornerRadius::same(2), Stroke::new(1.0, tokens.icon), egui::StrokeKind::Inside);
+    let mut horizontal = None;
+    let mut vertical = None;
+    for (index, (name, x)) in [("left", parent.left()), ("center", parent.center().x), ("right", parent.right())].into_iter().enumerate() {
+        let marker = Rect::from_center_size(pos2(x, rect.top() + 81.0), vec2(20.0, 20.0));
+        let response = ui.interact(marker, ui.id().with(("constraint_h_pin", index)), Sense::click()).tip(tr(name));
+        let active = value.is_some_and(|c| match c.horizontal {
+            HConstraint::Left => index == 0,
+            HConstraint::Center => index == 1,
+            HConstraint::Right => index == 2,
+            HConstraint::LeftRight => index != 1,
+            HConstraint::Scale => false,
+        });
+        ui.painter().circle_filled(marker.center(), if active { 4.0 } else { 2.5 }, if active { tokens.accent } else { tokens.icon_secondary });
+        if response.clicked() {
+            horizontal = Some(name);
+        }
+    }
+    for (index, (name, y)) in [("top", parent.top()), ("center", parent.center().y), ("bottom", parent.bottom())].into_iter().enumerate() {
+        let marker = Rect::from_center_size(pos2(rect.left() + 81.0, y), vec2(20.0, 20.0));
+        let response = ui.interact(marker, ui.id().with(("constraint_v_pin", index)), Sense::click()).tip(tr(name));
+        let active = value.is_some_and(|c| match c.vertical {
+            VConstraint::Top => index == 0,
+            VConstraint::Center => index == 1,
+            VConstraint::Bottom => index == 2,
+            VConstraint::TopBottom => index != 1,
+            VConstraint::Scale => false,
+        });
+        ui.painter().circle_filled(marker.center(), if active { 4.0 } else { 2.5 }, if active { tokens.accent } else { tokens.icon_secondary });
+        if response.clicked() {
+            vertical = Some(name);
+        }
+    }
+    (horizontal, vertical)
 }
 
 /// The selected ellipses' arc: Start (degrees), Sweep (a share of a full turn, negative running
@@ -2380,12 +2452,25 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let ids = sel.to_vec();
     let list = common(doc, sel, |n| n.effects.clone());
     let empty = list.as_ref().is_none_or(|l| l.is_empty());
-    if let Some(i) = widgets::section_header(ui, tr("Effects"), &[(Icon::Styles, tr("Styles")), (Icon::Plus, tr("Add effect"))], empty) {
-        if i == 1 {
-            app.run("effect.add", json!({"ids": ids, "type": "dropShadow"}));
-        } else {
+    let (clicked, actions) =
+        widgets::section_header_actions(ui, tr("Effects"), &[(Icon::Styles, tr("Styles")), (Icon::Plus, tr("Add effect"))], empty);
+    if let Some(i) = clicked {
+        if i == 0 {
             style_picker::open(app, ui, &ids, StyleSlot::Effect);
         }
+    }
+    if let Some((_, add)) = actions.iter().find(|(index, _)| *index == 1) {
+        crate::primitives::Menu::popup(add).width(216.0).show(|ui| {
+            let icons = [Icon::Effects, Icon::Rectangle, Icon::Ellipse, Icon::Image, Icon::Dots, Icon::Grid, Icon::PaintBucket];
+            for ((label, effect_type), icon) in Effect::TYPES.into_iter().zip(icons) {
+                if menu_item_with(ui, tr(label), "", 24.0, |painter, rect, color| {
+                    icons::paint(painter, Rect::from_center_size(rect.right_center() - vec2(15.0, 0.0), vec2(14.0, 14.0)), icon, color);
+                }) {
+                    app.run("effect.add", json!({"ids": ids, "type": effect_type}));
+                    ui.close();
+                }
+            }
+        });
     }
     let before_chip = ui.cursor().min.y;
     style_picker::chip(app, ui, doc, &ids, StyleSlot::Effect);

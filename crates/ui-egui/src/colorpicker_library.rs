@@ -364,14 +364,7 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
     if custom {
         s.active = false;
         s.create = None;
-        if let PickerTarget::ColorLibraryStyle { fills, ids } = target {
-            let index = ids.first().and_then(|id| doc.node(*id)).map(|node| if *fills { node.fills.len() } else { node.strokes.len() });
-            if let Some(index) = index.and_then(|len| len.checked_sub(1)) {
-                app.ui.picker = Some(PickerTarget::Paint { fills: *fills, index, ids: ids.clone() });
-            } else {
-                app.ui.picker = None;
-            }
-        }
+        open_custom(app, &doc, target);
     }
     if close {
         app.ui.picker = None;
@@ -402,6 +395,17 @@ pub(super) fn show(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarg
         creation_panel(app, ctx, &doc, library_pos, &mut s, kind);
     }
     save(ctx, s);
+}
+
+fn open_custom(app: &mut LizardApp, doc: &lizard_doc::Document, target: &PickerTarget) {
+    if let PickerTarget::ColorLibraryStyle { fills, ids } = target {
+        let index = ids.first().and_then(|id| doc.node(*id)).map(|node| if *fills { node.fills.len() } else { node.strokes.len() });
+        let index = index.and_then(|len| len.checked_sub(1)).or_else(|| {
+            app.run(if *fills { "fill.add" } else { "stroke.add" }, json!({"ids": ids}))?;
+            Some(0)
+        });
+        app.ui.picker = index.map(|index| PickerTarget::Paint { fills: *fills, index, ids: ids.clone() });
+    }
 }
 
 fn apply_swatch(app: &mut LizardApp, target: &PickerTarget, swatch: &Swatch, paint: &Paint) {
@@ -686,5 +690,17 @@ mod tests {
             let links = &app.session.doc().unwrap().node(id).unwrap().styles;
             assert_eq!(if fills { &links.fill } else { &links.stroke }, &Some(style_id.clone()));
         }
+    }
+
+    #[test]
+    fn custom_tab_creates_an_editable_paint_when_the_layer_has_none() {
+        let mut session = Session::new();
+        let id = NodeId(session.execute("shape.rectangle", &json!({"width": 40, "height": 40})).unwrap()["id"].as_u64().unwrap());
+        session.doc_mut().unwrap().node_mut(id).unwrap().fills.clear();
+        let mut app = LizardApp::new(session, Box::new(NoServices));
+        let doc = app.session.doc().unwrap().clone();
+        open_custom(&mut app, &doc, &PickerTarget::ColorLibraryStyle { fills: true, ids: vec![id] });
+        assert_eq!(app.ui.picker, Some(PickerTarget::Paint { fills: true, index: 0, ids: vec![id] }));
+        assert_eq!(app.session.doc().unwrap().node(id).unwrap().fills.len(), 1);
     }
 }

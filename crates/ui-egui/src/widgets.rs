@@ -1019,6 +1019,11 @@ pub fn section_action_rect(header: Rect, column: usize) -> Rect {
 /// A section header ("Fill", "Stroke"…) with optional right-side icon buttons; returns which
 /// button was clicked. `dim` greys the title (empty sections).
 pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: bool) -> Option<usize> {
+    section_header_actions(ui, title, buttons, dim).0
+}
+
+/// The clicked action and its responses, for sections that attach a menu to a header button.
+pub fn section_header_actions(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: bool) -> (Option<usize>, Vec<(usize, Response)>) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
@@ -1038,12 +1043,14 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
         },
     );
     let mut out = None;
+    let mut responses = Vec::with_capacity(buttons.len());
     for (i, (icon, tip)) in buttons.iter().enumerate().rev() {
         let r = section_action_rect(rect, buttons.len() - 1 - i);
         if *icon == Icon::Styles && dim && !hovered {
             continue;
         }
         let resp = ui.interact(r, ui.id().with(("hdr", title, i)), Sense::click()).tip(*tip);
+        responses.push((i, resp.clone()));
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
         }
@@ -1058,7 +1065,8 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
             out = Some(i);
         }
     }
-    out
+    responses.sort_by_key(|(i, _)| *i);
+    (out, responses)
 }
 
 /// An icon button at `rect` (hover highlight, tooltip); true when clicked.

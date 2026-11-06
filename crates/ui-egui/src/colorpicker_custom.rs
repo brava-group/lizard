@@ -268,8 +268,7 @@ pub(super) fn show_standalone_solid(ctx: &egui::Context, color: Color, anchor: P
 }
 
 fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, mut paint: Paint, stop: Option<(usize, Pos2)>) {
-    let pos =
-        stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH).max(8.0), (parent.y - 85.0).max(8.0)));
+    let pos = stop.map_or_else(|| super::initial_position(app, ctx, target), |(_, parent)| pos2((parent.x - WIDTH - 8.0).max(8.0), parent.y));
     let solid_only = stop.is_some()
         || matches!(
             target,
