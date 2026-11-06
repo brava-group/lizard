@@ -10,7 +10,6 @@ use serde_json::json;
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, HeaderIcon, Icon, NavIcon};
-use crate::primitives::{Menu, MenuItem};
 use crate::theme::{ColorRole, Tokens, regular, semibold};
 use crate::{LeftTab, LizardApp};
 
@@ -244,24 +243,12 @@ pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
             ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
         }
         icons::paint_nav(ui.painter(), Rect::from_center_size(ir.center(), vec2(20.0, 20.0)), icon, ink);
-        if icon == NavIcon::Theme {
-            a11y::menu_button(&resp, &label, a11y::menu_open(&resp));
-            let current = app.session.prefs.theme.clone();
-            Menu::popup(&resp).width(164.0).align(egui::RectAlign::RIGHT_END).show(|ui| {
-                for (choice, value, command) in [
-                    (tr("Light"), "light", "view.themeLight"),
-                    (tr("Dark"), "dark", "view.themeDark"),
-                    (tr("System"), "system", "view.themeSystem"),
-                ] {
-                    if MenuItem::new(&choice).checked(current.eq_ignore_ascii_case(value)).show(ui).clicked() {
-                        app.run(command, json!({}));
-                        ui.close();
-                    }
-                }
-            });
-        } else {
-            a11y::button(&resp, &label);
-            if resp.clicked() {
+        a11y::button(&resp, &label);
+        if resp.clicked() {
+            if icon == NavIcon::Theme {
+                let command = if app.ui.dark { "view.themeLight" } else { "view.themeDark" };
+                app.run(command, json!({}));
+            } else {
                 app.ui.preferences = true;
                 if icon == NavIcon::Shortcuts {
                     app.ui.settings_shortcuts_requested = true;
