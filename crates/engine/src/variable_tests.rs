@@ -105,6 +105,33 @@ fn bound_layers_follow_variable_values_and_unbind() {
 }
 
 #[test]
+fn hug_sizing_detaches_only_its_dimension_variable() -> crate::Result<()> {
+    let mut session = Session::new();
+    let frame = session.execute("frame.create", &json!({"width":200,"height":100}))?;
+    let id = id_of(&frame["id"]).ok_or_else(|| crate::bad("test", "missing frame id"))?;
+    session.execute("layout.add", &json!({"ids":[id]}))?;
+    session.execute("variable.createCollection", &json!({"name":"Size"}))?;
+    session.execute("variable.create", &json!({"collection":"Size","name":"width-token","type":"number","value":200}))?;
+    session.execute("variable.create", &json!({"collection":"Size","name":"height-token","type":"number","value":100}))?;
+    session.execute("variable.bind", &json!({"ids":[id],"field":"width","variable":"width-token"}))?;
+    session.execute("variable.bind", &json!({"ids":[id],"field":"height","variable":"height-token"}))?;
+
+    session.execute("node.set", &json!({"ids":[id],"props":{"sizingH":"hug"}}))?;
+    let bound = &session.doc()?.get(id)?.bound;
+    assert!(!bound.contains_key("width"));
+    assert!(bound.contains_key("height"));
+    session.execute("variable.set", &json!({"variable":"width-token","value":300}))?;
+    session.execute("variable.set", &json!({"variable":"height-token","value":120}))?;
+    let node = session.doc()?.get(id)?;
+    assert_ne!(node.width, 300.0);
+    assert_eq!(node.height, 120.0);
+
+    session.execute("node.set", &json!({"ids":[id],"props":{"sizingV":"hug"}}))?;
+    assert!(!session.doc()?.get(id)?.bound.contains_key("height"));
+    Ok(())
+}
+
+#[test]
 fn opacity_padding_text_and_visibility_follow_their_variables() {
     let mut s = Session::new();
     let f = id_of(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap()["id"]).unwrap();

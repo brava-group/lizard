@@ -1187,6 +1187,11 @@ fn set_sizing(cmd: &str, doc: &mut Document, id: NodeId, s: Sizing, horizontal: 
     } else {
         n.child_layout.sizing_v = s;
     }
+    // A variable controls a fixed numeric dimension. Hug and Fill take their size from layout,
+    // so retaining that binding would display a stale token and reapply it on later variable edits.
+    if s != Sizing::Fixed {
+        n.bound.remove(if horizontal { "width" } else { "height" });
+    }
     if let NodeKind::Text(t) = &mut n.kind {
         t.auto_resize = match (n.child_layout.sizing_h, n.child_layout.sizing_v) {
             (Sizing::Hug, _) => TextAutoResize::WidthAndHeight,
