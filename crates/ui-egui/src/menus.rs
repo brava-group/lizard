@@ -1085,7 +1085,9 @@ pub fn popups(app: &mut LizardApp, ctx: &egui::Context) {
                         separator(ui);
                         continue;
                     }
-                    let sc = crate::shortcuts::shortcut(id).unwrap_or("");
+                    // "Paste here" is a pointer-location action. Cmd+V pastes normally and
+                    // must not be advertised as this context-menu item's shortcut.
+                    let sc = if *id == "edit.paste" { "" } else { crate::shortcuts::shortcut(id).unwrap_or("") };
                     if item(ui, label, sc, available(id), false, &t) {
                         if *id == "edit.paste" {
                             let p = app.to_page(pos);

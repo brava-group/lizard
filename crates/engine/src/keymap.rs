@@ -303,10 +303,10 @@ pub static KEYS: &[Binding] = &[
     k(Transform, "object.resizeToFit", &["Alt+Shift+Cmd+R"]),
     k(Transform, "transform.rotationOrigin", &["Alt+R"]),
     // Arrange
-    k(Arrange, "arrange.front", &["Alt+Cmd+]"]).win(&["Shift+Cmd+]"]),
+    k(Arrange, "arrange.front", &["]", "Alt+Cmd+]"]).win(&["]", "Shift+Cmd+]"]),
     k(Arrange, "arrange.forward", &["Cmd+]"]),
     k(Arrange, "arrange.backward", &["Cmd+["]),
-    k(Arrange, "arrange.back", &["Alt+Cmd+["]).win(&["Shift+Cmd+["]),
+    k(Arrange, "arrange.back", &["[", "Alt+Cmd+["]).win(&["[", "Shift+Cmd+["]),
     k(Arrange, "align.left", &["Alt+A"]),
     k(Arrange, "align.hcenter", &["Alt+H"]),
     k(Arrange, "align.right", &["Alt+D"]),

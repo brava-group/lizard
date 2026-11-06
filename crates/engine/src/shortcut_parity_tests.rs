@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::Session;
 use crate::keymap::Group::{self, *};
-use crate::keymap::{Context, GESTURES, KEYS, Platform, display, lookup, parse};
+use crate::keymap::{Context, GESTURES, KEYS, Platform, display, lookup, parse, primary};
 use crate::params::id_of;
 use crate::vectoredit::VTool;
 
@@ -250,8 +250,10 @@ static ROWS: &[Row] = &[
     // Arrange
     doc(Arrange, "Bring forward", &["Cmd+]"], &[], Bound("arrange.forward"), ""),
     doc(Arrange, "Send backward", &["Cmd+["], &[], Bound("arrange.backward"), ""),
-    doc(Arrange, "Bring to front", &["Alt+Cmd+]"], &["Ctrl+Shift+]"], Bound("arrange.front"), "one layout table shows only the bracket"),
-    doc(Arrange, "Send to back", &["Alt+Cmd+["], &["Ctrl+Shift+["], Bound("arrange.back"), ""),
+    doc(Arrange, "Bring to front", &["]", "Alt+Cmd+]"], &["]", "Ctrl+Shift+]"], Bound("arrange.front"),
+        "the keyboard-layout reference and the current context menu show the bare bracket; the arrangement article also gives the modified chord"),
+    doc(Arrange, "Send to back", &["[", "Alt+Cmd+["], &["[", "Ctrl+Shift+["], Bound("arrange.back"),
+        "the keyboard-layout reference and the current context menu show the bare bracket; the arrangement article also gives the modified chord"),
     doc(Arrange, "Align left", &["Alt+A"], &[], Bound("align.left"), ""),
     doc(Arrange, "Align horizontal centres", &["Alt+H"], &[], Bound("align.hcenter"), ""),
     doc(Arrange, "Align right", &["Alt+D"], &[], Bound("align.right"), ""),
@@ -420,6 +422,16 @@ fn modifiers_read_the_platform_way() {
             assert!(!(k.contains("Cmd") && k.contains("Ctrl")), "{}: `{k}` names Ctrl twice off macOS", b.id);
         }
         assert!(b.keys(Platform::Mac).iter().chain(b.keys(Platform::Other)).all(|k| !k.contains("Option") && !k.contains("Win")));
+    }
+}
+
+#[test]
+fn arrangement_menu_shows_the_default_bracket_shortcuts() {
+    for platform in PLATFORMS {
+        assert_eq!(primary("arrange.front", platform), Some("]"));
+        assert_eq!(primary("arrange.back", platform), Some("["));
+        assert_eq!(fires(platform, "]")[0], Some("arrange.front"));
+        assert_eq!(fires(platform, "[")[0], Some("arrange.back"));
     }
 }
 
