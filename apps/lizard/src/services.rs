@@ -340,7 +340,7 @@ impl Services for Desktop {
     fn update_status(&mut self) -> UpdateStatus {
         #[cfg(target_os = "macos")]
         {
-            return self.updater.status();
+            self.updater.status()
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -358,7 +358,7 @@ impl Services for Desktop {
     fn update_install(&mut self) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
-            return self.updater.install();
+            self.updater.install()
         }
         #[cfg(not(target_os = "macos"))]
         {

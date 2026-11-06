@@ -235,12 +235,12 @@ pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
     {
         let hit = Rect::from_min_size(pos2(r.min.x, footer_y + index as f32 * 40.0), vec2(r.width(), 40.0));
         let ir = Rect::from_center_size(hit.center(), vec2(32.0, 32.0));
-        let resp = ui.interact(hit, ui.id().with(("rail_footer", index)), Sense::click()).tip(&label);
+        let resp = ui.interact(hit, ui.id().with(("rail_footer", index)), Sense::click()).tip(label);
         if resp.hovered() {
             ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
         }
         icons::paint_nav(ui.painter(), Rect::from_center_size(ir.center(), vec2(20.0, 20.0)), icon, ink);
-        a11y::button(&resp, &label);
+        a11y::button(&resp, label);
         if resp.clicked() {
             if icon == NavIcon::Theme {
                 let command = if app.ui.dark { "view.themeLight" } else { "view.themeDark" };

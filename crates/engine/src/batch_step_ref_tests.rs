@@ -11,9 +11,9 @@ fn streamed_batch_exposes_each_node_then_keeps_one_undo_step() {
         crate::BatchStep::new("node.create", json!({"type":"rectangle","parent":{"$ref":"frame"},"width":40,"height":20})),
     ];
     let mut batch = session.begin_streamed_batch("Login", steps).unwrap().unwrap();
-    assert_eq!(session.streamed_batch_step(&mut batch).unwrap().0, false);
+    assert!(!session.streamed_batch_step(&mut batch).unwrap().0);
     assert_eq!(session.doc().unwrap().node(page).unwrap().children.len(), 1);
-    assert_eq!(session.streamed_batch_step(&mut batch).unwrap().0, true);
+    assert!(session.streamed_batch_step(&mut batch).unwrap().0);
     let result = session.finish_streamed_batch(batch).unwrap();
     let frame = id(&result[0]);
     let child = id(&result[1]);

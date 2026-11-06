@@ -2454,10 +2454,8 @@ fn effects(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     let empty = list.as_ref().is_none_or(|l| l.is_empty());
     let (clicked, actions) =
         widgets::section_header_actions(ui, tr("Effects"), &[(Icon::Styles, tr("Styles")), (Icon::Plus, tr("Add effect"))], empty);
-    if let Some(i) = clicked {
-        if i == 0 {
-            style_picker::open(app, ui, &ids, StyleSlot::Effect);
-        }
+    if clicked == Some(0) {
+        style_picker::open(app, ui, &ids, StyleSlot::Effect);
     }
     if let Some((_, add)) = actions.iter().find(|(index, _)| *index == 1) {
         crate::primitives::Menu::popup(add).width(216.0).show(|ui| {
@@ -3150,10 +3148,10 @@ fn effect_settings(app: &mut LizardApp, ui: &mut Ui, target: &EffectTarget<'_>, 
             );
             let preview = Rect::from_min_size(light.min + vec2(88.0, 16.0), vec2(56.0, 56.0));
             let light_control = GlassLightControl::new(Id::new(("fx_light_preview", i)), g.light_angle, g.light_intensity).show(ui, preview);
-            if let Some(angle) = light_control.angle {
-                if (angle - g.light_angle).abs() > 0.5 {
-                    target.set(app, i, with(&|gl| gl.light_angle = angle), if light_control.response.clicked() { None } else { Some(false) });
-                }
+            if let Some(angle) = light_control.angle
+                && (angle - g.light_angle).abs() > 0.5
+            {
+                target.set(app, i, with(&|gl| gl.light_angle = angle), if light_control.response.clicked() { None } else { Some(false) });
             }
             if light_control.response.drag_stopped() {
                 let _ = app.session.commit_interaction();

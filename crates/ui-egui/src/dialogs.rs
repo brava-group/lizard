@@ -790,7 +790,7 @@ fn settings_appearance(app: &mut LizardApp, ui: &mut egui::Ui) {
     ui.label(RichText::new(tr("Theme")).font(semibold(13.0)));
     ui.add_space(14.0);
     let gap = 14.0;
-    let card_width = ((ui.available_width() - 2.0 * gap) / 3.0).min(172.0).max(88.0);
+    let card_width = ((ui.available_width() - 2.0 * gap) / 3.0).clamp(88.0, 172.0);
     ui.horizontal(|ui| {
         for (label, value, cmd) in [
             (tr_noop("Light"), "light", "view.themeLight"),
