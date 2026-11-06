@@ -299,6 +299,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                 Ok((done, created)) => {
                     if let Some(id) = created {
                         crate::agent_presence::start_entrance(&mut app.ui.agent.presence, id);
+                        app.ui.agent.presence.target = Some(id);
+                        app.ui.agent.presence.point = None;
+                        app.ui.agent.presence.updated = Some(web_time::Instant::now());
                     }
                     app.ui.streamed_batch = Some(batch);
                     ctx.request_repaint();
@@ -407,7 +410,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                     shimmer.ongoing = false;
                 }
             }
-            if let Some(id) = ids.first().copied() {
+            if !matches!(tool, "inspect_document" | "screenshot")
+                && let Some(id) = ids.first().copied()
+            {
                 presence.target = Some(lizard_doc::NodeId(id));
             }
             for id in shimmer_ids {

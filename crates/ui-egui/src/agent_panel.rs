@@ -220,9 +220,8 @@ pub struct AgentPresence {
     pub point: Option<(f64, f64)>,
     /// Smoothed cursor position in page coordinates; camera changes must not move it off target.
     pub shown: Option<(f64, f64)>,
-    /// Stable work zone. Individual tool calls can update the node highlight without moving it.
+    /// Current destination in page coordinates, retained while the agent is idle.
     pub destination: Option<(f64, f64)>,
-    pub destination_updated: Option<web_time::Instant>,
     pub motion_updated: Option<web_time::Instant>,
     pub idle_strength: f32,
     pub updated: Option<web_time::Instant>,
@@ -869,7 +868,6 @@ fn send_prompt(app: &mut LizardApp) {
             if app.ui.agent.presence.conversation != Some(id) {
                 app.ui.agent.presence.shown = None;
                 app.ui.agent.presence.destination = None;
-                app.ui.agent.presence.destination_updated = None;
                 app.ui.agent.presence.motion_updated = None;
             }
             app.ui.agent.presence.document = Some(document);
