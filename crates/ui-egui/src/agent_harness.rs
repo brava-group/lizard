@@ -20,7 +20,17 @@ Workflow:\n\
 For interface icons, gather the names needed by a section and call search_icons once with queries (up to 12 names) before creating icon layers. Reuse returned exact library/name pairs; do not search the same name repeatedly. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
 The snapshot below is context, not a substitute for a fresh tool read after other edits or collaboration changes. All coordinates are in page units; child coordinates are relative to their parent. The user may attach images as references.";
 
-const COMPONENT_WORKFLOW: &str = "\nReusable component workflow: A frame is not yet a component. Build the full cross-product of requested properties: two styles and three sizes require six distinct variants. Make each one an auto-layout frame with real text, fills, padding and sizing. Name variants with property pairs, for example `Button/Style=Ghost, Size=sm`, `Button/Style=Secondary, Size=sm`, and so on for the complete requested combinations. Use the returned node IDs, then call run_command with `component.create` and `params:{\"ids\":[id]}` for each frame. After those calls succeed, call run_command with `component.combineVariants` and `params:{\"ids\":[component IDs]}` to make one component set. For a single reusable component, stop after component.create. Do not use ordinary groups or frames as a substitute for main components. Inspect the returned set ID with get_node or inspect_document: it must be a component set with the requested number of component children. Then run `component.properties` on that set ID and confirm the requested property names, values and no conflicts. Check the canvas before finishing. If any command fails or the structure is incomplete, say exactly what exists and what failed; never claim that the component or variants were created without that verification.";
+const COMPONENT_PRINCIPLES: &str = r#"
+Design-system semantics: Before making reusable UI, classify each difference. A primitive is an independently reusable building block (for example an icon glyph); a composed component combines primitives (for example a Quick Action Button or Navigation Item Button). A text label is a text property, an interchangeable icon is an instance-swap property backed by nested icon component instances, and optional visibility is a boolean property. A variant represents a genuine visual or behavioral configuration of the same component, such as rest/hover/pressed/disabled/selected, or a size or tone with different layout or styling. Do not make a variant for each label, icon, action, destination, transaction, or sample content. Do not create every possible cross-product of properties unless the user explicitly needs those combinations and each changes the component's design. A Lizard component property is not automatically a document variable; use document variables only when shared design tokens are needed. Keep one canonical component per reusable role and place configured instances in screens. Create only states the request or design actually needs; do not invent hover/pressed screens merely to fill a catalog. If the request is to componentize an existing screen, reuse its visual language, build real native components, replace repeated copies with instances, and verify the screen still matches. State clearly if the result is only a visual sample rather than a reusable component."#;
+
+const COMPONENT_WORKFLOW: &str = r#"
+Reusable component workflow:
+1. Inventory repeated roles and classify each changing field as primitive, text property, instance-swap property, boolean property, variant, or shared token. Explain ambiguous choices briefly in the result. For a banking screen, `Send`, `Request`, and `Add money` are values of Label and Icon on one Quick Action Button, not three variants; Home, Accounts, Cards, and Profile are values on one Navigation Item Button. Selection may be a variant because its appearance changes.
+2. Build the required icon primitives first as actual main components, each with artwork in a consistent-size frame. Reuse existing local or enabled-library icon components when available. Build each composed control with auto layout, one text layer, and a nested instance of a default icon component. Convert its frame using run_command `component.create` with `params:{"ids":[frameId]}` and use the returned component ID.
+3. Define editable properties with `component.addProperty`: `{"id":componentId,"name":"Label","type":"text","default":"Send","layer":textLayerId}` and `{"id":componentId,"name":"Icon","type":"instanceSwap","default":defaultIconComponentId,"layer":nestedIconInstanceId,"preferred":[iconComponentIds]}`. Use `component.bindProperty` with field `characters` or `mainComponent` if a property was added without a layer binding. Use a boolean property for optional parts. A plain icon layer or a renamed frame is not an instance-swap property.
+4. If the same control has requested meaningful states, sizes, or tones, create those native component variants with the same semantic property bindings and combine their returned component IDs using `component.combineVariants`. Name only genuine variant axes (for example `State=Default` and `State=Pressed`); never put Label or Icon values in variant names. Do not combine unrelated control roles in one set. If no genuine axis is needed, keep a single main component.
+5. Put `instance.create` results in the screen, then set their content with `instance.setProperties`, for example `{"ids":[instanceId],"properties":{"Label":"Request","Icon":requestIconComponentId}}`. Set variant values only for applicable states. Do not leave duplicate detached frames in place of the screen's reusable controls.
+6. Verify with `component.properties` that Label is text, Icon is instanceSwap, genuine variant axes have only intended values, and conflicts are empty. Inspect the nested icon and at least two screen instances to confirm their main-component links and different label/icon values. Check a screenshot for visual integrity. Report only components, properties, variants, and instances confirmed by tool results; if any step fails, say what exists and what failed."#;
 
 /// Build one provider-independent turn. Static instructions start each local agent process;
 /// live state travels on every turn so a resumed model sees the current page and selection.
@@ -82,7 +92,11 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     if new_session {
         text.push_str("Lizard agent instructions:\n");
         text.push_str(INSTRUCTIONS);
+        text.push_str(COMPONENT_PRINCIPLES);
         text.push_str("\n\n");
+    } else {
+        text.push_str(COMPONENT_PRINCIPLES);
+        text.push('\n');
     }
     text.push_str("Current document snapshot (JSON data):\n");
     text.push_str(&snapshot.to_string());
@@ -91,7 +105,10 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     text.push_str("\nBuild progressively with streamed batches: create the screen root, then create section frames and children in about 2-4 batches of 10-30 node.create steps using props at creation and `$ref` for nested parents. Inspect the assembled screen once and take one screenshot; inspect earlier only after a tool error or when modifying uncertain existing structure.");
     text.push_str("\nFor interface screens, build a nested auto-layout frame hierarchy (screen, sections, rows, cards, lists). Use horizontal layout for desktop columns and vertical layout for mobile stacks; set gap, padding and sizingH/sizingV hug/fill. Keep children in flow instead of placing them by x/y. Use absolute only for intentional overlays or decoration. Verify the resulting hierarchy before finishing.");
     let request_lower = request.to_lowercase();
-    if ["component", "componente", "variant", "variante", "reutiliz"].iter().any(|word| request_lower.contains(word)) {
+    if ["component", "componente", "componentiz", "variant", "variante", "reutiliz", "design system", "biblioteca"]
+        .iter()
+        .any(|word| request_lower.contains(word))
+    {
         text.push_str(COMPONENT_WORKFLOW);
     }
     if !prior.is_empty() {
@@ -165,7 +182,21 @@ mod tests {
         let turn = build_turn(&ds, &[], "Crie um componente de botão com variantes ghost e secondary em sm, md e lg", "", false);
         assert!(turn.contains("component.create"));
         assert!(turn.contains("component.combineVariants"));
-        assert!(turn.contains("component set with the requested number of component children"));
-        assert!(turn.contains("never claim that the component or variants were created without that verification"));
+        assert!(turn.contains("instanceSwap"));
+        assert!(turn.contains("component.addProperty"));
+        assert!(turn.contains("instance.setProperties"));
+        assert!(turn.contains("never put Label or Icon values in variant names"));
+        assert!(turn.contains("Report only components, properties, variants, and instances confirmed by tool results"));
+    }
+
+    #[test]
+    fn componentize_screen_request_distinguishes_content_from_variants() {
+        let ds = DocState::new(Document::new("Example"), None);
+        let turn = build_turn(&ds, &[], "Componentize a banking screen into a design system", "", false);
+        assert!(turn.contains("`Send`, `Request`, and `Add money` are values of Label and Icon"));
+        assert!(turn.contains("Quick Action Button"));
+        assert!(turn.contains("Navigation Item Button"));
+        assert!(turn.contains("one canonical component per reusable role"));
+        assert!(!turn.contains("Build the full cross-product"));
     }
 }
