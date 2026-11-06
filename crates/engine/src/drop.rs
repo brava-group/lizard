@@ -53,6 +53,38 @@ pub fn line_before(b: lizard_geom::Rect, vertical: bool, off: f64) -> [f64; 4] {
     if vertical { [b.x0, b.y0 - off, b.x1, b.y0 - off] } else { [b.x0 - off, b.y0, b.x0 - off, b.y1] }
 }
 
+/// Preview line centred in the gap where an item will enter a row or column.
+pub fn line_in_gap(doc: &Document, parent: NodeId, index: usize, exclude: &[NodeId]) -> Option<[f64; 4]> {
+    let node = doc.node(parent)?;
+    let layout = node.layout.as_ref()?;
+    if layout.mode == LayoutMode::Grid || layout.wrap {
+        return None;
+    }
+    let vertical = layout.mode == LayoutMode::Vertical;
+    let kids: Vec<(usize, NodeId)> = node
+        .children
+        .iter()
+        .copied()
+        .filter(|id| !exclude.contains(id))
+        .enumerate()
+        .filter(|(_, id)| doc.node(*id).is_some_and(|n| n.visible && !n.child_layout.absolute))
+        .collect();
+    let half_gap = layout.gap.max(0.0) / 2.0;
+    if let Some((_, next)) = kids.iter().find(|(i, _)| *i >= index)
+        && let Some(bounds) = doc.world_bounds(*next)
+    {
+        return Some(line_before(bounds, vertical, half_gap));
+    }
+    if let Some((_, last)) = kids.last()
+        && let Some(b) = doc.world_bounds(*last)
+    {
+        return Some(if vertical { [b.x0, b.y1 + half_gap, b.x1, b.y1 + half_gap] } else { [b.x1 + half_gap, b.y0, b.x1 + half_gap, b.y1] });
+    }
+    let b = doc.world_bounds(parent)?;
+    let [top, right, bottom, left] = layout.padding;
+    Some(if vertical { [b.x0 + left, b.y0 + top, b.x1 - right, b.y0 + top] } else { [b.x0 + left, b.y0 + top, b.x0 + left, b.y1 - bottom] })
+}
+
 /// `r` with x and y swapped when `vertical`: a vertical wrap (columns) is a horizontal one (rows)
 /// turned on its side.
 pub fn flip(r: lizard_geom::Rect, vertical: bool) -> lizard_geom::Rect {

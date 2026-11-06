@@ -1,5 +1,6 @@
 //! The canvas: the rendered page plus selection, hover, guides, labels and text-editing overlays.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::Receiver;
@@ -267,6 +268,8 @@ pub struct CanvasState {
     pub preview_latency_ms: Option<f64>,
     pub refine_latency_ms: Option<f64>,
     dragging: bool,
+    layout_motion: LayoutMotion,
+    layout_ghost: Option<LayoutGhost>,
     #[cfg(not(target_arch = "wasm32"))]
     drag_visual: Option<DragVisual>,
     /// Last drag input sent to the engine. Repainting a stationary pointer must not clone and
@@ -314,6 +317,8 @@ impl Default for CanvasState {
             preview_latency_ms: None,
             refine_latency_ms: None,
             dragging: false,
+            layout_motion: LayoutMotion::default(),
+            layout_ghost: None,
             #[cfg(not(target_arch = "wasm32"))]
             drag_visual: None,
             last_drag_input: None,
@@ -427,6 +432,27 @@ struct DragVisual {
     prepare_ms: Option<f64>,
 }
 
+/// Only the painted positions ease. The document always holds the final layout for hit testing,
+/// insertion slots, undo and persistence.
+#[derive(Default)]
+struct LayoutMotion {
+    of: Option<(u64, NodeId)>,
+    last_doc: Option<Arc<Document>>,
+    positions: HashMap<NodeId, (f64, f64)>,
+    last_tick: Option<web_time::Instant>,
+    last_ghost: Option<(NodeId, (f64, f64))>,
+}
+
+struct LayoutGhost {
+    uid: u64,
+    root: NodeId,
+    source: Arc<Document>,
+    view: lizard_render::View,
+    texture: Option<egui::TextureHandle>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending: Option<Receiver<egui::ColorImage>>,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool {
     let Some(node) = doc.node(root) else { return false };
@@ -456,7 +482,6 @@ fn drag_root_is_independent(doc: &Document, page: NodeId, root: NodeId) -> bool 
     true
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn drag_view_for_bounds(bounds: lizard_geom::Rect, base: &lizard_render::View, scale: f64, pixel_limit: f64) -> Option<lizard_render::View> {
     if !scale.is_finite() || scale <= 0.0 || ![bounds.x0, bounds.y0, bounds.x1, bounds.y1].iter().all(|n| n.is_finite()) {
         return None;
@@ -472,7 +497,6 @@ fn drag_view_for_bounds(bounds: lizard_geom::Rect, base: &lizard_render::View, s
     Some(lizard_render::View { origin: (base.origin.0 + x0 / scale, base.origin.1 + y0 / scale), scale, width: w as u32, height: h as u32 })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn cropped_drag_view(doc: &Document, root: NodeId, base: &lizard_render::View) -> Option<lizard_render::View> {
     let bounds = doc.world_render_bounds(root)?;
     let width = bounds.width();
@@ -814,6 +838,153 @@ fn paint_drag_visual(app: &LizardApp, painter: &egui::Painter) -> bool {
         draw(detail, view, (dx, dy));
     }
     true
+}
+
+fn layout_motion_document(app: &mut LizardApp, ctx: &egui::Context) -> Option<Arc<Document>> {
+    let reduce_motion = app.reduce_motion();
+    let ds = app.session.ds().ok()?;
+    let current = ds.doc.clone();
+    let ghost = app.session.tool.overlay.drag_ghost;
+    let motion = &mut app.canvas.layout_motion;
+    if motion.of != Some((ds.uid, ds.page)) {
+        *motion = LayoutMotion { of: Some((ds.uid, ds.page)), ..Default::default() };
+    }
+    if let Some((id, [dx, dy])) = ghost
+        && let Some(source) = ds.interaction.as_ref().map(|it| &it.doc)
+    {
+        let xf = source.world_transform(id).as_coeffs();
+        motion.last_ghost = Some((id, (xf[4] + dx, xf[5] + dy)));
+    }
+    if let Some(previous) = motion.last_doc.as_ref()
+        && !Arc::ptr_eq(previous, &current)
+        && (ghost.is_some() || motion.last_ghost.is_some())
+    {
+        for node in current.nodes() {
+            let id = node.id;
+            let old_parent = previous.node(id).and_then(|n| n.parent);
+            let in_layout = node.parent.and_then(|p| current.node(p)).is_some_and(|p| p.layout.is_some())
+                || old_parent.and_then(|p| previous.node(p)).is_some_and(|p| p.layout.is_some());
+            if !in_layout || previous.node(id).is_none() {
+                continue;
+            }
+            let target = current.world_transform(id).as_coeffs();
+            let from = if motion.last_ghost.is_some_and(|(g, _)| g == id) && ghost.is_none() {
+                motion.last_ghost.map(|(_, xy)| xy)
+            } else {
+                motion.positions.get(&id).copied().or_else(|| {
+                    let old = previous.world_transform(id).as_coeffs();
+                    Some((old[4], old[5]))
+                })
+            };
+            if let Some((x, y)) = from
+                && ((x - target[4]).abs() + (y - target[5]).abs()) * ds.view.zoom > 0.5
+            {
+                motion.positions.insert(id, (x, y));
+            }
+        }
+    }
+    motion.last_doc = Some(current.clone());
+    let now = web_time::Instant::now();
+    let dt = motion.last_tick.replace(now).map_or(0.016, |then| now.duration_since(then).as_secs_f64().min(0.05));
+    let blend = if reduce_motion { 1.0 } else { 1.0 - (-dt / 0.075).exp() };
+    motion.positions.retain(|id, pos| {
+        let Some(node) = current.node(*id) else { return false };
+        if node.opacity == 0.0 && ghost.is_some_and(|(g, _)| g == *id) {
+            return false;
+        }
+        let target = current.world_transform(*id).as_coeffs();
+        pos.0 += (target[4] - pos.0) * blend;
+        pos.1 += (target[5] - pos.1) * blend;
+        ((pos.0 - target[4]).abs() + (pos.1 - target[5]).abs()) * ds.view.zoom > 0.35
+    });
+    if motion.positions.is_empty() {
+        if ghost.is_none() {
+            motion.last_ghost = None;
+        }
+        return None;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    let mut painted = (*current).clone();
+    for (id, (x, y)) in &motion.positions {
+        let mut xf = current.world_transform(*id).as_coeffs();
+        xf[4] = *x;
+        xf[5] = *y;
+        let _ = painted.set_world_transform(*id, lizard_geom::Affine::new(xf));
+    }
+    Some(Arc::new(painted))
+}
+
+fn update_layout_ghost(app: &mut LizardApp, ctx: &egui::Context) {
+    let Some((root, _)) = app.session.tool.overlay.drag_ghost else {
+        app.canvas.layout_ghost = None;
+        return;
+    };
+    let Ok(ds) = app.session.ds() else { return };
+    let Some(source) = ds.interaction.as_ref().map(|it| it.doc.clone()) else { return };
+    let same = app.canvas.layout_ghost.as_ref().is_some_and(|g| g.uid == ds.uid && g.root == root && Arc::ptr_eq(&g.source, &source));
+    if !same {
+        let Some(base) = app.canvas.visible_view.as_ref() else { return };
+        let Some(view) = cropped_drag_view(&source, root, base) else { return };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let job_doc = source.clone();
+            let job_view = view.clone();
+            let repaint = ctx.clone();
+            let viewport = ctx.viewport_id();
+            let spawned = std::thread::Builder::new().name("lizard-layout-ghost".into()).spawn(move || {
+                let Some(pixels) = lizard_engine::cmd::file::render_export_area_screen(&job_doc, &[root], job_view.page_rect(), job_view.scale)
+                else {
+                    return;
+                };
+                let image = crate::render_worker::screen_image(&pixels, lizard_color::ColorProfile::Srgb);
+                if tx.send(image).is_ok() {
+                    repaint.request_repaint_of(viewport);
+                }
+            });
+            if spawned.is_err() {
+                return;
+            }
+            app.canvas.layout_ghost = Some(LayoutGhost { uid: ds.uid, root, source, view, texture: None, pending: Some(rx) });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let texture = lizard_engine::cmd::file::render_export_area_screen(&source, &[root], view.page_rect(), view.scale)
+                .map(|pixels| crate::render_worker::screen_image(&pixels, lizard_color::ColorProfile::Srgb))
+                .map(|image| ctx.load_texture("lizard-layout-ghost", image, egui::TextureOptions::LINEAR));
+            app.canvas.layout_ghost = Some(LayoutGhost { uid: ds.uid, root, source, view, texture });
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ghost) = app.canvas.layout_ghost.as_mut()
+        && let Some(rx) = ghost.pending.as_ref()
+    {
+        match rx.try_recv() {
+            Ok(image) => {
+                ghost.texture = Some(ctx.load_texture("lizard-layout-ghost", image, egui::TextureOptions::LINEAR));
+                ghost.pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => ghost.pending = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+}
+
+fn paint_layout_ghost(app: &LizardApp, painter: &egui::Painter) {
+    let Some((root, [dx, dy])) = app.session.tool.overlay.drag_ghost else { return };
+    let Some(ghost) = app.canvas.layout_ghost.as_ref().filter(|g| g.root == root) else { return };
+    let Some(texture) = ghost.texture.as_ref() else { return };
+    let Ok(ds) = app.session.ds() else { return };
+    let cross_layout = ds.doc.node(root).and_then(|n| n.parent) != ghost.source.node(root).and_then(|n| n.parent);
+    let zoom = ds.view.zoom;
+    let tl = app.to_screen(ghost.view.origin.0 + dx, ghost.view.origin.1 + dy);
+    let size = vec2((f64::from(ghost.view.width) / ghost.view.scale * zoom) as f32, (f64::from(ghost.view.height) / ghost.view.scale * zoom) as f32);
+    painter.image(
+        texture.id(),
+        Rect::from_min_size(tl, size),
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        Color32::from_white_alpha(if cross_layout { 145 } else { 255 }),
+    );
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1293,6 +1464,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     // The GPU backend can satisfy the view without calling `request_render`. Keep its camera and
     // texture dimensions current when the window resizes, even if the CPU worker stays idle.
     app.canvas.visible_view = app.session.ds().ok().map(|ds| visible_view_for(&ds.view, rect, ppp));
+    let motion_doc = layout_motion_document(app, &ctx);
+    update_layout_ghost(app, &ctx);
     // Ask the shared-device renderer first. A resident GPU texture already contains this camera
     // and document; scheduling the CPU worker as well duplicates the most expensive work.
     let mut gpu_source_view = None;
@@ -1305,7 +1478,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     {
         // The IME composition lives in a stable transient document until the next edit. Render
         // that document on the GPU as well, keeping the visible caret/underline as egui overlays.
-        let gpu_doc = app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).unwrap_or_else(|| Arc::clone(&ds.doc));
+        let gpu_doc =
+            app.preedit_view().map(|preedit| Arc::clone(&preedit.doc)).or_else(|| motion_doc.clone()).unwrap_or_else(|| Arc::clone(&ds.doc));
         let animation_time = if !app.reduce_motion() && !ds.view.outlines && animated_shader_visible(&gpu_doc, ds.page, &view) {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             Some((app.canvas.shader_started.elapsed().as_secs_f64() * 60.0).floor() / 60.0)
@@ -1377,7 +1551,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     };
     app.canvas.gpu_presented = gpu_texture.is_some();
     if (!app.canvas.dragging || !composing_drag) && gpu_texture.is_none() {
-        request_render(app, worker, &ctx, ppp, max_texture_side);
+        request_render(app, worker, &ctx, ppp, max_texture_side, motion_doc.clone());
     }
     if fast_drag
         && gpu_texture.is_none()
@@ -1465,9 +1639,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     if !painted_drag {
         paint_pending_layer(app, &painter, &ctx, ppp);
     }
+    paint_layout_ghost(app, &painter);
     #[cfg(not(target_arch = "wasm32"))]
     crate::image_vectorize::paint_preview(app, &painter, bg);
-    app.session.tool.labels = overlays(app, &painter, &t);
+    app.session.tool.labels = overlays(app, &painter, &t, motion_doc.as_deref());
     crate::frame_labels::rename_field(app, ui);
     // The zoom tool's area.
     if let (Some(start), Some(p)) = (app.canvas.zoom_drag, ctx.input(|i| i.pointer.hover_pos())) {
@@ -1832,13 +2007,13 @@ mod visible_view_tests {
     }
 }
 
-fn request_render(app: &mut LizardApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32) {
+fn request_render(app: &mut LizardApp, worker: &mut Worker, ctx: &egui::Context, ppp: f32, max_texture_side: u32, motion_doc: Option<Arc<Document>>) {
     let Ok(ds) = app.session.ds() else { return };
     let visible_view = visible_view_for(&ds.view, app.canvas.rect, ppp);
     let (ox, oy) = visible_view.origin;
     let (scale, visible_w, visible_h) = (visible_view.scale, visible_view.width, visible_view.height);
     // The edited text is drawn live (an IME composition included); the caret is an overlay.
-    let doc = app.preedit_view().map(|p| p.doc.clone()).unwrap_or_else(|| ds.doc.clone());
+    let doc = app.preedit_view().map(|p| p.doc.clone()).or(motion_doc).unwrap_or_else(|| ds.doc.clone());
     let outlined = if ds.view.outlines_selection { ds.selection.clone() } else { vec![] };
     let proof = ds.view.proof_srgb && !doc.color_profile.is_srgb();
     let outline_extras = lizard_render::Outline { hidden: ds.view.outline_hidden, bounds: ds.view.outline_bounds, light: false };
@@ -2437,10 +2612,11 @@ fn draw_outline(app: &LizardApp, painter: &egui::Painter, doc: &Document, id: No
 
 /// Everything drawn over the rendered page; returns the frame labels drawn (frame, corners on the
 /// page) for the engine to hit-test.
-fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [Point; 4])> {
+fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens, painted_doc: Option<&Document>) -> Vec<(NodeId, [Point; 4])> {
     let mut labels = Vec::new();
     let Ok(ds) = app.session.ds() else { return labels };
     let doc = ds.doc.clone();
+    let selected_doc = painted_doc.unwrap_or(&doc);
     let page = ds.page;
     let sel = ds.selection.clone();
     let zoom = ds.view.zoom;
@@ -2548,7 +2724,10 @@ fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId
         swap_highlight(app, painter, &doc, t);
     }
     if let Some([x0, y0, x1, y1]) = ov.insert_line {
-        painter.line_segment([app.to_screen(x0, y0), app.to_screen(x1, y1)], stroke(accent(painter), 2.0));
+        let line = [app.to_screen(x0, y0), app.to_screen(x1, y1)];
+        painter.line_segment(line, stroke(Color32::from_black_alpha(190), 5.0));
+        let purple = if t.dark { Color32::from_rgb(0xB5, 0x96, 0xFF) } else { Color32::from_rgb(0x62, 0x43, 0xDE) };
+        painter.line_segment(line, stroke(purple, 3.0));
     }
     if let Some([x0, y0, x1, y1]) = ov.drop_cell {
         let r = Rect::from_two_pos(app.to_screen(x0, y0), app.to_screen(x1, y1));
@@ -2582,15 +2761,24 @@ fn overlays(app: &LizardApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId
     }
     // Selection.
     let editing = ds.text_edit.clone();
-    if !sel.is_empty() && editing.is_none() && ds.vector_edit.is_none() {
+    if let Some((id, [dx, dy])) = app.session.tool.overlay.drag_ghost
+        && let Some(source) = ds.interaction.as_ref().map(|it| &it.doc)
+        && let Some(mut q) = node_quad(app, source, id)
+    {
+        let offset = vec2((dx * zoom) as f32, (dy * zoom) as f32);
+        for point in &mut q {
+            *point += offset;
+        }
+        quad(painter, q, stroke(accent(painter), 1.0));
+    } else if !sel.is_empty() && editing.is_none() && ds.vector_edit.is_none() {
         let col = if sel.iter().any(|i| outline_colour(&doc, *i, accent(painter)) == COMPONENT) { COMPONENT } else { accent(painter) };
         for id in &sel {
-            draw_outline(app, painter, &doc, *id, stroke(col, 1.0));
+            draw_outline(app, painter, selected_doc, *id, stroke(col, 1.0));
         }
         // The shape builder reshapes by regions: no transform box.
         if app.session.tool.tool != ToolId::ShapeBuilder
-            && let Some(b) = selection_box(&doc, &sel)
-            && let Some((_, w, h)) = selection_frame(&doc, &sel)
+            && let Some(b) = selection_box(selected_doc, &sel)
+            && let Some((_, w, h)) = selection_frame(selected_doc, &sel)
         {
             let is_line = sel.len() == 1 && matches!(sel.first().and_then(|i| doc.node(*i)).map(|n| &n.kind), Some(NodeKind::Line));
             let mut label = if is_line { fmt(w) } else { format!("{} × {}", fmt(w), fmt(h)) };

@@ -294,6 +294,10 @@ pub struct Overlay {
     pub drop_target: Option<NodeId>,
     /// Auto layout insertion indicator (x0, y0, x1, y1).
     pub insert_line: Option<[f64; 4]>,
+    /// Slot used when a layer is previewed outside its destination layout until mouse-up.
+    pub drop_index: Option<usize>,
+    /// Layer drawn under the pointer while its layout slot stays empty (id, world delta).
+    pub drag_ghost: Option<(NodeId, [f64; 2])>,
     /// The instance an Alt-drop of a component from the Assets panel would swap (highlighted).
     pub swap_target: Option<NodeId>,
     /// Auto layout grid cell a drag would drop into (x0, y0, x1, y1).
@@ -1484,7 +1488,10 @@ impl Session {
                 let page = self.page()?;
                 let mut drop_cell = None;
                 let mut drop_target = None;
+                let mut drop_index = None;
                 let mut in_flow = false;
+                let mut ghost = false;
+                let mut external_line = None;
                 // Placed in a row or column: (is it a column, its gap) for the insertion line.
                 let mut slot_axis: Option<(bool, f64)> = None;
                 self.preview(|doc, sel| {
@@ -1513,6 +1520,7 @@ impl Session {
                     }
                     let p = ev.p();
                     let home = moving.first().and_then(|i| doc.node(*i)).and_then(|n| n.parent);
+                    let from_flow = home.and_then(|h| doc.node(h)).is_some_and(|n| n.layout.is_some());
                     // Absolute children of an auto layout frame stay in it, and so do the layers of
                     // groups, boolean groups and instances ([`crate::drop::keeps_layers`]); the
                     // rest may change parent.
@@ -1539,6 +1547,22 @@ impl Session {
                         let cell = if mode == LayoutMode::Grid { crate::drop::grid_cell_at(doc, target, p) } else { None };
                         let idx =
                             if mode == LayoutMode::Grid { 0 } else { crate::drop::auto_layout_slot(doc, target, p, &moving).map_or(0, |(i, _)| i) };
+                        if from_flow && !dup && moving.len() == 1 && home != Some(target) && mode != LayoutMode::Grid {
+                            // Crossing layout boundaries removes the layer from its old flow
+                            // immediately, but the destination only receives it on mouse-up.
+                            // Its own image is drawn by the canvas under the pointer.
+                            external_line = crate::drop::auto_layout_slot(doc, target, p, &moving).and_then(|(_, line)| line);
+                            for m in &moving {
+                                doc.reparent(*m, page, None)?;
+                                move_world(doc, *m, d.x, d.y)?;
+                                doc.get_mut(*m)?.opacity = 0.0;
+                            }
+                            drop_target = Some(target);
+                            drop_index = Some(idx);
+                            in_flow = true;
+                            ghost = true;
+                            return Ok(());
+                        }
                         for m in &moving {
                             if doc.get(*m)?.parent != Some(target) {
                                 doc.reparent(*m, target, None)?;
@@ -1560,6 +1584,12 @@ impl Session {
                         }
                         drop_target = (Some(target) != home).then_some(target);
                         in_flow = true;
+                        if from_flow && !dup && moving.len() == 1 && (home == Some(target) || mode != LayoutMode::Grid) {
+                            for m in &moving {
+                                doc.get_mut(*m)?.opacity = 0.0;
+                            }
+                            ghost = true;
+                        }
                         return Ok(());
                     }
                     // A free move. Layers dragged out of an auto layout flow leave it (onto the page
@@ -1570,6 +1600,10 @@ impl Session {
                             doc.reparent(*m, page, None)?;
                         }
                         move_world(doc, *m, d.x, d.y)?;
+                        if from_flow && !dup && moving.len() == 1 {
+                            doc.get_mut(*m)?.opacity = 0.0;
+                            ghost = true;
+                        }
                         if make_variant && let Some(set) = crate::components::variant_set(doc, *m) {
                             crate::cmd::component::fit_set(doc, set);
                         }
@@ -1578,6 +1612,13 @@ impl Session {
                     Ok(())
                 })?;
                 let placed = if dup { self.selection() } else { ids };
+                if drop_index.is_some()
+                    && let Some(target) = drop_target
+                    && let Some((index, line)) = crate::drop::auto_layout_slot(self.doc()?, target, ev.p(), &placed)
+                {
+                    drop_index = Some(index);
+                    external_line = crate::drop::line_in_gap(self.doc()?, target, index, &placed).or(line);
+                }
                 // Snapping guides mean nothing while the layout places the layers; with Alt held,
                 // live distances to the neighbours replace them.
                 self.tool.overlay.guides = if in_flow {
@@ -1588,12 +1629,16 @@ impl Session {
                 } else {
                     guides
                 };
-                // The preview already shows the layers in their slot: the line marks it there, in
-                // the middle of the gap before them (clear of the selection box).
-                self.tool.overlay.insert_line = slot_axis.and_then(|(vertical, gap)| {
-                    let off = if gap.is_finite() { (gap / 2.0).clamp(3.0, 24.0) } else { 3.0 };
-                    self.doc().ok()?.bounds_of(&placed).map(|b| crate::drop::line_before(b, vertical, off))
-                });
+                // A reordering reserves its slot; a cross-layout drag keeps the target empty and
+                // marks the future insertion point until mouse-up.
+                self.tool.overlay.insert_line = slot_axis
+                    .and_then(|(vertical, gap)| {
+                        let off = if gap.is_finite() { (gap / 2.0).clamp(3.0, 24.0) } else { 3.0 };
+                        self.doc().ok()?.bounds_of(&placed).map(|b| crate::drop::line_before(b, vertical, off))
+                    })
+                    .or(external_line);
+                self.tool.overlay.drop_index = drop_index;
+                self.tool.overlay.drag_ghost = if ghost && placed.len() == 1 { Some((placed[0], [d.x, d.y])) } else { None };
                 self.tool.overlay.drop_cell = drop_cell;
                 self.tool.overlay.drop_target = drop_target;
                 self.tool.overlay.cursor = if self.refused(&placed, true) {
@@ -1982,7 +2027,9 @@ impl Session {
         self.tool.overlay.arc = None;
         self.tool.overlay.shape = None;
         self.tool.overlay.measure_box = None;
+        let drop_index = self.tool.overlay.drop_index.take();
         self.tool.overlay.insert_line = None;
+        self.tool.overlay.drag_ghost = None;
         self.tool.overlay.drop_cell = None;
         let drop_target = self.tool.overlay.drop_target.take();
         match g {
@@ -1999,6 +2046,15 @@ impl Session {
                         moving.iter().any(|m| doc.node(*m).and_then(|n| n.parent).and_then(|p| doc.node(p)).is_some_and(|p| p.layout.is_some()));
                     let target = drop_target.unwrap_or(page);
                     let current = moving.first().and_then(|m| doc.node(*m)).and_then(|n| n.parent);
+                    // The invisible drag image is a preview detail, never part of the edit.
+                    if let Some(before) = self.ds()?.interaction.as_ref().map(|it| it.doc.clone()) {
+                        let ds = self.ds_mut()?;
+                        for m in &moving {
+                            if let (Some(source), Some(now)) = (before.node(*m), ds.doc_mut().node_mut(*m)) {
+                                now.opacity = source.opacity;
+                            }
+                        }
+                    }
                     if !in_al && current != Some(target) {
                         let ds = self.ds_mut()?;
                         let before = ds.doc.clone();
@@ -2010,7 +2066,7 @@ impl Session {
                                 continue;
                             }
                             // A layer can't go into itself; it stays where it is.
-                            let _ = d.reparent(*m, target, None);
+                            let _ = d.reparent(*m, target, drop_index);
                         }
                         crate::normalize(ds.doc_mut(), &before);
                     }

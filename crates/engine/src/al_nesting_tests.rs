@@ -115,13 +115,20 @@ fn drag_into_a_nested_auto_layout_frame_takes_the_slot_there() {
     assert_eq!(ov.drop_target, Some(n.inner), "the receiving frame is outlined");
     let line = ov.insert_line.expect("insertion line");
     assert!(line[0] == line[2] && line[0] < bounds(&s, n.y).x0, "a vertical line before y: {line:?}");
-    // The preview shows a in its slot already; the line marks it there, mid-gap (gap 10).
-    assert_eq!(line[0], bounds(&s, n.a).x0 - 5.0);
+    assert_eq!(line[0], bounds(&s, n.y).x0 - 5.0, "the line is centred in the 10-unit gap");
+    // The source closes immediately. The destination shows a line and keeps the dragged item
+    // outside its flow until release, so the pointer can carry a translucent image of it.
+    assert_eq!(parent(&s, n.a), s.page().unwrap());
+    assert_eq!(kids(&s, n.inner), vec![n.x, n.y]);
+    assert_eq!(s.tool.overlay.drag_ghost.map(|(id, _)| id), Some(n.a));
+    assert_eq!(s.tool.overlay.drop_index, Some(1));
+    assert_eq!(s.doc().unwrap().node(n.a).unwrap().opacity, 0.0);
     assert!(ov.guides.is_empty());
     release(&mut s, to);
     assert_eq!(parent(&s, n.a), n.inner);
     assert_eq!(kids(&s, n.inner), vec![n.x, n.a, n.y]);
     assert_eq!(kids(&s, n.outer), vec![n.b, n.inner]);
+    assert_eq!(s.doc().unwrap().node(n.a).unwrap().opacity, 1.0);
     // Laid out in the row: x, then a, then y.
     assert!(bounds(&s, n.a).x0 > bounds(&s, n.x).x1 && bounds(&s, n.y).x0 > bounds(&s, n.a).x1);
     let ov = &s.tool.overlay;
@@ -131,6 +138,23 @@ fn drag_into_a_nested_auto_layout_frame_takes_the_slot_there() {
     s.undo().unwrap();
     assert_eq!(kids(&s, n.outer), vec![n.a, n.b, n.inner]);
     assert_eq!(kids(&s, n.inner), vec![n.x, n.y]);
+}
+
+#[test]
+fn reordering_in_one_layout_reserves_a_slot_while_the_drag_image_follows_the_pointer() {
+    let mut s = Session::new();
+    let n = nest(&mut s);
+    select(&mut s, n.b);
+    let from = bounds(&s, n.b).center();
+    let to = Point::new(bounds(&s, n.a).center().x, bounds(&s, n.a).y0 + 2.0);
+    drag_to(&mut s, from, to);
+    assert_eq!(kids(&s, n.outer), vec![n.b, n.a, n.inner]);
+    assert_eq!(s.tool.overlay.drag_ghost.map(|(id, _)| id), Some(n.b));
+    assert_eq!(s.doc().unwrap().node(n.b).unwrap().opacity, 0.0);
+    release(&mut s, to);
+    assert_eq!(kids(&s, n.outer), vec![n.b, n.a, n.inner]);
+    assert_eq!(s.doc().unwrap().node(n.b).unwrap().opacity, 1.0);
+    assert!(s.tool.overlay.drag_ghost.is_none());
 }
 
 #[test]
