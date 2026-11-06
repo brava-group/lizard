@@ -312,6 +312,7 @@ pub fn document(s: &Session, depth: usize, all_pages: bool) -> Value {
     let pages: Vec<Value> =
         doc.pages.iter().map(|p| if all_pages || *p == ds.page { node_json(doc, *p, depth) } else { node_json(doc, *p, 0) }).collect();
     json!({
+        "documentId": ds.uid,
         "name": doc.name,
         "path": ds.path,
         "dirty": ds.is_dirty(),

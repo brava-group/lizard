@@ -192,7 +192,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "inspect_document",
             "Inspect document",
-            "The active document as JSON: name, path, dirty flag, current page, selection, the current page's layer tree (id, name, type, x/y relative to the parent frame (groups don't count), width, height, absoluteBounds in page coordinates, fills, strokes, effects, cornerRadius, layout, sizing, text properties, component links, overrides, bound variables), other pages summarised, styles, variable count and the undo history. Use it to verify every change.",
+            "The active document as JSON: documentId, name, path, dirty flag, currentPage, selection, the current page's layer tree (id, name, type, x/y relative to the parent frame (groups don't count), width, height, absoluteBounds in page coordinates, fills, strokes, effects, cornerRadius, layout, sizing, text properties, component links, overrides, bound variables), other pages summarised, styles, variable count and the undo history. Compare documentId and currentPage with the Lizard conversation snapshot before editing; use this tool to verify every change.",
             obj(
                 json!({"depth": int("Tree depth for the current page (default 4)"), "allPages": boolean("Expand every page, not only the current one")}),
                 &[],

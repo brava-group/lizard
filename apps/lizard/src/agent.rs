@@ -750,7 +750,20 @@ fn start_codex_with_program(program: &std::ffi::OsStr, document: u64, conversati
     let mcp_command = format!("mcp_servers.lizard.command={}", serde_json::to_string(cli).map_err(|e| e.to_string())?);
     let mcp_args = format!("mcp_servers.lizard.args=[\"mcp\",\"--attach\",\"{port}\"]");
     let mut child = command_with_runtime(program)
-        .args(["app-server", "--stdio", "-c", &mcp_command, "-c", &mcp_args])
+        .args([
+            "app-server",
+            "--stdio",
+            "-c",
+            &mcp_command,
+            "-c",
+            &mcp_args,
+            "-c",
+            "mcp_servers.lizard.enabled=true",
+            "-c",
+            "mcp_servers.figcraft.enabled=false",
+            "-c",
+            "mcp_servers.figcraft-app.enabled=false",
+        ])
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1202,6 +1215,9 @@ for line in sys.stdin:
 import json, sys
 assert any('mcp_servers.lizard.command=' in value for value in sys.argv)
 assert any('mcp_servers.lizard.args=' in value and '7777' in value for value in sys.argv)
+assert 'mcp_servers.lizard.enabled=true' in sys.argv
+assert 'mcp_servers.figcraft.enabled=false' in sys.argv
+assert 'mcp_servers.figcraft-app.enabled=false' in sys.argv
 def send(value): print(json.dumps(value), flush=True)
 for line in sys.stdin:
  msg=json.loads(line)

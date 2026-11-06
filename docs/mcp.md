@@ -140,6 +140,8 @@ Or in a project's `.mcp.json`:
 ## Conventions agents must know
 
 - Coordinates are **page units** (1 unit = 1 px at 100% zoom), x right, **y down**.
+- `inspect_document` includes `documentId` and `currentPage` so an attached agent can verify
+  that its tool calls target the open document and page before editing.
 - `create_node` and `set_properties` take `x`/`y` **relative to the parent frame** (the page when
   there is none, so they are page coordinates then). Groups and boolean groups have no coordinate
   space of their own: a layer in a group is placed in the frame (or on the page) the group is in.

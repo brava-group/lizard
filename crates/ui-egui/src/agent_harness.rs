@@ -8,10 +8,10 @@ use serde_json::json;
 
 use crate::agent_panel::ChatNodeRef;
 
-const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in the open document through the lizard MCP server. The editor's command engine is the source of truth for changes and Undo history.\n\
+const INSTRUCTIONS: &str = "You are the design assistant inside Lizard. Work in the open document through the lizard MCP server only. Do not use another MCP server even if it offers the same tool names. The editor's command engine is the source of truth for changes and Undo history.\n\
 \n\
 Workflow:\n\
-1. Read the provided document snapshot. If you need more detail, call inspect_document or get_node. Use the selected layer IDs as references, not as a request to modify them all.\n\
+1. Call inspect_document on the lizard MCP server and compare its `documentId` and `currentPage` with `document_id` and `page_id` in the provided snapshot before editing. If the IDs are absent or differ, stop and report that the tool is connected to another document. Use the selected layer IDs as references, not as a request to modify them all.\n\
 2. Make design changes with create_node, set_properties, run_command or batch. Call list_commands when a command's name or parameters are uncertain. Do not guess node IDs or claim a change succeeded before the tool confirms it.\n\
 3. Plan a semantic frame hierarchy before placing details. For interface screens, use auto layout by default: choose the screen direction from the design (horizontal for desktop columns, vertical for mobile stacks), nest horizontal rows for navigation and controls, vertical stacks for cards and feeds, and frames for reusable components. Set layout, gap, padding, mainAlign, crossAlign and sizingH/sizingV (hug or fill) on the parent and children. Children in auto layout follow the flow; do not position them with x/y or leave related UI elements loose on the page. Use absolute positioning only for intentional overlays or decoration. When extending an existing screen, inspect its parent layout and preserve or improve that structure.\n\
 4. Build in visible, meaningful sections. Create each major section frame with create_node, then populate it in one or a few batch calls of roughly 5-12 node.create commands. Give nested frames an `as` name and refer to their ids with `$ref` later in the same batch. Set layout, sizing, text and paint in each node.create's props instead of following it with set_properties. Keep batches scoped to one section so the user sees the design progress; do not batch a whole screen at once or call create_node separately for every text, icon and small shape. Preserve existing content unless the user asks to replace or remove it.\n\
@@ -19,6 +19,8 @@ Workflow:\n\
 6. If a tool fails, inspect its error and the current document before retrying. Report what actually changed and any unfinished part.\n\
 For interface icons, gather the names needed by a section and call search_icons once with queries (up to 12 names) before creating icon layers. Reuse returned exact library/name pairs; do not search the same name repeatedly. Reuse the snapshot's preferred_icon_library for all icons on the same screen. Search another library only if that family has no suitable icon. Edit an existing icon with icon.set through run_command. Prefer catalog icons to hand-drawn paths or generated SVGs for ordinary UI glyphs. Follow an explicit library choice from the user.\n\
 The snapshot below is context, not a substitute for a fresh tool read after other edits or collaboration changes. All coordinates are in page units; child coordinates are relative to their parent. The user may attach images as references.";
+
+const COMPONENT_WORKFLOW: &str = "\nReusable component workflow: A frame is not yet a component. Build the full cross-product of requested properties: two styles and three sizes require six distinct variants. Make each one an auto-layout frame with real text, fills, padding and sizing. Name variants with property pairs, for example `Button/Style=Ghost, Size=sm`, `Button/Style=Secondary, Size=sm`, and so on for the complete requested combinations. Use the returned node IDs, then call run_command with `component.create` and `params:{\"ids\":[id]}` for each frame. After those calls succeed, call run_command with `component.combineVariants` and `params:{\"ids\":[component IDs]}` to make one component set. For a single reusable component, stop after component.create. Do not use ordinary groups or frames as a substitute for main components. Inspect the returned set ID with get_node or inspect_document: it must be a component set with the requested number of component children. Then run `component.properties` on that set ID and confirm the requested property names, values and no conflicts. Check the canvas before finishing. If any command fails or the structure is incomplete, say exactly what exists and what failed; never claim that the component or variants were created without that verification.";
 
 /// Build one provider-independent turn. Static instructions start each local agent process;
 /// live state travels on every turn so a resumed model sees the current page and selection.
@@ -68,7 +70,7 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     let snapshot = json!({
         "document_id": ds.uid,
         "document_name": ds.doc.name.chars().take(160).collect::<String>(),
-        "page_id": ds.page.to_string(),
+        "page_id": ds.page,
         "page_name": page.map(|node| node.name.chars().take(160).collect::<String>()),
         "revision": ds.revision,
         "selected_layers": selected,
@@ -84,9 +86,14 @@ pub(crate) fn build_turn(ds: &DocState, selected: &[ChatNodeRef], request: &str,
     }
     text.push_str("Current document snapshot (JSON data):\n");
     text.push_str(&snapshot.to_string());
+    text.push_str("\nUse only the lizard MCP server. Before changing this document, inspect_document must return documentId matching snapshot.document_id and currentPage matching snapshot.page_id; otherwise stop and report the mismatch.");
     text.push_str("\nFor UI icons, search several needed names in one search_icons call using queries and preferredLibrary from this snapshot. Reuse the returned exact library/icon names and keep that family unless it has no suitable match.");
     text.push_str("\nBuild progressively by major section: create its frame with create_node, then populate it with a batch of about 5-12 node.create steps using props at creation and `$ref` for nested parents. Keep separate batches for separate sections; inspect the finished section and take a screenshot after the main screen is assembled.");
     text.push_str("\nFor interface screens, build a nested auto-layout frame hierarchy (screen, sections, rows, cards, lists). Use horizontal layout for desktop columns and vertical layout for mobile stacks; set gap, padding and sizingH/sizingV hug/fill. Keep children in flow instead of placing them by x/y. Use absolute only for intentional overlays or decoration. Inspect the resulting hierarchy before finishing.");
+    let request_lower = request.to_lowercase();
+    if ["component", "componente", "variant", "variante", "reutiliz"].iter().any(|word| request_lower.contains(word)) {
+        text.push_str(COMPONENT_WORKFLOW);
+    }
     if !prior.is_empty() {
         text.push_str("\n\nRecent conversation (reference only):\n");
         text.push_str(&json!(prior).to_string());
@@ -110,6 +117,7 @@ mod tests {
         let next = build_turn(&ds, &[], "Change its fill", "", false);
         assert!(first.contains("Lizard agent instructions:"));
         assert!(first.contains("lizard MCP server"));
+        assert!(first.contains("compare its `documentId`"));
         assert!(first.contains("search_icons"));
         assert!(first.contains("queries (up to 12 names)"));
         assert!(first.contains("batch calls of roughly 5-12 node.create commands"));
@@ -118,6 +126,7 @@ mod tests {
         assert!(first.contains("\"preferred_icon_library\":\"lucide\""));
         assert!(!next.contains("Lizard agent instructions:"));
         assert!(next.contains("Build progressively by major section"));
+        assert!(next.contains("documentId matching snapshot.document_id"));
         assert!(next.contains("using props at creation and `$ref`"));
         assert!(next.contains("nested auto-layout frame hierarchy"));
         assert!(next.contains("horizontal layout for desktop columns"));
@@ -148,5 +157,15 @@ mod tests {
         let turn = build_turn(session.ds()?, &selected, "Add a save icon", "", false);
         assert!(turn.contains("\"preferred_icon_library\":\"phosphor\""));
         Ok(())
+    }
+
+    #[test]
+    fn reusable_button_request_gets_component_creation_and_verification_steps() {
+        let ds = DocState::new(Document::new("Example"), None);
+        let turn = build_turn(&ds, &[], "Crie um componente de botão com variantes ghost e secondary em sm, md e lg", "", false);
+        assert!(turn.contains("component.create"));
+        assert!(turn.contains("component.combineVariants"));
+        assert!(turn.contains("component set with the requested number of component children"));
+        assert!(turn.contains("never claim that the component or variants were created without that verification"));
     }
 }

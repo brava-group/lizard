@@ -1,5 +1,7 @@
 //! The Agent sidebar and its conversation state.
 
+use std::borrow::Cow;
+
 use crate::primitives::TooltipResponseExt as _;
 use base64::Engine as _;
 use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -1171,6 +1173,16 @@ fn chat_title(title: &str) -> &str {
     if title == "New chat" || title == "Novo chat" { tr("New chat") } else { title }
 }
 
+fn receipt_title(title: &str) -> Cow<'_, str> {
+    if title.contains("screenshot") || title.contains("execute") {
+        Cow::Borrowed(tr("Designed"))
+    } else if let Some(tool) = title.strip_prefix("figcraft · ").or_else(|| title.strip_prefix("figcraft-app · ")) {
+        Cow::Owned(format!("{} · {tool}", tr("External MCP")))
+    } else {
+        Cow::Borrowed(title)
+    }
+}
+
 fn connection_detail(connection: &AgentConnection, kind: AgentKind) -> String {
     if connection.detail == "checking" {
         tr("Checking account…").to_owned()
@@ -1220,6 +1232,23 @@ fn tool_icon(title: &str) -> ToolIcon {
 fn receipt_is_compact(tool: &ChatTool, preview: Option<&AgentPreview>) -> bool {
     (tool.title.contains("create_node") && tool.output.is_none() && tool.content.is_empty() && preview.is_none())
         || (tool.input.is_none() && tool.output.is_none() && tool.content.is_empty() && preview.is_none())
+}
+
+fn attempted_edit_without_document_change(message: &ChatMessage) -> bool {
+    message.work_seconds.is_some()
+        && !message.stopped
+        && message.undo_after == message.undo_before
+        && message.tools.iter().any(|tool| {
+            if tool.status != "completed" {
+                return false;
+            }
+            let name = tool.title.rsplit_once('·').map_or(tool.title.as_str(), |(_, name)| name.trim());
+            matches!(name, "create_node" | "set_properties" | "batch")
+                || (name == "run_command"
+                    && tool.input.as_ref().and_then(|input| input.get("command")).and_then(serde_json::Value::as_str).is_some_and(|command| {
+                        matches!(command, "component.create" | "component.createMultiple" | "component.combineVariants" | "component.addVariant")
+                    }))
+        })
 }
 
 fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&AgentPreview>, max_width: f32) {
@@ -1623,12 +1652,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                 let Some(tool) = message.tools.get(*tool_index) else { continue };
                                 let preview = if *tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
                                 ui.add_space(if receipt_is_compact(tool, preview) { 4.0 } else { 9.0 });
-                                let title = if tool.title.contains("screenshot") || tool.title.contains("execute") {
-                                    tr("Designed")
-                                } else {
-                                    tool.title.as_str()
-                                };
-                                receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), title, tool, preview, content_width);
+                                let title = receipt_title(&tool.title);
+                                receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), &title, tool, preview, content_width);
                             }
                             ChatPart::Text(text) if !text.is_empty() => {
                                 ui.add_space(9.0);
@@ -1652,6 +1677,14 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                     }
                     if message.stopped {
                         ui.label(egui::RichText::new(tr("Stopped")).size(crate::theme::ui_font_size(11.0)).color(secondary));
+                    }
+                    if attempted_edit_without_document_change(message) {
+                        ui.add_space(9.0);
+                        ui.label(
+                            egui::RichText::new(tr("No changes were made to the open document."))
+                                .size(crate::theme::ui_font_size(11.0))
+                                .color(secondary),
+                        );
                     }
                     if let Some(seconds) = message.work_seconds {
                         ui.add_space(9.0);
@@ -2186,6 +2219,22 @@ mod tests {
         assert!(!receipt_is_compact(&failed_create, None));
         let inspect = ChatTool { title: "lizard · inspect_document".into(), input: Some(serde_json::json!({"scope": "all"})), ..Default::default() };
         assert!(!receipt_is_compact(&inspect, None));
+    }
+
+    #[test]
+    fn old_external_mcp_receipts_keep_their_tool_without_the_previous_brand() {
+        assert_eq!(receipt_title("figcraft · list_commands"), "External MCP · list_commands");
+        assert_eq!(receipt_title("figcraft-app · inspect_document"), "External MCP · inspect_document");
+        assert_eq!(receipt_title("lizard · create_node"), "lizard · create_node");
+    }
+
+    #[test]
+    fn completed_external_edit_without_local_undo_is_reported_as_unapplied() {
+        let mut message = ChatMessage { work_seconds: Some(87), undo_before: 58, undo_after: 58, ..Default::default() };
+        message.tools.push(ChatTool { title: "figcraft · batch".into(), status: "completed".into(), ..Default::default() });
+        assert!(attempted_edit_without_document_change(&message));
+        message.undo_after = 59;
+        assert!(!attempted_edit_without_document_change(&message));
     }
 
     #[test]

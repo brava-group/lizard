@@ -65,6 +65,15 @@ fn gradient(kind: GradientKind, from: (f64, f64), to: (f64, f64)) -> Paint {
 }
 
 #[test]
+fn document_inspection_identifies_the_attached_document_and_page() {
+    let s = Session::new();
+    let ds = s.ds().unwrap();
+    let result = crate::inspect::document(&s, 0, false);
+    assert_eq!(result["documentId"], json!(ds.uid));
+    assert_eq!(result["currentPage"], json!(ds.page));
+}
+
+#[test]
 fn layout_rows_report_size_position_and_look() {
     let mut s = Session::new();
     let f = id(&ex(&mut s, "frame.create", json!({"x": 100, "y": 100, "width": 400, "height": 300})));
