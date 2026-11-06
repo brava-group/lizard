@@ -522,29 +522,11 @@ fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
     });
     ui.add_space(12.0);
     widgets::separator(ui);
-    // Local variables & styles.
-    let vars = doc.variables.variables.iter().filter(|v| !lizard_engine::library::is_remote_variable(doc, &v.id)).count();
-    widgets::section_header(ui, tr("Local variables"), &[], vars == 0);
-    row(ui, 32.0, |ui| {
-        let label = trf("Open variables ({count})", &[("count", &vars)]);
-        let r = Button::new(&label)
-            .variant(ButtonVariant::Input)
-            .align(ButtonAlign::Start)
-            .width(crate::primitives::ControlWidth::Fill)
-            .leading(Icon::Styles)
-            .trailing(Icon::Chevron)
-            .trailing_at_end(true)
-            .show(ui);
-        if r.clicked() {
-            app.ui.preferences = false;
-            app.ui.palette = None;
-            app.ui.variables.get_or_insert_with(Default::default);
-        }
-    });
-    ui.add_space(12.0);
-    widgets::separator(ui);
+    let has_styles = lizard_engine::library::local_styles(doc).next().is_some();
     crate::style_picker::local_styles(app, ui, doc);
-    ui.add_space(20.0);
+    if has_styles {
+        ui.add_space(12.0);
+    }
     widgets::separator(ui);
     crate::export_panel::page_section(app, ui, doc, page);
 }
