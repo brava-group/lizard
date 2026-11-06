@@ -128,6 +128,8 @@ impl Tokens {
     pub fn lizard(dark: bool) -> Self {
         let mut tokens = Self::from_recipe(dark, LIZARD_THEME);
         tokens.picker_surface = tokens.panel;
+        // Keep the product's primary buttons and selected tools white in both themes.
+        tokens.accent_on = Color32::WHITE;
         tokens
     }
 
