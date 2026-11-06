@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::a11y::{self, Region, RowInfo, Tip};
 use crate::i18n::{tr, trf, trn};
 use crate::icons::{self, HeaderIcon, Icon, NavIcon};
+use crate::primitives::{Menu, MenuItem};
 use crate::theme::{ColorRole, Tokens, regular, semibold};
 use crate::{LeftTab, LizardApp};
 
@@ -155,7 +156,7 @@ mod component_color_tests {
     }
 }
 
-/// The slim icon rail at the far left: main menu, File, Agent, Assets, Variables.
+/// The slim icon rail at the far left, with document tools above and account controls below.
 pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let r = ui.max_rect();
@@ -224,6 +225,51 @@ pub fn rail(app: &mut LizardApp, ui: &mut Ui) {
             }
         }
         y += 40.0;
+    }
+
+    let footer_y = (r.bottom() - 128.0).max(y + 16.0);
+    separator(ui, footer_y - 16.0);
+    for (index, (icon, label)) in [
+        (NavIcon::Shortcuts, tr("Keyboard shortcuts")),
+        (NavIcon::Theme, tr("Change theme")),
+        (NavIcon::Profile, tr("Profile")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let hit = Rect::from_min_size(pos2(r.min.x, footer_y + index as f32 * 40.0), vec2(r.width(), 40.0));
+        let ir = Rect::from_center_size(hit.center(), vec2(32.0, 32.0));
+        let resp = ui.interact(hit, ui.id().with(("rail_footer", index)), Sense::click()).tip(&label);
+        if resp.hovered() {
+            ui.painter().rect_filled(ir, CornerRadius::same(5), t.hover);
+        }
+        icons::paint_nav(ui.painter(), Rect::from_center_size(ir.center(), vec2(20.0, 20.0)), icon, ink);
+        if icon == NavIcon::Theme {
+            a11y::menu_button(&resp, &label, a11y::menu_open(&resp));
+            let current = app.session.prefs.theme.clone();
+            Menu::popup(&resp).width(164.0).align(egui::RectAlign::RIGHT_END).show(|ui| {
+                for (choice, value, command) in [
+                    (tr("Light"), "light", "view.themeLight"),
+                    (tr("Dark"), "dark", "view.themeDark"),
+                    (tr("System"), "system", "view.themeSystem"),
+                ] {
+                    if MenuItem::new(&choice).checked(current.eq_ignore_ascii_case(value)).show(ui).clicked() {
+                        app.run(command, json!({}));
+                        ui.close();
+                    }
+                }
+            });
+        } else {
+            a11y::button(&resp, &label);
+            if resp.clicked() {
+                app.ui.preferences = true;
+                if icon == NavIcon::Shortcuts {
+                    app.ui.settings_shortcuts_requested = true;
+                } else {
+                    app.ui.settings_profile_requested = true;
+                }
+            }
+        }
     }
 }
 

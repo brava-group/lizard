@@ -213,12 +213,15 @@ const LAYER_SVGS: [(&str, [f32; 2]); 22] = [
     (include_str!("../assets/layer-group.svg"), [16.0, 16.0]),
     (include_str!("../assets/layer-collapse.svg"), [24.0, 24.0]),
 ];
-const NAV_SVGS: [(&str, [f32; 2]); 5] = [
+const NAV_SVGS: [(&str, [f32; 2]); 8] = [
     (include_str!("../assets/nav-logo.svg"), [85.84124, 94.0]),
     (include_str!("../assets/nav-file.svg"), [10.0, 14.0]),
     (include_str!("../assets/nav-agent.svg"), [14.0, 14.0]),
     (include_str!("../assets/nav-assets.svg"), [14.0, 14.0]),
     (include_str!("../assets/nav-variables.svg"), [12.0, 13.23847]),
+    (include_str!("../assets/settings-shortcuts.svg"), [24.0, 24.0]),
+    (include_str!("../assets/nav-theme.svg"), [20.0, 20.0]),
+    (include_str!("../assets/nav-profile.svg"), [24.0, 24.0]),
 ];
 const HEADER_SVGS: [(&str, [f32; 2]); 14] = [
     (include_str!("../assets/header-collapse-panel.svg"), [24.0, 24.0]),
@@ -996,6 +999,9 @@ pub(super) fn paint_nav(painter: &Painter, rect: Rect, icon: super::NavIcon, col
         super::NavIcon::Agent => 2,
         super::NavIcon::Assets => 3,
         super::NavIcon::Variables => 4,
+        super::NavIcon::Shortcuts => 5,
+        super::NavIcon::Theme => 6,
+        super::NavIcon::Profile => 7,
     };
     if let Some(Some(geometry)) = icons.get(index) {
         if icon == super::NavIcon::Logo {

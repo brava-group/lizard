@@ -383,8 +383,12 @@ fn settings_modal(app: &mut LizardApp, ctx: &Context, t: &Tokens) {
     let id = Id::new("settings_modal");
     let section_id = id.with("section");
     let mut section = ctx.data(|data| data.get_temp::<SettingsSection>(section_id)).unwrap_or_default();
-    if std::mem::take(&mut app.ui.settings_shortcuts_requested) {
+    let shortcuts_requested = std::mem::take(&mut app.ui.settings_shortcuts_requested);
+    let profile_requested = std::mem::take(&mut app.ui.settings_profile_requested);
+    if shortcuts_requested {
         section = SettingsSection::Shortcuts;
+    } else if profile_requested {
+        section = SettingsSection::Sharing;
     }
     let agent_state_id = Id::new("settings_agent_state");
     let mut agent_state = ctx.data(|data| data.get_temp::<AgentSettingsState>(agent_state_id)).unwrap_or_default();

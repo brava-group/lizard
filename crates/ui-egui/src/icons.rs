@@ -153,6 +153,9 @@ pub enum NavIcon {
     Agent,
     Assets,
     Variables,
+    Shortcuts,
+    Theme,
+    Profile,
 }
 
 /// Glyphs from the owner-supplied Agent panel reference, kept at their SVG view-box sizes.

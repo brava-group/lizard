@@ -576,6 +576,8 @@ pub struct UiState {
     pub ui_scale: ui_scale::Plan,
     /// Open Settings directly on its Keyboard shortcuts section.
     pub settings_shortcuts_requested: bool,
+    /// Open Settings at the section that holds the user's profile name.
+    pub settings_profile_requested: bool,
     /// The Keyboard shortcuts section's group and search text.
     pub shortcuts_tab: lizard_engine::keymap::Group,
     pub shortcuts_query: String,
@@ -745,6 +747,7 @@ impl Default for UiState {
             rename_file: false,
             ui_scale: ui_scale::plan(1.0, None, None),
             settings_shortcuts_requested: false,
+            settings_profile_requested: false,
             shortcuts_tab: lizard_engine::keymap::Group::Essential,
             shortcuts_query: String::new(),
             opacity_digit: None,
