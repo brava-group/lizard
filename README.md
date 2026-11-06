@@ -22,6 +22,8 @@ On macOS, launch the local app bundle to show **Lizard** in the Dock:
 packaging/macos/dev-app.sh
 ```
 
+Packaged macOS releases check for newer published versions and offer an in-app update. See [how updates are verified and installed](docs/auto-updates.md).
+
 The desktop executable and product name are **Lizard**. New native documents use `.lzd`; existing `.lizard` and `.figcraft` documents still open. The CLI and browser build are available through the workspace:
 
 ```sh

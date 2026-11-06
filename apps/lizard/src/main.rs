@@ -31,6 +31,8 @@ mod services;
 mod startup;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
+#[cfg(target_os = "macos")]
+mod updater;
 
 #[cfg(test)]
 mod agent_bridge_tests;
@@ -197,6 +199,10 @@ impl eframe::App for App {
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "macos")]
+    if args.first().is_some_and(|arg| arg == updater::HELPER_ARG) {
+        std::process::exit(updater::run_helper(&args));
+    }
     if args.first().is_some_and(|arg| arg == lizard_figma_plugin::worker::WORKER_ARG) {
         if let Err(e) = lizard_figma_plugin::worker::run_stdio() {
             eprintln!("Lizard plugin worker: {e}");

@@ -177,6 +177,7 @@ pub fn keys(app: &mut LizardApp, ctx: &Context) {
 }
 
 pub fn show(app: &mut LizardApp, ctx: &Context) {
+    crate::updates::show(app, ctx);
     // Dropped files waiting to open: their card, then (once it has shown) the files.
     crate::pending_open::pending_opens(app, ctx);
     crate::import_report::show(app, ctx);
@@ -530,6 +531,7 @@ fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         }
     });
+    crate::updates::settings(app, ui);
 }
 
 fn provider_title(kind: AgentKind) -> &'static str {

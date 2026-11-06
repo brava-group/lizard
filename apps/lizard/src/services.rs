@@ -8,13 +8,15 @@ use std::sync::{Arc, Mutex};
 use lizard_engine::{Prefs, Session};
 use lizard_ui_egui::agent_panel::{AgentEvent, AgentKind, AgentPrompt};
 use lizard_ui_egui::i18n::{tr, trf};
-use lizard_ui_egui::{ControlRequest, DialogFuture, LizardApp, Services};
+use lizard_ui_egui::{ControlRequest, DialogFuture, LizardApp, Services, UpdateStatus};
 use serde_json::{Value, json};
 
 type ControlQueue = Arc<Mutex<Vec<ControlRequest>>>;
 type ContextSlot = Arc<Mutex<Option<egui::Context>>>;
 
 pub struct Desktop {
+    #[cfg(target_os = "macos")]
+    updater: crate::updater::Updater,
     clipboard: Option<arboard::Clipboard>,
     /// Where the preferences live ([`config_dir`]).
     dir: Option<PathBuf>,
@@ -89,6 +91,8 @@ impl Desktop {
         let flag = reduce_motion.clone();
         std::thread::spawn(move || flag.store(system_reduce_motion(), Ordering::Relaxed));
         Self {
+            #[cfg(target_os = "macos")]
+            updater: crate::updater::Updater::new(),
             clipboard: arboard::Clipboard::new().ok(),
             dir,
             prefs,
@@ -240,6 +244,7 @@ const STATE: &str = "state.json";
 /// preferences in `dir`, this run's recovery copies ([`Recovery::quit`](crate::recovery::Recovery::quit))
 /// and the live sessions' ends (one this app hosts tells everyone and stops; a joined one leaves).
 pub fn shutdown(app: &mut LizardApp, dir: Option<&Path>, recovery: Option<crate::recovery::Recovery>) {
+    app.services.update_cleanup();
     if let Some(dir) = dir {
         write_prefs(dir, &app.session.prefs);
     }
@@ -332,6 +337,38 @@ fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
 }
 
 impl Services for Desktop {
+    fn update_status(&mut self) -> UpdateStatus {
+        #[cfg(target_os = "macos")]
+        {
+            return self.updater.status();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            UpdateStatus::Unavailable
+        }
+    }
+    fn update_check(&mut self) {
+        #[cfg(target_os = "macos")]
+        self.updater.check();
+    }
+    fn update_prepare(&mut self) {
+        #[cfg(target_os = "macos")]
+        self.updater.prepare();
+    }
+    fn update_install(&mut self) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            return self.updater.install();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Err("Updates are unavailable on this platform".into())
+        }
+    }
+    fn update_cleanup(&mut self) {
+        #[cfg(target_os = "macos")]
+        self.updater.cleanup();
+    }
     fn agent_send(&mut self, kind: AgentKind, prompt: AgentPrompt, document: u64) -> Result<(), String> {
         let count = usize::from(prompt.agent_count.clamp(1, 6));
         if !self.agents.is_empty()

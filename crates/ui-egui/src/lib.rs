@@ -71,6 +71,7 @@ pub mod theme;
 pub mod toolbar;
 pub mod typography;
 pub mod ui_scale;
+pub mod updates;
 pub mod variable_ui;
 pub mod variables_panel;
 pub mod vector_panel;
@@ -258,8 +259,31 @@ use serde_json::{Value, json};
 
 pub use control::{ControlReply, ControlRequest};
 
+/// Status of an in-app desktop update. The web build has no self-installation flow.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum UpdateStatus {
+    #[default]
+    Unavailable,
+    Checking,
+    Current,
+    Available(String),
+    Preparing(String),
+    Ready(String),
+    Installing,
+    Error(String),
+}
+
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).
 pub trait Services {
+    fn update_status(&mut self) -> UpdateStatus {
+        UpdateStatus::Unavailable
+    }
+    fn update_check(&mut self) {}
+    fn update_prepare(&mut self) {}
+    fn update_install(&mut self) -> Result<(), String> {
+        Err("Updates are unavailable in this build".into())
+    }
+    fn update_cleanup(&mut self) {}
     /// Start or continue a local ACP design agent. Desktop implementations run it off the UI thread.
     fn agent_send(&mut self, _agent: agent_panel::AgentKind, _prompt: agent_panel::AgentPrompt, _document: u64) -> Result<(), String> {
         Err(crate::i18n::tr("Local agents are only available in the desktop app").into())
