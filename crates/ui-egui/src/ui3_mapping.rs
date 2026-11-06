@@ -139,6 +139,7 @@ pub(super) fn index(icon: super::super::Icon) -> Option<usize> {
         super::super::Icon::LivePrivate => Some(193),
         super::super::Icon::Angle
         | super::super::Icon::Logo
+        | super::super::Icon::FilterLines
         | super::super::Icon::VariableColor
         | super::super::Icon::VariableString
         | super::super::Icon::VariableNumber

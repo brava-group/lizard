@@ -388,6 +388,8 @@ icons! {
     Slot,
     /// Edit settings: two sliders.
     Adjust,
+    /// Filter by kind: three horizontal lines narrowing toward the bottom.
+    FilterLines,
     /// Show as a list.
     ViewList,
     /// Show as a grid of swatches.
@@ -1513,6 +1515,11 @@ fn draw(p: &P, icon: Icon) {
             p.line(2.0, 11.5, 14.0, 11.5);
             p.dot(10.5, 4.5, 2.2);
             p.dot(5.5, 11.5, 2.2);
+        }
+        FilterLines => {
+            p.line(2.0, 4.0, 14.0, 4.0);
+            p.line(4.67, 8.0, 11.33, 8.0);
+            p.line(7.33, 12.0, 8.67, 12.0);
         }
         ViewList => {
             for y in [2.0, 6.0, 10.0] {

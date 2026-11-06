@@ -264,8 +264,8 @@ fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool, sidebar_w: f32) {
             .width(ControlWidth::Fixed(search.width()))
             .show(&mut search_ui, &mut st.query);
     }
-    let filter_resp = Button::icon(Icon::Adjust, tr("Filter variables"))
-        .variant(ButtonVariant::Secondary)
+    let filter_resp = Button::icon(Icon::FilterLines, tr("Filter variables"))
+        .variant(ButtonVariant::Ghost)
         .behavior(ButtonBehavior::Toggle { selected: st.kind_filter.is_some() })
         .icon_size(14.0)
         .show_at(ui, Id::new("vars_filter"), filter);
@@ -280,7 +280,7 @@ fn header(ui: &mut Ui, st: &mut Editor, open: &mut bool, sidebar_w: f32) {
             (VariableType::String, tr("String")),
             (VariableType::Boolean, tr("Boolean")),
         ] {
-            if menu_check(ui, st.kind_filter == Some(kind), label, "") {
+            if MenuItem::new(label).checked(st.kind_filter == Some(kind)).leading(variable_type_icon(kind)).show(ui).clicked() {
                 st.kind_filter = Some(kind);
                 ui.close();
             }
