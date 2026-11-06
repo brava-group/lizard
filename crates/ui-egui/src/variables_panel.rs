@@ -8,7 +8,7 @@
 //! undoable and the same over MCP.
 
 use crate::primitives::TooltipResponseExt as _;
-use egui::{Align2, Context, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
+use egui::{Align2, Context, CornerRadius, Id, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use lizard_doc::{Collection, Document, PublishedLibrary, Variable, VariableType, VariableValue, Variables, scopes_for};
 use lizard_engine::library;
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ use crate::colorpicker::PickerTarget;
 use crate::i18n::{tr, tr_noop, trf, trn};
 use crate::icons::{self, Icon};
 use crate::primitives::{
-    AliasValue, Button, ButtonBehavior, ButtonVariant, ColorControl, ColorValue, ControlWidth, InlineField, SearchField, Surface, Switch,
+    AliasValue, Button, ButtonBehavior, ButtonVariant, ColorControl, ColorValue, ControlWidth, InlineField, MenuItem, SearchField, Surface, Switch,
 };
 use crate::right::{menu_check, menu_item};
 use crate::theme::{Tokens, regular, semibold};
@@ -164,7 +164,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
-        .frame(Surface::palette().frame(t).inner_margin(egui::Margin::same(0)));
+        .frame(Surface::palette().frame(t).fill(t.panel).inner_margin(egui::Margin::same(0)));
     let window = if st.expanded {
         window.fixed_rect(expanded).pivot(Align2::LEFT_TOP)
     } else {
@@ -407,20 +407,29 @@ fn library_title(ui: &mut Ui, name: &str) {
     resp.lizard_tooltip(tr("Library: its variables are read-only here; edit them in the library file and publish it"));
 }
 
+fn sidebar_selection(ui: &Ui, rect: Rect, selected: bool, hovered: bool) {
+    let t = Tokens::get(ui.ctx());
+    if selected || hovered {
+        ui.painter().rect_filled(rect, CornerRadius::same(5), if selected { t.selected_row } else { t.hover });
+    }
+}
+
 /// One collection in the sidebar (with its groups while selected).
 fn collection_row(app: &mut LizardApp, ui: &mut Ui, view: &View, c: &Collection, st: &mut Editor) {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
     let r = r.shrink2(vec2(10.0, 4.0));
     let selected = view.is(st.library.as_deref()) && st.collection.as_deref() == Some(c.id.as_str());
-    if selected {
-        ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
-    }
+    sidebar_selection(ui, r, selected, resp.hovered());
     let target = Rename::Collection(c.id.clone());
     let count = view.in_collection(&c.id).count();
-    ui.painter().text(pos2(r.max.x - 8.0, r.center().y), Align2::RIGHT_CENTER, count.to_string(), regular(11.0), t.text_tertiary);
+    ui.painter().text(
+        pos2(r.max.x - 8.0, r.center().y),
+        Align2::RIGHT_CENTER,
+        count.to_string(),
+        regular(11.0),
+        if selected { t.text_secondary } else { t.text_tertiary },
+    );
     let indent = if view.editable() { 8.0 } else { 26.0 };
     let name_r = Rect::from_min_max(pos2(r.min.x + indent, r.min.y + 4.0), pos2(r.max.x - 32.0, r.max.y - 4.0));
     if view.editable() && st.rename.as_ref() == Some(&target) {
@@ -491,19 +500,21 @@ fn group_rows(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
         let r = r.shrink2(vec2(10.0, 4.0));
         let on = st.group.as_ref() == g;
-        if on {
-            ui.painter().rect_filled(r, CornerRadius::same(5), t.selected_row);
-        } else if resp.hovered() {
-            ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.border), StrokeKind::Inside);
-        }
+        sidebar_selection(ui, r, on, resp.hovered());
         let depth = g.map_or(0, |g| g.matches('/').count());
         let x = r.min.x + 8.0 + depth as f32 * 12.0;
         let label = g.map_or(tr("All"), |g| g.rsplit('/').next().unwrap_or(g));
         let count = names.iter().filter(|n| g.is_none_or(|g| n.starts_with(&format!("{g}/")))).count();
-        ui.painter().text(pos2(r.max.x - 8.0, r.center().y), Align2::RIGHT_CENTER, count.to_string(), regular(10.0), t.text_tertiary);
+        ui.painter().text(
+            pos2(r.max.x - 8.0, r.center().y),
+            Align2::RIGHT_CENTER,
+            count.to_string(),
+            regular(10.0),
+            if on { t.text_secondary } else { t.text_tertiary },
+        );
         let name_r = Rect::from_min_max(pos2(x, r.min.y + 3.0), pos2(r.max.x - 28.0, r.max.y - 3.0));
         let Some(g) = g else {
-            ui.painter().text(name_r.left_center(), Align2::LEFT_CENTER, label, regular(11.0), t.text_secondary);
+            ui.painter().text(name_r.left_center(), Align2::LEFT_CENTER, label, if on { semibold(11.0) } else { regular(11.0) }, t.text);
             if resp.clicked() {
                 st.group = None;
             }
@@ -515,7 +526,13 @@ fn group_rows(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
                 rename_group(app, &members, g, &new, st);
             }
         } else {
-            ui.painter().with_clip_rect(name_r).text(name_r.left_center(), Align2::LEFT_CENTER, label, regular(11.0), t.text);
+            ui.painter().with_clip_rect(name_r).text(
+                name_r.left_center(),
+                Align2::LEFT_CENTER,
+                label,
+                if on { semibold(11.0) } else { regular(11.0) },
+                t.text,
+            );
         }
         if resp.clicked() {
             st.group = Some(g.clone());
@@ -783,13 +800,16 @@ fn var_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, v: 
 /// The type marker before a variable's name: its colour (default mode), or a type glyph.
 fn kind_glyph(ui: &Ui, _vars: &Variables, v: &Variable, _coll: &Collection, rect: Rect) {
     let t = Tokens::get(ui.ctx());
-    let icon = match v.kind {
+    icons::paint(ui.painter(), rect, variable_type_icon(v.kind), t.icon);
+}
+
+fn variable_type_icon(kind: VariableType) -> Icon {
+    match kind {
         VariableType::Color => Icon::VariableColor,
         VariableType::Number => Icon::VariableNumber,
         VariableType::String => Icon::VariableString,
         VariableType::Boolean => Icon::VariableBoolean,
-    };
-    icons::paint(ui.painter(), rect, icon, t.icon);
+    }
 }
 
 /// `val` as a `variable.set` value.
@@ -932,7 +952,7 @@ fn create_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
             Id::new("vars_create_variable"),
             button,
         );
-        crate::right::menu_popup(&resp).show(|ui| {
+        crate::right::menu_popup(&resp).width(160.0).show(|ui| {
             for kind in TYPES {
                 let label = match kind {
                     // The English label also names the new variable (document content).
@@ -941,7 +961,7 @@ fn create_row(app: &mut LizardApp, ui: &mut Ui, view: &View, coll: &Collection, 
                     VariableType::String => tr_noop("String"),
                     VariableType::Boolean => tr_noop("Boolean"),
                 };
-                if menu_item(ui, tr(label), "") {
+                if MenuItem::new(tr(label)).leading(variable_type_icon(kind)).show(ui).clicked() {
                     let base = st.group.as_ref().map_or_else(|| label.to_string(), |group| format!("{group}/{label}"));
                     let name = unique(&base, |n| view.in_collection(&coll.id).any(|v| v.name == n));
                     let params = json!({"collection": coll.id, "name": name, "type": kind.id()});
