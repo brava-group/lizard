@@ -247,7 +247,7 @@ No alpha blockers: the alpha gate in [`roadmap.md`](roadmap.md#alpha-gate) passe
   WebView; an Iconify message inserted an editable SVG. The worker and WebView now allow
   manifest-scoped HTTPS; `clientStorage` persists within the user's settings, and selected
   frames expose nested layers. The remaining interactions, external service accounts and API
-  coverage need per-plugin checks ([results](local-figma-plugin-compatibility.md)).
+  coverage need per-plugin checks.
 - **Impact:** teams that depend on specific Figma plugins (icons, content, accessibility checks)
   can't bring them. Lizard's CLI, control channel and MCP server cover agent automation better
   than Figma does.

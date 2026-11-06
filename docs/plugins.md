@@ -128,8 +128,8 @@ blocks navigation, new windows and clipboard access. It accepts inline scripts, 
 images; HTTPS requests from UI or plugin JavaScript are limited to the manifest's declared hosts.
 Client storage is kept in the user's preferences with a 64 KB limit per plugin. This runtime is
 for trusted local development packages: it has no OS memory limit, is available only in the macOS
-desktop UI, and does not run Community listings. [The ten-package compatibility check](local-figma-plugin-compatibility.md)
-records which published bundles opened and what still needs validation.
+desktop UI, and does not run Community listings. Ten local packages passed a limited
+startup check; their full workflows still need validation.
 
 The official MIT `figma/plugin-samples` examples `create-rects-shapes`, `resizer` (absolute and
 relative), `text-review`, `styles-to-variables`, `post-message` and `barchart` were tested from

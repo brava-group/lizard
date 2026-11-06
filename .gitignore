@@ -8,3 +8,12 @@ plans/
 /log/
 .DS_Store
 *.profraw
+
+# Local agent reports and research prototypes.
+/CLEANUP_*.md
+/benchmarks/canvas-strategies/
+/docs/figma-effects-performance-notes.md
+/docs/gpu-effects-migration.md
+/docs/gpu-renderer-checklist.md
+/docs/local-figma-plugin-compatibility.md
+/docs/rendering-backend-evaluation.md
