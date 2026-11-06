@@ -1,10 +1,12 @@
 <div align="center">
-  <img src="assets/app-icon/lizard.svg" width="112" height="112" alt="Lizard logo">
+  <img src="assets/app-icon/lizard-512.png" width="112" height="112" alt="Lizard app icon">
   <h1>Lizard</h1>
   <p>A native interface design editor built with Rust and egui.</p>
 </div>
 
 Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It is an independent continuation of earlier open-source work. The original contributors retain their credits and copyrights; see [contributors](contributors/contributors.json), [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
+
+![Lizard editor in dark mode with the Ridgeline Studio dashboard open](assets/screenshots/editor-dark.png)
 
 ## Run the editor
 
