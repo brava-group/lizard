@@ -544,7 +544,7 @@ fn page_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
     ui.add_space(12.0);
     widgets::separator(ui);
     crate::style_picker::local_styles(app, ui, doc);
-    ui.add_space(12.0);
+    ui.add_space(20.0);
     widgets::separator(ui);
     crate::export_panel::page_section(app, ui, doc, page);
 }

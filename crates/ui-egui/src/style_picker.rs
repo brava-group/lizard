@@ -1942,24 +1942,23 @@ fn create_local_style(app: &mut LizardApp, ui: &Ui, doc: &Document, slot: StyleS
 /// match); right-click on a folder renames it (and the styles in it).
 pub fn local_styles(app: &mut LizardApp, ui: &mut Ui, doc: &Document) {
     let t = Tokens::get(ui.ctx());
-    let (header, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().text(pos2(header.min.x + widgets::PAD, header.center().y), Align2::LEFT_CENTER, tr("Styles"), semibold(11.0), t.text);
-    let add_rect = Rect::from_min_size(pos2(header.max.x - 32.0, header.center().y - 12.0), vec2(24.0, 24.0));
-    let add = Button::icon(Icon::Plus, tr("Create style")).icon_size(14.0).show_at(ui, Id::new("local_styles_add"), add_rect);
     let mut create = None;
-    crate::right::menu_popup(&add).show(|ui| {
-        for (slot, title) in [
-            (StyleSlot::Text, tr("Text style")),
-            (StyleSlot::Fill, tr("Color styles")),
-            (StyleSlot::Effect, tr("Effect styles")),
-            (StyleSlot::Grid, tr("Grid styles")),
-        ] {
-            if crate::right::menu_item(ui, title, "") {
-                create = Some(slot);
-                ui.close();
+    let (_, actions) = widgets::section_header_actions(ui, tr("Styles"), &[(Icon::Plus, tr("Create style"))], false);
+    if let Some((_, add)) = actions.first() {
+        crate::right::menu_popup(add).show(|ui| {
+            for (slot, title) in [
+                (StyleSlot::Text, tr("Text style")),
+                (StyleSlot::Fill, tr("Color styles")),
+                (StyleSlot::Effect, tr("Effect styles")),
+                (StyleSlot::Grid, tr("Grid styles")),
+            ] {
+                if crate::right::menu_item(ui, title, "") {
+                    create = Some(slot);
+                    ui.close();
+                }
             }
-        }
-    });
+        });
+    }
     let renaming: Option<String> = ui.data(|d| d.get_temp(folder_rename_id()));
     let mut run: Option<(&'static str, Value)> = None;
     let mut edit: Option<(StyleSlot, String)> = None;
