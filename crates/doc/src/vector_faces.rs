@@ -420,8 +420,8 @@ pub fn interior_point(path: &BezPath) -> Option<Point> {
             .filter(|x| x.is_finite())
             .collect();
         xs.sort_by(f64::total_cmp);
-        for pair in xs.chunks_exact(2) {
-            let (Some(a), Some(b)) = (pair.first(), pair.get(1)) else { continue };
+        for pair in xs.as_chunks::<2>().0 {
+            let [a, b] = *pair;
             let w = b - a;
             if w > best.map(|b| b.0).unwrap_or(1e-9) {
                 best = Some((w, Point::new((a + b) / 2.0, y)));
