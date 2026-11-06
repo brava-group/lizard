@@ -1,6 +1,6 @@
 # CI for pull requests and main: format, clippy, tests, dependency layering, asset licences and
-# the wasm32 check (the same gates as `cargo xtask ci`). Platform release workflows will be added
-# after Lizard's packaging identities and signing are configured.
+# the wasm32 check (the same gates as `cargo xtask ci`). The separate macOS release workflow
+# requires Developer ID and Apple notarization secrets before publishing a distribution.
 name: CI
 
 on:

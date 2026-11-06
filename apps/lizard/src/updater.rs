@@ -200,10 +200,12 @@ fn parse_release(body: &Value, current: &str, arch: &str) -> Result<Option<Relea
     if version <= current {
         return Ok(None);
     }
-    let name = format!("lizard-{version}-macos-{arch}.dmg");
+    let assets = body["assets"].as_array().ok_or("The update has no installers")?;
+    let (name, asset) = [format!("lizard-{version}-macos-{arch}.dmg"), format!("lizard-{version}-macos-universal.dmg")]
+        .into_iter()
+        .find_map(|name| assets.iter().find(|asset| asset["name"].as_str() == Some(name.as_str())).map(|asset| (name, asset)))
+        .ok_or("The new version has no installer for this Mac")?;
     let expected = format!("https://github.com/brava-group/lizard/releases/download/{tag}/{name}");
-    let asset = body["assets"].as_array().and_then(|assets| assets.iter().find(|asset| asset["name"].as_str() == Some(&name)));
-    let asset = asset.ok_or("The new version has no installer for this Mac")?;
     let url = asset["browser_download_url"].as_str().ok_or("The update has no download URL")?;
     if url != expected {
         return Err("The update points outside the Lizard release channel".into());
@@ -424,5 +426,17 @@ mod tests {
         let mut draft = good;
         draft["draft"] = json!(true);
         assert!(parse_release(&draft, "0.9.1", "aarch64").is_err());
+    }
+
+    #[test]
+    fn universal_dmg_updates_both_mac_architectures() {
+        let digest = "a".repeat(64);
+        let mut universal = release("0.9.2", &digest);
+        let name = "lizard-0.9.2-macos-universal.dmg";
+        universal["assets"][0]["name"] = json!(name);
+        universal["assets"][0]["browser_download_url"] = json!(format!("https://github.com/brava-group/lizard/releases/download/v0.9.2/{name}"));
+        for arch in ["aarch64", "x86_64"] {
+            assert!(parse_release(&universal, "0.9.1", arch).is_ok_and(|found| found.is_some()));
+        }
     }
 }

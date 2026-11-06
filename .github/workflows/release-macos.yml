@@ -1,0 +1,98 @@
+name: macOS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after signing, notarization and verification
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 180
+    environment: release
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,wasm32-unknown-unknown
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: macos-release
+
+      - name: Require distribution credentials
+        shell: bash
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] ||
+             [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] ||
+             [ "$APPLE_TEAM_ID" != 2L268W62AW ]; then
+            echo '::error::Configure the Developer ID certificate and Apple notarization credentials in the release environment.'
+            exit 1
+          fi
+
+      - name: Validate source and version
+        shell: bash
+        run: |
+          cargo run --locked -q -p xtask -- ci
+          version="$(cargo run --locked -q -p xtask -- version)"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::error::Release v$version already exists. Bump the workspace version first."
+            exit 1
+          fi
+          echo "LIZARD_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Import Developer ID certificate
+        run: packaging/macos/import-cert.sh
+
+      - name: Build, sign and notarize universal app
+        run: packaging/macos/package.sh --arch universal
+
+      - name: Verify the downloaded package format
+        run: packaging/macos/verify.sh --arch universal
+
+      - name: Prepare checksums
+        shell: bash
+        run: |
+          cd dist/release
+          shasum -a 256 "lizard-$LIZARD_RELEASE_VERSION-macos-universal.dmg" \
+            "lizard-cli-$LIZARD_RELEASE_VERSION-macos-universal.zip" \
+            > "SHA256SUMS-$LIZARD_RELEASE_VERSION.txt"
+
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$LIZARD_RELEASE_VERSION" \
+            "dist/release/lizard-$LIZARD_RELEASE_VERSION-macos-universal.dmg" \
+            "dist/release/lizard-cli-$LIZARD_RELEASE_VERSION-macos-universal.zip" \
+            "dist/release/SHA256SUMS-$LIZARD_RELEASE_VERSION.txt" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft \
+            --title "Lizard $LIZARD_RELEASE_VERSION" --generate-notes
+
+      - name: Publish verified release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v$LIZARD_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
