@@ -1404,10 +1404,10 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     let composer_height = 142.0 + context_height + images_height;
     ui.painter().rect_filled(full, 0.0, panel);
 
-    // Header: back, two-line title, IA badge, options.
-    let header_bottom = full.min.y + 63.0;
+    // Header: back, title, options.
+    let header_bottom = full.min.y + 48.0;
     line(ui, pos2(full.min.x, header_bottom - 0.5), pos2(full.max.x, header_bottom - 0.5), border);
-    let back = Rect::from_min_size(pos2(full.min.x + 8.0, full.min.y + 19.0), vec2(24.0, 24.0));
+    let back = Rect::from_min_size(pos2(full.min.x + 8.0, full.min.y + 12.0), vec2(24.0, 24.0));
     let back_resp = hit(ui, "agent_back", back, tr("All chats"));
     if back_resp.hovered() {
         ui.painter().rect_filled(back, CornerRadius::same(5), t.hover);
@@ -1426,20 +1426,17 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
             .map_or(tr("New chat"), |chat| chat_title(&chat.title))
     };
-    ui.painter().text(pos2(title_x, full.min.y + 12.0), Align2::LEFT_TOP, title, semibold(13.0), text);
-    ui.painter().text(pos2(title_x, full.min.y + 34.0), Align2::LEFT_TOP, tr("Shared"), regular(11.0), secondary);
+    let title_width = (full.max.x - 46.0 - title_x).max(0.0);
+    let mut title_job = egui::text::LayoutJob::simple_singleline(title.to_owned(), semibold(13.0), text);
+    title_job.wrap = egui::text::TextWrapping { max_width: title_width, max_rows: 1, break_anywhere: true, ..Default::default() };
+    let title_galley = ui.painter().layout_job(title_job);
+    ui.painter().galley(pos2(title_x, full.min.y + (48.0 - title_galley.size().y) * 0.5), title_galley, text);
     let more = Rect::from_min_size(pos2(full.max.x - 38.0, full.min.y + 12.0), vec2(24.0, 24.0));
     let more_resp = hit(ui, "agent_options", more, tr("More options"));
     if more_resp.hovered() || a11y::menu_open(&more_resp) {
         ui.painter().rect_filled(more, CornerRadius::same(5), t.hover);
     }
     glyph(ui, more, AgentIcon::More, vec2(15.0, 3.0), text);
-    let badge = Rect::from_center_size(pos2(full.max.x - 55.5, full.min.y + 24.0), vec2(19.0, 18.0));
-    ui.painter().rect_stroke(badge, CornerRadius::same(5), Stroke::new(1.0, border), egui::StrokeKind::Inside);
-    ui.painter().text(badge.center(), Align2::CENTER_CENTER, tr("AI"), semibold(11.0), secondary);
-    if hit(ui, "agent_model_badge", badge, tr("Select model")).clicked() {
-        egui::Popup::open_id(ui.ctx(), Id::new("agent_footer_model_popup"));
-    }
 
     let middle_bottom = (full.max.y - 26.0 - composer_height).max(header_bottom);
     let middle = Rect::from_min_max(pos2(full.min.x, header_bottom), pos2(full.max.x, middle_bottom));
