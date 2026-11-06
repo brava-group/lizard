@@ -333,7 +333,12 @@ fn number_field_impl(
         Lead::Icon(..) | Lead::PositionIcon(..) | Lead::LayoutIcon(..) | Lead::AppearanceIcon(..) | Lead::PropertyIcon(..) => 24.0,
     };
     let lead_rect = Rect::from_min_size(rect.min, vec2(lead_w, FIELD_H));
-    let selector_x = if dropdown { Some(rect.max.x - 24.0) } else { sizing.map(|_| (rect.min.x + 56.0).min(rect.max.x - 24.0)) };
+    let bound = binding.is_some_and(|binding| binding.is_some());
+    let selector_x = if dropdown {
+        Some(rect.max.x - 24.0)
+    } else {
+        sizing.map(|_| if bound { rect.max.x - 24.0 } else { (rect.min.x + 56.0).min(rect.max.x - 24.0) })
+    };
     let trailing_padding = external_padding.map_or(0.0, |(_, trailing)| trailing);
     let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), pos2(selector_x.unwrap_or(rect.max.x) - trailing_padding, rect.max.y));
     if let Some(Some(name)) = binding {
@@ -342,7 +347,7 @@ fn number_field_impl(
         let selector = if dropdown {
             Some(dropdown_selector(ui, id, rect, t, false))
         } else {
-            sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t))
+            sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t, true))
         };
         return (None, bind, selector);
     }
@@ -553,7 +558,7 @@ fn number_field_impl(
     let selector = if dropdown {
         Some(dropdown_selector(ui, id, rect, t, editing_active || field_resp.has_focus()))
     } else {
-        sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t))
+        sizing.map(|label| sizing_selector(ui, id, rect, selector_x.unwrap_or(rect.max.x), label, t, false))
     };
     (out, bind, selector)
 }
@@ -574,11 +579,11 @@ fn dropdown_selector(ui: &mut Ui, id: Id, field: Rect, t: Tokens, input_focused:
     response
 }
 
-fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, t: Tokens) -> egui::Response {
+fn sizing_selector(ui: &mut Ui, id: Id, field: Rect, start_x: f32, label: &str, t: Tokens, bound: bool) -> egui::Response {
     let rect = Rect::from_min_max(pos2(start_x, field.min.y), field.max);
     let response = ui.interact(rect, id.with("sizing"), Sense::click());
     let hovered = field.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN)));
-    if hovered || response.has_focus() {
+    if bound || hovered || response.has_focus() {
         ui.painter().rect_stroke(field, CornerRadius::same(5), Stroke::new(1.0, t.field_hover_border), StrokeKind::Inside);
         icons::paint_compact_chevron(
             ui.painter(),

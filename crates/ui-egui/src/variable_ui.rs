@@ -1,5 +1,5 @@
 //! Binding variables to properties from the Design panel: number fields show a variable button on
-//! hover and the bound variable's name once bound; colour fills bind through the style picker. The
+//! hover and the resolved numeric value once bound; colour fills bind through the style picker. The
 //! picker popover lists the document's variables of the matching type (and scope), by collection,
 //! then those of each enabled library (picking one copies it in, linked and read-only); the
 //! Variables editor uses it to pick alias targets too, and the interaction editor the variables of
@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
-use lizard_doc::{Collection, Document, ModeId, NodeId, PropDef, PublishedLibrary, Variable, VariableId, VariableType};
+use lizard_doc::{Collection, Document, ModeId, NodeId, PropDef, PublishedLibrary, Variable, VariableId, VariableType, VariableValue};
 use lizard_engine::library;
 use serde_json::json;
 
@@ -55,6 +55,19 @@ pub fn bound_name(doc: &Document, ids: &[NodeId], field: &str) -> Option<String>
         return None;
     }
     doc.variables.get(&first).map(|v| v.name.clone())
+}
+
+/// A shared numeric binding's resolved value, including the selected mode and aliases.
+fn bound_number(doc: &Document, ids: &[NodeId], field: &str) -> Option<f64> {
+    let mut values = ids.iter().map(|id| {
+        let variable = doc.node(*id)?.bound.get(field)?;
+        match doc.variables.resolve(variable, &doc.modes_for(*id))? {
+            VariableValue::Number(value) if value.is_finite() => Some(value),
+            _ => None,
+        }
+    });
+    let first = values.next().flatten()?;
+    values.all(|value| value == Some(first)).then_some(first)
 }
 
 /// A variable a picker offers: one of this file's, or a published one of an enabled library.
@@ -304,7 +317,9 @@ pub fn dimension_field(
     width: f32,
     sizing_label: &str,
 ) -> (Option<Edit>, egui::Response) {
-    let name = app.session.doc().ok().and_then(|d| bound_name(d, ids, field));
+    let doc = app.session.doc().ok();
+    let name = doc.and_then(|d| bound_name(d, ids, field));
+    let value = value.or_else(|| name.as_ref().and_then(|_| doc.and_then(|d| bound_number(d, ids, field))));
     let (edit, ev, selector) = widgets::number_field_with_sizing(ui, id, lead, value, width, Some(name.as_deref()), sizing_label);
     handle(app, ui, ids, field, VariableType::Number, ev);
     (edit, selector)
@@ -322,7 +337,9 @@ fn number_field_edit(
     lead: Lead,
     suffix: &str,
 ) -> Option<Edit> {
-    let name = app.session.doc().ok().and_then(|d| bound_name(d, ids, field));
+    let doc = app.session.doc().ok();
+    let name = doc.and_then(|d| bound_name(d, ids, field));
+    let value = value.or_else(|| name.as_ref().and_then(|_| doc.and_then(|d| bound_number(d, ids, field))));
     let result = crate::primitives::NumberField::new(id, lead, value, suffix)
         .binding(Some(name.as_deref()))
         .empty(empty)
@@ -680,5 +697,20 @@ mod kind_tests {
         assert!(!kind_fits(Some(String), Some("fontFamily"), Number), "only text content");
         assert!(!kind_fits(Some(Number), Some("width"), String));
         assert!(kind_fits(None, None, Boolean));
+    }
+
+    #[test]
+    fn bound_number_uses_the_selected_mode() -> lizard_engine::Result<()> {
+        let mut session = lizard_engine::Session::new();
+        session.execute("variable.createCollection", &json!({"name":"Spacing","modes":["Mobile","Desktop"]}))?;
+        session.execute("variable.create", &json!({"collection":"Spacing","name":"space-18","type":"number","values":{"Mobile":18,"Desktop":24}}))?;
+        let frame = session.execute("frame.create", &json!({"width":200,"height":100}))?;
+        let id = lizard_engine::params::id(&frame, "id").ok_or_else(|| lizard_engine::bad("test", "missing frame id"))?;
+        session.execute("layout.add", &json!({"ids":[id]}))?;
+        session.execute("variable.bind", &json!({"ids":[id],"field":"gap","variable":"space-18"}))?;
+        assert_eq!(bound_number(session.doc()?, &[id], "gap"), Some(18.0));
+        session.execute("variable.setMode", &json!({"ids":[id],"collection":"Spacing","mode":"Desktop"}))?;
+        assert_eq!(bound_number(session.doc()?, &[id], "gap"), Some(24.0));
+        Ok(())
     }
 }
