@@ -58,6 +58,16 @@ pub fn start_agent(document: u64, queue: Queue, ctx: CtxSlot) -> Option<(u16, Ar
 }
 
 pub fn start_agent_scoped(document: u64, agent_index: usize, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
+    start_agent_bridge(document, agent_index, queue, ctx)
+}
+
+/// A separate bridge for the orchestrator. The guard below allows only document reads and
+/// in-memory captures, so a reviewer cannot race the workers' edits.
+pub fn start_agent_reviewer(document: u64, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
+    start_agent_bridge(document, usize::MAX, queue, ctx)
+}
+
+fn start_agent_bridge(document: u64, agent_index: usize, queue: Queue, ctx: CtxSlot) -> Option<(u16, Arc<AtomicBool>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let port = listener.local_addr().ok()?.port();
     listener.set_nonblocking(true).ok()?;
@@ -152,6 +162,20 @@ fn serve_guarded(
                     if !enabled.load(Ordering::Acquire) {
                         writeln!(out, "{}", json!({"id": id, "ok": false, "error": lizard_ui_egui::i18n::tr("The agent session has ended")}))?;
                         continue;
+                    }
+                    if *agent_index == usize::MAX {
+                        if method == "agent.activity" {
+                            writeln!(out, "{}", json!({"id": id, "ok": true, "result": {"accepted": false}}))?;
+                            continue;
+                        }
+                        if !matches!(
+                            method.as_str(),
+                            "document.inspect" | "node.get" | "ui.render" | "ui.screenshot" | "window.list" | "engine.commands"
+                        ) || (matches!(method.as_str(), "ui.render" | "ui.screenshot") && params.get("path").is_some())
+                        {
+                            writeln!(out, "{}", json!({"id": id, "ok": false, "error": "The orchestrator connection is read-only"}))?;
+                            continue;
+                        }
                     }
                     if let Some(object) = params.as_object_mut() {
                         object.insert("__agent_document".into(), json!(document));

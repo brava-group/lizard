@@ -316,6 +316,17 @@ fn check_parallel_section_command(
     Ok(())
 }
 
+fn request_agent_review(app: &mut LizardApp, params: &Value) {
+    let Some(document) = params.get("__agent_document").and_then(Value::as_u64) else { return };
+    let request = app.ui.agent.active_prompt.clone();
+    if request.is_empty() {
+        return;
+    }
+    let index = params.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0);
+    let roots = app.ui.agent.parallel_assignments.get(index).map_or_else(Vec::new, |ids| ids.iter().map(|id| id.0).collect());
+    app.services.agent_review(document, index, &request, &roots);
+}
+
 /// Handle one control method (also used by tests and the headless snapshot tool).
 pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Result<Value, String> {
     if let Some(expected) = p.get("__agent_document").and_then(Value::as_u64)
@@ -378,7 +389,17 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
             let batch = app.ui.streamed_batch.take().ok_or("no streamed batch")?;
             let result = app.session.finish_streamed_batch(batch).map_err(|e| e.to_string())?;
+            request_agent_review(app, p);
             Ok(Value::Array(result))
+        }
+        "agent.review.take" => {
+            p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
+            let agent_index = p.get("__agent_index").and_then(Value::as_u64).and_then(|index| usize::try_from(index).ok()).unwrap_or(0);
+            let lead_integration = agent_index == 0 && app.ui.agent.integration_started;
+            let (matching, remaining): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut app.ui.agent.review_feedback).into_iter().partition(|(owner, _)| lead_integration || *owner == agent_index);
+            app.ui.agent.review_feedback = remaining;
+            Ok(json!(matching.into_iter().map(|(_, text)| text).collect::<Vec<_>>()))
         }
         "agent.batch.cancel" => {
             p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
@@ -602,6 +623,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             }
             let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
+            if cmd == "command.batch" && r.is_ok() && p.get("__agent_document").is_some() {
+                request_agent_review(app, p);
+            }
             if cmd == "node.create"
                 && p.get("__agent_document").is_some()
                 && let Ok(result) = &r

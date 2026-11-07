@@ -97,6 +97,7 @@ fn each_tool_has_its_cursor_by_modifier_and_what_is_under_the_pointer() {
         (ToolId::Ellipse, NONE, EMPTY, Crosshair, "ellipse"),
         (ToolId::Polygon, NONE, EMPTY, Crosshair, "polygon"),
         (ToolId::Star, NONE, EMPTY, Crosshair, "star"),
+        (ToolId::Brush, NONE, EMPTY, Brush, "brush"),
         (ToolId::Pencil, NONE, EMPTY, Pencil, "pencil"),
         (ToolId::ShapeBuilder, NONE, EMPTY, PaintBucket, "shape builder"),
         (ToolId::Text, NONE, EMPTY, Crosshair, "the Text tool makes a text where it is pressed"),
@@ -114,7 +115,7 @@ fn each_tool_has_its_cursor_by_modifier_and_what_is_under_the_pointer() {
     }
     // Every tool has a row above.
     for t in ToolId::ALL {
-        assert!(matches!(t.cursor(), Default | Crosshair | Grab | Pen(_) | Comment | Eyedropper | Pencil | PaintBucket), "{t:?}");
+        assert!(matches!(t.cursor(), Default | Crosshair | Grab | Pen(_) | Comment | Eyedropper | Brush | Pencil | PaintBucket), "{t:?}");
     }
 }
 

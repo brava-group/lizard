@@ -105,6 +105,23 @@ fn agent_bridge_tags_the_document_and_worker_index() {
 }
 
 #[test]
+fn reviewer_bridge_rejects_edits_before_dispatch() {
+    let (mut client, server) = pair();
+    let pending = queue();
+    let q = pending.clone();
+    let guard = Arc::new(AtomicBool::new(true));
+    let worker = std::thread::spawn(move || serve_guarded(server, q, context(), Duration::from_secs(5), Some((42, usize::MAX, guard))));
+    client.write_all(b"{\"id\":1,\"method\":\"engine.execute\",\"params\":{\"command\":\"node.create\"}}\n").unwrap();
+    let mut reader = BufReader::new(client.try_clone().unwrap());
+    assert_eq!(reply(&mut reader)["error"], "The orchestrator connection is read-only");
+    client.write_all(b"{\"id\":2,\"method\":\"ui.render\",\"params\":{\"path\":\"/tmp/reviewer.png\"}}\n").unwrap();
+    assert_eq!(reply(&mut reader)["ok"], false);
+    assert!(pending.lock().unwrap().is_empty());
+    client.shutdown(Shutdown::Write).unwrap();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
 fn a_line_that_is_not_json_ends_the_connection_before_anything_after_it_runs() {
     // What a browser sends when a web page posts to the port: the JSON line in its body never runs.
     let (mut client, server) = pair();

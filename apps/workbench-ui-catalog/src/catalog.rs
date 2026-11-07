@@ -630,6 +630,7 @@ fn enter_page(state: &mut State, fig: &mut LizardApp, fixture: &Fixture, ctx: &e
                     title: "Layout do componente".into(),
                     agent: AgentKind::Codex,
                     messages: vec![user, assistant],
+                    agent_names: vec!["Luma".into()],
                     remote_session: None,
                     remote_sessions: Vec::new(),
                 }];

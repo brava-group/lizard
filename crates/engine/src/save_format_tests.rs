@@ -304,7 +304,7 @@ fn fig_copy_write_failure_keeps_save_state() {
 fn save_as_without_extension_stays_native() {
     let mut files = SaveFiles::new();
     let requested = files.dir.join("native");
-    let native = files.path("native.lizard");
+    let native = files.path("native.lzd");
     let mut s = Session::new();
     rect(&mut s, "Native rectangle");
     let result = s.execute("file.saveAs", &json!({"path": requested.to_string_lossy()})).unwrap();

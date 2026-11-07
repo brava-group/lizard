@@ -162,11 +162,11 @@ impl Backend for Attached {
             // command runs, and its visual change before the next tool starts. Headless calls
             // never wait, and a detached MCP client receives accepted: false.
             let delay = if starting && creating {
-                360
+                80
             } else if starting {
-                110
+                45
             } else {
-                85
+                35
             };
             std::thread::sleep(Duration::from_millis(delay));
         }

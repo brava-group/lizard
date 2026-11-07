@@ -85,6 +85,7 @@ fn tool(name: &str, title: &str, desc: &str, schema: Value, read_only: bool) -> 
 /// Tool names, in `tools/list` order.
 pub const TOOL_NAMES: &[&str] = &[
     "list_commands",
+    "spawn_agents",
     "search_icons",
     "run_command",
     "batch",
@@ -103,7 +104,6 @@ pub const TOOL_NAMES: &[&str] = &[
     "key",
     "type_text",
     "inspect_ui",
-    "spawn_agents",
 ];
 
 /// All tools, in `tools/list` order.
@@ -155,7 +155,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "batch",
             "Run commands as one step",
-            "Run several commands in order as ONE undo step (engine `command.batch`). If any command fails, everything is rolled back and the error names the failing step. Returns an array of the results in order. A later step can use what an earlier step returned: name a step with \"as\": \"card\", then anywhere in a later step's params {\"$ref\": \"card\"} stands for the `id` in its result ({\"$step\": n} does the same by zero-based position). Add \"field\" for another part of the result: a key or a slash path, e.g. {\"$ref\": \"copy\", \"field\": \"ids/0\"} for the first id edit.duplicate returned. Any object with a `$ref` or `$step` key is a reference. Example: [{\"command\":\"node.create\",\"as\":\"card\",\"params\":{\"type\":\"frame\"}}, {\"command\":\"node.create\",\"params\":{\"type\":\"text\",\"text\":\"Hi\",\"parent\":{\"$ref\":\"card\"}}}] builds a frame and a text inside it in one call.",
+            "Run several commands in order as ONE undo step (engine `command.batch`). If any command fails, everything is rolled back and the error names the failing step. Returns an array of the results in order; a separate text block may include asynchronous orchestrator feedback about an earlier section. A later step can use what an earlier step returned: name a step with \"as\": \"card\", then anywhere in a later step's params {\"$ref\": \"card\"} stands for the `id` in its result ({\"$step\": n} does the same by zero-based position). Add \"field\" for another part of the result: a key or a slash path, e.g. {\"$ref\": \"copy\", \"field\": \"ids/0\"} for the first id edit.duplicate returned. Any object with a `$ref` or `$step` key is a reference. Example: [{\"command\":\"node.create\",\"as\":\"card\",\"params\":{\"type\":\"frame\"}}, {\"command\":\"node.create\",\"params\":{\"type\":\"text\",\"text\":\"Hi\",\"parent\":{\"$ref\":\"card\"}}}] builds a frame and a text inside it in one call.",
             obj(
                 json!({
                     "commands": {"type": "array", "minItems": 1, "description": "Steps to run", "items": obj(json!({"command": string("Command id"), "params": {"type": "object"}, "as": string("Name for this step, unique in the batch; later steps use its result with {\"$ref\": name}")}), &["command"])},
@@ -168,7 +168,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "create_node",
             "Create layer",
-            "Create a layer (engine `node.create`) and return its id and inspected properties. For UI icons use type icon with library and icon from search_icons; keep the preferred library across a screen. Coordinates are page units, y down; x/y are relative to the parent frame (the page when there is none, so then they are page coordinates; groups don't count). Inside an auto-layout frame the position is decided by the layout. The new layer becomes the selection.",
+            "Create a layer (engine `node.create`) and return its id and inspected properties. Nested frames/components with no explicit fill are transparent; set props.fill for a visible card, panel or screen surface. For UI icons use type icon with library and icon from search_icons; keep the preferred library across a screen. Coordinates are page units, y down; x/y are relative to the parent frame (the page when there is none, so then they are page coordinates; groups don't count). Inside an auto-layout frame the position is decided by the layout. The new layer becomes the selection.",
             obj(
                 json!({
                     "type": {"type": "string", "enum": ["frame", "rectangle", "ellipse", "polygon", "star", "line", "arrow", "text", "vector", "icon", "section", "component", "slice"], "description": "Layer type"},
@@ -425,6 +425,26 @@ fn friendly_params(p: &mut Value) {
     }
 }
 
+/// The model uses nested frames as layout containers. An omitted paint on those frames means
+/// transparent; the white document/screen background must be requested explicitly.
+fn transparent_nested_container(p: &mut Value) {
+    let Some(params) = p.as_object_mut() else { return };
+    let nested = params.get("parent").is_some_and(|parent| !parent.is_null());
+    let container =
+        params.get("type").and_then(Value::as_str).is_some_and(|kind| matches!(kind.to_ascii_lowercase().as_str(), "frame" | "component"));
+    if !nested || !container {
+        return;
+    }
+    let props = params.entry("props").or_insert_with(|| json!({}));
+    if props.is_null() {
+        *props = json!({});
+    }
+    let Some(props) = props.as_object_mut() else { return };
+    if !["fill", "fills", "fillStyle"].iter().any(|key| props.contains_key(*key)) {
+        props.insert("fills".into(), json!([]));
+    }
+}
+
 // ---------- dispatch ----------
 
 /// Run one tool. Every failure becomes an `isError` result (never a panic).
@@ -630,6 +650,9 @@ fn run_command(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult
     };
     let mut params = params;
     friendly_params(&mut params);
+    if cmd == "node.create" {
+        transparent_nested_container(&mut params);
+    }
     exec(b, cmd, params).map(|v| ToolResult::json(&v))
 }
 
@@ -648,6 +671,9 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
         };
         let mut params = params;
         friendly_params(&mut params);
+        if cmd == "node.create" {
+            transparent_nested_container(&mut params);
+        }
         let mut step = json!({"command": cmd, "params": params});
         if let (Some(name), Some(o)) = (c.get("as"), step.as_object_mut()) {
             o.insert("as".into(), name.clone());
@@ -665,9 +691,9 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
                 }
                 // The control request runs at the start of a frame. Give the canvas time to
                 // paint this real node before requesting the next one.
-                std::thread::sleep(std::time::Duration::from_millis(90));
+                std::thread::sleep(std::time::Duration::from_millis(45));
             }
-            return b.call("agent.batch.finish", json!({})).map(|result| ToolResult::json(&result));
+            return b.call("agent.batch.finish", json!({})).map(|result| with_review_feedback(b, ToolResult::json(&result)));
         }
     }
     let result = exec(b, "command.batch", json!({"label": label, "commands": steps}))?;
@@ -679,7 +705,18 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
             std::thread::sleep(std::time::Duration::from_millis(35));
         }
     }
-    Ok(ToolResult::json(&result))
+    Ok(with_review_feedback(b, ToolResult::json(&result)))
+}
+
+fn with_review_feedback(b: &mut dyn Backend, mut result: ToolResult) -> ToolResult {
+    if b.has_ui()
+        && let Ok(Value::Array(feedback)) = b.call("agent.review.take", json!({}))
+    {
+        for note in feedback.into_iter().filter_map(|item| item.as_str().map(str::to_owned)).take(3) {
+            result.content.push(json!({"type":"text","text":format!("Orchestrator review of an earlier section: {note}\nContinue building the current section. Correct the cited nodes when you reach a safe batch boundary; do not redraw the entire screen.")}));
+        }
+    }
+    result
 }
 
 fn create_node(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
@@ -705,7 +742,9 @@ fn create_node(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult
     if let Some(Value::Object(p)) = params.get_mut("props") {
         normalize_props(p);
     }
-    let r = exec(b, "node.create", Value::Object(params))?;
+    let mut params = Value::Object(params);
+    transparent_nested_container(&mut params);
+    let r = exec(b, "node.create", params)?;
     let id = r.get("id").cloned().ok_or("node.create returned no id")?;
     let node = b.call("node.get", json!({"id": id, "depth": 0}))?;
     Ok(ToolResult::json(&json!({"id": id, "node": node})))
@@ -751,7 +790,7 @@ fn inspect_document(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolR
         Some(Value::Bool(x)) => *x,
         Some(_) => return Err("`allPages` must be a boolean".into()),
     };
-    b.call("document.inspect", json!({"depth": depth, "allPages": all})).map(|v| ToolResult::json(&v))
+    b.call("document.inspect", json!({"depth": depth, "allPages": all})).map(|v| with_review_feedback(b, ToolResult::json(&v)))
 }
 
 fn get_node(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
@@ -837,7 +876,7 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult,
             None => b.screenshot_png()?,
         };
         let (w, h) = png_info(&bytes);
-        return Ok(ToolResult::image(&bytes, "image/png", &json!({"source": "window", "width": w, "height": h})));
+        return Ok(with_review_feedback(b, ToolResult::image(&bytes, "image/png", &json!({"source": "window", "width": w, "height": h}))));
     }
     let max = n_arg(a, "maxSize")?.unwrap_or(1600.0).clamp(16.0, 8192.0);
     let req = n_arg(a, "scale")?.unwrap_or(1.0);
@@ -864,10 +903,13 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult,
         bytes = b.render_png(&ids, scale)?;
         (w, h) = png_info(&bytes);
     }
-    Ok(ToolResult::image(
-        &bytes,
-        "image/png",
-        &json!({"source": if ids.is_empty() { "page" } else { "layers" }, "ids": ids, "scale": scale, "width": w, "height": h}),
+    Ok(with_review_feedback(
+        b,
+        ToolResult::image(
+            &bytes,
+            "image/png",
+            &json!({"source": if ids.is_empty() { "page" } else { "layers" }, "ids": ids, "scale": scale, "width": w, "height": h}),
+        ),
     ))
 }
 
@@ -963,6 +1005,45 @@ fn type_text(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, 
 mod activity_tests {
     use super::*;
     use crate::Headless;
+
+    #[test]
+    fn completed_review_reaches_the_designers_next_tool_result() {
+        struct Reviewed;
+        impl Backend for Reviewed {
+            fn call(&mut self, method: &str, _: Value) -> Result<Value, String> {
+                if method == "agent.review.take" { Ok(json!(["Frame 12 has an unintended white fill."])) } else { Err(method.into()) }
+            }
+            fn has_ui(&self) -> bool {
+                true
+            }
+            fn describe(&self) -> String {
+                "reviewed".into()
+            }
+        }
+        let result = with_review_feedback(&mut Reviewed, ToolResult::json(&json!([{"id":12}])));
+        assert_eq!(result.content.len(), 2);
+        assert!(result.content[1]["text"].as_str().is_some_and(|text| text.contains("Frame 12")));
+    }
+
+    #[test]
+    fn nested_agent_frames_default_to_transparent_without_erasing_explicit_paint() {
+        let mut backend = Headless::new();
+        let result = call_tool(
+            &mut backend,
+            "batch",
+            &json!({"commands":[
+                {"command":"node.create","as":"screen","params":{"type":"frame","name":"Screen","props":{"fill":"#101828"}}},
+                {"command":"node.create","params":{"type":"frame","name":"Layout","parent":{"$ref":"screen"}}},
+                {"command":"node.create","params":{"type":"frame","name":"Card","parent":{"$ref":"screen"},"props":{"fill":"#FFFFFF"}}}
+            ]}),
+        );
+        assert!(!result.is_error, "{}", result.first_text());
+        let steps: Value = serde_json::from_str(result.first_text()).unwrap();
+        let layout = backend.call("node.get", json!({"id":steps[1]["id"]})).unwrap();
+        let card = backend.call("node.get", json!({"id":steps[2]["id"]})).unwrap();
+        assert!(layout.get("fills").is_none_or(|fills| fills.as_array().is_some_and(Vec::is_empty)), "{layout}");
+        assert_eq!(card["fills"].as_array().map(Vec::len), Some(1));
+    }
 
     struct Traced {
         backend: Headless,
@@ -1064,7 +1145,7 @@ mod activity_tests {
         ]});
         let result = call_tool(&mut backend, "batch", &args);
         assert!(!result.is_error, "{}", result.first_text());
-        assert_eq!(backend.methods, ["agent.batch.begin", "agent.batch.step", "agent.batch.step", "agent.batch.finish"]);
+        assert_eq!(backend.methods, ["agent.batch.begin", "agent.batch.step", "agent.batch.step", "agent.batch.finish", "agent.review.take"]);
     }
 
     #[test]

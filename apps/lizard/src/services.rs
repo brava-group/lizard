@@ -28,6 +28,12 @@ pub struct Desktop {
     /// Recovery copies of unsaved files (written at once after a panic).
     recovery: crate::recovery::Shared,
     agents: Vec<crate::agent::Agent>,
+    reviewer: Option<crate::agent::Agent>,
+    reviewer_busy: bool,
+    reviewer_agent_index: usize,
+    reviewer_text: String,
+    reviewer_pending: Vec<(u64, usize, String, Vec<u64>)>,
+    reviewer_template: Option<AgentPrompt>,
     pending_parallel: Option<(AgentKind, AgentPrompt, u64)>,
     agent_control: Option<(ControlQueue, ContextSlot)>,
     agent_bridges: Vec<(u16, Arc<AtomicBool>)>,
@@ -101,6 +107,12 @@ impl Desktop {
             language: system_language(),
             recovery,
             agents: Vec::new(),
+            reviewer: None,
+            reviewer_busy: false,
+            reviewer_agent_index: 0,
+            reviewer_text: String::new(),
+            reviewer_pending: Vec::new(),
+            reviewer_template: None,
             pending_parallel: None,
             agent_control: None,
             agent_bridges: Vec::new(),
@@ -421,7 +433,20 @@ impl Services for Desktop {
                     }
                 }
             }
+            if let Some((queue, context)) = &self.agent_control
+                && let Some((port, enabled)) = crate::control_server::start_agent_reviewer(document, queue.clone(), context.clone())
+            {
+                self.agent_bridges.push((port, enabled.clone()));
+                match crate::agent::Agent::start(kind, document, prompt.conversation, port, &cwd.to_string_lossy(), &cli) {
+                    Ok(reviewer) => self.reviewer = Some(reviewer),
+                    Err(error) => {
+                        enabled.store(false, Ordering::Release);
+                        log::warn!("Could not start design reviewer: {error}");
+                    }
+                }
+            }
         }
+        self.reviewer_template = Some(prompt.clone());
         for index in 0..self.agents.len() {
             let mut assigned = prompt.clone();
             if count > 1 {
@@ -438,6 +463,43 @@ impl Services for Desktop {
             self.pending_parallel = Some((kind, prompt, document));
         }
         Ok(())
+    }
+
+    fn agent_review(&mut self, document: u64, agent_index: usize, request: &str, roots: &[u64]) {
+        if self.reviewer.as_ref().is_none_or(|reviewer| reviewer.document != document) {
+            return;
+        }
+        if self.reviewer_busy {
+            let pending = (document, agent_index, request.to_owned(), roots.to_vec());
+            if let Some(existing) = self.reviewer_pending.iter_mut().find(|(_, index, _, _)| *index == agent_index) {
+                *existing = pending;
+            } else {
+                self.reviewer_pending.push(pending);
+            }
+            return;
+        }
+        let Some(template) = self.reviewer_template.clone() else { return };
+        let review = AgentPrompt {
+            text: format!(
+                "You are Lizard's design orchestrator. Review the current document while the designer keeps working. Use only the Lizard MCP inspect_document, get_node and screenshot tools. Your connection is read-only. Check the sections completed so far against this request: {request}. Review agent {agent_index}'s assigned root IDs {roots:?}; when this list is not empty, report issues only inside those roots. When it is empty, review the shared screen. Focus on accidental opaque structural frames, clipping, overlap, inconsistent colours/type/spacing and missing requested content. Ignore unfinished sections. Reply with at most three concrete issues including node IDs, or exactly 'No actionable issue yet.' Do not make edits or ask the designer to stop."
+            ),
+            images: Vec::new(),
+            resume: None,
+            resumes: Vec::new(),
+            agent_count: 1,
+            ..template
+        };
+        if let Some(reviewer) = &self.reviewer
+            && reviewer.send(review).is_ok()
+        {
+            self.reviewer_busy = true;
+            self.reviewer_agent_index = agent_index;
+            self.reviewer_text.clear();
+        }
+    }
+
+    fn agent_review_pending(&self) -> bool {
+        self.reviewer_busy || !self.reviewer_pending.is_empty()
     }
 
     fn agent_spawn(&mut self, document: u64, config: &[Value]) -> Result<(), String> {
@@ -510,12 +572,34 @@ impl Services for Desktop {
                 }
             }
         }
-        if lead_finished_without_spawn {
-            if let Some((_, prompt, _)) = self.pending_parallel.take() {
-                for index in 1..usize::from(prompt.agent_count.clamp(1, 6)) {
-                    events.push(AgentEvent::Scoped { index, event: Box::new(AgentEvent::Done("Not started".into())) });
+        if lead_finished_without_spawn && let Some((_, prompt, _)) = self.pending_parallel.take() {
+            for index in 1..usize::from(prompt.agent_count.clamp(1, 6)) {
+                events.push(AgentEvent::Scoped { index, event: Box::new(AgentEvent::Done("Not started".into())) });
+            }
+        }
+        if let Some(reviewer) = &self.reviewer {
+            for event in reviewer.poll() {
+                match event {
+                    AgentEvent::Text(chunk) if self.reviewer_text.len() < 8_000 => self.reviewer_text.push_str(&chunk),
+                    AgentEvent::Done(_) => {
+                        self.reviewer_busy = false;
+                        let feedback = std::mem::take(&mut self.reviewer_text);
+                        if !feedback.trim().is_empty() && !feedback.trim().eq_ignore_ascii_case("No actionable issue yet.") {
+                            events.push(AgentEvent::ReviewFeedback { agent_index: self.reviewer_agent_index, text: feedback });
+                        }
+                    }
+                    AgentEvent::Error(error) => {
+                        self.reviewer_busy = false;
+                        self.reviewer_text.clear();
+                        log::warn!("Design review failed: {error}");
+                    }
+                    _ => {}
                 }
             }
+        }
+        if !self.reviewer_busy && !self.reviewer_pending.is_empty() {
+            let (document, agent_index, request, roots) = self.reviewer_pending.remove(0);
+            self.agent_review(document, agent_index, &request, &roots);
         }
         if let Some(login) = &self.agent_login_events {
             for event in login.try_iter().take(20) {
@@ -621,10 +705,19 @@ impl Services for Desktop {
         for agent in &self.agents {
             agent.stop();
         }
+        if let Some(reviewer) = &self.reviewer {
+            reviewer.stop();
+        }
     }
 
     fn agent_reset(&mut self) {
         self.agents.clear();
+        self.reviewer = None;
+        self.reviewer_busy = false;
+        self.reviewer_agent_index = 0;
+        self.reviewer_text.clear();
+        self.reviewer_pending.clear();
+        self.reviewer_template = None;
         self.pending_parallel = None;
         for (_, enabled) in self.agent_bridges.drain(..) {
             enabled.store(false, Ordering::Release);

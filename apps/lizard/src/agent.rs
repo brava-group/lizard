@@ -1364,6 +1364,7 @@ for line in sys.stdin:
                     | AgentEvent::Models(_)
                     | AgentEvent::TextBoundary
                     | AgentEvent::Thinking(_)
+                    | AgentEvent::ReviewFeedback { .. }
                     | AgentEvent::Scoped { .. } => {}
                 }
             }

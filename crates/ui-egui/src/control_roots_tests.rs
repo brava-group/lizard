@@ -30,6 +30,19 @@ fn confined_app(name: &str) -> (LizardApp, Dirs) {
     (app, Dirs(d))
 }
 
+#[test]
+fn orchestrator_feedback_is_delivered_only_to_its_assigned_worker() {
+    let (mut app, _dirs) = confined_app("review-routing");
+    let document = app.session.ds().unwrap().uid;
+    app.ui.agent.review_feedback = vec![(1, "Fix section A".into()), (2, "Fix section B".into())];
+    let first = handle(&mut app, "agent.review.take", json!({"__agent_document":document,"__agent_index":1})).unwrap();
+    assert_eq!(first, json!(["Fix section A"]));
+    assert_eq!(app.ui.agent.review_feedback, [(2, "Fix section B".into())]);
+    app.ui.agent.integration_started = true;
+    let lead = handle(&mut app, "agent.review.take", json!({"__agent_document":document,"__agent_index":0})).unwrap();
+    assert_eq!(lead, json!(["Fix section B"]));
+}
+
 /// Control method `method` handled as the desktop app does: inside the frame guard.
 fn handle(app: &mut LizardApp, method: &str, p: Value) -> Result<Value, String> {
     let ctx = egui::Context::default();

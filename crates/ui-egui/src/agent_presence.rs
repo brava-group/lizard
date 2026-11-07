@@ -373,9 +373,8 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
                 .agent
                 .runtime_conversation
                 .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
-                .map_or(crate::i18n::tr("Agent"), |chat| chat.agent.label());
-            let label = if app.ui.agent.active_agent_count > 1 { format!("{name} {}", agent_index + 1) } else { name.to_string() };
-            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, &label, brand.gamma_multiply(fade));
+                .map_or(crate::i18n::tr("Agent"), |chat| crate::agent_panel::agent_display_name(chat, agent_index));
+            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
         }
     }
     let cursor_visible = shown.is_some_and(|(x, y)| app.canvas.rect.contains(app.to_screen(x, y)));

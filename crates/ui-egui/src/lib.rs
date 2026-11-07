@@ -291,6 +291,10 @@ pub trait Services {
     fn agent_spawn(&mut self, _document: u64, _config: &[serde_json::Value]) -> Result<(), String> {
         Err(crate::i18n::tr("Parallel agents are only available in the desktop app").into())
     }
+    fn agent_review(&mut self, _document: u64, _agent_index: usize, _request: &str, _roots: &[u64]) {}
+    fn agent_review_pending(&self) -> bool {
+        false
+    }
     fn agent_poll(&mut self) -> Vec<agent_panel::AgentEvent> {
         Vec::new()
     }
