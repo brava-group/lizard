@@ -3,12 +3,13 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lizard_engine::Session;
 use lizard_engine::file_access::Roots;
 use serde_json::{Value, json};
 
-use crate::{LizardApp, NoServices};
+use crate::{LizardApp, NoServices, Services};
 
 struct Dirs(PathBuf);
 
@@ -41,6 +42,42 @@ fn orchestrator_feedback_is_delivered_only_to_its_assigned_worker() {
     app.ui.agent.integration_started = true;
     let lead = handle(&mut app, "agent.review.take", json!({"__agent_document":document,"__agent_index":0})).unwrap();
     assert_eq!(lead, json!(["Fix section B"]));
+}
+
+#[test]
+fn a_pending_review_does_not_block_the_designers_next_batch() {
+    struct PendingReview(Arc<AtomicUsize>);
+
+    impl Services for PendingReview {
+        fn agent_review(&mut self, _document: u64, _agent_index: usize, _request: &str, _roots: &[u64]) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn agent_review_pending(&self) -> bool {
+            true
+        }
+    }
+
+    let reviews = Arc::new(AtomicUsize::new(0));
+    let mut app = LizardApp::new(Session::new(), Box::new(PendingReview(reviews.clone())));
+    let document = app.session.ds().unwrap().uid;
+    app.ui.agent.active_prompt = "Create a screen in sections".into();
+    for name in ["First section", "Second section"] {
+        let result = handle(
+            &mut app,
+            "engine.execute",
+            json!({
+                "__agent_document": document,
+                "__agent_index": 0,
+                "command": "command.batch",
+                "params": {"commands": [{"command": "node.create", "params": {"type": "frame", "name": name}}]},
+            }),
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+    assert_eq!(reviews.load(Ordering::Relaxed), 2);
+    let page = app.session.ds().unwrap().doc.node(app.session.ds().unwrap().page).unwrap();
+    assert_eq!(page.children.len(), 2);
 }
 
 /// Control method `method` handled as the desktop app does: inside the frame guard.
