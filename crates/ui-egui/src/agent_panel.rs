@@ -227,6 +227,9 @@ pub struct AgentPresence {
     /// Current destination in page coordinates, retained while the agent is idle.
     pub destination: Option<(f64, f64)>,
     pub motion_updated: Option<web_time::Instant>,
+    /// Short visual path through nodes from an atomic batch; playback never blocks tool replies.
+    pub cursor_trail: Vec<NodeId>,
+    pub cursor_trail_next: Option<web_time::Instant>,
     pub idle_strength: f32,
     pub updated: Option<web_time::Instant>,
     pub pulses: Vec<AgentPulse>,
@@ -641,7 +644,14 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     app.ui.agent.round_failed = true;
                 }
                 if app.ui.agent.remaining_agents == 0 {
-                    if shared_reply && !app.ui.agent.round_failed && !app.ui.agent.integration_started {
+                    if !app.ui.agent.round_failed
+                        && !app.ui.agent.integration_started
+                        && app.ui.agent.remaining_variants <= 1
+                        && let Some(document) = app.ui.agent.runtime_document
+                    {
+                        app.services.agent_review(document, 0, &app.ui.agent.active_prompt, &[]);
+                    }
+                    if shared_reply && !app.ui.agent.round_failed && !app.ui.agent.integration_started && !app.services.agent_review_pending() {
                         integrate = true;
                     } else if app.ui.agent.remaining_variants > 1 && !app.ui.agent.round_failed {
                         next_variant = true;
@@ -2373,6 +2383,62 @@ mod tests {
         assert_eq!(app.ui.agent.conversations[0].messages.len(), 2);
         assert_eq!(sent.lock().unwrap().len(), 2);
         assert!(sent.lock().unwrap()[1].text.contains("Frame 12 tem fundo branco"));
+    }
+
+    #[test]
+    fn finished_screen_requests_one_review_without_a_second_design_pass() {
+        struct FinalReviewer {
+            events: Arc<Mutex<Vec<AgentEvent>>>,
+            reviews: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl Services for FinalReviewer {
+            fn agent_send(&mut self, _agent: AgentKind, _prompt: AgentPrompt, _document: u64) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn agent_poll(&mut self) -> Vec<AgentEvent> {
+                std::mem::take(&mut *self.events.lock().unwrap())
+            }
+
+            fn agent_review(&mut self, _document: u64, _agent_index: usize, request: &str, _roots: &[u64]) {
+                self.reviews.lock().unwrap().push(request.into());
+            }
+
+            fn agent_review_pending(&self) -> bool {
+                true
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let reviews = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FinalReviewer { events: events.clone(), reviews: reviews.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.draft = "Crie uma tela".into();
+        send_prompt(&mut app);
+        events.lock().unwrap().push(AgentEvent::Done("end_turn".into()));
+        sync(&mut app, &egui::Context::default());
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(*reviews.lock().unwrap(), ["Crie uma tela"]);
+        assert!(!app.ui.agent.busy);
+        assert!(!app.ui.agent.integration_started);
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let reviews = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FinalReviewer { events: events.clone(), reviews: reviews.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.agent_count = 2;
+        app.ui.agent.parallel_mode = ParallelMode::Split;
+        app.ui.agent.draft = "Crie uma tela em conjunto".into();
+        send_prompt(&mut app);
+        events.lock().unwrap().extend([
+            AgentEvent::Scoped { index: 0, event: Box::new(AgentEvent::Done("end_turn".into())) },
+            AgentEvent::Scoped { index: 1, event: Box::new(AgentEvent::Done("end_turn".into())) },
+        ]);
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(*reviews.lock().unwrap(), ["Crie uma tela em conjunto"]);
+        assert!(!app.ui.agent.integration_started);
+        assert_eq!(app.ui.agent.conversations[0].messages.len(), 2);
     }
     use crate::{NoServices, Services};
     use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};

@@ -316,17 +316,6 @@ fn check_parallel_section_command(
     Ok(())
 }
 
-fn request_agent_review(app: &mut LizardApp, params: &Value) {
-    let Some(document) = params.get("__agent_document").and_then(Value::as_u64) else { return };
-    let request = app.ui.agent.active_prompt.clone();
-    if request.is_empty() {
-        return;
-    }
-    let index = params.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0);
-    let roots = app.ui.agent.parallel_assignments.get(index).map_or_else(Vec::new, |ids| ids.iter().map(|id| id.0).collect());
-    app.services.agent_review(document, index, &request, &roots);
-}
-
 /// Handle one control method (also used by tests and the headless snapshot tool).
 pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Result<Value, String> {
     if let Some(expected) = p.get("__agent_document").and_then(Value::as_u64)
@@ -389,7 +378,6 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             p.get("__agent_document").and_then(Value::as_u64).ok_or("an attached agent session is required")?;
             let batch = app.ui.streamed_batch.take().ok_or("no streamed batch")?;
             let result = app.session.finish_streamed_batch(batch).map_err(|e| e.to_string())?;
-            request_agent_review(app, p);
             Ok(Value::Array(result))
         }
         "agent.review.take" => {
@@ -470,6 +458,10 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             let agent_index = p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0).min(5);
             let conversation = app.ui.agent.runtime_conversation;
             let presence = app.ui.agent.presence_mut(agent_index);
+            if phase == "start" && !inspection {
+                presence.cursor_trail.clear();
+                presence.cursor_trail_next = None;
+            }
             if tool == "create_node" {
                 if phase == "start" {
                     if let Some(arguments) = p.get("arguments").filter(|arguments| arguments.is_object()) {
@@ -623,8 +615,20 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             }
             let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
-            if cmd == "command.batch" && r.is_ok() && p.get("__agent_document").is_some() {
-                request_agent_review(app, p);
+            if cmd == "command.batch"
+                && p.get("__agent_document").is_some()
+                && let (Some(steps), Ok(Value::Array(results))) = (params.get("commands").and_then(Value::as_array), &r)
+            {
+                let created: Vec<_> = steps
+                    .iter()
+                    .zip(results)
+                    .filter(|(step, _)| step.get("command").and_then(Value::as_str) == Some("node.create"))
+                    .filter_map(|(_, result)| result.get("id").and_then(Value::as_u64).map(lizard_doc::NodeId))
+                    .collect();
+                if !created.is_empty() {
+                    let index = p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0).min(5);
+                    crate::agent_presence::schedule_batch_reveal(app.ui.agent.presence_mut(index), &created);
+                }
             }
             if cmd == "node.create"
                 && p.get("__agent_document").is_some()

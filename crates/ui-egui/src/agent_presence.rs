@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use web_time::Instant;
 
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2};
 use serde_json::Value;
 
 use crate::LizardApp;
@@ -17,6 +17,27 @@ pub fn start_entrance(presence: &mut crate::agent_panel::AgentPresence, id: liza
         presence.entrances.remove(0);
     }
     presence.entrances.push(crate::agent_panel::AgentEntrance { id, started: Instant::now() });
+}
+
+/// Animate an atomic batch on the canvas after the editor has committed it. The agent receives
+/// the batch result immediately; this visual playback is independent of its next tool call.
+pub fn schedule_batch_reveal(presence: &mut crate::agent_panel::AgentPresence, ids: &[lizard_doc::NodeId]) {
+    let now = Instant::now();
+    for (index, id) in ids.iter().take(32).enumerate() {
+        presence.entrances.push(crate::agent_panel::AgentEntrance { id: *id, started: now + Duration::from_millis(index as u64 * 20) });
+    }
+    if presence.entrances.len() > 32 {
+        presence.entrances.drain(..presence.entrances.len() - 32);
+    }
+    presence.cursor_trail.clear();
+    let stride = ids.len().div_ceil(8).max(1);
+    presence.cursor_trail.extend(ids.iter().step_by(stride).copied());
+    if let Some(last) = ids.last()
+        && presence.cursor_trail.last() != Some(last)
+    {
+        presence.cursor_trail.push(*last);
+    }
+    presence.cursor_trail_next = (!presence.cursor_trail.is_empty()).then_some(now);
 }
 
 fn entrance_background(app: &LizardApp, id: lizard_doc::NodeId, fallback: Color32) -> Color32 {
@@ -233,16 +254,58 @@ fn advance_idle_strength(current: f32, idle: bool, dt: Duration, reduce_motion: 
     current + ((if idle { 1.0 } else { 0.0 }) - current) * progress
 }
 
+/// Place the visible pointer and tag near the real work point without covering another agent.
+/// The page-space cursor stays unchanged; only this canvas overlay moves.
+fn cursor_placement(real_tip: Pos2, tag_size: Vec2, canvas: Rect, occupied: &[Rect]) -> Option<(Pos2, [Rect; 2])> {
+    const SLOTS: [(f32, f32); 25] = [
+        (0.0, 0.0),
+        (-1.0, 0.0),
+        (1.0, 0.0),
+        (0.0, -1.0),
+        (0.0, 1.0),
+        (-1.0, -1.0),
+        (1.0, -1.0),
+        (-1.0, 1.0),
+        (1.0, 1.0),
+        (-2.0, 0.0),
+        (2.0, 0.0),
+        (0.0, -2.0),
+        (0.0, 2.0),
+        (-2.0, -1.0),
+        (2.0, -1.0),
+        (-2.0, 1.0),
+        (2.0, 1.0),
+        (-1.0, -2.0),
+        (1.0, -2.0),
+        (-1.0, 2.0),
+        (1.0, 2.0),
+        (-2.0, -2.0),
+        (2.0, -2.0),
+        (-2.0, 2.0),
+        (2.0, 2.0),
+    ];
+    let spacing = vec2((tag_size.x + 30.0).max(80.0), (tag_size.y + 30.0).max(52.0));
+    SLOTS.into_iter().find_map(|(column, row)| {
+        let tip = real_tip + vec2(column * spacing.x, row * spacing.y);
+        let pointer = Rect::from_min_size(tip, vec2(17.0, 18.0));
+        let tag = Rect::from_min_size(tip + vec2(14.0, 15.0), tag_size);
+        let fits = [pointer, tag].iter().all(|rect| canvas.contains(rect.min) && canvas.contains(rect.max));
+        let clear = [pointer, tag].iter().all(|rect| occupied.iter().all(|other| !rect.expand(4.0).intersects(*other)));
+        (fits && clear).then_some((tip, [pointer, tag]))
+    })
+}
+
 pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
-    draw_one(app, painter, ctx, 0);
+    let mut occupied = Vec::with_capacity(12);
+    draw_one(app, painter, ctx, 0, &mut occupied);
     for index in 0..app.ui.agent.other_presences.len() {
         std::mem::swap(&mut app.ui.agent.presence, &mut app.ui.agent.other_presences[index]);
-        draw_one(app, painter, ctx, index + 1);
+        draw_one(app, painter, ctx, index + 1, &mut occupied);
         std::mem::swap(&mut app.ui.agent.presence, &mut app.ui.agent.other_presences[index]);
     }
 }
 
-fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_index: usize) {
+fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_index: usize, occupied: &mut Vec<Rect>) {
     let brand = if agent_index == 0 {
         Tokens::get(ctx).accent_text
     } else {
@@ -257,6 +320,10 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
     };
     let now = Instant::now();
     let Some(document) = app.session.ds().ok().map(|ds| ds.uid) else { return };
+    if app.ui.agent.presence.cursor_trail_next.is_some_and(|at| now >= at) && !app.ui.agent.presence.cursor_trail.is_empty() {
+        app.ui.agent.presence.target = Some(app.ui.agent.presence.cursor_trail.remove(0));
+        app.ui.agent.presence.cursor_trail_next = (!app.ui.agent.presence.cursor_trail.is_empty()).then_some(now + Duration::from_millis(85));
+    }
     let presence = &app.ui.agent.presence;
     if presence.document != Some(document) || presence.conversation != app.ui.agent.runtime_conversation {
         return;
@@ -272,7 +339,7 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
         })
     });
     let zoom = app.session.ds().map_or(1.0, |ds| ds.view.zoom).max(0.01);
-    let destination = if active { work.or(presence.destination) } else { presence.destination };
+    let destination = work.or(presence.destination);
     let target = destination.or(presence.shown).or_else(|| {
         active
             .then(|| {
@@ -365,16 +432,23 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
     }
     let draft_visible = draw_draft(app, painter, now, brand, reduce_motion);
     if let Some((x, y)) = shown.filter(|_| fade > 0.0) {
-        let tip = app.to_screen(x, y) + idle_offset(idle_age, idle_strength);
-        if app.canvas.rect.contains(tip) {
-            crate::live::pointer(painter, tip, brand.gamma_multiply(fade));
+        let real_tip = app.to_screen(x, y) + idle_offset(idle_age, idle_strength);
+        if app.canvas.rect.contains(real_tip) {
             let name = app
                 .ui
                 .agent
                 .runtime_conversation
                 .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
                 .map_or(crate::i18n::tr("Agent"), |chat| crate::agent_panel::agent_display_name(chat, agent_index));
-            crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
+            let tag_size = painter.layout_no_wrap(name.to_owned(), crate::theme::semibold(11.0), Color32::WHITE).size() + vec2(12.0, 6.0);
+            if let Some((tip, bounds)) = cursor_placement(real_tip, tag_size, app.canvas.rect, occupied) {
+                if tip != real_tip {
+                    painter.line_segment([real_tip, tip], Stroke::new(1.0, brand.gamma_multiply(fade * 0.6)));
+                }
+                crate::live::pointer(painter, tip, brand.gamma_multiply(fade));
+                crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
+                occupied.extend(bounds);
+            }
         }
     }
     let cursor_visible = shown.is_some_and(|(x, y)| app.canvas.rect.contains(app.to_screen(x, y)));
@@ -403,6 +477,44 @@ mod tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn colocated_agent_cursors_have_separate_pointers_and_names() {
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 600.0));
+        let tip = pos2(450.0, 300.0);
+        let mut occupied = Vec::new();
+        for _ in 0..7 {
+            let (_, bounds) = cursor_placement(tip, vec2(54.0, 22.0), canvas, &occupied).unwrap();
+            for rect in &bounds {
+                assert!(occupied.iter().all(|previous| !rect.intersects(*previous)));
+            }
+            occupied.extend(bounds);
+        }
+        assert_eq!(occupied.len(), 14);
+    }
+
+    #[test]
+    fn cursor_collision_avoids_the_canvas_edge() {
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(250.0, 180.0));
+        let first = cursor_placement(pos2(218.0, 120.0), vec2(52.0, 22.0), canvas, &[]).unwrap();
+        let second = cursor_placement(pos2(218.0, 120.0), vec2(52.0, 22.0), canvas, &first.1).unwrap();
+        assert_ne!(first.0, second.0);
+        assert!(first.1.into_iter().chain(second.1).all(|rect| canvas.contains(rect.min) && canvas.contains(rect.max)));
+    }
+
+    #[test]
+    fn atomic_batch_keeps_entry_animation_and_a_short_cursor_path() {
+        let mut presence = crate::agent_panel::AgentPresence::default();
+        let ids: Vec<_> = (1..=24).map(NodeId).collect();
+        schedule_batch_reveal(&mut presence, &ids);
+        assert_eq!(presence.entrances.len(), 24);
+        assert_eq!(presence.entrances[0].id, NodeId(1));
+        assert!(presence.entrances[0].started < presence.entrances[1].started);
+        assert_eq!(presence.cursor_trail.first(), Some(&NodeId(1)));
+        assert_eq!(presence.cursor_trail.last(), Some(&NodeId(24)));
+        assert!(presence.cursor_trail.len() <= 9);
+        assert!(presence.cursor_trail_next.is_some());
+    }
 
     #[test]
     fn incomplete_tool_json_updates_the_canvas_draft_field_by_field() {

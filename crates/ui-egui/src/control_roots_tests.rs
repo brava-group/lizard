@@ -45,7 +45,7 @@ fn orchestrator_feedback_is_delivered_only_to_its_assigned_worker() {
 }
 
 #[test]
-fn a_pending_review_does_not_block_the_designers_next_batch() {
+fn design_batches_do_not_start_repeated_reviews() {
     struct PendingReview(Arc<AtomicUsize>);
 
     impl Services for PendingReview {
@@ -75,7 +75,9 @@ fn a_pending_review_does_not_block_the_designers_next_batch() {
         );
         assert!(result.is_ok(), "{result:?}");
     }
-    assert_eq!(reviews.load(Ordering::Relaxed), 2);
+    assert_eq!(reviews.load(Ordering::Relaxed), 0);
+    assert_eq!(app.ui.agent.presence.entrances.len(), 2);
+    assert!(!app.ui.agent.presence.cursor_trail.is_empty());
     let page = app.session.ds().unwrap().doc.node(app.session.ds().unwrap().page).unwrap();
     assert_eq!(page.children.len(), 2);
 }

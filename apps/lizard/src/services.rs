@@ -481,7 +481,7 @@ impl Services for Desktop {
         let Some(template) = self.reviewer_template.clone() else { return };
         let review = AgentPrompt {
             text: format!(
-                "You are Lizard's design orchestrator. Review the current document while the designer keeps working. Use only the Lizard MCP inspect_document, get_node and screenshot tools. Your connection is read-only. Check the sections completed so far against this request: {request}. Review agent {agent_index}'s assigned root IDs {roots:?}; when this list is not empty, report issues only inside those roots. When it is empty, review the shared screen. Focus on accidental opaque structural frames, clipping, overlap, inconsistent colours/type/spacing and missing requested content. Ignore unfinished sections. Reply with at most three concrete issues including node IDs, or exactly 'No actionable issue yet.' Do not make edits or ask the designer to stop."
+                "You are Lizard's final design reviewer. The designers have completed this pass. Use only the Lizard MCP inspect_document, get_node and screenshot tools. Your connection is read-only. Check the assembled design against this request: {request}. Review agent {agent_index}'s assigned root IDs {roots:?}; when this list is empty, review the shared screen. Inspect the document once and take one screenshot; inspect specific nodes only to verify concrete issues. Focus on accidental opaque structural frames, clipping, overlap, inconsistent colours/type/spacing, weak hierarchy, and missing requested content. Reply with at most three actionable issues including node IDs, or exactly 'No actionable issue yet.' Do not make edits."
             ),
             images: Vec::new(),
             resume: None,
