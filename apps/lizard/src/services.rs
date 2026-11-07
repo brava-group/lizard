@@ -341,7 +341,7 @@ fn save_filters<'a>(exts: &'a [&'a str]) -> Vec<(&'static str, &'a [&'a str])> {
 fn parallel_lead_instructions(count: usize, mode: lizard_ui_egui::agent_panel::ParallelMode) -> String {
     match mode {
         lizard_ui_egui::agent_panel::ParallelMode::Split => format!(
-            "Parallel design run with {count} agents. You are the lead designer. Inspect the document and divide the user request into exactly {count} distinct parts before detailed design. Create a separate frame container for each part; related sections of one screen should be sibling frames inside their shared screen frame, while independent screens can each be root frames. Call spawn_agents once with exactly {} config entries: each entry has a brief, different prompt and the existing containerNodes assigned to one other agent. Then design the remaining part yourself in its own container. Never work in the other agents' containers. Give each task the same relevant style guidance, but let the agent determine its internal layout. If the request cannot be divided safely, explain why and continue alone.",
+            "Parallel design run with {count} agents. You are the lead designer and own the complete result. First determine the number of screens the user explicitly requested. If no number is specified, produce ONE finished screen; a request for a web app is not permission to invent a second screen. Before spawning, create that single screen frame, establish its background, grid, typography, palette and shared navigation, then create non-overlapping section frames INSIDE it. Give other agents bounded sections, not separate screens, and build the remaining sections yourself at the same time. If multiple screens were explicitly requested, use one consistent design system across them. Call spawn_agents once with exactly {} config entries containing an existing section container and a distinct scoped task each. Each task must include concrete shared visual values (colours, type sizes, spacing, icon family), section bounds, and which global elements already exist. The child must use the established shell and must not add another page, screen, global navigation or brand treatment. Continue building your own section immediately after spawning; inspect the combined result, reconcile inconsistencies, and only then report completion. Never edit another agent's assigned section while it is working. If the work cannot be split into independent sections, explain why and continue alone.",
             count - 1
         ),
         lizard_ui_egui::agent_panel::ParallelMode::SideBySide => format!(
@@ -468,7 +468,15 @@ impl Services for Desktop {
                     .and_then(Value::as_str)
                     .filter(|value| !value.trim().is_empty())
                     .unwrap_or_else(|| prompt.text.rsplit_once("User request:\n").map_or(prompt.text.as_str(), |(_, request)| request));
-                assigned.text.push_str(&format!("\n\nYou are designer agent {} of {}. Your exclusive task: {}. Work only inside the assigned root frame IDs: {}. Do not move, delete, or edit another agent's roots. The assigned frame snapshot below was fetched immediately before this turn; verify the document ID and page before editing. Preserve shared styles and variables. Report only your assigned result.\nAssigned frame snapshot: {}", index + 1, count, description, Value::Array(roots), task.get("bootstrap").unwrap_or(&Value::Null)));
+                let scope = match prompt.parallel_mode {
+                    lizard_ui_egui::agent_panel::ParallelMode::Split => {
+                        "Build only your assigned section of the ONE shared design. The original request above supplies product context, not permission to build a second full screen. Do not create another root screen, page, navigation shell or visual theme. Match the lead's existing colours, type, spacing and icon family exactly; inspect surrounding work before and after editing. Finish by reporting your section and any visual inconsistency you noticed."
+                    }
+                    lizard_ui_egui::agent_panel::ParallelMode::SideBySide => {
+                        "Build one complete independent alternative in your assigned root frame. Do not alter the other alternatives. Finish by reporting what distinguishes yours."
+                    }
+                };
+                assigned.text.push_str(&format!("\n\nYou are collaborator {} of {}. Your exclusive task: {}. Work only inside the assigned frame IDs: {}. {} Do not move, delete, or edit another agent's assigned frame.\nAssigned frame snapshot: {}", index + 1, count, description, Value::Array(roots), scope, task.get("bootstrap").unwrap_or(&Value::Null)));
                 assigned.resume = None;
                 agent.send(assigned)?;
                 children.push(agent);

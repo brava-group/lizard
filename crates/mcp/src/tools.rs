@@ -120,7 +120,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "spawn_agents",
             "Split design work",
-            "Only the lead agent in an in-app parallel run can use this. Create distinct frame containers first; related sections may be sibling frames inside one screen. Assign one distinct task and at least one non-overlapping existing frame to each additional agent. Spawn one fewer agent than the selected count; continue the remaining part yourself. Keep shared visual guidance in each task. In Side by side mode, each agent makes a complete alternative in its own frame.",
+            "Only the lead agent in an in-app parallel run can use this. Split work mode: if the user did not explicitly request multiple screens, create ONE screen with a shared shell and sibling section frames inside it. Assign one bounded section frame and a distinct task to each collaborator; continue other sections yourself. Pass exact shared colours, typography, spacing and icon family in every task. Never assign a whole second screen for an unspecified web app. Side by side mode is for complete alternative screens. Spawn one fewer agent than the selected count.",
             obj(
                 json!({"config": {"type":"array","minItems":1,"maxItems":5,"items":obj(json!({"prompt":string("A brief, distinct design task"),"containerNodes":ids_schema("Existing frame IDs reserved for this agent")}), &["prompt","containerNodes"])}}),
                 &["config"],
@@ -501,6 +501,13 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
     let result = r.unwrap_or_else(ToolResult::error);
     if relevant {
         let mut ids = activity_ids(name, args);
+        if name == "batch"
+            && !result.is_error
+            && let Ok(completed) = serde_json::from_str::<Value>(result.first_text())
+            && let Some(steps) = completed.as_array()
+        {
+            ids = steps.iter().rev().find_map(|step| step.get("id").and_then(Value::as_u64)).into_iter().collect();
+        }
         if name == "create_node"
             && !result.is_error
             && let Ok(created) = serde_json::from_str::<Value>(result.first_text())
@@ -663,7 +670,16 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
             return b.call("agent.batch.finish", json!({})).map(|result| ToolResult::json(&result));
         }
     }
-    exec(b, "command.batch", json!({"label": label, "commands": steps})).map(|v| ToolResult::json(&v))
+    let result = exec(b, "command.batch", json!({"label": label, "commands": steps}))?;
+    if b.has_ui()
+        && let Some(completed) = result.as_array()
+    {
+        for id in completed.iter().filter_map(|step| step.get("id").and_then(Value::as_u64)).take(40) {
+            b.agent_activity(json!({"phase":"done","tool":"create_node","ids":[id]}));
+            std::thread::sleep(std::time::Duration::from_millis(35));
+        }
+    }
+    Ok(ToolResult::json(&result))
 }
 
 fn create_node(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, String> {
@@ -966,6 +982,57 @@ mod activity_tests {
         fn agent_activity(&mut self, activity: Value) {
             self.activity.push(activity);
         }
+    }
+
+    #[test]
+    fn atomic_batch_reports_created_nodes_for_the_agent_cursor() {
+        let mut traced = Traced { backend: Headless::new(), activity: Vec::new() };
+        let result = call_tool(
+            &mut traced,
+            "batch",
+            &json!({"commands":[
+                {"command":"node.create","params":{"type":"frame","name":"Screen"}},
+                {"command":"node.create","params":{"type":"frame","name":"Section"}}
+            ]}),
+        );
+        assert!(!result.is_error, "{}", result.first_text());
+        let done = traced.activity.iter().find(|activity| activity["phase"] == "done").unwrap();
+        assert_eq!(done["ids"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn attached_atomic_batch_replays_each_created_node_to_the_cursor() {
+        struct VisibleAtomic {
+            activity: Vec<Value>,
+        }
+        impl Backend for VisibleAtomic {
+            fn call(&mut self, method: &str, _: Value) -> Result<Value, String> {
+                match method {
+                    "agent.batch.begin" => Ok(json!({"accepted":false})),
+                    "engine.execute" => Ok(json!([{"id":10},{"id":11}])),
+                    _ => Err(format!("unexpected {method}")),
+                }
+            }
+            fn has_ui(&self) -> bool {
+                true
+            }
+            fn describe(&self) -> String {
+                "visible atomic test".into()
+            }
+            fn agent_activity(&mut self, activity: Value) {
+                self.activity.push(activity);
+            }
+        }
+        let mut backend = VisibleAtomic { activity: Vec::new() };
+        let result = call_tool(&mut backend, "batch", &json!({"commands":[{"command":"node.create","params":{"type":"frame"}}]}));
+        assert!(!result.is_error, "{}", result.first_text());
+        let visited: Vec<_> = backend
+            .activity
+            .iter()
+            .filter(|activity| activity["tool"] == "create_node" && activity["phase"] == "done")
+            .map(|activity| activity["ids"][0].clone())
+            .collect();
+        assert_eq!(visited, [json!(10), json!(11)]);
     }
 
     #[test]

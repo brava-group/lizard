@@ -99,6 +99,7 @@ fn parallel_spawn_requires_distinct_existing_frames() {
     app.ui.agent.busy = true;
     app.ui.agent.runtime_document = Some(document);
     app.ui.agent.active_agent_count = 3;
+    app.ui.agent.active_parallel_mode = crate::agent_panel::ParallelMode::SideBySide;
     let frame = app.session.execute("node.create", &json!({"type":"frame", "name":"First task"})).unwrap()["id"].clone();
     let request = |second: Value| {
         json!({
@@ -129,6 +130,7 @@ fn parallel_spawn_accepts_sibling_sections_but_rejects_ancestor_overlap() {
     let screen = app.session.execute("node.create", &json!({"type":"frame", "name":"Screen"})).unwrap()["id"].clone();
     let first = app.session.execute("node.create", &json!({"type":"frame", "name":"Header", "parent":screen})).unwrap()["id"].clone();
     let second = app.session.execute("node.create", &json!({"type":"frame", "name":"Body", "parent":screen})).unwrap()["id"].clone();
+    let nested = app.session.execute("node.create", &json!({"type":"frame", "name":"Nested", "parent":first})).unwrap()["id"].clone();
     let request = |left: Value, right: Value| {
         json!({
             "__agent_document": document,
@@ -139,7 +141,9 @@ fn parallel_spawn_accepts_sibling_sections_but_rejects_ancestor_overlap() {
             ]
         })
     };
-    let overlap = handle(&mut app, "agent.spawn", request(screen, first.clone())).unwrap_err();
+    let root = handle(&mut app, "agent.spawn", request(screen, first.clone())).unwrap_err();
+    assert!(root.contains("section frames"), "{root}");
+    let overlap = handle(&mut app, "agent.spawn", request(first.clone(), nested)).unwrap_err();
     assert!(overlap.contains("non-overlapping frame"), "{overlap}");
     let siblings = handle(&mut app, "agent.spawn", request(first, second)).unwrap_err();
     assert!(siblings.contains("desktop app"), "{siblings}");
@@ -168,4 +172,54 @@ fn parallel_activity_keeps_each_cursor_at_its_own_work() {
     }
     assert_eq!(app.ui.agent.presence.point, Some((100.0, 20.0)));
     assert_eq!(app.ui.agent.other_presences[0].point, Some((400.0, 20.0)));
+}
+
+#[test]
+fn parallel_runs_use_atomic_batches_to_preserve_other_agents_edits() {
+    let (mut app, _dirs) = confined_app("parallel-batch");
+    let document = app.session.ds().unwrap().uid;
+    app.ui.agent.busy = true;
+    app.ui.agent.runtime_document = Some(document);
+    app.ui.agent.active_agent_count = 2;
+    let response = handle(
+        &mut app,
+        "agent.batch.begin",
+        json!({"__agent_document":document,"__agent_index":1,"commands":[{"command":"node.create","params":{"type":"frame"}}]}),
+    )
+    .unwrap();
+    assert_eq!(response["accepted"], false);
+    assert!(app.ui.streamed_batch.is_none());
+}
+
+#[test]
+fn collaborator_cannot_create_a_second_screen_or_leave_its_section() {
+    let (mut app, _dirs) = confined_app("parallel-scope");
+    let document = app.session.ds().unwrap().uid;
+    let screen = app.session.execute("node.create", &json!({"type":"frame","name":"Screen"})).unwrap()["id"].clone();
+    let section = app.session.execute("node.create", &json!({"type":"frame","name":"Section","parent":screen})).unwrap()["id"].clone();
+    app.ui.agent.busy = true;
+    app.ui.agent.runtime_document = Some(document);
+    app.ui.agent.active_agent_count = 2;
+    app.ui.agent.active_parallel_mode = crate::agent_panel::ParallelMode::Split;
+    app.ui.agent.parallel_assignments = vec![Vec::new(), vec![lizard_engine::params::id_of(&section).unwrap()]];
+    let create = |parent: Option<Value>| {
+        let mut params = json!({"type":"rectangle"});
+        if let Some(parent) = parent {
+            params["parent"] = parent;
+        }
+        json!({"__agent_document":document,"__agent_index":1,"command":"node.create","params":params})
+    };
+    assert!(handle(&mut app, "engine.execute", create(None)).is_err());
+    assert!(handle(&mut app, "engine.execute", create(Some(screen.clone()))).is_err());
+    assert!(handle(&mut app, "engine.execute", create(Some(section.clone()))).is_ok());
+    let outside = json!({"__agent_document":document,"__agent_index":1,"command":"node.set","params":{"ids":[screen],"props":{"name":"Wrong"}}});
+    assert!(handle(&mut app, "engine.execute", outside).is_err());
+    let batch = json!({
+        "__agent_document":document,"__agent_index":1,"command":"command.batch",
+        "params":{"commands":[
+            {"as":"card","command":"node.create","params":{"type":"frame","parent":section}},
+            {"command":"node.create","params":{"type":"text","parent":{"$ref":"card"},"text":"Inside"}}
+        ]}
+    });
+    assert!(handle(&mut app, "engine.execute", batch).is_ok());
 }

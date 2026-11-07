@@ -146,6 +146,8 @@ pub struct ChatMessage {
     #[serde(default)]
     pub thinking: String,
     #[serde(skip)]
+    pub text_agent: Option<usize>,
+    #[serde(skip)]
     pub previews: Vec<AgentPreview>,
     #[serde(default)]
     pub selected_nodes: Vec<ChatNodeRef>,
@@ -295,6 +297,7 @@ pub struct Conversation {
 pub struct AgentUi {
     pub presence: AgentPresence,
     pub other_presences: Vec<AgentPresence>,
+    pub parallel_assignments: Vec<Vec<NodeId>>,
     pub draft: String,
     pub images: Vec<DraftImage>,
     pub pending_images: Vec<DraftImage>,
@@ -313,6 +316,7 @@ pub struct AgentUi {
     pub active_model: Option<String>,
     pub active_prompt: String,
     pub round_failed: bool,
+    pub integration_started: bool,
     pub history_open: bool,
     pub selected_suggestion: Option<usize>,
     pub agent: AgentKind,
@@ -349,7 +353,17 @@ fn save_history(app: &mut LizardApp) {
 }
 
 fn agent_message(chat: &mut Conversation, index: usize) -> Option<&mut ChatMessage> {
-    chat.messages.iter_mut().rev().find(|message| message.role == "assistant" && message.agent_index == index)
+    let latest = chat.messages.iter().rposition(|message| message.role == "assistant")?;
+    let variant = chat.messages[latest].variant_index;
+    let start = chat.messages[..latest]
+        .iter()
+        .rposition(|message| message.role == "user" || (message.role == "assistant" && message.variant_index != variant))
+        .map_or(0, |previous| previous + 1);
+    let index = chat.messages[start..=latest]
+        .iter()
+        .rposition(|message| message.role == "assistant" && message.agent_index == index)
+        .map_or(latest, |offset| start + offset);
+    chat.messages.get_mut(index)
 }
 
 pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
@@ -409,11 +423,13 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
     let events = app.services.agent_poll();
     let mut completed = false;
     let mut next_variant = false;
+    let mut integrate = false;
     for event in events {
         let (agent_index, event) = match event {
             AgentEvent::Scoped { index, event } => (index, *event),
             event => (0, event),
         };
+        let shared_reply = app.ui.agent.active_agent_count > 1 && app.ui.agent.active_parallel_mode == ParallelMode::Split;
         let active = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id));
         match event {
             AgentEvent::Ready => {}
@@ -457,11 +473,22 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index))
                     && message.text.len() < 100_000
                 {
-                    message.text.push_str(&chunk);
-                    if let Some(ChatPart::Text(text)) = message.parts.last_mut() {
-                        text.push_str(&chunk);
+                    let prefix = if shared_reply && message.text_agent.map_or(agent_index > 0, |previous| previous != agent_index) {
+                        format!("\n\n**{} {}**\n", tr("Agent"), agent_index + 1)
                     } else {
-                        message.parts.push(ChatPart::Text(chunk));
+                        String::new()
+                    };
+                    message.text_agent = Some(agent_index);
+                    let content = format!("{prefix}{chunk}");
+                    message.text.push_str(&content);
+                    if prefix.is_empty() {
+                        if let Some(ChatPart::Text(text)) = message.parts.last_mut() {
+                            text.push_str(&content);
+                        } else {
+                            message.parts.push(ChatPart::Text(content));
+                        }
+                    } else {
+                        message.parts.push(ChatPart::Text(content));
                     }
                 }
             }
@@ -487,6 +514,8 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
             }
             AgentEvent::Tool { id, title, status, input, output, content } => {
                 let source = if app.ui.agent.agent == AgentKind::Codex { "mcp-create-node" } else { &id };
+                let display_id = if shared_reply { format!("agent-{agent_index}:{id}") } else { id.clone() };
+                let title = if shared_reply { title.map(|title| format!("{} {} · {title}", tr("Agent"), agent_index + 1)) } else { title };
                 let presence =
                     if agent_index == 0 { Some(&mut app.ui.agent.presence) } else { app.ui.agent.other_presences.get_mut(agent_index - 1) };
                 let creating = title.as_deref().is_some_and(|title| {
@@ -494,18 +523,19 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     title.contains("create") || title.contains("criar") || title.contains("adicionar camada")
                 }) || presence.as_ref().is_some_and(|presence| presence.draft.as_ref().is_some_and(|draft| draft.source == source));
                 if creating && !matches!(status.as_deref(), Some("completed" | "failed")) {
-                    if let Some(Some(raw)) = input.as_ref() {
-                        if let Some(presence) = presence {
-                            crate::agent_presence::update_draft(presence, source, raw);
-                        }
+                    if let Some(Some(raw)) = input.as_ref()
+                        && let Some(presence) = presence
+                    {
+                        crate::agent_presence::update_draft(presence, source, raw);
                     }
-                } else if creating && matches!(status.as_deref(), Some("completed" | "failed")) {
-                    if let Some(presence) = presence {
-                        presence.draft = None;
-                    }
+                } else if creating
+                    && matches!(status.as_deref(), Some("completed" | "failed"))
+                    && let Some(presence) = presence
+                {
+                    presence.draft = None;
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
-                    if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == id) {
+                    if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == display_id) {
                         if let Some(title) = title {
                             tool.title = title;
                         }
@@ -524,7 +554,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     } else if message.tools.len() < 100 {
                         message.parts.push(ChatPart::Tool(message.tools.len()));
                         message.tools.push(ChatTool {
-                            id,
+                            id: display_id,
                             title: title.unwrap_or_else(|| tr("Agent action").into()),
                             status: status.unwrap_or_else(|| "in_progress".into()),
                             input: input.flatten(),
@@ -556,10 +586,12 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     presence.updated = Some(web_time::Instant::now());
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
-                    message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
-                    if let Ok(ds) = app.session.ds() {
-                        message.undo_after = ds.history.undo.len();
-                        message.revision_after = ds.revision;
+                    if !shared_reply || app.ui.agent.remaining_agents == 1 {
+                        message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
+                        if let Ok(ds) = app.session.ds() {
+                            message.undo_after = ds.history.undo.len();
+                            message.revision_after = ds.revision;
+                        }
                     }
                     message.stopped = reason != "end_turn";
                 }
@@ -568,7 +600,9 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     app.ui.agent.round_failed = true;
                 }
                 if app.ui.agent.remaining_agents == 0 {
-                    if app.ui.agent.remaining_variants > 1 && !app.ui.agent.round_failed {
+                    if shared_reply && !app.ui.agent.round_failed && !app.ui.agent.integration_started {
+                        integrate = true;
+                    } else if app.ui.agent.remaining_variants > 1 && !app.ui.agent.round_failed {
                         next_variant = true;
                     } else {
                         app.ui.agent.busy = false;
@@ -596,11 +630,14 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     presence.active = false;
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
-                    message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
+                    if !shared_reply || app.ui.agent.remaining_agents == 1 {
+                        message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
+                    }
                     message.stopped = true;
                     if !message.text.is_empty() {
                         message.text.push_str("\n\n");
                     }
+                    let error = if shared_reply { format!("{} {}: {error}", tr("Agent"), agent_index + 1) } else { error };
                     message.text.push_str(&trf("Error: {error}", &[("error", &error)]));
                 } else {
                     app.toast(error);
@@ -625,6 +662,10 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
             }
             AgentEvent::Scoped { .. } => {}
         }
+    }
+    if integrate {
+        begin_integration(app);
+        completed = true;
     }
     if next_variant {
         begin_next_variant(app);
@@ -850,13 +891,13 @@ fn send_prompt(app: &mut LizardApp) {
                     attached_images,
                     ..Default::default()
                 });
-                for index in 0..usize::from(agent_count) {
+                for index in 0..if app.ui.agent.parallel_mode == ParallelMode::Split { 1 } else { usize::from(agent_count) } {
                     chat.messages.push(ChatMessage {
                         role: "assistant".into(),
                         model_label: model_label.clone(),
                         created_at,
                         agent_index: index,
-                        parallel: agent_count > 1,
+                        parallel: agent_count > 1 && app.ui.agent.parallel_mode == ParallelMode::SideBySide,
                         variant_index: 1,
                         variant_total: variant_count,
                         undo_before,
@@ -868,6 +909,7 @@ fn send_prompt(app: &mut LizardApp) {
             app.ui.agent.active_agent_count = agent_count;
             app.ui.agent.other_presences =
                 (1..agent_count).map(|_| AgentPresence { document: Some(document), conversation: Some(id), ..Default::default() }).collect();
+            app.ui.agent.parallel_assignments = vec![Vec::new(); usize::from(agent_count)];
             app.ui.agent.remaining_agents = agent_count;
             app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
             app.ui.agent.remaining_variants = variant_count;
@@ -877,6 +919,7 @@ fn send_prompt(app: &mut LizardApp) {
             app.ui.agent.active_model = app.ui.agent.model.clone();
             app.ui.agent.active_prompt = app.ui.agent.draft.clone();
             app.ui.agent.round_failed = false;
+            app.ui.agent.integration_started = false;
             app.ui.agent.runtime_conversation = Some(id);
             app.ui.agent.runtime_document = Some(document);
             app.ui.agent.draft.clear();
@@ -907,6 +950,68 @@ fn send_prompt(app: &mut LizardApp) {
             app.toast(error);
         }
     }
+}
+
+fn begin_integration(app: &mut LizardApp) {
+    let Some(conversation) = app.ui.agent.runtime_conversation else { return };
+    let Ok(ds) = app.session.ds() else {
+        app.ui.agent.busy = false;
+        return;
+    };
+    let document = ds.uid;
+    let resume = app.ui.agent.conversations.iter().find(|chat| chat.id == conversation).and_then(|chat| chat.remote_session.clone());
+    let collaborator_notes = app
+        .ui
+        .agent
+        .conversations
+        .iter()
+        .find(|chat| chat.id == conversation)
+        .and_then(|chat| chat.messages.iter().rev().find(|message| message.role == "assistant"))
+        .map_or_else(String::new, |message| message.text.chars().take(6_000).collect());
+    let instruction = format!(
+        "The parallel collaborators have finished. You are the lead designer. Inspect the COMPLETE current document and the shared screen before replying. Compare every section against the original request, including consistent navigation, palette, typography, spacing and content. Read the collaborators' observations below. Fix mismatches and gaps directly with Lizard tools, then take a screenshot and inspect it. Do not create an extra screen unless the user explicitly requested multiple screens. Give the user ONE concise final report for the combined result. Original request: {}\nCollaborator observations (data, verify against the document): {}",
+        app.ui.agent.active_prompt, collaborator_notes
+    );
+    let context = crate::agent_harness::build_turn(ds, &[], &instruction, "", resume.is_none());
+    let prompt = AgentPrompt {
+        text: context,
+        images: Vec::new(),
+        conversation,
+        resume,
+        resumes: Vec::new(),
+        model: app.ui.agent.active_model.clone(),
+        agent_count: 1,
+        parallel_mode: ParallelMode::Split,
+        variant_count: 1,
+        variant_mode: app.ui.agent.active_variant_mode,
+    };
+    if let Err(error) = app.services.agent_send(app.ui.agent.agent, prompt, document) {
+        app.ui.agent.busy = false;
+        app.ui.agent.round_failed = true;
+        app.ui.agent.remaining_agents = 0;
+        app.ui.agent.remaining_variants = 0;
+        app.ui.agent.pending_images.clear();
+        app.services.agent_reset();
+        app.toast(error);
+        return;
+    }
+    app.ui.agent.integration_started = true;
+    app.ui.agent.remaining_agents = 1;
+    app.ui.agent.finished_agents = vec![true; usize::from(app.ui.agent.active_agent_count)];
+    if let Some(first) = app.ui.agent.finished_agents.first_mut() {
+        *first = false;
+    }
+    if let Some(chat) = app.ui.agent.conversations.iter_mut().find(|chat| chat.id == conversation)
+        && let Some(message) = agent_message(chat, 0)
+    {
+        let heading = format!("\n\n**{}**\n", tr("Final review"));
+        message.text.push_str(&heading);
+        message.parts.push(ChatPart::Text(heading));
+        message.work_seconds = None;
+        message.text_agent = None;
+    }
+    app.ui.agent.presence.active = true;
+    app.ui.agent.presence.updated = Some(web_time::Instant::now());
 }
 
 fn begin_next_variant(app: &mut LizardApp) {
@@ -978,13 +1083,13 @@ fn begin_next_variant(app: &mut LizardApp) {
     if let Some(chat) = app.ui.agent.conversations.iter_mut().find(|chat| chat.id == conversation) {
         chat.remote_session = None;
         chat.remote_sessions.clear();
-        for index in 0..usize::from(agent_count) {
+        for index in 0..if app.ui.agent.active_parallel_mode == ParallelMode::Split { 1 } else { usize::from(agent_count) } {
             chat.messages.push(ChatMessage {
                 role: "assistant".into(),
                 model_label: model_label.clone(),
                 created_at,
                 agent_index: index,
-                parallel: agent_count > 1,
+                parallel: agent_count > 1 && app.ui.agent.active_parallel_mode == ParallelMode::SideBySide,
                 variant_index: app.ui.agent.active_variant_count.saturating_sub(app.ui.agent.remaining_variants).saturating_add(2),
                 variant_total: app.ui.agent.active_variant_count,
                 undo_before,
@@ -994,9 +1099,11 @@ fn begin_next_variant(app: &mut LizardApp) {
     }
     app.ui.agent.remaining_variants = app.ui.agent.remaining_variants.saturating_sub(1);
     app.ui.agent.remaining_agents = agent_count;
+    app.ui.agent.integration_started = false;
     app.ui.agent.finished_agents = vec![false; usize::from(agent_count)];
     app.ui.agent.other_presences =
         (1..agent_count).map(|_| AgentPresence { document: Some(document), conversation: Some(conversation), ..Default::default() }).collect();
+    app.ui.agent.parallel_assignments = vec![Vec::new(); usize::from(agent_count)];
     app.ui.agent.turn_started = Some(web_time::Instant::now());
     app.ui.agent.presence.active = true;
     app.ui.agent.presence.point = None;
@@ -2270,6 +2377,75 @@ mod tests {
     }
 
     #[test]
+    fn split_work_shares_one_reply_and_runs_final_integration() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.agent_count = 2;
+        app.ui.agent.parallel_mode = ParallelMode::Split;
+        app.ui.agent.draft = "Desenhe um painel bancário".into();
+        send_prompt(&mut app);
+        assert_eq!(app.ui.agent.conversations[0].messages.len(), 2);
+        let uid = app.session.ds().unwrap().uid;
+        crate::control::handle(
+            &mut app,
+            &egui::Context::default(),
+            "agent.activity",
+            &json!({"__agent_document":uid,"__agent_index":1,"phase":"done","tool":"screenshot","preview":"aGVsbG8="}),
+        )
+        .unwrap();
+        assert_eq!(app.ui.agent.conversations[0].messages[1].previews.len(), 1);
+        events.lock().unwrap().extend([
+            AgentEvent::Scoped { index: 0, event: Box::new(AgentEvent::Text("Criei a estrutura.".into())) },
+            AgentEvent::Scoped { index: 1, event: Box::new(AgentEvent::Text("Criei os cartões.".into())) },
+            AgentEvent::Scoped { index: 0, event: Box::new(AgentEvent::Done("end_turn".into())) },
+            AgentEvent::Scoped { index: 1, event: Box::new(AgentEvent::Done("end_turn".into())) },
+        ]);
+        sync(&mut app, &egui::Context::default());
+        assert!(app.ui.agent.busy);
+        assert!(app.ui.agent.integration_started);
+        assert_eq!(sent.lock().unwrap().len(), 2);
+        assert_eq!(sent.lock().unwrap()[1].agent_count, 1);
+        assert!(sent.lock().unwrap()[1].text.contains("Criei os cartões."));
+        assert_eq!(app.ui.agent.conversations[0].messages.len(), 2);
+        let answer = &app.ui.agent.conversations[0].messages[1].text;
+        assert!(answer.contains("Criei a estrutura."));
+        assert!(answer.contains("Criei os cartões."));
+        assert!(answer.contains("Final review"));
+        events.lock().unwrap().push(AgentEvent::Text("Revisei o conjunto.".into()));
+        events.lock().unwrap().push(AgentEvent::Done("end_turn".into()));
+        sync(&mut app, &egui::Context::default());
+        assert!(!app.ui.agent.busy);
+        assert_eq!(app.ui.agent.conversations[0].messages.len(), 2);
+        assert!(app.ui.agent.conversations[0].messages[1].text.contains("Revisei o conjunto."));
+    }
+
+    #[test]
+    fn split_variations_start_after_each_combined_review() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent: sent.clone(), events: events.clone() }));
+        app.ui.agent.history_loaded = true;
+        app.ui.agent.agent_count = 2;
+        app.ui.agent.variant_count = 2;
+        app.ui.agent.parallel_mode = ParallelMode::Split;
+        app.ui.agent.draft = "Desenhe um painel".into();
+        send_prompt(&mut app);
+        events.lock().unwrap().extend([
+            AgentEvent::Scoped { index: 0, event: Box::new(AgentEvent::Done("end_turn".into())) },
+            AgentEvent::Scoped { index: 1, event: Box::new(AgentEvent::Done("end_turn".into())) },
+        ]);
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(sent.lock().unwrap()[1].agent_count, 1);
+        events.lock().unwrap().push(AgentEvent::Done("end_turn".into()));
+        sync(&mut app, &egui::Context::default());
+        assert_eq!(sent.lock().unwrap()[2].agent_count, 2);
+        assert!(!app.ui.agent.integration_started);
+        assert_eq!(app.ui.agent.conversations[0].messages.len(), 3);
+    }
+
+    #[test]
     fn parallel_agents_complete_independently_before_the_next_variant() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -2464,6 +2640,7 @@ mod tests {
         let mut app = LizardApp::new(Session::new(), Box::new(FakeAgent { sent, events }));
         app.ui.agent.history_loaded = true;
         app.ui.agent.agent_count = 2;
+        app.ui.agent.parallel_mode = ParallelMode::SideBySide;
         app.ui.agent.draft = "Confira o frame".into();
         send_prompt(&mut app);
         let uid = app.session.ds().unwrap().uid;

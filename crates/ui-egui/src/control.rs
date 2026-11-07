@@ -261,6 +261,61 @@ fn b(p: &Value, k: &str) -> bool {
     p.get(k).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn check_parallel_section_command(
+    command: &str,
+    params: &Value,
+    doc: &lizard_doc::Document,
+    allowed: &[lizard_doc::NodeId],
+    in_batch: bool,
+) -> Result<(), String> {
+    if command == "command.batch" {
+        let steps = params.get("commands").and_then(Value::as_array).ok_or("Batch commands are required")?;
+        for step in steps {
+            let command = step.get("command").and_then(Value::as_str).ok_or("Batch step command is required")?;
+            check_parallel_section_command(command, &step["params"], doc, allowed, true)?;
+        }
+        return Ok(());
+    }
+    if command.starts_with("page.") || command.starts_with("file.") || command.starts_with("edit.paste") || command == "edit.duplicate" {
+        return Err("A collaborator cannot create another screen or change the file in Split work".into());
+    }
+    let in_scope = |id: lizard_doc::NodeId| allowed.contains(&id) || doc.ancestors(id).iter().any(|ancestor| allowed.contains(ancestor));
+    for value in params.get("ids").and_then(Value::as_array).into_iter().flatten().chain(params.get("id")) {
+        if let Some(id) = lizard_engine::params::id_of(value)
+            && doc.node(id).is_some()
+            && !in_scope(id)
+        {
+            return Err("A collaborator cannot edit nodes outside its assigned section frames".into());
+        }
+    }
+    let creates_layer = matches!(
+        command,
+        "node.create"
+            | "frame.create"
+            | "text.create"
+            | "vector.create"
+            | "instance.create"
+            | "image.place"
+            | "shape.rectangle"
+            | "shape.ellipse"
+            | "shape.polygon"
+            | "shape.star"
+            | "shape.line"
+            | "shape.arrow"
+    );
+    let new_parent =
+        (creates_layer && params.get("target").filter(|value| !value.is_null()).is_none()) || matches!(command, "node.reparent" | "node.move");
+    if new_parent {
+        let parent = params.get("parent").ok_or("A collaborator must create layers inside an assigned section frame")?;
+        let in_scope = lizard_engine::params::id_of(parent).is_some_and(in_scope);
+        let local_reference = in_batch && (parent.get("$ref").is_some() || parent.get("$step").is_some());
+        if !in_scope && !local_reference {
+            return Err("A collaborator must create and move layers inside its assigned section frames".into());
+        }
+    }
+    Ok(())
+}
+
 /// Handle one control method (also used by tests and the headless snapshot tool).
 pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Result<Value, String> {
     if let Some(expected) = p.get("__agent_document").and_then(Value::as_u64)
@@ -274,7 +329,13 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
     match method {
         "agent.batch.begin" => {
             let Some(document) = p.get("__agent_document").and_then(Value::as_u64) else { return Ok(json!({"accepted": false})) };
-            if !app.ui.agent.busy || app.ui.agent.runtime_document != Some(document) || app.ui.streamed_batch.is_some() {
+            // A streamed batch can roll the whole document back. Keep it exclusive to a
+            // single-agent run so another collaborator's edits cannot be rolled back.
+            if !app.ui.agent.busy
+                || app.ui.agent.runtime_document != Some(document)
+                || app.ui.agent.active_agent_count > 1
+                || app.ui.streamed_batch.is_some()
+            {
                 return Ok(json!({"accepted": false}));
             }
             let commands = p.get("commands").and_then(Value::as_array).ok_or("`commands` must be an array")?;
@@ -433,14 +494,16 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                     presence.pulses.push(crate::agent_panel::AgentPulse { id: lizard_doc::NodeId(id), started: now, inspection });
                 }
             }
+            let shared_reply = app.ui.agent.active_parallel_mode == crate::agent_panel::ParallelMode::Split;
             if phase == "done"
                 && tool == "screenshot"
                 && let Some(data) = p.get("preview").and_then(Value::as_str).filter(|data| data.len() <= 2_000_000)
                 && let Some(chat) = app.ui.agent.runtime_conversation.and_then(|id| app.ui.agent.conversations.iter_mut().find(|chat| chat.id == id))
                 && let Some(message) = chat.messages.iter_mut().rev().find(|message| {
                     message.role == "assistant"
-                        && message.agent_index
-                            == p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0)
+                        && (shared_reply
+                            || message.agent_index
+                                == p.get("__agent_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(0))
                 })
                 && message.previews.len() < 6
             {
@@ -490,6 +553,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                     {
                         return Err("Each assigned container must be a non-overlapping frame on the current page".into());
                     }
+                    if app.ui.agent.active_parallel_mode == crate::agent_panel::ParallelMode::Split && node.parent == Some(ds.page) {
+                        return Err("Split work needs section frames inside a shared screen; root screens belong to Side by side mode".into());
+                    }
                     assigned.insert(id);
                     let bounds = ds.doc.world_bounds(id);
                     snapshot.push(json!({
@@ -506,8 +572,12 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
             app.services.agent_spawn(document, &assignments)?;
             let conversation = app.ui.agent.runtime_conversation;
             for (offset, task) in config.iter().enumerate() {
-                let target =
-                    task.get("containerNodes").and_then(Value::as_array).and_then(|roots| roots.first()).and_then(lizard_engine::params::id_of);
+                let roots: Vec<_> =
+                    task.get("containerNodes").and_then(Value::as_array).into_iter().flatten().filter_map(lizard_engine::params::id_of).collect();
+                let target = roots.first().copied();
+                if let Some(assignment) = app.ui.agent.parallel_assignments.get_mut(offset + 1) {
+                    *assignment = roots;
+                }
                 let presence = app.ui.agent.presence_mut(offset + 1);
                 presence.document = Some(document);
                 presence.conversation = conversation;
@@ -521,6 +591,15 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
         "engine.execute" => {
             let cmd = p.get("command").and_then(Value::as_str).ok_or("`command` required")?;
             let params = p.get("params").cloned().unwrap_or(json!({}));
+            if p.get("__agent_index").and_then(Value::as_u64).is_some_and(|index| index > 0)
+                && app.ui.agent.active_agent_count > 1
+                && app.ui.agent.active_parallel_mode == crate::agent_panel::ParallelMode::Split
+            {
+                let index = p.get("__agent_index").and_then(Value::as_u64).and_then(|index| usize::try_from(index).ok()).unwrap_or(0);
+                let allowed = app.ui.agent.parallel_assignments.get(index).ok_or("No section is assigned to this collaborator")?;
+                let doc = app.session.doc().map_err(|error| error.to_string())?;
+                check_parallel_section_command(cmd, &params, doc, allowed, false)?;
+            }
             let before = app.session.ds().ok().map_or(0, |ds| ds.history.undo.len());
             let r = app.session.execute(cmd, &params).map_err(|e| e.to_string());
             if cmd == "node.create"
