@@ -691,7 +691,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
                 }
                 // The control request runs at the start of a frame. Give the canvas time to
                 // paint this real node before requesting the next one.
-                std::thread::sleep(std::time::Duration::from_millis(45));
+                std::thread::sleep(std::time::Duration::from_millis(16));
             }
             return b.call("agent.batch.finish", json!({})).map(|result| with_review_feedback(b, ToolResult::json(&result)));
         }
@@ -699,11 +699,11 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<ToolResult, Stri
     let result = exec(b, "command.batch", json!({"label": label, "commands": steps}))?;
     if b.has_ui()
         && let Some(completed) = result.as_array()
+        && let Some(id) = completed.iter().rev().find_map(|step| step.get("id").and_then(Value::as_u64))
     {
-        for id in completed.iter().filter_map(|step| step.get("id").and_then(Value::as_u64)).take(40) {
-            b.agent_activity(json!({"phase":"done","tool":"create_node","ids":[id]}));
-            std::thread::sleep(std::time::Duration::from_millis(35));
-        }
+        // An atomic batch has already finished. Point at its last created node rather than
+        // replaying earlier cursor positions after the work is done.
+        b.agent_activity(json!({"phase":"done","tool":"create_node","ids":[id]}));
     }
     Ok(with_review_feedback(b, ToolResult::json(&result)))
 }
@@ -1082,7 +1082,7 @@ mod activity_tests {
     }
 
     #[test]
-    fn attached_atomic_batch_replays_each_created_node_to_the_cursor() {
+    fn attached_atomic_batch_points_to_the_last_created_node_without_replaying_work() {
         struct VisibleAtomic {
             activity: Vec<Value>,
         }
@@ -1113,7 +1113,7 @@ mod activity_tests {
             .filter(|activity| activity["tool"] == "create_node" && activity["phase"] == "done")
             .map(|activity| activity["ids"][0].clone())
             .collect();
-        assert_eq!(visited, [json!(10), json!(11)]);
+        assert_eq!(visited, [json!(11)]);
     }
 
     #[test]
