@@ -98,7 +98,7 @@ fn open_vector_hover_and_selection_show_the_path_and_selection_box() {
         .unwrap());
     s.execute("select.none", &json!({})).unwrap();
     let mut u = Ui::new(s);
-    let blue = egui::epaint::ColorMode::Solid(crate::theme::ACCENT);
+    let blue = egui::epaint::ColorMode::Solid(crate::theme::canvas_accent(&u.ctx));
     let blue_path = |shapes: &[Shape]| {
         shapes.iter().any(|shape| {
             matches!(shape, Shape::Path(path)
@@ -108,7 +108,18 @@ fn open_vector_hover_and_selection_show_the_path_and_selection_box() {
     let hover = u.app.to_screen(130.0, 140.0);
     let shapes = flat(&u.frame_output(vec![egui::Event::PointerMoved(hover)]).shapes);
     assert_eq!(u.app.session.ds().unwrap().hover, Some(vector));
-    assert!(blue_path(&shapes), "hover outlines the open vector, not its empty fill path");
+    assert!(
+        blue_path(&shapes),
+        "hover outlines the open vector, not its empty fill path; paths={:?}",
+        shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                Shape::Path(path) if !path.closed => Some((path.points.len(), path.stroke.color.clone())),
+                _ => None,
+            })
+            .take(12)
+            .collect::<Vec<_>>()
+    );
 
     u.app.run("select.set", json!({"ids": [vector]}));
     let shapes = flat(&u.frame_output(vec![]).shapes);
@@ -189,7 +200,7 @@ fn the_pen_draws_the_handles_of_the_point_being_dragged_and_a_curved_band() {
     let press = |p: Pos2, pressed: bool| {
         vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Default::default() }]
     };
-    let accent = egui::epaint::ColorMode::Solid(crate::theme::ACCENT);
+    let accent = egui::epaint::ColorMode::Solid(crate::theme::canvas_accent(&u.ctx));
     // A handle: the line from its anchor and the dot at its end.
     let handle = |shapes: &[Shape], a: Pos2, e: Pos2| {
         let near = |p: Pos2, q: Pos2| p.distance(q) < 0.5;
@@ -210,7 +221,18 @@ fn the_pen_draws_the_handles_of_the_point_being_dragged_and_a_curved_band() {
     let shapes = flat(&u.frame_output(vec![Event::PointerMoved(at(&u, 200.0, 200.0))]).shapes);
     assert!(handle(&shapes, a, at(&u, 140.0, 100.0)), "the handles stay");
     let band = shapes.iter().any(|s| matches!(s, Shape::CubicBezier(c) if c.points[0].distance(a) < 0.5 && c.points[1].distance(at(&u, 140.0, 100.0)) < 0.5 && c.stroke.color == accent));
-    assert!(band, "a curve leaving along the out handle");
+    assert!(
+        band,
+        "a curve leaving along the out handle; curves={:?}",
+        shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                Shape::CubicBezier(curve) => Some((curve.points, curve.stroke.color.clone())),
+                _ => None,
+            })
+            .take(8)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// While drawing, the Pencil shows the stroke it will make, in its colour and weight (#256): in a

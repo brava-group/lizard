@@ -469,6 +469,8 @@ fn the_server_preference_resets_and_turns_online_sharing_off() {
     let (mut h, script) = harness();
     h.app.ui.preferences = true;
     let shapes = h.frames(2);
+    click(&mut h, &shapes, "Sharing");
+    let shapes = h.frames(2);
     assert!(has_text(&shapes, "Server for online sharing") && has_text(&shapes, "Reset"));
     click(&mut h, &shapes, "Reset");
     assert_eq!(h.app.session.prefs.publish_server, DEFAULT_SERVER);

@@ -458,17 +458,18 @@ fn editing_colour_picker_components_commits_one_undo_step_each() {
         u.frame(vec![]);
     }
     let steps = undo_steps(&u);
-    let edit = |u: &mut Ui, id: &str, value: &str| {
-        let at = u.ctx.read_response(Id::new(id)).unwrap_or_else(|| panic!("no picker field {id}")).rect.center();
+    let edit = |u: &mut Ui, id: Id, value: &str| {
+        let at = u.ctx.read_response(id).unwrap_or_else(|| panic!("no picker field {id:?}")).rect.center();
         click(u, at);
         key(u, Key::A, Modifiers::COMMAND);
         u.frame(vec![Event::Text(value.into())]);
         key(u, Key::Enter, Modifiers::NONE);
         u.frame(vec![]);
     };
-    edit(&mut u, "cp_component_0", "128");
+    let fields = Id::new("cp_model_fields");
+    edit(&mut u, fields.with(("channel", 0)).with("field"), "128");
     assert_eq!((rgba(&u)[0], undo_steps(&u)), (128, steps + 1), "R");
-    edit(&mut u, "cp_alpha_exact", "50");
+    edit(&mut u, fields.with("model_opacity").with("field"), "50");
     let [.., alpha] = rgba(&u);
     assert!((alpha as i32 - 128).abs() <= 1, "50% alpha gives 128, got {alpha}");
     assert_eq!(undo_steps(&u), steps + 2, "alpha");

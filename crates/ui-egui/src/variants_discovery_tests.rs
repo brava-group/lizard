@@ -81,7 +81,7 @@ fn the_design_panel_adds_a_variant_to_a_lone_component() {
     let (s, [a, ..], _) = doc();
     let mut u = Ui::new(s);
     select(&mut u, &[a]);
-    let at = shows(&mut u, "Add variant").expect("a lone main component offers Add variant");
+    let at = u.ctx.read_response(egui::Id::new(("component_add_variant", a))).expect("a lone main component offers Add variant").rect.center();
     click(&mut u, at);
     let set = set_of(&u, a).expect("the component became a set");
     assert_eq!(u.app.session.doc().unwrap().node(set).unwrap().children.len(), 2);

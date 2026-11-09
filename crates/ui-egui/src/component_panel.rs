@@ -778,7 +778,7 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
                 vi += 3;
             }
         }
-        drag.row_by(&summary.row, i, summary.row.rect.with_max_y(ui.cursor().min.y.max(summary.row.rect.max.y)), || k.clone());
+        drag.row(ui, i, summary.row.rect, summary.row.rect.with_max_y(ui.cursor().min.y.max(summary.row.rect.max.y)), || k.clone());
     }
     if let Some((from, to)) = drag.finish(ui)
         && let Some((k, _)) = variants.get(from)

@@ -10,6 +10,14 @@ use crate::{LizardApp, NoServices, TitleBar};
 
 const SIZE: egui::Vec2 = vec2(1440.0, 900.0);
 
+fn new_tab_button(u: &Ui) -> Pos2 {
+    u.ctx.read_response(egui::Id::new("tab_bar_newtab")).expect("new tab button").rect.center()
+}
+
+fn close_tab_button(u: &Ui, uid: u64) -> Pos2 {
+    u.ctx.read_response(egui::Id::new(("tabclose", uid))).expect("tab close button").rect.center()
+}
+
 struct Ui {
     ctx: egui::Context,
     app: LizardApp,
@@ -161,17 +169,10 @@ fn tabs_and_new_tab_keep_their_clicks() {
     // The open file's tab switches to it.
     assert!(u.click(pos2(100.0, 20.0)).is_empty());
     assert!(!u.app.ui.home);
-    // The `+` right of it opens a new file (found by clicking along the bar past the tab).
-    let mut opened = false;
-    for x in (176..320).step_by(4) {
-        u.time += 1.0;
-        assert!(u.click(pos2(x as f32, 20.0)).is_empty(), "{x}");
-        if u.app.session.docs.len() > 1 {
-            opened = true;
-            break;
-        }
-    }
-    assert!(opened, "the new-tab button took no click");
+    // The `+` follows the open document as tab widths change.
+    let at = new_tab_button(&u);
+    assert!(u.click(at).is_empty());
+    assert_eq!(u.app.session.docs.len(), 2, "the new-tab button took no click");
 }
 
 #[test]
@@ -180,10 +181,19 @@ fn many_tabs_do_not_cover_the_window_buttons() {
     for _ in 0..24 {
         u.app.session.execute("file.new", &json!({})).unwrap();
     }
+    // Reflow after adding tabs before reading the new button's response.
+    u.frame(vec![]);
     u.frame(vec![]);
     let before = u.app.session.docs.len();
-    u.click(pos2(SIZE.x - 222.0, 20.0));
-    assert_eq!(u.app.session.docs.len(), before + 1, "the new-tab button must stay reachable");
+    let at = new_tab_button(&u);
+    u.click(at);
+    assert_eq!(
+        u.app.session.docs.len(),
+        before + 1,
+        "the new-tab button must stay reachable: at={at:?}, response={:?}, error={:?}",
+        u.ctx.read_response(egui::Id::new("tab_bar_newtab")).map(|response| (response.rect, response.hovered(), response.clicked())),
+        u.app.ui.last_error
+    );
     assert!(u.click(window_button(0)).contains(&ViewportCommand::Minimized(true)));
     assert!(u.click(window_button(1)).contains(&ViewportCommand::Maximized(true)));
     u.click(window_button(2));
@@ -197,7 +207,8 @@ fn close_button_on_inactive_tab_closes_it_without_switching() {
     u.app.session.execute("file.new", &json!({})).unwrap();
     let active_uid = u.app.session.docs[u.app.session.active].uid;
     let inactive_uid = u.app.session.docs[1].uid;
-    let close_button = pos2(270.0, 20.0);
+    u.frame(vec![]);
+    let close_button = close_tab_button(&u, inactive_uid);
     u.frame(vec![Event::PointerMoved(close_button)]);
     u.click(close_button);
     assert!(
@@ -220,7 +231,8 @@ fn closing_a_tab_before_the_active_one_keeps_the_active_file() {
     u.app.session.execute("doc.switch", &json!({"index": 2})).unwrap();
     let active_uid = u.app.session.docs[u.app.session.active].uid;
     let closed_uid = u.app.session.docs[0].uid;
-    let close_button = pos2(156.0, 20.0);
+    u.frame(vec![]);
+    let close_button = close_tab_button(&u, closed_uid);
     u.frame(vec![Event::PointerMoved(close_button)]);
     u.click(close_button);
     assert!(!u.app.session.docs.iter().any(|doc| doc.uid == closed_uid));

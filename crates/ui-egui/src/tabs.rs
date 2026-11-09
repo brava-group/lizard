@@ -184,7 +184,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let body_r = Rect::from_min_max(r.min, pos2(r.max.x - 32.0, r.max.y));
             let close_r = Rect::from_min_max(body_r.right_top(), r.max);
             let resp = ui.interact(body_r, ui.id().with(("tab", d.uid)), Sense::click_and_drag());
-            let cresp = ui.interact(close_r, ui.id().with(("tabclose", d.uid)), Sense::click()).tip(tr("Close tab"));
+            let cresp = ui.interact(close_r, egui::Id::new(("tabclose", d.uid)), Sense::click()).tip(tr("Close tab"));
             if (resp.dragged() || resp.drag_stopped())
                 && let Some(p) = ui.input(|inp| inp.pointer.latest_pos())
             {
@@ -302,7 +302,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
             let r = Rect::from_min_size(pos2(x, rect.min.y), vec2(w, HEIGHT));
             let body_r = Rect::from_min_max(r.min, pos2(r.max.x - 32.0, r.max.y));
             let close_r = Rect::from_min_max(body_r.right_top(), r.max);
-            let resp = ui.interact(body_r, ui.id().with("presentation_tab"), Sense::click()).tip(tr("Present"));
+            let resp = ui.interact(body_r, egui::Id::new("presentation_tab"), Sense::click()).tip(tr("Present"));
             let close_resp = ui.interact(close_r, ui.id().with("presentation_close"), Sense::click()).tip(tr("Close preview"));
             let active = app.ui.present.is_some();
             crate::a11y::tab(&resp, tr("Present"), active);
@@ -336,7 +336,7 @@ pub fn tab_bar(app: &mut LizardApp, ui: &mut Ui) {
         }
         // New tab.
         let nr = Rect::from_center_size(pos2(x + 20.0, rect.center().y), vec2(28.0, 28.0));
-        let nresp = ui.interact(nr, ui.id().with("newtab"), Sense::click()).tip(crate::shortcuts::tip(tr("New design file"), "file.new"));
+        let nresp = ui.interact(nr, egui::Id::new("tab_bar_newtab"), Sense::click()).tip(crate::shortcuts::tip(tr("New design file"), "file.new"));
         if nresp.hovered() {
             ui.painter().rect_filled(nr, CornerRadius::same(5), t.hover);
         }

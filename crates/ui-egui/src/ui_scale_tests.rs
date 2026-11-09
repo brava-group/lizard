@@ -26,6 +26,21 @@ fn settle(u: &mut Ui, native: f32) {
     }
 }
 
+fn open_appearance(u: &mut Ui) {
+    u.frame(vec![]);
+    u.frame(vec![]);
+    let shapes = crate::live_tests::flat(&u.frame_output(vec![]).shapes);
+    assert!(
+        crate::live_tests::has_text(&shapes, "Appearance"),
+        "Appearance setting is visible: preferences={}, labels={:?}",
+        u.app.ui.preferences,
+        crate::live_tests::texts(&shapes).into_iter().map(|(label, _, _)| label).take(40).collect::<Vec<_>>()
+    );
+    let at = crate::live_tests::text_center(&shapes, "Appearance");
+    u.button(at, true);
+    u.button(at, false);
+}
+
 const SCREENS: [f32; 5] = [1.0, 1.25, 1.5, 2.0, 3.0];
 
 #[test]
@@ -60,6 +75,7 @@ fn a_size_is_relative_to_the_systems_scale_on_every_screen_and_auto_is_100() {
 fn the_interface_size_menu_has_a_name_a_value_and_a_state_for_a_screen_reader() {
     let mut u = Ui::new(Session::new());
     u.app.ui.preferences = true;
+    open_appearance(&mut u);
     u.ctx.enable_accesskit();
     let combo = |u: &mut Ui| {
         settle(u, 2.0);
@@ -180,6 +196,7 @@ fn the_interface_size_menu_works_from_the_keyboard() {
 
     let mut u = Ui::new(Session::new());
     u.app.ui.preferences = true;
+    open_appearance(&mut u);
     u.ctx.enable_accesskit();
     settle(&mut u, 1.0);
     assert_eq!(chosen(&u), json!(1.0));

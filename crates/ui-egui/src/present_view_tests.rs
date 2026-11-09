@@ -108,9 +108,7 @@ fn presentation_tab_keeps_the_current_screen_when_returning_to_the_editor() {
     assert!(u.app.ui.present.is_none());
     assert_eq!(u.app.ui.paused_present.as_ref().map(|p| p.current), Some(b));
 
-    let name_len = u.app.session.doc().unwrap().name.chars().count() as f32;
-    let design_w = (12.0 * 0.6 * name_len + 64.0).clamp(120.0, 220.0);
-    let preview_tab = pos2(8.0 + 44.0 + design_w + 40.0, 20.0);
+    let preview_tab = u.ctx.read_response(egui::Id::new("presentation_tab")).expect("presentation tab").rect.center();
     u.button(preview_tab, true);
     u.button(preview_tab, false);
     assert!(u.app.ui.paused_present.is_none());

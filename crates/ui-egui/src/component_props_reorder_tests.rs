@@ -86,6 +86,8 @@ fn dragging_a_variant_property_reorders_it_in_one_step() {
 #[test]
 fn a_property_dropped_under_the_last_ones_values_lands_last() {
     let (mut u, set, _) = setup();
+    u.ctx.data_mut(|data| data.insert_temp(egui::Id::new(("variant_property_expanded", set, "State")), true));
+    u.frame(vec![]);
     let size = grip(&u, set, 0).unwrap();
     // State's header is 32 high and its value row 30 under it: 58 down is on the value row, below
     // the header's half-row slack, so only an area that takes in the values counts it.
@@ -98,7 +100,7 @@ fn a_property_dropped_under_the_last_ones_values_lands_last() {
 
 #[test]
 fn pressing_the_name_field_does_not_start_a_drag() {
-    // A guard: on main there's no grip at all; it fails if the whole row becomes a drag handle.
+    // Only the left grip starts a drag; editing the name must not reorder the row.
     let (mut u, set, _) = setup();
     let (size, state) = (grip(&u, set, 0).unwrap(), grip(&u, set, 1).unwrap());
     let undo = undo_len(&u);

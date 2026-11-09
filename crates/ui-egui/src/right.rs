@@ -751,7 +751,8 @@ fn component_header(app: &mut LizardApp, ui: &mut Ui, doc: &Document, id: NodeId
 
     let action = |ui: &mut Ui, index: usize, icon: Icon, size: f32, tip: &str, enabled: bool| {
         let cell = Rect::from_center_size(pos2(rect.max.x - 20.0 - index as f32 * 28.0, rect.center().y), vec2(24.0, 24.0));
-        Button::icon(icon, tip).icon_size(size).enabled(enabled).show_at(ui, ui.id().with(("component_header", id, index)), cell)
+        let action_id = if index == 2 { Id::new(("component_add_variant", id)) } else { ui.id().with(("component_header", id, index)) };
+        Button::icon(icon, tip).icon_size(size).enabled(enabled).show_at(ui, action_id, cell)
     };
     let owner = lizard_engine::components::variant_set(doc, id).unwrap_or(id);
     let more = action(ui, 0, Icon::Dots, 14.0, tr("More actions"), true);
