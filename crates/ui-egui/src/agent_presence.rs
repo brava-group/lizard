@@ -271,22 +271,31 @@ fn frame_border_point(rect: Rect, distance: f32) -> Pos2 {
     }
 }
 
+fn border_color_with_opacity(color: Color32, opacity: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (opacity.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
 fn draw_frame_border(painter: &Painter, rect: Rect, brand: Color32, elapsed: f32, fade: f32, reduce_motion: bool) {
-    painter.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.5, brand.gamma_multiply(0.75 * fade)), StrokeKind::Outside);
+    painter.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(2.0, border_color_with_opacity(brand, 0.7 * fade)), StrokeKind::Outside);
     if reduce_motion {
         return;
     }
     let perimeter = 2.0 * (rect.width() + rect.height());
-    let head = (elapsed / 2.4).fract() * perimeter;
-    let tail = (perimeter * 0.15).clamp(24.0, 220.0).min(perimeter * 0.45);
-    const SEGMENTS: usize = 36;
+    let head = (elapsed / 2.8).fract() * perimeter;
+    let tail = (perimeter * 0.4).clamp(120.0, 560.0).min(perimeter * 0.48);
+    let highlight = Color32::from_rgb(
+        ((u16::from(brand.r()) + 255) / 2) as u8,
+        ((u16::from(brand.g()) + 255) / 2) as u8,
+        ((u16::from(brand.b()) + 255) / 2) as u8,
+    );
+    const SEGMENTS: usize = 48;
     for index in 0..SEGMENTS {
         let start = head - tail * (index + 1) as f32 / SEGMENTS as f32;
         let end = head - tail * index as f32 / SEGMENTS as f32;
-        let strength = (1.0 - index as f32 / SEGMENTS as f32).powi(2) * fade;
+        let strength = (1.0 - index as f32 / SEGMENTS as f32).sqrt() * fade;
         let points = [frame_border_point(rect, start), frame_border_point(rect, end)];
-        painter.line_segment(points, Stroke::new(5.0, brand.gamma_multiply(0.15 * strength)));
-        painter.line_segment(points, Stroke::new(2.4, brand.gamma_multiply(0.9 * strength)));
+        painter.line_segment(points, Stroke::new(9.0, border_color_with_opacity(brand, 0.38 * strength)));
+        painter.line_segment(points, Stroke::new(3.5, border_color_with_opacity(highlight, strength)));
     }
 }
 
@@ -423,7 +432,6 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
         if rect.is_positive() && rect.intersects(app.canvas.rect) {
             let elapsed = now.saturating_duration_since(shimmer.started).as_secs_f32();
             let clipped = painter.with_clip_rect(app.canvas.rect);
-            clipped.rect_filled(rect, CornerRadius::ZERO, brand.gamma_multiply(0.035 * border_fade));
             draw_frame_border(&clipped, rect, brand, elapsed, border_fade, reduce_motion);
         }
     }
@@ -513,6 +521,17 @@ mod tests {
         ] {
             assert_eq!(frame_border_point(rect, distance), expected);
         }
+    }
+
+    #[test]
+    fn frame_border_fade_preserves_the_agents_hue() {
+        let brand = Color32::from_rgb(151, 71, 255);
+        let faded = border_color_with_opacity(brand, 0.4);
+        let [red, green, blue, alpha] = faded.to_srgba_unmultiplied();
+        assert_eq!(alpha, 102);
+        assert!((i16::from(red) - i16::from(brand.r())).abs() <= 2);
+        assert!((i16::from(green) - i16::from(brand.g())).abs() <= 2);
+        assert!((i16::from(blue) - i16::from(brand.b())).abs() <= 2);
     }
 
     #[test]
