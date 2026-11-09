@@ -286,7 +286,7 @@ pub struct CanvasState {
     /// What the pointer shows over the canvas (`ui.inspect`); none while it is elsewhere or
     /// something on the canvas with a cursor of its own has it (a ruler guide, a gradient handle).
     pub cursor: Option<crate::cursors::Shown>,
-    cursor_textures: crate::cursors::CursorTextures,
+    pub(crate) cursor_textures: crate::cursors::CursorTextures,
     preedit: Option<PreeditView>,
     /// The pen pressure last reported during the current press (pen and stylus touches; the
     /// winit backends and browsers that report it).

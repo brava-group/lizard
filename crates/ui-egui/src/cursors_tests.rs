@@ -32,7 +32,7 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
         (Cursor::Rotate(-45.0), Drawn(Glyph::Rotate(315.0)), "rotate 315"),
         (Cursor::Grab, Drawn(Glyph::Hand(false)), "grab"),
         (Cursor::Grabbing, Drawn(Glyph::Hand(true)), "grabbing"),
-        (Cursor::Text, System(CursorIcon::Text), "text"),
+        (Cursor::Text, Drawn(Glyph::Text), "text"),
         (Cursor::Pen(PenCursor::New), Drawn(Glyph::Pen(PenCursor::New)), "pen"),
         (Cursor::Pen(PenCursor::Close), Drawn(Glyph::Pen(PenCursor::Close)), "pen-close"),
         (Cursor::Pen(PenCursor::Add), Drawn(Glyph::Pen(PenCursor::Add)), "pen-add"),
@@ -49,7 +49,7 @@ fn every_engine_cursor_has_a_system_cursor_or_a_glyph() {
         (Cursor::Pointer, Drawn(Glyph::Pointer), "pointer"),
         (Cursor::Eyedropper, Drawn(Glyph::Eyedropper), "eyedropper"),
         (Cursor::Comment, Drawn(Glyph::Comment), "comment"),
-        (Cursor::NotAllowed, System(CursorIcon::NotAllowed), "not-allowed"),
+        (Cursor::NotAllowed, Drawn(Glyph::NotAllowed), "not-allowed"),
     ];
     for (cursor, shown, name) in rows {
         assert_eq!(of(cursor), shown, "{cursor:?}");

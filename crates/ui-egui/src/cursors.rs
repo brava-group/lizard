@@ -1,7 +1,4 @@
-//! Canvas cursors from the owner's local `cursores.html` reference.
-//!
-//! Its SVG files contain embedded PNG images, so the corresponding PNG payloads are shown
-//! directly. This preserves the supplied artwork without tracing or redrawing it.
+//! Canvas cursors exported from the owner's `cursors-lizard.lzd` vector components.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -13,6 +10,8 @@ use lizard_engine::tools::{Cursor, PenCursor};
 pub enum Glyph {
     Arrow,
     Move,
+    Text,
+    NotAllowed,
     Crosshair,
     Resize(f32),
     Hand(bool),
@@ -43,18 +42,46 @@ pub enum Shown {
 /// Decoded cursor bitmaps are shared across frames so winit can cache each OS cursor.
 #[derive(Default)]
 pub struct CursorTextures {
-    loaded: HashMap<(Asset, u32, u8), CustomCursorImage>,
+    loaded: HashMap<(Asset, u32), CustomCursorImage>,
+    multiplayer: HashMap<usize, egui::TextureHandle>,
 }
+
+/// The seven collaboration cursor colours defined in `source.lzd`.
+pub(crate) const MULTIPLAYER_COLORS: [egui::Color32; 7] = [
+    egui::Color32::from_rgb(151, 71, 255),
+    egui::Color32::from_rgb(0, 123, 229),
+    egui::Color32::from_rgb(255, 205, 41),
+    egui::Color32::from_rgb(255, 36, 189),
+    egui::Color32::from_rgb(242, 72, 34),
+    egui::Color32::from_rgb(20, 174, 92),
+    egui::Color32::from_rgb(102, 119, 153),
+];
+
+const MULTIPLAYER_PNGS: [&[u8]; 7] = [
+    include_bytes!("../assets/cursors/multiplayer-purple.png"),
+    include_bytes!("../assets/cursors/multiplayer-blue.png"),
+    include_bytes!("../assets/cursors/multiplayer-yellow.png"),
+    include_bytes!("../assets/cursors/multiplayer-pink.png"),
+    include_bytes!("../assets/cursors/multiplayer-red.png"),
+    include_bytes!("../assets/cursors/multiplayer-green.png"),
+    include_bytes!("../assets/cursors/multiplayer-grey.png"),
+];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum Asset {
+    Arrow,
     Move,
+    Text,
+    NotAllowed,
     Crosshair,
     ResizeHorizontal,
     ResizeVertical,
     ResizeDiagonalDr,
     ResizeDiagonalUr,
     Rotate,
+    RotateBottomRight,
+    RotateBottomLeft,
+    RotateTopLeft,
     Hand,
     HandPress,
     Duplicate,
@@ -82,13 +109,19 @@ impl Asset {
     #[cfg(test)]
     fn name(self) -> &'static str {
         match self {
+            Self::Arrow => "arrow",
             Self::Move => "move",
+            Self::Text => "text-horizontal",
+            Self::NotAllowed => "not-allowed",
             Self::Crosshair => "crosshair",
             Self::ResizeHorizontal => "resize-horizontal",
             Self::ResizeVertical => "resize-vertical",
             Self::ResizeDiagonalDr => "resize-diagonal-dr",
             Self::ResizeDiagonalUr => "resize-diagonal-ur",
             Self::Rotate => "rotate",
+            Self::RotateBottomRight => "rotate-bottom-right",
+            Self::RotateBottomLeft => "rotate-bottom-left",
+            Self::RotateTopLeft => "rotate-top-left",
             Self::Hand => "hand",
             Self::HandPress => "hand-press",
             Self::Duplicate => "duplicate",
@@ -115,13 +148,19 @@ impl Asset {
 
     fn png(self) -> &'static [u8] {
         match self {
+            Self::Arrow => include_bytes!("../assets/cursors/arrow.png"),
             Self::Move => include_bytes!("../assets/cursors/move.png"),
+            Self::Text => include_bytes!("../assets/cursors/text-horizontal.png"),
+            Self::NotAllowed => include_bytes!("../assets/cursors/not-allowed.png"),
             Self::Crosshair => include_bytes!("../assets/cursors/crosshair.png"),
             Self::ResizeHorizontal => include_bytes!("../assets/cursors/resize-horizontal.png"),
             Self::ResizeVertical => include_bytes!("../assets/cursors/resize-vertical.png"),
             Self::ResizeDiagonalDr => include_bytes!("../assets/cursors/resize-diagonal-dr.png"),
             Self::ResizeDiagonalUr => include_bytes!("../assets/cursors/resize-diagonal-ur.png"),
             Self::Rotate => include_bytes!("../assets/cursors/rotate.png"),
+            Self::RotateBottomRight => include_bytes!("../assets/cursors/rotate-bottom-right.png"),
+            Self::RotateBottomLeft => include_bytes!("../assets/cursors/rotate-bottom-left.png"),
+            Self::RotateTopLeft => include_bytes!("../assets/cursors/rotate-top-left.png"),
             Self::Hand => include_bytes!("../assets/cursors/hand.png"),
             Self::HandPress => include_bytes!("../assets/cursors/hand-press.png"),
             Self::Duplicate => include_bytes!("../assets/cursors/duplicate.png"),
@@ -146,37 +185,44 @@ impl Asset {
         }
     }
 
-    /// Hot spot in the 32 × 32 image, in logical points.
+    /// Hot spot in the 32 × 32 component, in logical points.
     fn hotspot(self) -> egui::Vec2 {
         match self {
-            Self::Move | Self::Duplicate | Self::Pen | Self::PenDot | Self::PenInsert | Self::Lasso | Self::Cut | Self::Click => vec2(0.0, 0.0),
-            Self::Brush | Self::Pencil => vec2(2.0, 2.0),
-            Self::Eyedropper => vec2(5.0, 27.0),
-            Self::Comment => vec2(6.0, 27.0),
-            Self::PaintBucket | Self::PaintBucketInsert | Self::PaintBucketRemove => vec2(8.0, 24.0),
+            Self::Arrow | Self::Move => vec2(14.5, 14.5),
+            Self::Duplicate => vec2(14.5, 10.5),
+            Self::Pen | Self::PenDot | Self::PenInsert => vec2(14.0, 14.0),
+            Self::Brush | Self::Pencil | Self::Lasso | Self::Eraser => vec2(12.5, 19.0),
+            Self::Eyedropper => vec2(13.0, 19.0),
+            Self::Comment => vec2(16.0, 17.5),
+            Self::PaintBucket | Self::PaintBucketInsert | Self::PaintBucketRemove => vec2(16.0, 28.0),
+            Self::Click => vec2(14.0, 13.0),
+            Self::Cut => vec2(0.0, 0.0),
             _ => vec2(16.0, 16.0),
         }
     }
 }
 
 impl CursorTextures {
-    fn get(&mut self, ctx: &egui::Context, asset: Asset, quarter_turns: u8) -> Option<&CustomCursorImage> {
+    pub(crate) fn multiplayer(&mut self, ctx: &egui::Context, index: usize) -> Option<&egui::TextureHandle> {
+        let index = index % MULTIPLAYER_PNGS.len();
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.multiplayer.entry(index) {
+            let rgba = image::load_from_memory_with_format(MULTIPLAYER_PNGS[index], image::ImageFormat::Png).ok()?.into_rgba8();
+            let image = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
+            entry.insert(ctx.load_texture(format!("lizard-multiplayer-cursor-{index}"), image, egui::TextureOptions::LINEAR));
+        }
+        self.multiplayer.get(&index)
+    }
+
+    fn get(&mut self, ctx: &egui::Context, asset: Asset) -> Option<&CustomCursorImage> {
         // winit's macOS cursor creates an NSImage whose logical size equals this pixel size.
         // Scaling by Retina density there would make the pointer physically twice as large.
         let pixels = if cfg!(target_os = "macos") { 32 } else { (32.0 * ctx.pixels_per_point()).round().clamp(32.0, 256.0) as u32 };
-        let quarter_turns = if asset == Asset::Rotate { quarter_turns % 4 } else { 0 };
-        let key = (asset, pixels, quarter_turns);
+        let key = (asset, pixels);
         if let std::collections::hash_map::Entry::Vacant(entry) = self.loaded.entry(key) {
             let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).ok()?.into_rgba8();
             // egui's linear sampler has no mip levels. Downsample with a proper reconstruction
             // filter so the 256 px source stays crisp at its 32 pt display size.
             let rgba = image::imageops::resize(&png, pixels, pixels, image::imageops::FilterType::Lanczos3);
-            let rgba = match quarter_turns {
-                1 => image::imageops::rotate90(&rgba),
-                2 => image::imageops::rotate180(&rgba),
-                3 => image::imageops::rotate270(&rgba),
-                _ => rgba,
-            };
             let scale = pixels as f32 / 32.0;
             let hotspot = asset.hotspot() * scale;
             let side = u16::try_from(pixels).ok()?;
@@ -191,8 +237,7 @@ impl CursorTextures {
 }
 
 impl Glyph {
-    /// The source image points up and left, matching the bottom-right corner. The corner's
-    /// centre-to-handle angle selects one of four right-angle rotations of that exact image.
+    /// The corner's centre-to-handle angle selects its matching supplied component.
     fn quarter_turns(self) -> u8 {
         match self {
             Self::Rotate(degrees) if degrees.is_finite() => (degrees.rem_euclid(360.0) / 90.0).floor() as u8,
@@ -202,7 +247,10 @@ impl Glyph {
 
     fn asset(self) -> Asset {
         match self {
-            Self::Arrow | Self::Move => Asset::Move,
+            Self::Arrow => Asset::Arrow,
+            Self::Move => Asset::Move,
+            Self::Text => Asset::Text,
+            Self::NotAllowed => Asset::NotAllowed,
             Self::Crosshair => Asset::Crosshair,
             Self::Resize(degrees) => match resize_icon(f64::from(degrees)) {
                 CursorIcon::ResizeHorizontal => Asset::ResizeHorizontal,
@@ -228,7 +276,12 @@ impl Glyph {
             Self::Lasso => Asset::Lasso,
             Self::Cut => Asset::Cut,
             Self::Eraser => Asset::Eraser,
-            Self::Rotate(_) => Asset::Rotate,
+            Self::Rotate(_) => match self.quarter_turns() {
+                1 => Asset::RotateBottomLeft,
+                2 => Asset::RotateTopLeft,
+                3 => Asset::Rotate,
+                _ => Asset::RotateBottomRight,
+            },
             Self::Eyedropper => Asset::Eyedropper,
             Self::Comment => Asset::Comment,
             Self::Pointer => Asset::Click,
@@ -261,7 +314,7 @@ pub fn of(cursor: Cursor) -> Shown {
         Cursor::Rotate(a) => Drawn(Glyph::Rotate(if a.is_finite() { a.rem_euclid(360.0) as f32 } else { 0.0 })),
         Cursor::Grab => Drawn(Glyph::Hand(false)),
         Cursor::Grabbing => Drawn(Glyph::Hand(true)),
-        Cursor::Text => System(CursorIcon::Text),
+        Cursor::Text => Drawn(Glyph::Text),
         Cursor::Pen(p) => Drawn(Glyph::Pen(p)),
         Cursor::Brush => Drawn(Glyph::Brush),
         Cursor::Pencil => Drawn(Glyph::Pencil),
@@ -275,7 +328,7 @@ pub fn of(cursor: Cursor) -> Shown {
         Cursor::Pointer => Drawn(Glyph::Pointer),
         Cursor::Eyedropper => Drawn(Glyph::Eyedropper),
         Cursor::Comment => Drawn(Glyph::Comment),
-        Cursor::NotAllowed => System(CursorIcon::NotAllowed),
+        Cursor::NotAllowed => Drawn(Glyph::NotAllowed),
     }
 }
 
@@ -294,6 +347,8 @@ impl Shown {
             Self::System(i) => i,
             Self::Drawn(glyph) => match glyph {
                 Glyph::Arrow | Glyph::Move => CursorIcon::Default,
+                Glyph::Text => CursorIcon::Text,
+                Glyph::NotAllowed => CursorIcon::NotAllowed,
                 Glyph::Crosshair
                 | Glyph::Pen(_)
                 | Glyph::Brush
@@ -330,6 +385,8 @@ impl Shown {
             Self::Drawn(glyph) => match glyph {
                 Glyph::Arrow => "default".into(),
                 Glyph::Move => "move".into(),
+                Glyph::Text => "text".into(),
+                Glyph::NotAllowed => "not-allowed".into(),
                 Glyph::Crosshair => "crosshair".into(),
                 Glyph::Resize(a) => match resize_icon(f64::from(a)) {
                     CursorIcon::ResizeHorizontal => "ew-resize",
@@ -371,7 +428,7 @@ impl Shown {
             return;
         };
         let asset = glyph.asset();
-        let Some(image) = textures.get(ctx, asset, glyph.quarter_turns()) else {
+        let Some(image) = textures.get(ctx, asset) else {
             ctx.set_cursor_icon(CursorIcon::Default);
             return;
         };
@@ -389,13 +446,19 @@ mod tests {
     #[test]
     fn supplied_cursor_images_decode_and_states_use_the_reference_files() {
         for asset in [
+            Asset::Arrow,
             Asset::Move,
+            Asset::Text,
+            Asset::NotAllowed,
             Asset::Crosshair,
             Asset::ResizeHorizontal,
             Asset::ResizeVertical,
             Asset::ResizeDiagonalDr,
             Asset::ResizeDiagonalUr,
             Asset::Rotate,
+            Asset::RotateBottomRight,
+            Asset::RotateBottomLeft,
+            Asset::RotateTopLeft,
             Asset::Hand,
             Asset::HandPress,
             Asset::Duplicate,
@@ -421,7 +484,10 @@ mod tests {
             let png = image::load_from_memory_with_format(asset.png(), image::ImageFormat::Png).unwrap();
             assert_eq!((png.width(), png.height()), (256, 256), "{}", asset.name());
         }
+        assert_eq!(Glyph::Arrow.asset(), Asset::Arrow);
         assert_eq!(Glyph::Move.asset(), Asset::Move);
+        assert_eq!(Glyph::Text.asset(), Asset::Text);
+        assert_eq!(Glyph::NotAllowed.asset(), Asset::NotAllowed);
         assert_eq!(Glyph::Crosshair.asset(), Asset::Crosshair);
         assert_eq!(Glyph::Copy.asset(), Asset::Duplicate);
         assert_eq!(Glyph::Pen(PenCursor::Close).asset(), Asset::PenDot);
@@ -449,6 +515,19 @@ mod tests {
         // Non-square selections keep the same visual variant throughout a corner's quadrant.
         for (angle, quarter_turns) in [(12.0, 0), (168.0, 1), (192.0, 2), (348.0, 3)] {
             assert_eq!(Glyph::Rotate(angle).quarter_turns(), quarter_turns, "{angle}°");
+        }
+        for (angle, asset) in
+            [(45.0, Asset::RotateBottomRight), (135.0, Asset::RotateBottomLeft), (225.0, Asset::RotateTopLeft), (315.0, Asset::Rotate)]
+        {
+            assert_eq!(Glyph::Rotate(angle).asset(), asset, "{angle}°");
+        }
+    }
+
+    #[test]
+    fn supplied_multiplayer_pointer_colours_decode() {
+        for png in super::MULTIPLAYER_PNGS {
+            let image = image::load_from_memory_with_format(png, image::ImageFormat::Png).unwrap();
+            assert_eq!((image.width(), image.height()), (185, 185));
         }
     }
 }

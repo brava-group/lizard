@@ -287,7 +287,7 @@ fn cursor_placement(real_tip: Pos2, tag_size: Vec2, canvas: Rect, occupied: &[Re
     let spacing = vec2((tag_size.x + 30.0).max(80.0), (tag_size.y + 30.0).max(52.0));
     SLOTS.into_iter().find_map(|(column, row)| {
         let tip = real_tip + vec2(column * spacing.x, row * spacing.y);
-        let pointer = Rect::from_min_size(tip, vec2(17.0, 18.0));
+        let pointer = Rect::from_min_size(tip - vec2(3.5, 2.5), vec2(22.0, 22.0));
         let tag = Rect::from_min_size(tip + vec2(14.0, 15.0), tag_size);
         let fits = [pointer, tag].iter().all(|rect| canvas.contains(rect.min) && canvas.contains(rect.max));
         let clear = [pointer, tag].iter().all(|rect| occupied.iter().all(|other| !rect.expand(4.0).intersects(*other)));
@@ -306,18 +306,7 @@ pub fn draw(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context) {
 }
 
 fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_index: usize, occupied: &mut Vec<Rect>) {
-    let brand = if agent_index == 0 {
-        Tokens::get(ctx).accent_text
-    } else {
-        const COLORS: [Color32; 5] = [
-            Color32::from_rgb(0x4D, 0xB6, 0xF2),
-            Color32::from_rgb(0xF2, 0x9A, 0x62),
-            Color32::from_rgb(0x72, 0xCE, 0x9F),
-            Color32::from_rgb(0xEE, 0x83, 0xBB),
-            Color32::from_rgb(0xD5, 0xBE, 0x70),
-        ];
-        COLORS[(agent_index - 1) % COLORS.len()]
-    };
+    let brand = crate::cursors::MULTIPLAYER_COLORS[agent_index % crate::cursors::MULTIPLAYER_COLORS.len()];
     let now = Instant::now();
     let Some(document) = app.session.ds().ok().map(|ds| ds.uid) else { return };
     if app.ui.agent.presence.cursor_trail_next.is_some_and(|at| now >= at) && !app.ui.agent.presence.cursor_trail.is_empty() {
@@ -445,7 +434,14 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
                 if tip != real_tip {
                     painter.line_segment([real_tip, tip], Stroke::new(1.0, brand.gamma_multiply(fade * 0.6)));
                 }
-                crate::live::pointer(painter, tip, brand.gamma_multiply(fade));
+                if let Some(texture) = app.canvas.cursor_textures.multiplayer(ctx, agent_index) {
+                    painter.image(
+                        texture.id(),
+                        Rect::from_min_size(tip - vec2(4.5, 3.5), vec2(23.125, 23.125)),
+                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        Color32::WHITE.gamma_multiply(fade),
+                    );
+                }
                 crate::live::name_tag(painter, tip + vec2(14.0, 15.0), Align2::LEFT_TOP, name, brand.gamma_multiply(fade));
                 occupied.extend(bounds);
             }
