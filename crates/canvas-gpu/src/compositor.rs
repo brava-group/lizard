@@ -168,14 +168,16 @@ impl Compositor {
         if capacity == 0 {
             return Err("tile atlas needs at least one slot".into());
         }
+        // Mesa GL samples a one-layer D2Array atlas as black; keep a spare layer for that case.
+        let atlas_layers = capacity.max(2);
         let max_layers = device.limits().max_texture_array_layers;
-        if capacity > max_layers {
-            return Err(format!("tile atlas requests {capacity} layers, but this GPU supports {max_layers}").into());
+        if atlas_layers > max_layers {
+            return Err(format!("tile atlas requests {atlas_layers} layers, but this GPU supports {max_layers}").into());
         }
         let side = tile_size + bleed * 2;
         let atlas = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("bounded streaming tile atlas"),
-            size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: capacity },
+            size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: atlas_layers },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -772,10 +774,11 @@ mod tests {
 
     #[test]
     fn streaming_slot_moves_without_leaving_old_pixels_and_respects_zoom() -> Result<(), Box<dyn Error>> {
-        let instance = wgpu::Instance::default();
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
             return Ok(());
         };
+        eprintln!("streaming atlas adapter: {:?}", adapter.get_info());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
         let compositor = Compositor::empty_slots(64, 32, 16, 0, 1, device.clone(), queue.clone())?;
         let solid = |label, rgba: [u8; 4]| {
