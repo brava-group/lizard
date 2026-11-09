@@ -7,7 +7,7 @@ use crate::gpu_blur::GpuBlur;
 
 const SHADER: &str = r#"
 @group(0) @binding(0) var init_mask: texture_2d<f32>;
-@group(0) @binding(1) var init_out: texture_storage_2d<rg32sint, write>;
+@group(0) @binding(1) var init_out: texture_storage_2d<rgba16sint, write>;
 @compute @workgroup_size(16, 16)
 fn initialize(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = textureDimensions(init_mask);
@@ -19,7 +19,7 @@ fn initialize(@builtin(global_invocation_id) id: vec3<u32>) {
 
 struct Step { value: vec4<u32> };
 @group(0) @binding(2) var step_input: texture_2d<i32>;
-@group(0) @binding(3) var step_out: texture_storage_2d<rg32sint, write>;
+@group(0) @binding(3) var step_out: texture_storage_2d<rgba16sint, write>;
 @group(0) @binding(4) var<uniform> step: Step;
 @compute @workgroup_size(16, 16)
 fn propagate(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -234,8 +234,8 @@ impl GpuGlass {
         };
         let i = wgpu::TextureSampleType::Sint;
         let specs = [
-            vec![texture(0, f), storage(1, wgpu::TextureFormat::Rg32Sint)],
-            vec![texture(2, i), storage(3, wgpu::TextureFormat::Rg32Sint), uniform(4)],
+            vec![texture(0, f), storage(1, wgpu::TextureFormat::Rgba16Sint)],
+            vec![texture(2, i), storage(3, wgpu::TextureFormat::Rgba16Sint), uniform(4)],
             vec![texture(5, i), texture(6, f), storage(7, wgpu::TextureFormat::R32Float)],
             vec![texture(8, f), storage(9, wgpu::TextureFormat::Rgba8Unorm)],
             vec![
@@ -439,8 +439,9 @@ impl GpuGlass {
             let group = make_group(5, &[(&field, 17), (&gradients, 18)], Some((&uniform, 16)));
             dispatch(&mut encoder, &self.rounded_rect, &group);
         } else {
-            let seed_a = make("Lizard glass seeds A", wgpu::TextureFormat::Rg32Sint);
-            let seed_b = make("Lizard glass seeds B", wgpu::TextureFormat::Rg32Sint);
+            // Signed 16-bit coordinates cover every supported 2D texture dimension.
+            let seed_a = make("Lizard glass seeds A", wgpu::TextureFormat::Rgba16Sint);
+            let seed_b = make("Lizard glass seeds B", wgpu::TextureFormat::Rgba16Sint);
             let group_init = make_group(0, &[(mask, 0), (&seed_a, 1)], None);
             let group_distance_a = make_group(2, &[(&seed_a, 5), (mask, 6), (&field, 7)], None);
             let group_distance_b = make_group(2, &[(&seed_b, 5), (mask, 6), (&field, 7)], None);

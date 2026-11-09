@@ -1566,6 +1566,10 @@ mod effect_capability_tests {
 
     #[test]
     fn uniform_text_luminance_mask_uses_gpu() -> Result<(), Box<dyn Error>> {
+        lizard_text::scan_system_fonts();
+        if lizard_text::find_face("Inter", "Regular").is_none() {
+            return Ok(());
+        }
         let mut doc = Document::new("GPU text luminance mask");
         let page = doc.current_page.ok_or("page missing")?;
         let group = doc.create(page, NodeKind::Group, "Group", 0.0, 0.0, 200.0, 100.0)?;
