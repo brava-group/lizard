@@ -182,6 +182,24 @@ fn serve_guarded(
                         object.insert("__agent_index".into(), json!(agent_index));
                     }
                 }
+                if matches!(method.as_str(), "stock.search" | "stock.fetch") {
+                    let result = match method.as_str() {
+                        "stock.search" => {
+                            params.as_object().ok_or_else(|| "`params` must be an object".to_string()).and_then(lizard_mcp::search_stock_photos)
+                        }
+                        _ => params
+                            .get("photoId")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| "`photoId` is required".to_string())
+                            .and_then(lizard_mcp::fetch_stock_photo),
+                    };
+                    let response = match result {
+                        Ok(value) => json!({"id": id, "ok": true, "result": value}),
+                        Err(error) => json!({"id": id, "ok": false, "error": error}),
+                    };
+                    writeln!(out, "{response}")?;
+                    continue;
+                }
                 let (tx, rx) = std::sync::mpsc::channel();
                 let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let mut pending = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

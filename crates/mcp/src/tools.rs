@@ -82,11 +82,19 @@ fn tool(name: &str, title: &str, desc: &str, schema: Value, read_only: bool) -> 
     })
 }
 
+fn online_tool(name: &str, title: &str, desc: &str, schema: Value, read_only: bool) -> Value {
+    let mut definition = tool(name, title, desc, schema, read_only);
+    definition["annotations"]["openWorldHint"] = json!(true);
+    definition
+}
+
 /// Tool names, in `tools/list` order.
 pub const TOOL_NAMES: &[&str] = &[
     "list_commands",
     "spawn_agents",
     "search_icons",
+    "search_stock_photos",
+    "place_stock_photo",
     "run_command",
     "batch",
     "create_node",
@@ -141,6 +149,26 @@ pub fn tool_definitions() -> Vec<Value> {
                 &[],
             ),
             true,
+        ),
+        online_tool(
+            "search_stock_photos",
+            "Search Unsplash photos",
+            "Search real photos on Unsplash for a design. Use a short, concrete subject query, then choose a photo ID from the results and call place_stock_photo. Requires LIZARD_UNSPLASH_ACCESS_KEY in the local app environment. Returns photographer and Unsplash attribution links along with preview URLs.",
+            obj(
+                json!({"query": string("One to three concrete words describing the desired photo"), "orientation": string("Optional: landscape, portrait or squarish")}),
+                &["query"],
+            ),
+            true,
+        ),
+        online_tool(
+            "place_stock_photo",
+            "Place Unsplash photo",
+            "Fetch a chosen Unsplash photo and place it on the canvas, or fill an existing shape with target. Choose the photo ID from search_stock_photos. Calls Unsplash's download tracking endpoint and stores the photographer, source and attribution links on the layer. Requires LIZARD_UNSPLASH_ACCESS_KEY in the local app environment.",
+            obj(
+                json!({"photoId": string("Unsplash photo ID from search_stock_photos"), "target": id_schema("Existing shape or frame to fill; omitted creates a new image layer"), "parent": id_schema("Parent frame for a new image layer"), "x": num("X of a new image layer"), "y": num("Y of a new image layer"), "width": num("Width of a new image layer"), "height": num("Height of a new image layer")}),
+                &["photoId"],
+            ),
+            false,
         ),
         tool(
             "run_command",
@@ -453,8 +481,10 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
         Ok(a) => a,
         Err(e) => return ToolResult::error(e),
     };
-    let relevant =
-        matches!(name, "create_node" | "set_properties" | "get_node" | "inspect_document" | "screenshot" | "select" | "run_command" | "batch");
+    let relevant = matches!(
+        name,
+        "create_node" | "set_properties" | "place_stock_photo" | "get_node" | "inspect_document" | "screenshot" | "select" | "run_command" | "batch"
+    );
     if relevant {
         let ids = activity_ids(name, args);
         let position = if name == "create_node" {
@@ -498,6 +528,8 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
     let r = match name {
         "list_commands" => list_commands(b, &a),
         "search_icons" => search_icons(&a),
+        "search_stock_photos" => crate::stock::search(b, &a),
+        "place_stock_photo" => crate::stock::place(b, &a),
         "run_command" => run_command(b, &a),
         "batch" => batch(b, &a),
         "create_node" => create_node(b, &a),

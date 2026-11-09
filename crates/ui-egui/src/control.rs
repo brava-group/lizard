@@ -520,6 +520,9 @@ pub fn handle(app: &mut LizardApp, ctx: &Context, method: &str, p: &Value) -> Re
                 })
                 && message.previews.len() < 6
             {
+                if let Some(thumbnail) = crate::agent_panel::history_thumbnail(data) {
+                    chat.thumbnail = thumbnail;
+                }
                 message.previews.push(crate::agent_panel::AgentPreview { data: data.to_string(), texture: None });
             }
             ctx.request_repaint();

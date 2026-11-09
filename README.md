@@ -30,6 +30,12 @@ On macOS, launch the local app bundle to show **Lizard** in the Dock:
 packaging/macos/dev-app.sh
 ```
 
+To let the in-app agent find and place Unsplash photos, configure an Unsplash API Access Key in the app's local environment before launch. The agent uses `search_stock_photos` and `place_stock_photo`; photo credits and source links are kept on the image layer. The key is never written to a design document or chat history.
+
+```sh
+LIZARD_UNSPLASH_ACCESS_KEY=your_access_key cargo run -p lizard --bin lizard
+```
+
 The CLI and browser build are available through the workspace:
 
 ```sh

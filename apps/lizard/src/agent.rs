@@ -478,6 +478,9 @@ fn named_program(name: &str) -> Option<PathBuf> {
 
 fn command_with_runtime(program: &std::ffi::OsStr) -> Command {
     let mut command = Command::new(program);
+    // The image-provider key belongs to the desktop process. Attached MCP requests reach it over
+    // the private control bridge; external ACP adapters never inherit the credential.
+    command.env_remove("LIZARD_UNSPLASH_ACCESS_KEY");
     if let Some(node_dir) = named_program("node").and_then(|path| path.parent().map(std::path::Path::to_path_buf)) {
         let mut paths = vec![node_dir];
         if let Some(dir) = crate::services::config_dir() {
@@ -1099,6 +1102,13 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn external_agent_process_does_not_inherit_unsplash_key() {
+        let command = command_with_runtime(std::ffi::OsStr::new("mock-agent"));
+        let removed = command.get_envs().any(|(name, value)| name == "LIZARD_UNSPLASH_ACCESS_KEY" && value.is_none());
+        assert!(removed);
+    }
 
     #[test]
     fn gemini_login_uses_advertised_google_account_method() {

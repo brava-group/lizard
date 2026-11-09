@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::LizardApp;
 use crate::a11y;
 use crate::i18n::{tr, tr_noop, trf, trn};
-use crate::icons::{self, AgentIcon, LayerIcon, ToolIcon};
+use crate::icons::{self, AgentIcon, Icon, LayerIcon, ToolIcon};
 use crate::primitives::{Menu, MenuItem, Select, SelectVariant, ShimmerDirection, ShimmerText};
 use crate::theme::{Tokens, regular, semibold};
 
@@ -150,6 +150,10 @@ pub struct ChatMessage {
     pub variant_total: u8,
     #[serde(default)]
     pub thinking: String,
+    #[serde(default)]
+    pub thinking_started_ms: u64,
+    #[serde(default)]
+    pub thinking_seconds: Option<u64>,
     #[serde(skip)]
     pub text_agent: Option<usize>,
     #[serde(skip)]
@@ -286,6 +290,10 @@ pub struct ChatTool {
     pub output: Option<serde_json::Value>,
     #[serde(default)]
     pub content: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub started_at_ms: u64,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -296,11 +304,41 @@ pub struct Conversation {
     pub agent: AgentKind,
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
+    pub thumbnail: String,
+    #[serde(default)]
     pub agent_names: Vec<String>,
     #[serde(default)]
     pub remote_session: Option<String>,
     #[serde(default)]
     pub remote_sessions: Vec<Option<String>>,
+}
+
+pub(crate) fn history_thumbnail(data: &str) -> Option<String> {
+    let encoded = data.split_once(',').map_or(data, |(_, encoded)| encoded);
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    let thumbnail = image.resize_to_fill(64, 64, image::imageops::FilterType::Triangle);
+    let mut output = std::io::Cursor::new(Vec::new());
+    thumbnail.write_to(&mut output, image::ImageFormat::Png).ok()?;
+    Some(base64::engine::general_purpose::STANDARD.encode(output.into_inner()))
+}
+
+fn history_thumbnail_texture(ui: &Ui, chat: &Conversation) -> Option<egui::TextureHandle> {
+    if chat.thumbnail.is_empty() {
+        return None;
+    }
+    let id = Id::new(("agent_history_thumbnail", chat.id));
+    if let Some((data, texture)) = ui.ctx().data(|memory| memory.get_temp::<(String, egui::TextureHandle)>(id))
+        && data == chat.thumbnail
+    {
+        return Some(texture);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&chat.thumbnail).ok()?;
+    let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let pixels = egui::ColorImage::from_rgba_unmultiplied([image.width() as usize, image.height() as usize], image.as_raw());
+    let texture = ui.ctx().load_texture(format!("agent-history-{}", chat.id), pixels, egui::TextureOptions::LINEAR);
+    ui.ctx().data_mut(|memory| memory.insert_temp(id, (chat.thumbnail.clone(), texture.clone())));
+    Some(texture)
 }
 
 #[derive(Default)]
@@ -329,6 +367,8 @@ pub struct AgentUi {
     pub integration_started: bool,
     pub review_feedback: Vec<(usize, String)>,
     pub history_open: bool,
+    pub history_search: String,
+    pub history_search_open: bool,
     pub selected_suggestion: Option<usize>,
     pub agent: AgentKind,
     pub conversations: Vec<Conversation>,
@@ -354,12 +394,71 @@ pub struct AgentUi {
 }
 
 fn document_key(app: &LizardApp) -> String {
-    app.session.ds().ok().map_or_else(|| "sem-documento".to_string(), |ds| ds.path.clone().unwrap_or_else(|| format!("untitled:{}", ds.uid)))
+    static SESSION: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    app.session.ds().ok().map_or_else(
+        || "sem-documento".to_string(),
+        |ds| ds.path.clone().unwrap_or_else(|| format!("untitled:{}:{}", SESSION.get_or_init(now_ms), ds.uid)),
+    )
 }
 
 fn save_history(app: &mut LizardApp) {
-    if let Ok(value) = serde_json::to_value(&app.ui.agent.conversations) {
+    let on_disk = serde_json::from_value::<Vec<Conversation>>(app.services.agent_history_load()).unwrap_or_default();
+    let merged = merge_history(&app.ui.agent.conversations, on_disk);
+    if let Ok(value) = serde_json::to_value(compact_history(&merged)) {
         app.services.agent_history_save(&value);
+    }
+}
+
+const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
+
+fn merge_history(current: &[Conversation], on_disk: Vec<Conversation>) -> Vec<Conversation> {
+    let mut merged = on_disk.into_iter().filter(|chat| !current.iter().any(|live| live.id == chat.id)).collect::<Vec<_>>();
+    merged.extend_from_slice(current);
+    merged.sort_by_key(|chat| chat.id);
+    merged
+}
+
+fn compact_history(chats: &[Conversation]) -> Vec<Conversation> {
+    let mut saved = chats.iter().rev().take(100).cloned().collect::<Vec<_>>();
+    saved.reverse();
+    for chat in &mut saved {
+        if chat.thumbnail.len() > 50_000 {
+            chat.thumbnail.clear();
+        }
+        for message in &mut chat.messages {
+            for tool in &mut message.tools {
+                // Raw tool replies often include document snapshots or base64 screenshots.
+                // The transcript keeps the action, result and timing without retaining those blobs.
+                for value in [&mut tool.input, &mut tool.output] {
+                    if value.as_ref().is_some_and(|value| value.to_string().len() > 4_096) {
+                        *value = Some(serde_json::Value::String(tr("Details omitted from local history").into()));
+                    }
+                }
+                if tool.content.iter().map(|value| value.to_string().len()).sum::<usize>() > 4_096 {
+                    tool.content.clear();
+                }
+            }
+        }
+    }
+    while serde_json::to_vec(&saved).is_ok_and(|bytes| bytes.len() > MAX_HISTORY_BYTES) {
+        if saved.len() > 1 {
+            saved.remove(0);
+        } else if saved.first().is_some_and(|chat| chat.messages.len() > 2) {
+            saved[0].messages.remove(0);
+        } else {
+            break;
+        }
+    }
+    saved
+}
+
+fn now_ms() -> u64 {
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |time| time.as_millis() as u64)
+}
+
+fn finish_thinking(message: &mut ChatMessage, now: u64) {
+    if message.thinking_started_ms > 0 && message.thinking_seconds.is_none() {
+        message.thinking_seconds = Some(now.saturating_sub(message.thinking_started_ms).div_ceil(1_000));
     }
 }
 
@@ -404,8 +503,13 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
     if !app.ui.agent.history_loaded {
         app.ui.agent.history_loaded = true;
         if let Ok(mut chats) = serde_json::from_value::<Vec<Conversation>>(app.services.agent_history_load()) {
-            chats.truncate(100);
+            if chats.len() > 100 {
+                chats.drain(..chats.len() - 100);
+            }
             for chat in &mut chats {
+                if chat.thumbnail.len() > 50_000 {
+                    chat.thumbnail.clear();
+                }
                 if chat.agent_names.len() != AGENT_NAMES.len() {
                     chat.agent_names = shuffled_agent_names(chat.id);
                 }
@@ -445,9 +549,6 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
     {
         chat.document = key.clone();
         save_history(app);
-    }
-    if app.ui.agent.active.is_some_and(|id| app.ui.agent.conversations.iter().any(|chat| chat.id == id && chat.document != key)) {
-        app.ui.agent.active = None;
     }
     if app.ui.agent.runtime_document.is_some() && app.ui.agent.runtime_document != document {
         stop_chat(app);
@@ -517,6 +618,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index))
                     && message.text.len() < 100_000
                 {
+                    finish_thinking(message, now_ms());
                     let prefix = if shared_reply && message.text_agent.map_or(agent_index > 0, |previous| previous != agent_index) {
                         format!("\n\n**{agent_name}**\n")
                     } else {
@@ -553,6 +655,9 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index))
                     && message.thinking.len() < 32_000
                 {
+                    if message.thinking_started_ms == 0 {
+                        message.thinking_started_ms = now_ms();
+                    }
                     message.thinking.push_str(&chunk);
                 }
             }
@@ -579,12 +684,16 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     presence.draft = None;
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
+                    finish_thinking(message, now_ms());
                     if let Some(tool) = message.tools.iter_mut().find(|tool| tool.id == display_id) {
                         if let Some(title) = title {
                             tool.title = title;
                         }
                         if let Some(status) = status {
                             tool.status = status;
+                            if matches!(tool.status.as_str(), "completed" | "failed") && tool.duration_ms.is_none() {
+                                tool.duration_ms = Some(now_ms().saturating_sub(tool.started_at_ms));
+                            }
                         }
                         if let Some(input) = input {
                             tool.input = input;
@@ -604,13 +713,21 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                             input: input.flatten(),
                             output: output.flatten(),
                             content: content.unwrap_or_default(),
+                            started_at_ms: now_ms(),
+                            duration_ms: None,
                         });
+                        if let Some(tool) = message.tools.last_mut()
+                            && matches!(tool.status.as_str(), "completed" | "failed")
+                        {
+                            tool.duration_ms = Some(0);
+                        }
                     }
                 }
             }
             AgentEvent::Permission { id, title, options } => {
                 let id = if app.ui.agent.active_agent_count > 1 { serde_json::json!({"agent_index":agent_index,"request":id}) } else { id };
                 app.ui.agent.permission = Some(AgentPermission { id, title, options });
+                app.ui.agent.history_open = false;
             }
             AgentEvent::Done(reason) => {
                 if !app.ui.agent.busy
@@ -630,6 +747,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     presence.updated = Some(web_time::Instant::now());
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
+                    finish_thinking(message, now_ms());
                     if !shared_reply || app.ui.agent.remaining_agents == 1 {
                         message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
                         if let Ok(ds) = app.session.ds() {
@@ -681,6 +799,7 @@ pub fn sync(app: &mut LizardApp, ctx: &egui::Context) {
                     presence.active = false;
                 }
                 if let Some(message) = active.and_then(|chat| agent_message(chat, agent_index)) {
+                    finish_thinking(message, now_ms());
                     if !shared_reply || app.ui.agent.remaining_agents == 1 {
                         message.work_seconds = app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs());
                     }
@@ -943,6 +1062,7 @@ fn send_prompt(app: &mut LizardApp) {
                     },
                     agent: app.ui.agent.agent,
                     messages: Vec::new(),
+                    thumbnail: String::new(),
                     agent_names: shuffled_agent_names(id),
                     remote_session: None,
                     remote_sessions: Vec::new(),
@@ -1396,6 +1516,50 @@ fn chat_title(title: &str) -> &str {
     if title == "New chat" || title == "Novo chat" { tr("New chat") } else { title }
 }
 
+fn history_time(chat: &Conversation) -> u64 {
+    chat.messages.last().map_or(0, |message| message.created_at)
+}
+
+fn history_group(created_at: u64, now: u64) -> &'static str {
+    let days = now.saturating_sub(created_at) / 86_400;
+    match days {
+        0 => tr("Today"),
+        1 => tr("Yesterday"),
+        2..=7 => tr("Last week"),
+        8..=30 => tr("Last month"),
+        _ => tr("Earlier"),
+    }
+}
+
+fn history_age(created_at: u64, now: u64) -> String {
+    if created_at == 0 {
+        return String::new();
+    }
+    let seconds = now.saturating_sub(created_at);
+    if seconds < 3_600 {
+        format!("{}m", (seconds / 60).max(1))
+    } else if seconds < 86_400 {
+        format!("{}h", seconds / 3_600)
+    } else {
+        format!("{}d", seconds / 86_400)
+    }
+}
+
+fn history_preview(chat: &Conversation) -> String {
+    let message = chat
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && !message.text.trim().is_empty())
+        .or_else(|| chat.messages.iter().rev().find(|message| !message.text.trim().is_empty()));
+    message.map_or_else(String::new, |message| message.text.split_whitespace().take(25).collect::<Vec<_>>().join(" "))
+}
+
+fn history_line(text: &str, width: f32) -> String {
+    let count = (width / 8.3).floor().max(1.0) as usize;
+    if text.chars().count() <= count { text.to_owned() } else { format!("{}…", text.chars().take(count.saturating_sub(1)).collect::<String>()) }
+}
+
 fn receipt_title(title: &str) -> Cow<'_, str> {
     if title.contains("screenshot") || title.contains("execute") {
         Cow::Borrowed(tr("Designed"))
@@ -1489,16 +1653,15 @@ fn attempted_edit_without_document_change(message: &ChatMessage) -> bool {
 
 fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&AgentPreview>, max_width: f32) {
     let t = Tokens::get(ui.ctx());
-    let bg = if t.dark { Color32::from_rgb(0x30, 0x30, 0x30) } else { t.field };
-    let border = if t.dark { Color32::from_rgb(0x3D, 0x3D, 0x42) } else { t.border };
+    let border = t.border;
     let foreground = if t.dark { Color32::from_rgb(0xB9, 0xB9, 0xBC) } else { t.text };
     let muted = if t.dark { Color32::from_rgb(0x94, 0x94, 0x98) } else { t.text_secondary };
-    let mut is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(preview.is_some());
+    let mut is_open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     let width = max_width.min(ui.available_width()).max(1.0);
     let compact = receipt_is_compact(tool, preview);
-    egui::Frame::new().fill(bg).stroke(Stroke::new(1.0, border)).corner_radius(11).show(ui, |ui| {
+    ui.vertical(|ui| {
         ui.set_width(width);
-        let header = ui.allocate_exact_size(vec2(width, if compact { 28.0 } else { 36.0 }), if compact { Sense::hover() } else { Sense::click() });
+        let header = ui.allocate_exact_size(vec2(width, 23.0), if compact { Sense::hover() } else { Sense::click() });
         if !compact && header.1.clicked() {
             is_open = !is_open;
             ui.data_mut(|data| data.insert_temp(id, is_open));
@@ -1507,7 +1670,12 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
             a11y::disclosure(&header.1, tr("Tool details"), is_open);
         }
         let rect = header.0;
-        let max_chars = ((rect.width() - if compact { 48.0 } else { 68.0 }) / 7.0).floor().max(0.0) as usize;
+        let duration = tool
+            .duration_ms
+            .or_else(|| (tool.started_at_ms > 0).then(|| now_ms().saturating_sub(tool.started_at_ms)))
+            .map(|ms| format!("{}s", ms.div_ceil(1_000)));
+        let trailing = if compact { 18.0 } else { 36.0 } + if duration.is_some() { 32.0 } else { 0.0 };
+        let max_chars = ((rect.width() - 31.0 - trailing) / 7.0).floor().max(0.0) as usize;
         let label = if title.chars().count() > max_chars {
             format!("{}…", title.chars().take(max_chars.saturating_sub(1)).collect::<String>())
         } else {
@@ -1515,17 +1683,20 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
         };
         icons::paint_tool(
             ui.painter(),
-            Rect::from_center_size(pos2(rect.min.x + 18.0, rect.center().y), vec2(16.0, 16.0)),
+            Rect::from_center_size(pos2(rect.min.x + 9.0, rect.center().y), vec2(15.0, 15.0)),
             tool_icon(&tool.title),
             foreground,
         );
-        ui.painter().text(pos2(rect.min.x + 31.0, rect.center().y), Align2::LEFT_CENTER, label, regular(13.0), foreground);
+        ui.painter().text(pos2(rect.min.x + 24.0, rect.center().y), Align2::LEFT_CENTER, label, regular(12.0), foreground);
+        if let Some(duration) = duration {
+            ui.painter().text(pos2(rect.max.x - trailing + 3.0, rect.center().y), Align2::LEFT_CENTER, duration, regular(11.0), muted);
+        }
         let status_color = if tool.status == "completed" { if t.dark { RECEIPT_GREEN } else { t.success } } else { muted };
         ui.painter().text(
-            pos2(rect.max.x - if compact { 17.0 } else { 35.0 }, rect.center().y),
+            pos2(rect.max.x - if compact { 8.0 } else { 25.0 }, rect.center().y),
             Align2::CENTER_CENTER,
             if tool.status == "completed" { "✓" } else { "◌" },
-            regular(13.0),
+            regular(11.0),
             status_color,
         );
         if compact {
@@ -1533,9 +1704,9 @@ fn receipt(ui: &mut Ui, id: Id, title: &str, tool: &ChatTool, preview: Option<&A
         }
         glyph(
             ui,
-            Rect::from_center_size(pos2(rect.max.x - 18.0, rect.center().y), vec2(14.0, 14.0)),
+            Rect::from_center_size(pos2(rect.max.x - 8.0, rect.center().y), vec2(12.0, 12.0)),
             if is_open { AgentIcon::Up } else { AgentIcon::Down },
-            vec2(14.0, 14.0),
+            vec2(10.0, 10.0),
             muted,
         );
         let animation_time = if ui.style().animation_time > 0.0 { 0.2 } else { 0.0 };
@@ -1663,7 +1834,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
     }
     let title_x = full.min.x + 36.0;
     let title = if app.ui.agent.history_open {
-        tr("All chats")
+        tr("Chats")
     } else {
         app.ui
             .agent
@@ -1671,7 +1842,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             .and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id))
             .map_or(tr("New chat"), |chat| chat_title(&chat.title))
     };
-    let title_width = (full.max.x - 46.0 - title_x).max(0.0);
+    let title_width = (full.max.x - if app.ui.agent.history_open { 106.0 } else { 46.0 } - title_x).max(0.0);
     let mut title_job = egui::text::LayoutJob::simple_singleline(title.to_owned(), semibold(13.0), text);
     title_job.wrap = egui::text::TextWrapping { max_width: title_width, max_rows: 1, break_anywhere: true, ..Default::default() };
     let title_galley = ui.painter().layout_job(title_job);
@@ -1682,33 +1853,101 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         ui.painter().rect_filled(more, CornerRadius::same(5), t.hover);
     }
     glyph(ui, more, AgentIcon::More, vec2(15.0, 3.0), text);
+    if app.ui.agent.history_open {
+        let search = Rect::from_center_size(pos2(full.max.x - 62.0, full.min.y + 24.0), vec2(24.0, 24.0));
+        if hit(ui, "agent_history_search", search, tr("Search chats")).clicked() {
+            app.ui.agent.history_search_open = !app.ui.agent.history_search_open;
+            if !app.ui.agent.history_search_open {
+                app.ui.agent.history_search.clear();
+            }
+        }
+        icons::paint(ui.painter(), search.shrink(4.0), Icon::Search, text);
+        let add = Rect::from_center_size(pos2(full.max.x - 94.0, full.min.y + 24.0), vec2(24.0, 24.0));
+        if hit(ui, "agent_history_new", add, tr("New chat")).clicked() {
+            reset_chat(app);
+        }
+        glyph(ui, add, AgentIcon::Add, vec2(12.0, 12.0), text);
+    }
 
-    let middle_bottom = (full.max.y - 26.0 - composer_height).max(header_bottom);
+    let middle_bottom = if app.ui.agent.history_open { full.max.y } else { (full.max.y - 26.0 - composer_height).max(header_bottom) };
     let middle = Rect::from_min_max(pos2(full.min.x, header_bottom), pos2(full.max.x, middle_bottom));
     let painter = ui.painter().with_clip_rect(middle);
     if app.ui.agent.history_open {
-        let new_chat = Rect::from_min_size(pos2(full.min.x + 16.0, header_bottom + 16.0), vec2((width - 32.0).max(0.0), 42.0));
-        let resp = hit(ui, "agent_new_chat", new_chat, tr("New chat"));
-        painter.rect(new_chat, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-        glyph(ui, Rect::from_center_size(pos2(new_chat.min.x + 21.0, new_chat.center().y), vec2(24.0, 24.0)), AgentIcon::Add, vec2(12.0, 12.0), text);
-        painter.text(pos2(new_chat.min.x + 40.0, new_chat.center().y), Align2::LEFT_CENTER, tr("New chat"), regular(13.0), text);
-        let key = document_key(app);
-        let chats: Vec<_> = app.ui.agent.conversations.iter().filter(|chat| chat.document == key).cloned().collect();
+        let search_height = if app.ui.agent.history_search_open { 48.0 } else { 0.0 };
+        if app.ui.agent.history_search_open {
+            let search_rect = Rect::from_min_size(pos2(full.min.x + 16.0, header_bottom + 8.0), vec2((width - 32.0).max(1.0), 32.0));
+            let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(search_rect));
+            search_ui.add_sized(search_rect.size(), egui::TextEdit::singleline(&mut app.ui.agent.history_search).hint_text(tr("Search chats")));
+        }
+        let query = if app.ui.agent.history_search_open { app.ui.agent.history_search.trim().to_lowercase() } else { String::new() };
+        let mut chats = app
+            .ui
+            .agent
+            .conversations
+            .iter()
+            .filter(|chat| query.is_empty() || chat.title.to_lowercase().contains(&query) || history_preview(chat).to_lowercase().contains(&query))
+            .collect::<Vec<_>>();
+        chats.sort_by_key(|chat| (history_time(chat), chat.id));
         let mut chosen = None;
-        let list = Rect::from_min_max(pos2(full.min.x + 8.0, new_chat.max.y + 8.0), middle.max);
+        let list = Rect::from_min_max(pos2(full.min.x + 8.0, header_bottom + search_height + 8.0), middle.max);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
+            ui.set_width((list.width() - 16.0).max(1.0));
             if chats.is_empty() {
                 ui.label(egui::RichText::new(tr("No previous chats")).size(crate::theme::ui_font_size(11.0)).color(secondary));
             }
+            let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |time| time.as_secs());
+            let mut previous_group = "";
             for chat in chats.iter().rev() {
-                if ui
-                    .add_sized(
-                        [list.width() - 16.0, 36.0],
-                        egui::Button::new(egui::RichText::new(chat_title(&chat.title)).size(crate::theme::ui_font_size(12.0))).frame(false),
-                    )
-                    .clicked()
-                {
+                let group = history_group(history_time(chat), now);
+                if group != previous_group {
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new(group).size(crate::theme::ui_font_size(11.0)).color(secondary));
+                    ui.add_space(4.0);
+                    previous_group = group;
+                }
+                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 70.0), Sense::click());
+                a11y::button(&response, chat_title(&chat.title));
+                if response.hovered() || app.ui.agent.active == Some(chat.id) {
+                    ui.painter().rect_filled(row, CornerRadius::same(7), t.hover);
+                }
+                let icon = Rect::from_min_size(pos2(row.min.x + 8.0, row.min.y + 14.0), vec2(38.0, 38.0));
+                ui.painter().rect(icon, CornerRadius::same(7), t.field, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+                if let Some(texture) = history_thumbnail_texture(ui, chat) {
+                    ui.painter().with_clip_rect(icon.shrink(1.0)).image(
+                        texture.id(),
+                        icon.shrink(1.0),
+                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                } else {
+                    glyph(ui, icon, AgentIcon::Emblem, vec2(16.0, 16.0), t.accent_text);
+                }
+                let text_x = icon.max.x + 10.0;
+                let text_width = (row.max.x - text_x - 42.0).max(1.0);
+                ui.painter().with_clip_rect(Rect::from_min_max(pos2(text_x, row.min.y), pos2(row.max.x - 44.0, row.max.y))).text(
+                    pos2(text_x, row.min.y + 24.0),
+                    Align2::LEFT_CENTER,
+                    history_line(chat_title(&chat.title), text_width),
+                    semibold(12.0),
+                    text,
+                );
+                ui.painter().text(
+                    pos2(row.max.x - 8.0, row.min.y + 24.0),
+                    Align2::RIGHT_CENTER,
+                    history_age(history_time(chat), now),
+                    regular(10.0),
+                    secondary,
+                );
+                let preview = history_preview(chat);
+                ui.painter().with_clip_rect(Rect::from_min_max(pos2(text_x, row.min.y), pos2(row.max.x - 12.0, row.max.y))).text(
+                    pos2(text_x, row.min.y + 45.0),
+                    Align2::LEFT_CENTER,
+                    history_line(&preview, row.max.x - text_x - 12.0),
+                    regular(11.0),
+                    secondary,
+                );
+                if response.clicked() {
                     chosen = Some((chat.id, chat.agent));
                 }
             }
@@ -1722,11 +1961,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             app.ui.agent.runtime_conversation = None;
             app.ui.agent.history_open = false;
         }
-        if resp.clicked() {
-            reset_chat(app);
-        }
     } else if let Some(chat) = app.ui.agent.active.and_then(|id| app.ui.agent.conversations.iter().find(|chat| chat.id == id)).cloned() {
-        let transcript = middle.shrink2(vec2(20.0, 12.0));
+        let transcript = middle.shrink2(vec2(16.0, 8.0));
         let content_width = (transcript.width() - TRANSCRIPT_SCROLL_GUTTER).max(1.0);
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(transcript));
         let mut revert = None;
@@ -1735,7 +1971,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
             ui.set_width(content_width);
             for (index, message) in chat.messages.iter().enumerate() {
                 if message.role == "user" {
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     let bubble_width = content_width.min(320.0);
                     ui.horizontal(|ui| {
                         ui.add_space((content_width - bubble_width).max(0.0));
@@ -1749,11 +1985,11 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                 );
                                 ui.label(egui::RichText::new(tr("You")).size(crate::theme::ui_font_size(12.0)).strong().color(transcript_heading));
                             });
-                            ui.add_space(5.0);
+                            ui.add_space(3.0);
                             egui::Frame::new()
                                 .fill(if t.dark { Color32::from_rgb(0x40, 0x40, 0x40) } else { t.field })
                                 .corner_radius(CornerRadius { nw: 24, ne: 0, sw: 24, se: 24 })
-                                .inner_margin(egui::Margin::symmetric(16, 12))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
                                 .show(ui, |ui| {
                                     ui.set_width((bubble_width - 32.0).max(0.0));
                                     for node in &message.selected_nodes {
@@ -1765,7 +2001,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         .fill(Tokens::get(ui.ctx()).selected_row)
                                         .stroke(Stroke::new(1.0, Tokens::get(ui.ctx()).accent_text.gamma_multiply(0.4)))
                                         .corner_radius(5);
-                                        if ui.add(badge).lizard_tooltip(tr("Find on canvas")).clicked() {
+                                        if ui.add(badge).lizard_tooltip(tr("Find on canvas")).clicked() && chat.document == document_key(app) {
                                             locate_node = Some(node.id);
                                         }
                                     }
@@ -1783,7 +2019,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         });
                     });
                 } else {
-                    ui.add_space(9.0);
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
                         ui.painter().circle_filled(dot.center(), 4.5, Color32::from_rgb(0xF1, 0x6A, 0x99));
@@ -1795,6 +2031,20 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         );
                         if !message.model_label.is_empty() {
                             ui.label(egui::RichText::new(&message.model_label).size(crate::theme::ui_font_size(12.0)).color(transcript_secondary));
+                        }
+                        let elapsed = message.work_seconds.or_else(|| {
+                            (app.ui.agent.busy
+                                && app.ui.agent.runtime_conversation == Some(chat.id)
+                                && !chat
+                                    .messages
+                                    .iter()
+                                    .skip(index + 1)
+                                    .any(|later| later.role == "assistant" && later.agent_index == message.agent_index))
+                            .then(|| app.ui.agent.turn_started.as_ref().map(|started| started.elapsed().as_secs()))
+                            .flatten()
+                        });
+                        if let Some(seconds) = elapsed {
+                            ui.label(egui::RichText::new(format!("· {seconds}s")).size(crate::theme::ui_font_size(11.0)).color(transcript_secondary));
                         }
                         if message.variant_total > 1 {
                             ui.label(
@@ -1828,7 +2078,9 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         state.show_toggle_button(ui, thought_chevron);
                                         ui.spacing_mut().item_spacing.x = spacing;
                                         let word = work_word(ui, header_id);
-                                        let shimmer = ShimmerText::new(word)
+                                        let elapsed = now_ms().saturating_sub(message.thinking_started_ms).div_ceil(1_000);
+                                        let label = format!("{word} {elapsed}s");
+                                        let shimmer = ShimmerText::new(&label)
                                             .direction(ShimmerDirection::Diagonal)
                                             .duration(0.6)
                                             .size(crate::theme::ui_font_size(12.0))
@@ -1838,7 +2090,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                         if click.clicked() {
                                             state.toggle(ui);
                                         }
-                                        a11y::disclosure(&click, word, state.is_open());
+                                        a11y::disclosure(&click, &label, state.is_open());
                                     });
                                     state.show_body_indented(&header.response, ui, |ui| {
                                         if !message.thinking.is_empty() {
@@ -1848,7 +2100,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                                 });
                             } else {
                                 let label = message
-                                    .work_seconds
+                                    .thinking_seconds
+                                    .or(message.work_seconds)
                                     .map_or_else(|| tr("Thinking…").to_string(), |s| trf("Thought for {seconds}s", &[("seconds", &s)]));
                                 egui::CollapsingHeader::new(
                                     egui::RichText::new(label).size(crate::theme::ui_font_size(12.0)).color(transcript_secondary),
@@ -1880,12 +2133,12 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                             ChatPart::Tool(tool_index) => {
                                 let Some(tool) = message.tools.get(*tool_index) else { continue };
                                 let preview = if *tool_index + 1 == message.tools.len() { message.previews.first() } else { None };
-                                ui.add_space(if receipt_is_compact(tool, preview) { 4.0 } else { 9.0 });
+                                ui.add_space(2.0);
                                 let title = receipt_title(&tool.title);
                                 receipt(ui, ui.id().with(("agent_receipt", chat.id, index, tool_index)), &title, tool, preview, content_width);
                             }
                             ChatPart::Text(text) if !text.is_empty() => {
-                                ui.add_space(9.0);
+                                ui.add_space(5.0);
                                 let accent = Tokens::get(ui.ctx()).accent_text;
                                 crate::agent_markdown::show(ui, text, transcript_text, accent);
                             }
@@ -1893,7 +2146,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         }
                     }
                     if message.tools.is_empty() && !message.previews.is_empty() {
-                        ui.add_space(9.0);
+                        ui.add_space(4.0);
                         let preview_tool = ChatTool { status: "completed".into(), ..Default::default() };
                         receipt(
                             ui,
@@ -1908,22 +2161,15 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                         ui.label(egui::RichText::new(tr("Stopped")).size(crate::theme::ui_font_size(11.0)).color(secondary));
                     }
                     if attempted_edit_without_document_change(message) {
-                        ui.add_space(9.0);
+                        ui.add_space(5.0);
                         ui.label(
                             egui::RichText::new(tr("No changes were made to the open document."))
                                 .size(crate::theme::ui_font_size(11.0))
                                 .color(secondary),
                         );
                     }
-                    if let Some(seconds) = message.work_seconds {
-                        ui.add_space(9.0);
-                        ui.label(
-                            egui::RichText::new(trf("Designed for {seconds}s", &[("seconds", &seconds)]))
-                                .size(crate::theme::ui_font_size(14.0))
-                                .color(transcript_secondary),
-                        );
-                    }
                     if !app.ui.agent.busy
+                        && chat.document == document_key(app)
                         && !message.parallel
                         && !message.reverted
                         && message.undo_after > message.undo_before
@@ -2043,292 +2289,361 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         }
     }
 
-    // Composer is anchored to the bottom, independently of the welcome area height.
-    let composer = Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 16.0 - composer_height), vec2((width - 32.0).max(0.0), composer_height));
-    ui.painter().rect(composer, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-    if !app.ui.agent.images.is_empty() {
-        let mut remove_image = None;
-        for (index, image) in app.ui.agent.images.iter_mut().enumerate() {
-            if image.preview.is_none()
-                && let Ok(decoded) = image::load_from_memory(&image.bytes)
-            {
-                let thumb = decoded.resize_to_fill(144, 144, image::imageops::FilterType::Triangle).to_rgba8();
-                let color = egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize, thumb.height() as usize], thumb.as_raw());
-                image.preview = Some(ui.ctx().load_texture(format!("agent-image-{}-{index}", image.name), color, egui::TextureOptions::LINEAR));
-            }
-            let row = index / image_columns;
-            let column = index % image_columns;
-            let tile = Rect::from_min_size(
-                pos2(composer.min.x + 12.0 + column as f32 * (image_size + 8.0), composer.min.y + 8.0 + row as f32 * (image_size + 8.0)),
-                vec2(image_size, image_size),
-            );
-            let _ = ui.interact(tile, ui.id().with(("agent_image", index)), Sense::hover()).lizard_tooltip(&image.name);
-            ui.painter().rect(tile, CornerRadius::same(8), t.field, Stroke::new(1.0, border), egui::StrokeKind::Inside);
-            if let Some(preview) = &image.preview {
-                egui::Image::from_texture(preview).corner_radius(8).paint_at(ui, tile.shrink(1.0));
-            }
-            let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y + 4.0), vec2(20.0, 20.0));
-            let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).lizard_tooltip(tr("Remove image"));
-            a11y::button(&remove_resp, tr("Remove image"));
-            ui.painter().circle_filled(remove.center(), 10.0, if remove_resp.hovered() { t.pressed } else { panel });
-            ui.painter().circle_stroke(remove.center(), 9.5, Stroke::new(1.0, border));
-            ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), text);
-            if remove_resp.clicked() {
-                remove_image = Some(index);
-            }
-        }
-        if let Some(index) = remove_image {
-            app.ui.agent.images.remove(index);
-        }
-    }
-    if !selected_nodes.is_empty() {
-        let mut x = composer.min.x + 12.0;
-        let mut shown = 0;
-        for node in &selected_nodes {
-            let label: String = node.name.chars().take(22).collect();
-            let chip_width = (label.chars().count() as f32 * 6.2 + 42.0).clamp(72.0, 190.0);
-            if x + chip_width > composer.max.x - 12.0 {
-                break;
-            }
-            let chip = Rect::from_min_size(pos2(x, composer.min.y + 8.0 + images_height), vec2(chip_width, 24.0));
-            let (locate, exclude) = context_chip(ui, chip, &label, node.id, &t);
-            if locate {
-                app.run("select.set", serde_json::json!({"ids":[node.id]}));
-                app.run("view.zoomSelection", serde_json::json!({}));
-            }
-            if exclude && !app.ui.agent.excluded_selection.contains(&node.id) {
-                app.ui.agent.excluded_selection.push(node.id);
-            }
-            x += chip_width + 6.0;
-            shown += 1;
-        }
-        if shown < selected_nodes.len() {
-            ui.painter().text(
-                pos2(x + 3.0, composer.min.y + 20.0 + images_height),
-                Align2::LEFT_CENTER,
-                format!("+{}", selected_nodes.len() - shown),
-                regular(11.0),
-                secondary,
-            );
-        }
-    }
-    let input = Rect::from_min_max(
-        pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
-        pos2(composer.max.x - 16.0, composer.min.y + 98.0 + context_height + images_height),
-    );
-    paste_image_into_composer(app, ui);
-    let mut input_ui = ui.new_child(egui::UiBuilder::new().max_rect(input));
-    let input_resp = egui::ScrollArea::vertical()
-        .id_salt("agent_prompt_scroll")
-        .auto_shrink([false, false])
-        .show(&mut input_ui, |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut app.ui.agent.draft)
-                    .id(Id::new("agent_prompt"))
-                    .font(regular(13.0))
-                    .hint_text(egui::RichText::new(tr("Request changes")).size(crate::theme::ui_font_size(13.0)).color(secondary))
-                    .frame(egui::Frame::NONE)
-                    .desired_width(ui.available_width())
-                    .desired_rows(3),
-            )
-        })
-        .inner;
-    let actions_y = composer.max.y - 32.0;
-    let attach = Rect::from_min_size(pos2(composer.min.x + 8.0, actions_y), vec2(24.0, 24.0));
-    let parallel = Rect::from_min_size(pos2(attach.max.x + 8.0, actions_y), vec2(34.0, 24.0));
-    let variants = Rect::from_min_size(pos2(parallel.max.x + 11.0, actions_y), vec2(34.0, 24.0));
-    let send = Rect::from_min_size(pos2(composer.max.x - 32.0, actions_y), vec2(24.0, 24.0));
-    let model_label = app
-        .ui
-        .agent
-        .model
-        .as_deref()
-        .and_then(|id| app.ui.agent.models.iter().find(|(model_id, _)| model_id == id).map(|(_, label)| label.as_str()))
-        .unwrap_or_else(|| app.ui.agent.agent.label());
-    let model_x = variants.max.x + 11.0;
-    let model_available = (send.min.x - 8.0 - model_x).max(0.0);
-    let model_label_width = ui.painter().layout_no_wrap(model_label.to_owned(), regular(12.0), Color32::PLACEHOLDER).size().x;
-    let model_width = (model_label_width + 36.0).ceil().max(72.0).min(model_available);
-    let model = Rect::from_min_size(pos2(model_x, actions_y), vec2(model_width, 24.0));
-    let attach_resp = hit(ui, "agent_context", attach, tr("Insert attachment"));
-    let parallel_resp = hit(ui, "agent_parallel", parallel, tr("Number of agents"));
-    let variants_resp = hit(ui, "agent_variants", variants, tr("Number of variations"));
-    let mut model_ui = ui.new_child(egui::UiBuilder::new().max_rect(model));
-    let model_resp =
-        Select::trigger_with_variant(&mut model_ui, model_label, model.width(), None, SelectVariant::Ghost).lizard_tooltip(tr("Select model"));
-    a11y::combo(&model_resp, tr("Select model"), model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
-    let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { tr("Stop agent") } else { tr("Send message") });
-    let reduce_motion = app.reduce_motion();
-    for (id, rect, response) in
-        [("agent_context", attach, &attach_resp), ("agent_parallel", parallel, &parallel_resp), ("agent_variants", variants, &variants_resp)]
-    {
-        composer_hover(ui, id, rect, response, t.dark, reduce_motion);
-    }
-    glyph(ui, attach, AgentIcon::Paperclip, vec2(14.0, 14.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
-    let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
-    glyph(ui, Rect::from_min_size(parallel.min, vec2(13.0, 24.0)), AgentIcon::Lightning, vec2(13.0, 13.0), parallel_color);
-    ui.painter().text(
-        pos2(parallel.min.x + 16.0, parallel.center().y),
-        Align2::LEFT_CENTER,
-        format!("{}x", app.ui.agent.agent_count.max(1)),
-        regular(12.0),
-        parallel_color,
-    );
-    glyph(ui, Rect::from_min_size(variants.min, vec2(13.0, 24.0)), AgentIcon::Grid, vec2(13.0, 13.0), Color32::from_rgb(0x99, 0x99, 0x99));
-    ui.painter().text(
-        pos2(variants.min.x + 16.0, variants.center().y),
-        Align2::LEFT_CENTER,
-        format!("{}x", app.ui.agent.variant_count.max(1)),
-        regular(12.0),
-        Color32::from_rgb(0x99, 0x99, 0x99),
-    );
-    let send_hover = ui.ctx().animate_bool_with_time(
-        ui.id().with("agent_send_hover"),
-        send_resp.hovered() || send_resp.has_focus(),
-        if reduce_motion { 0.0 } else { 0.14 },
-    );
-    let send_fill = Color32::from(egui::lerp(egui::Rgba::from(t.accent)..=egui::Rgba::from(t.accent_hover), send_hover));
-    ui.painter().circle_filled(send.center(), 12.0, send_fill);
-    if app.ui.agent.busy {
-        ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(7.0, 7.0)), 1.0, t.accent_on);
-    } else {
-        glyph(ui, send, AgentIcon::SendUp, vec2(15.0, 15.0), t.accent_on);
-    }
-    let enter = input_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-    if send_resp.clicked() || enter {
-        if app.ui.agent.busy && send_resp.clicked() {
-            stop_chat(app);
-        } else if !app.ui.agent.busy {
-            send_prompt(app);
-        }
-    }
-
-    Menu::popup(&attach_resp).width(176.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        if MenuItem::new(tr("Attach PNG or JPEG")).show(ui).clicked() {
-            app.pick_open(tr("Attach image to agent"), &["png", "jpg", "jpeg"], |app, path| {
-                let result = std::fs::metadata(&path)
-                    .map_err(|error| error.to_string())
-                    .and_then(|meta| {
-                        if meta.len() <= MAX_IMAGE_BYTES as u64 {
-                            std::fs::read(&path).map_err(|error| error.to_string())
-                        } else {
-                            Err(tr("The image exceeds 4 MB.").into())
-                        }
-                    })
-                    .and_then(|bytes| {
-                        attach_image(app, path.file_name().map_or_else(|| tr("Image").into(), |name| name.to_string_lossy().into_owned()), bytes)
-                    });
-                if let Err(error) = result {
-                    app.toast(error);
+    if !app.ui.agent.history_open {
+        // Composer is anchored to the bottom, independently of the welcome area height.
+        let composer =
+            Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 16.0 - composer_height), vec2((width - 32.0).max(0.0), composer_height));
+        ui.painter().rect(composer, CornerRadius::same(13), panel, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+        if !app.ui.agent.images.is_empty() {
+            let mut remove_image = None;
+            for (index, image) in app.ui.agent.images.iter_mut().enumerate() {
+                if image.preview.is_none()
+                    && let Ok(decoded) = image::load_from_memory(&image.bytes)
+                {
+                    let thumb = decoded.resize_to_fill(144, 144, image::imageops::FilterType::Triangle).to_rgba8();
+                    let color = egui::ColorImage::from_rgba_unmultiplied([thumb.width() as usize, thumb.height() as usize], thumb.as_raw());
+                    image.preview = Some(ui.ctx().load_texture(format!("agent-image-{}-{index}", image.name), color, egui::TextureOptions::LINEAR));
                 }
-            });
-            ui.close();
+                let row = index / image_columns;
+                let column = index % image_columns;
+                let tile = Rect::from_min_size(
+                    pos2(composer.min.x + 12.0 + column as f32 * (image_size + 8.0), composer.min.y + 8.0 + row as f32 * (image_size + 8.0)),
+                    vec2(image_size, image_size),
+                );
+                let _ = ui.interact(tile, ui.id().with(("agent_image", index)), Sense::hover()).lizard_tooltip(&image.name);
+                ui.painter().rect(tile, CornerRadius::same(8), t.field, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+                if let Some(preview) = &image.preview {
+                    egui::Image::from_texture(preview).corner_radius(8).paint_at(ui, tile.shrink(1.0));
+                }
+                let remove = Rect::from_min_size(pos2(tile.max.x - 24.0, tile.min.y + 4.0), vec2(20.0, 20.0));
+                let remove_resp = ui.interact(remove, ui.id().with(("agent_remove_image", index)), Sense::click()).lizard_tooltip(tr("Remove image"));
+                a11y::button(&remove_resp, tr("Remove image"));
+                ui.painter().circle_filled(remove.center(), 10.0, if remove_resp.hovered() { t.pressed } else { panel });
+                ui.painter().circle_stroke(remove.center(), 9.5, Stroke::new(1.0, border));
+                ui.painter().text(remove.center(), Align2::CENTER_CENTER, "×", regular(14.0), text);
+                if remove_resp.clicked() {
+                    remove_image = Some(index);
+                }
+            }
+            if let Some(index) = remove_image {
+                app.ui.agent.images.remove(index);
+            }
         }
-        if MenuItem::new(tr("Paste image")).show(ui).clicked() {
-            attach_clipboard_image(app);
-            ui.close();
+        if !selected_nodes.is_empty() {
+            let mut x = composer.min.x + 12.0;
+            let mut shown = 0;
+            for node in &selected_nodes {
+                let label: String = node.name.chars().take(22).collect();
+                let chip_width = (label.chars().count() as f32 * 6.2 + 42.0).clamp(72.0, 190.0);
+                if x + chip_width > composer.max.x - 12.0 {
+                    break;
+                }
+                let chip = Rect::from_min_size(pos2(x, composer.min.y + 8.0 + images_height), vec2(chip_width, 24.0));
+                let (locate, exclude) = context_chip(ui, chip, &label, node.id, &t);
+                if locate {
+                    app.run("select.set", serde_json::json!({"ids":[node.id]}));
+                    app.run("view.zoomSelection", serde_json::json!({}));
+                }
+                if exclude && !app.ui.agent.excluded_selection.contains(&node.id) {
+                    app.ui.agent.excluded_selection.push(node.id);
+                }
+                x += chip_width + 6.0;
+                shown += 1;
+            }
+            if shown < selected_nodes.len() {
+                ui.painter().text(
+                    pos2(x + 3.0, composer.min.y + 20.0 + images_height),
+                    Align2::LEFT_CENTER,
+                    format!("+{}", selected_nodes.len() - shown),
+                    regular(11.0),
+                    secondary,
+                );
+            }
         }
-    });
+        let input = Rect::from_min_max(
+            pos2(composer.min.x + 16.0, composer.min.y + 16.0 + context_height + images_height),
+            pos2(composer.max.x - 16.0, composer.min.y + 98.0 + context_height + images_height),
+        );
+        paste_image_into_composer(app, ui);
+        let mut input_ui = ui.new_child(egui::UiBuilder::new().max_rect(input));
+        let input_resp = egui::ScrollArea::vertical()
+            .id_salt("agent_prompt_scroll")
+            .auto_shrink([false, false])
+            .show(&mut input_ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.ui.agent.draft)
+                        .id(Id::new("agent_prompt"))
+                        .font(regular(13.0))
+                        .hint_text(egui::RichText::new(tr("Request changes")).size(crate::theme::ui_font_size(13.0)).color(secondary))
+                        .frame(egui::Frame::NONE)
+                        .desired_width(ui.available_width())
+                        .desired_rows(3),
+                )
+            })
+            .inner;
+        let actions_y = composer.max.y - 32.0;
+        let attach = Rect::from_min_size(pos2(composer.min.x + 8.0, actions_y), vec2(24.0, 24.0));
+        let parallel = Rect::from_min_size(pos2(attach.max.x + 8.0, actions_y), vec2(34.0, 24.0));
+        let variants = Rect::from_min_size(pos2(parallel.max.x + 11.0, actions_y), vec2(34.0, 24.0));
+        let send = Rect::from_min_size(pos2(composer.max.x - 32.0, actions_y), vec2(24.0, 24.0));
+        let model_label = app
+            .ui
+            .agent
+            .model
+            .as_deref()
+            .and_then(|id| app.ui.agent.models.iter().find(|(model_id, _)| model_id == id).map(|(_, label)| label.as_str()))
+            .unwrap_or_else(|| app.ui.agent.agent.label());
+        let model_x = variants.max.x + 11.0;
+        let model_available = (send.min.x - 8.0 - model_x).max(0.0);
+        let model_label_width = ui.painter().layout_no_wrap(model_label.to_owned(), regular(12.0), Color32::PLACEHOLDER).size().x;
+        let model_width = (model_label_width + 36.0).ceil().max(72.0).min(model_available);
+        let model = Rect::from_min_size(pos2(model_x, actions_y), vec2(model_width, 24.0));
+        let attach_resp = hit(ui, "agent_context", attach, tr("Insert attachment"));
+        let parallel_resp = hit(ui, "agent_parallel", parallel, tr("Number of agents"));
+        let variants_resp = hit(ui, "agent_variants", variants, tr("Number of variations"));
+        let mut model_ui = ui.new_child(egui::UiBuilder::new().max_rect(model));
+        let model_resp =
+            Select::trigger_with_variant(&mut model_ui, model_label, model.width(), None, SelectVariant::Ghost).lizard_tooltip(tr("Select model"));
+        a11y::combo(&model_resp, tr("Select model"), model_label, egui::Popup::is_id_open(ui.ctx(), Id::new("agent_footer_model_popup")));
+        let send_resp = hit(ui, "agent_send", send, if app.ui.agent.busy { tr("Stop agent") } else { tr("Send message") });
+        let reduce_motion = app.reduce_motion();
+        for (id, rect, response) in
+            [("agent_context", attach, &attach_resp), ("agent_parallel", parallel, &parallel_resp), ("agent_variants", variants, &variants_resp)]
+        {
+            composer_hover(ui, id, rect, response, t.dark, reduce_motion);
+        }
+        glyph(ui, attach, AgentIcon::Paperclip, vec2(14.0, 14.0), Color32::from_rgb(0xA5, 0xA5, 0xA8));
+        let parallel_color = Color32::from_rgb(0xFF, 0xBF, 0x00);
+        glyph(ui, Rect::from_min_size(parallel.min, vec2(13.0, 24.0)), AgentIcon::Lightning, vec2(13.0, 13.0), parallel_color);
+        ui.painter().text(
+            pos2(parallel.min.x + 16.0, parallel.center().y),
+            Align2::LEFT_CENTER,
+            format!("{}x", app.ui.agent.agent_count.max(1)),
+            regular(12.0),
+            parallel_color,
+        );
+        glyph(ui, Rect::from_min_size(variants.min, vec2(13.0, 24.0)), AgentIcon::Grid, vec2(13.0, 13.0), Color32::from_rgb(0x99, 0x99, 0x99));
+        ui.painter().text(
+            pos2(variants.min.x + 16.0, variants.center().y),
+            Align2::LEFT_CENTER,
+            format!("{}x", app.ui.agent.variant_count.max(1)),
+            regular(12.0),
+            Color32::from_rgb(0x99, 0x99, 0x99),
+        );
+        let send_hover = ui.ctx().animate_bool_with_time(
+            ui.id().with("agent_send_hover"),
+            send_resp.hovered() || send_resp.has_focus(),
+            if reduce_motion { 0.0 } else { 0.14 },
+        );
+        let send_fill = Color32::from(egui::lerp(egui::Rgba::from(t.accent)..=egui::Rgba::from(t.accent_hover), send_hover));
+        ui.painter().circle_filled(send.center(), 12.0, send_fill);
+        if app.ui.agent.busy {
+            ui.painter().rect_filled(Rect::from_center_size(send.center(), vec2(7.0, 7.0)), 1.0, t.accent_on);
+        } else {
+            glyph(ui, send, AgentIcon::SendUp, vec2(15.0, 15.0), t.accent_on);
+        }
+        let enter = input_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+        if send_resp.clicked() || enter {
+            if app.ui.agent.busy && send_resp.clicked() {
+                stop_chat(app);
+            } else if !app.ui.agent.busy {
+                send_prompt(app);
+            }
+        }
 
-    if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
-        egui::Window::new(tr("Agent permission")).collapsible(false).resizable(false).show(ui.ctx(), |ui| {
-            ui.label(title);
-            ui.horizontal(|ui| {
-                for (option, label) in options {
-                    if ui.button(label).clicked() {
-                        app.services.agent_permission(id.clone(), Some(option));
-                        app.ui.agent.permission = None;
+        Menu::popup(&attach_resp).width(176.0).align(egui::RectAlign::TOP_START).show(|ui| {
+            if MenuItem::new(tr("Attach PNG or JPEG")).show(ui).clicked() {
+                app.pick_open(tr("Attach image to agent"), &["png", "jpg", "jpeg"], |app, path| {
+                    let result = std::fs::metadata(&path)
+                        .map_err(|error| error.to_string())
+                        .and_then(|meta| {
+                            if meta.len() <= MAX_IMAGE_BYTES as u64 {
+                                std::fs::read(&path).map_err(|error| error.to_string())
+                            } else {
+                                Err(tr("The image exceeds 4 MB.").into())
+                            }
+                        })
+                        .and_then(|bytes| {
+                            attach_image(app, path.file_name().map_or_else(|| tr("Image").into(), |name| name.to_string_lossy().into_owned()), bytes)
+                        });
+                    if let Err(error) = result {
+                        app.toast(error);
                     }
-                }
-                if ui.button(tr("Decline")).clicked() {
-                    app.services.agent_permission(id, None);
-                    app.ui.agent.permission = None;
-                }
-            });
-        });
-    }
-
-    Menu::popup(&more_resp).width(166.0).show(|ui| {
-        if MenuItem::new(tr("New chat")).show(ui).clicked() {
-            reset_chat(app);
-            ui.close();
-        }
-        Menu::separator(ui, None);
-        for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi] {
-            if MenuItem::new(kind.label()).checked(app.ui.agent.agent == kind).show(ui).clicked() {
-                select_agent(app, kind);
+                });
                 ui.close();
             }
-        }
-        Menu::separator(ui, None);
-        let setup_label = tr("Connect account");
-        if MenuItem::new(setup_label).show(ui).clicked() {
-            let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
-            app.ui.agent.connection = None;
-            if !connected && !app.ui.agent.login_pending {
-                match app.services.agent_login(app.ui.agent.agent) {
-                    Ok(()) => {
-                        app.ui.agent.login_pending = true;
-                        app.ui.agent.login_kind = Some(app.ui.agent.agent);
-                        app.ui.agent.login_error = None;
-                        app.ui.agent.login_instruction = None;
-                    }
-                    Err(error) => app.toast(error),
-                }
+            if MenuItem::new(tr("Paste image")).show(ui).clicked() {
+                attach_clipboard_image(app);
+                ui.close();
             }
-            ui.close();
+        });
+
+        if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
+            egui::Window::new(tr("Agent permission")).collapsible(false).resizable(false).show(ui.ctx(), |ui| {
+                ui.label(title);
+                ui.horizontal(|ui| {
+                    for (option, label) in options {
+                        if ui.button(label).clicked() {
+                            app.services.agent_permission(id.clone(), Some(option));
+                            app.ui.agent.permission = None;
+                        }
+                    }
+                    if ui.button(tr("Decline")).clicked() {
+                        app.services.agent_permission(id, None);
+                        app.ui.agent.permission = None;
+                    }
+                });
+            });
         }
-    });
-    let models = app.ui.agent.models.clone();
-    crate::right::menu_popup(&model_resp).id(Id::new("agent_footer_model_popup")).width(model.width().max(180.0)).show(|ui| {
-        if crate::right::menu_item(ui, tr("Default model"), "") {
-            app.ui.agent.model = None;
-            ui.close();
-        }
-        egui::ScrollArea::vertical().max_height(8.0 * 26.0).show(ui, |ui| {
-            for (id, label) in &models {
-                if crate::right::menu_item(ui, label, "") {
-                    app.ui.agent.model = Some(id.clone());
+
+        Menu::popup(&more_resp).width(166.0).show(|ui| {
+            if MenuItem::new(tr("New chat")).show(ui).clicked() {
+                reset_chat(app);
+                ui.close();
+            }
+            Menu::separator(ui, None);
+            for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::Gemini, AgentKind::Kimi] {
+                if MenuItem::new(kind.label()).checked(app.ui.agent.agent == kind).show(ui).clicked() {
+                    select_agent(app, kind);
                     ui.close();
                 }
             }
+            Menu::separator(ui, None);
+            let setup_label = tr("Connect account");
+            if MenuItem::new(setup_label).show(ui).clicked() {
+                let connected = app.ui.agent.connection.as_ref().is_some_and(|(_, state)| state.authenticated);
+                app.ui.agent.connection = None;
+                if !connected && !app.ui.agent.login_pending {
+                    match app.services.agent_login(app.ui.agent.agent) {
+                        Ok(()) => {
+                            app.ui.agent.login_pending = true;
+                            app.ui.agent.login_kind = Some(app.ui.agent.agent);
+                            app.ui.agent.login_error = None;
+                            app.ui.agent.login_instruction = None;
+                        }
+                        Err(error) => app.toast(error),
+                    }
+                }
+                ui.close();
+            }
         });
-    });
-    Menu::popup(&parallel_resp).width(196.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        Menu::heading(ui, tr("Agents in parallel"));
-        for count in 1..=6_u8 {
-            let label = format!("{count}x");
-            if MenuItem::new(&label).checked(app.ui.agent.agent_count.max(1) == count).show(ui).clicked() {
-                app.ui.agent.agent_count = count;
+        let models = app.ui.agent.models.clone();
+        crate::right::menu_popup(&model_resp).id(Id::new("agent_footer_model_popup")).width(model.width().max(180.0)).show(|ui| {
+            if crate::right::menu_item(ui, tr("Default model"), "") {
+                app.ui.agent.model = None;
+                ui.close();
             }
-        }
-        Menu::separator(ui, None);
-        for (label, mode) in [(tr("Split work"), ParallelMode::Split), (tr("Side by side"), ParallelMode::SideBySide)] {
-            if MenuItem::new(label).checked(app.ui.agent.parallel_mode == mode).show(ui).clicked() {
-                app.ui.agent.parallel_mode = mode;
+            egui::ScrollArea::vertical().max_height(8.0 * 26.0).show(ui, |ui| {
+                for (id, label) in &models {
+                    if crate::right::menu_item(ui, label, "") {
+                        app.ui.agent.model = Some(id.clone());
+                        ui.close();
+                    }
+                }
+            });
+        });
+        Menu::popup(&parallel_resp).width(196.0).align(egui::RectAlign::TOP_START).show(|ui| {
+            Menu::heading(ui, tr("Agents in parallel"));
+            for count in 1..=6_u8 {
+                let label = format!("{count}x");
+                if MenuItem::new(&label).checked(app.ui.agent.agent_count.max(1) == count).show(ui).clicked() {
+                    app.ui.agent.agent_count = count;
+                }
             }
-        }
-    });
-    Menu::popup(&variants_resp).width(192.0).align(egui::RectAlign::TOP_START).show(|ui| {
-        Menu::heading(ui, tr("Variations"));
-        for count in 1..=6_u8 {
-            let label = if count == 1 { tr("1x · No iteration").to_owned() } else { format!("{count}x") };
-            if MenuItem::new(&label).checked(app.ui.agent.variant_count.max(1) == count).show(ui).clicked() {
-                app.ui.agent.variant_count = count;
+            Menu::separator(ui, None);
+            for (label, mode) in [(tr("Split work"), ParallelMode::Split), (tr("Side by side"), ParallelMode::SideBySide)] {
+                if MenuItem::new(label).checked(app.ui.agent.parallel_mode == mode).show(ui).clicked() {
+                    app.ui.agent.parallel_mode = mode;
+                }
             }
-        }
-        Menu::separator(ui, None);
-        for (label, mode) in [(tr("Vary layout"), VariantMode::Layout), (tr("Vary style"), VariantMode::Style)] {
-            if MenuItem::new(label).checked(app.ui.agent.variant_mode == mode).show(ui).clicked() {
-                app.ui.agent.variant_mode = mode;
+        });
+        Menu::popup(&variants_resp).width(192.0).align(egui::RectAlign::TOP_START).show(|ui| {
+            Menu::heading(ui, tr("Variations"));
+            for count in 1..=6_u8 {
+                let label = if count == 1 { tr("1x · No iteration").to_owned() } else { format!("{count}x") };
+                if MenuItem::new(&label).checked(app.ui.agent.variant_count.max(1) == count).show(ui).clicked() {
+                    app.ui.agent.variant_count = count;
+                }
             }
-        }
-    });
+            Menu::separator(ui, None);
+            for (label, mode) in [(tr("Vary layout"), VariantMode::Layout), (tr("Vary style"), VariantMode::Style)] {
+                if MenuItem::new(label).checked(app.ui.agent.variant_mode == mode).show(ui).clicked() {
+                    app.ui.agent.variant_mode = mode;
+                }
+            }
+        });
+    } else {
+        Menu::popup(&more_resp).width(166.0).show(|ui| {
+            if MenuItem::new(tr("New chat")).show(ui).clicked() {
+                reset_chat(app);
+                ui.close();
+            }
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_history_compacts_large_tool_replies_and_keeps_recent_chats() {
+        let chats = (0..24)
+            .map(|id| Conversation {
+                id,
+                document: "untitled:1".into(),
+                title: format!("Chat {id}"),
+                agent: AgentKind::Codex,
+                messages: vec![ChatMessage {
+                    role: "assistant".into(),
+                    tools: vec![ChatTool {
+                        id: "inspection".into(),
+                        title: "Inspect document".into(),
+                        status: "completed".into(),
+                        output: Some(serde_json::Value::String("x".repeat(400_000))),
+                        duration_ms: Some(1_250),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                agent_names: Vec::new(),
+                thumbnail: String::new(),
+                remote_session: None,
+                remote_sessions: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let saved = compact_history(&chats);
+        assert!(serde_json::to_vec(&saved).is_ok_and(|bytes| bytes.len() <= MAX_HISTORY_BYTES));
+        assert_eq!(saved.len(), chats.len());
+        assert_eq!(saved.last().map(|chat| chat.id), Some(23));
+        assert_eq!(saved[0].messages[0].tools[0].duration_ms, Some(1_250));
+        assert!(saved[0].messages[0].tools[0].output.as_ref().is_some_and(|value| value.to_string().len() < 100));
+    }
+
+    #[test]
+    fn saving_history_keeps_chats_from_other_app_instances() {
+        let chat = |id, title: &str| Conversation {
+            id,
+            document: "document.lzd".into(),
+            title: title.into(),
+            agent: AgentKind::Codex,
+            messages: Vec::new(),
+            agent_names: Vec::new(),
+            thumbnail: String::new(),
+            remote_session: None,
+            remote_sessions: Vec::new(),
+        };
+        let merged = merge_history(&[chat(2, "current")], vec![chat(1, "other instance"), chat(2, "stale")]);
+        assert_eq!(merged.iter().map(|chat| chat.title.as_str()).collect::<Vec<_>>(), ["other instance", "current"]);
+    }
+
+    #[test]
+    fn thinking_time_stops_when_tool_work_begins() {
+        let mut message = ChatMessage { thinking_started_ms: 2_000, ..Default::default() };
+        finish_thinking(&mut message, 4_100);
+        finish_thinking(&mut message, 10_000);
+        assert_eq!(message.thinking_seconds, Some(3));
+    }
 
     #[test]
     fn agent_names_are_unique_stable_and_saved_with_conversation() {
@@ -2345,6 +2660,7 @@ mod tests {
             agent: AgentKind::Codex,
             messages: Vec::new(),
             agent_names: names,
+            thumbnail: String::new(),
             remote_session: None,
             remote_sessions: Vec::new(),
         };

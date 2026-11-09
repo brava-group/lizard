@@ -18,6 +18,7 @@ mod headless;
 mod prompts;
 mod resources;
 mod server;
+mod stock;
 mod tools;
 
 #[cfg(test)]
@@ -28,6 +29,8 @@ pub use headless::Headless;
 pub use prompts::{PROMPTS, PromptArg, PromptDef};
 pub use resources::{COMMAND_TEMPLATE, COMMANDS_URI, DOC_URI, NODE_TEMPLATE};
 pub use server::{INSTRUCTIONS, PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
+#[cfg(not(target_arch = "wasm32"))]
+pub use stock::{fetch_api as fetch_stock_photo, search_api as search_stock_photos};
 pub use tools::{TOOL_NAMES, ToolResult, call_tool, tool_definitions};
 
 /// Width and height of a PNG from its IHDR chunk.

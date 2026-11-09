@@ -37,6 +37,7 @@ image = { workspace = true }
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+lizard-mcp = { workspace = true }
 lizard-canvas-gpu = { workspace = true }
 lizard-color = { workspace = true }
 lizard-doc = { workspace = true }
@@ -62,7 +63,6 @@ objc2-foundation = "0.3.2"
 
 [dev-dependencies]
 wat = { workspace = true }
-lizard-mcp = { workspace = true }
 
 [build-dependencies]
 winresource = "0.1"

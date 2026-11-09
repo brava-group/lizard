@@ -736,18 +736,25 @@ impl Services for Desktop {
         self.dir
             .as_ref()
             .and_then(|dir| std::fs::read(dir.join("agent-chats.json")).ok())
-            .filter(|bytes| bytes.len() <= 8 * 1024 * 1024)
+            // Accept older oversized histories so the next save can compact and recover them.
+            .filter(|bytes| bytes.len() <= 64 * 1024 * 1024)
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or(Value::Null)
     }
 
     fn agent_history_save(&mut self, history: &Value) {
-        if let Some(dir) = &self.dir
-            && let Ok(bytes) = serde_json::to_vec(history)
-            && bytes.len() <= 8 * 1024 * 1024
-            && let Err(error) = std::fs::create_dir_all(dir)
-                .and_then(|()| write_private(&dir.join("agent-chats.json.tmp"), &bytes))
-                .and_then(|()| std::fs::rename(dir.join("agent-chats.json.tmp"), dir.join("agent-chats.json")))
+        let Some(dir) = &self.dir else { return };
+        let Ok(bytes) = serde_json::to_vec(history) else { return };
+        if bytes.len() > 8 * 1024 * 1024 {
+            log::warn!("agent chat history exceeds the local storage limit");
+            return;
+        }
+        static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temporary = dir.join(format!("agent-chats-{}-{serial}.tmp", std::process::id()));
+        if let Err(error) = std::fs::create_dir_all(dir)
+            .and_then(|()| write_private(&temporary, &bytes))
+            .and_then(|()| std::fs::rename(&temporary, dir.join("agent-chats.json")))
         {
             log::warn!("agent chat history: {error}");
         }
