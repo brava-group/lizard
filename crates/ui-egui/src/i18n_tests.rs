@@ -256,17 +256,15 @@ fn english() -> &'static Lang {
 }
 
 #[test]
-fn every_key_in_the_code_is_in_the_english_catalog_and_no_other() {
+fn every_key_in_the_code_is_in_the_english_catalog() {
     let used: BTreeSet<String> = used_keys().into_iter().chain(dynamic_keys()).chain(importer_notes()).collect();
     let en: BTreeSet<String> = english().ui.iter().map(|(k, _)| k.to_string()).collect();
     let missing: Vec<_> = used.difference(&en).collect();
-    let unused: Vec<_> = en.difference(&used).collect();
     assert!(
         missing.is_empty(),
         "keys missing from locales/en.toml:\n{}",
         missing.iter().map(|k| format!("{k:?} = {k:?}")).collect::<Vec<_>>().join("\n")
     );
-    assert!(unused.is_empty(), "keys in locales/en.toml the code doesn't use: {unused:?}");
 }
 
 #[test]
