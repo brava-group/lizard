@@ -254,6 +254,42 @@ fn advance_idle_strength(current: f32, idle: bool, dt: Duration, reduce_motion: 
     current + ((if idle { 1.0 } else { 0.0 }) - current) * progress
 }
 
+/// A point travelling clockwise around a frame, measured from its top-left corner.
+fn frame_border_point(rect: Rect, distance: f32) -> Pos2 {
+    let width = rect.width();
+    let height = rect.height();
+    let perimeter = 2.0 * (width + height);
+    let distance = distance.rem_euclid(perimeter);
+    if distance < width {
+        pos2(rect.left() + distance, rect.top())
+    } else if distance < width + height {
+        pos2(rect.right(), rect.top() + distance - width)
+    } else if distance < 2.0 * width + height {
+        pos2(rect.right() - (distance - width - height), rect.bottom())
+    } else {
+        pos2(rect.left(), rect.bottom() - (distance - 2.0 * width - height))
+    }
+}
+
+fn draw_frame_border(painter: &Painter, rect: Rect, brand: Color32, elapsed: f32, fade: f32, reduce_motion: bool) {
+    painter.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(1.5, brand.gamma_multiply(0.75 * fade)), StrokeKind::Outside);
+    if reduce_motion {
+        return;
+    }
+    let perimeter = 2.0 * (rect.width() + rect.height());
+    let head = (elapsed / 2.4).fract() * perimeter;
+    let tail = (perimeter * 0.15).clamp(24.0, 220.0).min(perimeter * 0.45);
+    const SEGMENTS: usize = 36;
+    for index in 0..SEGMENTS {
+        let start = head - tail * (index + 1) as f32 / SEGMENTS as f32;
+        let end = head - tail * index as f32 / SEGMENTS as f32;
+        let strength = (1.0 - index as f32 / SEGMENTS as f32).powi(2) * fade;
+        let points = [frame_border_point(rect, start), frame_border_point(rect, end)];
+        painter.line_segment(points, Stroke::new(5.0, brand.gamma_multiply(0.15 * strength)));
+        painter.line_segment(points, Stroke::new(2.4, brand.gamma_multiply(0.9 * strength)));
+    }
+}
+
 /// Place the visible pointer and tag near the real work point without covering another agent.
 /// The page-space cursor stays unchanged; only this canvas overlay moves.
 fn cursor_placement(real_tip: Pos2, tag_size: Vec2, canvas: Rect, occupied: &[Rect]) -> Option<(Pos2, [Rect; 2])> {
@@ -375,30 +411,20 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
             }
         }
     }
-    app.ui.agent.presence.shimmers.retain(|shimmer| {
-        now.saturating_duration_since(shimmer.started) < if shimmer.ongoing { Duration::from_secs(20) } else { Duration::from_secs(2) }
-    });
+    let border_fade = if active {
+        1.0
+    } else {
+        app.ui.agent.presence.updated.map_or(0.0, |updated| (1.0 - now.saturating_duration_since(updated).as_secs_f32() / 0.9).clamp(0.0, 1.0))
+    };
+    app.ui.agent.presence.shimmers.retain(|_| border_fade > 0.0);
     for shimmer in &app.ui.agent.presence.shimmers {
         let Some(bounds) = app.session.ds().ok().and_then(|ds| ds.doc.world_bounds(shimmer.id)) else { continue };
         let rect = Rect::from_two_pos(app.to_screen(bounds.x0, bounds.y0), app.to_screen(bounds.x1, bounds.y1));
         if rect.is_positive() && rect.intersects(app.canvas.rect) {
             let elapsed = now.saturating_duration_since(shimmer.started).as_secs_f32();
-            let fade = if shimmer.ongoing { 1.0 } else { (1.0 - elapsed / 2.0).clamp(0.0, 1.0) };
-            painter.with_clip_rect(app.canvas.rect).rect_filled(rect, CornerRadius::same(6), brand.gamma_multiply(0.20 * fade));
-            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(2.0, brand.gamma_multiply(0.65 * fade)), StrokeKind::Outside);
-            if !reduce_motion {
-                let visible = rect.intersect(app.canvas.rect);
-                let clipped = painter.with_clip_rect(visible);
-                let band = visible.width().clamp(64.0, 240.0) * 0.7;
-                let progress = (elapsed / 1.1).fract();
-                let center = visible.left() - band + (visible.width() + 2.0 * band) * progress;
-                for strip in 0..9 {
-                    let distance = (strip as f32 - 4.0).abs() / 4.0;
-                    let x = center + (strip as f32 - 4.5) * band / 9.0;
-                    let stripe = Rect::from_min_size(pos2(x, visible.top()), vec2(band / 9.0 + 1.0, visible.height()));
-                    clipped.rect_filled(stripe, CornerRadius::ZERO, brand.gamma_multiply((1.0 - distance) * 0.18 * fade));
-                }
-            }
+            let clipped = painter.with_clip_rect(app.canvas.rect);
+            clipped.rect_filled(rect, CornerRadius::ZERO, brand.gamma_multiply(0.035 * border_fade));
+            draw_frame_border(&clipped, rect, brand, elapsed, border_fade, reduce_motion);
         }
     }
     app.ui.agent.presence.entrances.retain(|entrance| now.saturating_duration_since(entrance.started) < Duration::from_millis(450));
@@ -457,7 +483,7 @@ fn draw_one(app: &mut LizardApp, painter: &Painter, ctx: &egui::Context, agent_i
     {
         ctx.request_repaint_after(Duration::from_millis(if reduce_motion {
             100
-        } else if moving {
+        } else if moving || !app.ui.agent.presence.shimmers.is_empty() {
             33
         } else {
             50
@@ -473,6 +499,21 @@ mod tests {
     use serde_json::json;
 
     use crate::layers_drag_tests::Ui;
+
+    #[test]
+    fn frame_border_animation_stays_on_the_perimeter_and_wraps() {
+        let rect = Rect::from_min_size(pos2(10.0, 20.0), vec2(100.0, 60.0));
+        for (distance, expected) in [
+            (0.0, pos2(10.0, 20.0)),
+            (100.0, pos2(110.0, 20.0)),
+            (160.0, pos2(110.0, 80.0)),
+            (260.0, pos2(10.0, 80.0)),
+            (320.0, pos2(10.0, 20.0)),
+            (340.0, pos2(30.0, 20.0)),
+        ] {
+            assert_eq!(frame_border_point(rect, distance), expected);
+        }
+    }
 
     #[test]
     fn colocated_agent_cursors_have_separate_pointers_and_names() {
