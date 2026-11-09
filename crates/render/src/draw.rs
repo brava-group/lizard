@@ -123,7 +123,15 @@ fn fill_with(pix: &mut Pixmap, path: &tiny_skia::Path, paints: &[Paint], w: f64,
     let scale = xf.determinant().abs().sqrt();
     for p in paints {
         let Some(prep) = prepare_at(p, w, h, scale, ctx.doc, ctx.time) else { continue };
-        let paint = tiny_skia::Paint { shader: prep.shader(), anti_alias: true, blend_mode: ts_blend(p.blend), ..Default::default() };
+        // tiny-skia's low-precision scalar Overlay/HardLight stages evaluate an unused branch
+        // with an underflowing u16 subtraction. The high-precision stages avoid that panic on x86.
+        let paint = tiny_skia::Paint {
+            shader: prep.shader(),
+            anti_alias: true,
+            blend_mode: ts_blend(p.blend),
+            force_hq_pipeline: matches!(p.blend, BlendMode::Overlay | BlendMode::HardLight),
+            ..Default::default()
+        };
         pix.fill_path(path, &paint, rule, ts_transform(xf), mask);
     }
 }
