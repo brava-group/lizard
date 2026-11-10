@@ -4,7 +4,7 @@
   <p>A native interface design editor built with Rust and egui.</p>
 </div>
 
-Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It is an independent continuation of earlier open-source work. The original contributors retain their credits and copyrights; see [contributors](contributors/contributors.json), [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
+Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It began as a fork of the first version of FigCraft and has since diverged in architecture, technical implementation, visual design, and product priorities. The original contributors retain their credits and copyrights; see [contributors](contributors/contributors.json), [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
 
 ![Lizard editor in dark mode with a Blink desktop email design open](assets/screenshots/editor-dark.png)
 
