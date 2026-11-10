@@ -147,11 +147,13 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 if [ "$(readlink "$MOUNT/Applications")" != /Applications ]; then
-  fail "DMG has no drag-to-Applications link"
+  echo "error: DMG has no drag-to-Applications link" >&2
+  exit 1
 fi
 if [ ! -s "$MOUNT/.DS_Store" ] ||
    ! cmp -s "$ROOT/packaging/macos/dmg-background.png" "$MOUNT/.background/dmg-background.png"; then
-  fail "DMG is missing the branded Finder layout"
+  echo "error: DMG is missing the branded Finder layout" >&2
+  exit 1
 fi
 codesign --verify --strict --deep --verbose=2 "$APP"
 bundled_node="$APP/Contents/Resources/Agents/runtime/bin/node"
