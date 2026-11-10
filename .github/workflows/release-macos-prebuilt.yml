@@ -43,7 +43,7 @@ jobs:
             exit 1
           fi
 
-      - name: Load binaries built locally from this source commit
+      - name: Load binaries built locally from the app source commit
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,9 +56,18 @@ jobs:
           cd "$RUNNER_TEMP/prebuilt"
           shasum -a 256 -c SHA256SUMS
           source_sha="$(cat SOURCE_SHA)"
-          if [ "$source_sha" != "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" ]; then
-            echo '::error::The staged binaries do not match the checked out source commit.'
-            exit 1
+          checkout_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          if [ "$source_sha" != "$checkout_sha" ]; then
+            if [ "$source_sha" != "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^)" ]; then
+              echo '::error::The staged binaries do not match the app source commit.'
+              exit 1
+            fi
+            while IFS= read -r changed; do
+              case "$changed" in
+                .github/workflows/release-macos-prebuilt.yml|packaging/env.sh|assets/fonts/inter/OFL.txt) ;;
+                *) echo "::error::App source changed after the local build: $changed"; exit 1 ;;
+              esac
+            done < <(git -C "$GITHUB_WORKSPACE" diff --name-only HEAD^ HEAD)
           fi
           echo "LIZARD_BUILD_SHA=$source_sha" >> "$GITHUB_ENV"
           for arch in aarch64-apple-darwin x86_64-apple-darwin; do

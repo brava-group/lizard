@@ -84,6 +84,7 @@ copy_docs() {
     if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$dest/"; fi
   done
   cp "$ROOT/assets/fonts/nv-legible-next/OFL.txt" "$dest/OFL-NV-Legible-Next.txt"
+  cp "$ROOT/assets/fonts/inter/OFL.txt" "$dest/OFL-Inter.txt"
   copy_font_licences "$dest"
 }
 
