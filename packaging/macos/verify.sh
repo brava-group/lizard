@@ -147,6 +147,24 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 codesign --verify --strict --deep --verbose=2 "$APP"
+bundled_node="$APP/Contents/Resources/Agents/runtime/bin/node"
+if [ ! -x "$bundled_node" ]; then
+  echo "error: Lizard.app is missing its agent Node.js runtime" >&2
+  exit 1
+fi
+codesign --verify --strict --verbose=2 "$bundled_node" || fail "the agent Node.js runtime has an invalid signature"
+node_archs="$(lipo -archs "$bundled_node")"
+for a in $WANT_ARCHS; do
+  case " $node_archs " in
+    *" $a "*) ;;
+    *) fail "the agent Node.js runtime lacks $a (has: $node_archs)" ;;
+  esac
+done
+# --version does not exercise V8. Run JavaScript to catch a hardened-runtime JIT crash.
+if [ "$("$bundled_node" -e 'process.stdout.write("lizard-node-ok")')" != lizard-node-ok ]; then
+  echo "error: the agent Node.js runtime cannot execute JavaScript" >&2
+  exit 1
+fi
 if [ "$HAS_CLI" = 1 ]; then
   bundled_cli="$APP/Contents/MacOS/lizard-cli"
   if [ ! -x "$bundled_cli" ]; then

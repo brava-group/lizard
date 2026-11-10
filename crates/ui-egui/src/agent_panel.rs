@@ -1967,6 +1967,7 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(transcript));
         let mut revert = None;
         let mut locate_node = None;
+        let mut permission_response = None;
         egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(&mut child, |ui| {
             ui.set_width(content_width);
             for (index, message) in chat.messages.iter().enumerate() {
@@ -2188,7 +2189,33 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                     }
                 }
             }
+            if let Some(permission) = app.ui.agent.permission.as_ref() {
+                ui.add_space(8.0);
+                egui::Frame::new().fill(t.field).stroke(Stroke::new(1.0, border)).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(
+                    ui,
+                    |ui| {
+                        ui.set_width((content_width - 20.0).max(1.0));
+                        ui.label(egui::RichText::new(tr("Agent permission")).strong().size(crate::theme::ui_font_size(12.0)));
+                        ui.label(&permission.title);
+                        ui.horizontal_wrapped(|ui| {
+                            for (option, label) in &permission.options {
+                                if ui.button(label).clicked() {
+                                    permission_response = Some(Some(option.clone()));
+                                }
+                            }
+                            if ui.button(tr("Decline")).clicked() {
+                                permission_response = Some(None);
+                            }
+                        });
+                    },
+                );
+            }
         });
+        if let Some(option) = permission_response
+            && let Some(permission) = app.ui.agent.permission.take()
+        {
+            app.services.agent_permission(permission.id, option);
+        }
         if let Some(node) = locate_node {
             app.run("select.set", serde_json::json!({"ids":[node]}));
             app.run("view.zoomSelection", serde_json::json!({}));
@@ -2477,24 +2504,6 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui) {
                 ui.close();
             }
         });
-
-        if let Some(AgentPermission { id, title, options }) = app.ui.agent.permission.clone() {
-            egui::Window::new(tr("Agent permission")).collapsible(false).resizable(false).show(ui.ctx(), |ui| {
-                ui.label(title);
-                ui.horizontal(|ui| {
-                    for (option, label) in options {
-                        if ui.button(label).clicked() {
-                            app.services.agent_permission(id.clone(), Some(option));
-                            app.ui.agent.permission = None;
-                        }
-                    }
-                    if ui.button(tr("Decline")).clicked() {
-                        app.services.agent_permission(id, None);
-                        app.ui.agent.permission = None;
-                    }
-                });
-            });
-        }
 
         Menu::popup(&more_resp).width(166.0).show(|ui| {
             if MenuItem::new(tr("New chat")).show(ui).clicked() {

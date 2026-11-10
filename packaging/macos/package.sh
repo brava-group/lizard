@@ -186,7 +186,7 @@ plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
-sign --options runtime "$NODE_RUNTIME/bin/node"
+sign --options runtime --entitlements "$HERE/node-entitlements.plist" "$NODE_RUNTIME/bin/node"
 if [ "$HAS_CLI" = 1 ]; then
   sign --options runtime --identifier com.brava.lizard.agent-cli "$APP/Contents/MacOS/lizard-cli"
 fi

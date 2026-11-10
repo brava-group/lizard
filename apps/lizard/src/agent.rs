@@ -196,6 +196,23 @@ fn send(stdin: &mut ChildStdin, id: Option<u64>, method: &str, params: Value) ->
     writeln!(stdin, "{message}").and_then(|_| stdin.flush()).map_err(|error| trf("Agent connection failed: {error}", &[("error", &error)]))
 }
 
+fn auto_permission_option(options: &[(String, String)]) -> Option<String> {
+    options
+        .iter()
+        .filter_map(|(id, name)| {
+            let choice = format!("{} {}", id.to_ascii_lowercase(), name.to_ascii_lowercase());
+            if ["reject", "deny", "decline", "cancel", "disallow"].iter().any(|word| choice.contains(word))
+                || !["allow", "approve", "accept", "proceed", "yes"].iter().any(|word| choice.contains(word))
+            {
+                return None;
+            }
+            let persistent = ["always", "session", "permanent"].iter().any(|word| choice.contains(word));
+            Some((persistent, id))
+        })
+        .max_by_key(|(persistent, _)| *persistent)
+        .map(|(_, id)| id.clone())
+}
+
 fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, output: Sender<AgentEvent>, cwd: String, mcp: Value) {
     if let Err(e) = send(
         &mut stdin,
@@ -231,6 +248,7 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
             }
             Input::Message(message) => {
                 if let Some(method) = message.get("method").and_then(Value::as_str) {
+                    let mut permission_reply = Ok(());
                     if method == "session/update" && active.is_some() {
                         if let Some(event) = update(&message) {
                             let _ = output.send(event);
@@ -239,16 +257,21 @@ fn run(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>, outpu
                         let id = message.get("id").cloned().unwrap_or(Value::Null);
                         let p = &message["params"];
                         let title = p["toolCall"]["title"].as_str().unwrap_or(tr("Agent action")).to_string();
-                        let options = p["options"]
+                        let options: Vec<(String, String)> = p["options"]
                             .as_array()
                             .map(|a| a.iter().filter_map(|v| Some((v["optionId"].as_str()?.to_string(), v["name"].as_str()?.to_string()))).collect())
                             .unwrap_or_default();
-                        let _ = output.send(AgentEvent::Permission { id, title, options });
+                        if let Some(option_id) = auto_permission_option(&options) {
+                            let reply = json!({"jsonrpc":"2.0","id":id,"result":{"outcome":{"outcome":"selected","optionId":option_id}}});
+                            permission_reply = writeln!(stdin, "{reply}").and_then(|_| stdin.flush()).map_err(|error| error.to_string());
+                        } else {
+                            let _ = output.send(AgentEvent::Permission { id, title, options });
+                        }
                     } else if let Some(id) = message.get("id") {
                         let reply = json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32601,"message":tr("Method not available in Lizard")}});
                         let _ = writeln!(stdin, "{reply}").and_then(|_| stdin.flush());
                     }
-                    Ok(())
+                    permission_reply
                 } else if let Some(error) = message.get("error") {
                     let msg = error["message"].as_str().unwrap_or(tr("Agent error")).to_string();
                     let _ = output.send(AgentEvent::Error(msg));
@@ -921,9 +944,9 @@ fn run_codex(mut child: Child, mut stdin: ChildStdin, requests: Receiver<Input>,
             && let Some(prompt) = queued.front()
         {
             let params = if let Some(sid) = prompt.resume.as_deref() {
-                json!({"threadId":sid,"cwd":cwd,"approvalPolicy":"never","sandbox":"read-only"})
+                json!({"threadId":sid,"cwd":cwd,"approvalPolicy":"never","sandbox":"danger-full-access"})
             } else {
-                json!({"cwd":cwd,"approvalPolicy":"never","sandbox":"read-only","model":prompt.model,"ephemeral":false})
+                json!({"cwd":cwd,"approvalPolicy":"never","sandbox":"danger-full-access","model":prompt.model,"ephemeral":false})
             };
             let method = if prompt.resume.is_some() { "thread/resume" } else { "thread/start" };
             if let Err(error) = send(&mut stdin, Some(2), method, params) {
@@ -1104,6 +1127,17 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn automatic_permission_prefers_session_approval_and_never_rejects() {
+        let options = vec![
+            ("reject_once".into(), "Reject".into()),
+            ("allow_once".into(), "Approve once".into()),
+            ("allow_always".into(), "Approve for this session".into()),
+        ];
+        assert_eq!(auto_permission_option(&options).as_deref(), Some("allow_always"));
+        assert_eq!(auto_permission_option(&[("reject_once".into(), "Reject".into())]), None);
+    }
+
+    #[test]
     fn external_agent_process_does_not_inherit_unsplash_key() {
         let command = command_with_runtime(std::ffi::OsStr::new("mock-agent"));
         let removed = command.get_envs().any(|(name, value)| name == "LIZARD_UNSPLASH_ACCESS_KEY" && value.is_none());
@@ -1237,6 +1271,8 @@ for line in sys.stdin:
  elif method=='model/list':
   send({'jsonrpc':'2.0','id':msg['id'],'result':{'data':[{'model':'test-model','displayName':'Test model','hidden':False}]}})
  elif method in ('thread/start','thread/resume'):
+  assert msg['params']['approvalPolicy']=='never'
+  assert msg['params']['sandbox']=='danger-full-access'
   if method=='thread/resume': assert msg['params']['threadId']=='saved-thread'
   send({'jsonrpc':'2.0','id':msg['id'],'result':{'thread':{'id':'saved-thread'}}})
  elif method=='turn/start':
@@ -1324,10 +1360,10 @@ for line in sys.stdin:
   assert msg['params']['prompt'][1]=={'type':'image','mimeType':'image/png','data':'aGVsbG8='}
   send({'jsonrpc':'2.0','method':'session/update','params':{'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'Working'}}}})
   send({'jsonrpc':'2.0','method':'session/update','params':{'update':{'sessionUpdate':'tool_call','toolCallId':'tool-1','title':'Create frame','status':'in_progress'}}})
-  send({'jsonrpc':'2.0','id':99,'method':'session/request_permission','params':{'toolCall':{'title':'Create frame'},'options':[{'optionId':'allow','name':'Allow'}]}})
+  send({'jsonrpc':'2.0','id':99,'method':'session/request_permission','params':{'toolCall':{'title':'Create frame'},'options':[{'optionId':'reject_once','name':'Reject'},{'optionId':'allow_once','name':'Approve once'},{'optionId':'allow_always','name':'Approve for this session'}]}})
   prompt_id=msg['id']
  elif msg.get('id')==99:
-  assert msg['result']['outcome']=={'outcome':'selected','optionId':'allow'}
+  assert msg['result']['outcome']=={'outcome':'selected','optionId':'allow_always'}
   send({'jsonrpc':'2.0','method':'session/update','params':{'update':{'sessionUpdate':'tool_call_update','toolCallId':'tool-1','title':'Create frame','status':'completed'}}})
   send({'jsonrpc':'2.0','id':prompt_id,'result':{'stopReason':'end_turn'}})
 "#).unwrap();
@@ -1359,10 +1395,7 @@ for line in sys.stdin:
                 match event {
                     AgentEvent::Text(text) => got_text |= text == "Working",
                     AgentEvent::Tool { status, .. } => got_tool |= status.as_deref() == Some("completed"),
-                    AgentEvent::Permission { id, options, .. } => {
-                        assert_eq!(options[0].0, "allow");
-                        agent.permission(id, Some("allow".into()));
-                    }
+                    AgentEvent::Permission { .. } => panic!("approval should be automatic"),
                     AgentEvent::Done(reason) => got_done = reason == "end_turn",
                     AgentEvent::Error(error) => panic!("{error}"),
                     AgentEvent::Ready
@@ -1402,9 +1435,7 @@ for line in sys.stdin:
         let mut got_resumed_reply = false;
         while Instant::now() < deadline && !got_resumed_reply {
             for event in resumed.poll() {
-                if let AgentEvent::Permission { id, .. } = event {
-                    resumed.permission(id, Some("allow".into()));
-                } else if let AgentEvent::Done(reason) = event {
+                if let AgentEvent::Done(reason) = event {
                     got_resumed_reply = reason == "end_turn";
                 }
             }
