@@ -80,7 +80,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
                     UpdateStatus::Failed(_, error) => {
                         ui.label(RichText::new(error).color(t.text_secondary));
                         ui.horizontal(|ui| {
-                            if Button::new(tr("Retry update")).show(ui).clicked() {
+                            if Button::new(tr("Update")).show(ui).clicked() {
                                 begin_update(app, ctx);
                             }
                             if Button::new(tr("Later")).variant(ButtonVariant::Secondary).show(ui).clicked() {
@@ -161,7 +161,7 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
         }
         UpdateStatus::Failed(_, _) => {
             ui.add_space(8.0);
-            if Button::new(tr("Retry update")).show(ui).clicked() {
+            if Button::new(tr("Update")).show(ui).clicked() {
                 begin_update(app, ui.ctx());
             }
         }
