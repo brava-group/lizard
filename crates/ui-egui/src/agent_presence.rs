@@ -275,7 +275,7 @@ fn border_color_with_opacity(color: Color32, opacity: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (opacity.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
-fn draw_frame_border(painter: &Painter, rect: Rect, brand: Color32, elapsed: f32, fade: f32, reduce_motion: bool) {
+pub(crate) fn draw_frame_border(painter: &Painter, rect: Rect, brand: Color32, elapsed: f32, fade: f32, reduce_motion: bool) {
     painter.rect_stroke(rect, CornerRadius::ZERO, Stroke::new(2.0, border_color_with_opacity(brand, 0.7 * fade)), StrokeKind::Outside);
     if reduce_motion {
         return;

@@ -532,6 +532,18 @@ fn settings_general(app: &mut LizardApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         }
     });
+    if !cfg!(target_arch = "wasm32") {
+        ui.add_space(20.0);
+        ui.separator();
+        ui.add_space(20.0);
+        ui.label(RichText::new(tr("Local image processing")).font(semibold(13.0)));
+        ui.add_space(8.0);
+        crate::widgets::label(
+            ui,
+            tr("Background removal uses a local model. First use may download about 1.5 GB; images stay on this computer."),
+            t.text_secondary,
+        );
+    }
     crate::updates::settings(app, ui);
 }
 

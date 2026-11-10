@@ -1659,6 +1659,8 @@ pub fn show(app: &mut LizardApp, ui: &mut Ui, worker: &mut Worker) {
     crate::live_text::draw(app, &painter);
     crate::live::draw(app, &painter, &ctx);
     crate::agent_presence::draw(app, &painter, &ctx);
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::background_removal::draw(app, &painter, &ctx);
     crate::live::chat_box(app, &ctx);
     crate::live::spotlight_banner(app, &ctx, rect);
     crate::comments::popovers(app, &ctx);
