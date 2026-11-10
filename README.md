@@ -6,7 +6,7 @@
 
 Lizard has a vector canvas, auto layout, components, styles, prototyping, plugins, and an agent panel that works with the open document. It is an independent continuation of earlier open-source work. The original contributors retain their credits and copyrights; see [contributors](contributors/contributors.json), [NOTICE](NOTICE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
 
-![Lizard editor in dark mode with the Ridgeline Studio dashboard open](assets/screenshots/editor-dark.png)
+![Lizard editor in dark mode with a Blink desktop email design open](assets/screenshots/editor-dark.png)
 
 ## Download
 
