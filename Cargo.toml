@@ -5,7 +5,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["plugins", "vendor/egui-winit"]
 
 [workspace.package]
-version = "0.9.6"
+version = "0.9.7"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"

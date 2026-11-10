@@ -5,7 +5,20 @@ use egui::{Align2, Context, Id, RichText, vec2};
 use crate::i18n::tr;
 use crate::primitives::{Button, ButtonVariant};
 use crate::theme::{Tokens, semibold};
-use crate::{LizardApp, UpdateStatus};
+use crate::{LizardApp, UpdateProgress, UpdateStatus, UpdateStep};
+
+fn progress_label(progress: UpdateProgress) -> String {
+    let step = match progress.step {
+        UpdateStep::Downloading => tr("Downloading update…"),
+        UpdateStep::Verifying => tr("Verifying update…"),
+        UpdateStep::Staging => tr("Preparing update for installation…"),
+    };
+    format!("{step} {}%", progress.percent)
+}
+
+fn progress_bar(ui: &mut egui::Ui, progress: UpdateProgress) {
+    ui.add(egui::ProgressBar::new(f32::from(progress.percent) / 100.0).desired_height(12.0).fill(Tokens::get(ui.ctx()).accent).corner_radius(6.0));
+}
 
 fn begin_update(app: &mut LizardApp, ctx: &Context) {
     ctx.data_mut(|data| data.remove_temp::<String>(Id::new("lizard_update_dismissed")));
@@ -29,8 +42,8 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         }
         return;
     }
-    if matches!(&status, UpdateStatus::Checking | UpdateStatus::Preparing(_)) {
-        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+    if matches!(&status, UpdateStatus::Checking | UpdateStatus::Preparing(_, _)) {
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
     } else if matches!(&status, UpdateStatus::Current | UpdateStatus::Error(_)) {
         ctx.request_repaint_after(std::time::Duration::from_secs(60));
     }
@@ -38,7 +51,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
         return;
     }
     let version = match &status {
-        UpdateStatus::Available(version) | UpdateStatus::Preparing(version) | UpdateStatus::Ready(version) | UpdateStatus::Failed(version, _) => {
+        UpdateStatus::Available(version) | UpdateStatus::Preparing(version, _) | UpdateStatus::Ready(version) | UpdateStatus::Failed(version, _) => {
             version
         }
         _ => return,
@@ -73,9 +86,10 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
                             }
                         });
                     }
-                    UpdateStatus::Preparing(_) => {
-                        ui.spinner();
-                        ui.label(tr("Downloading and verifying the update…"));
+                    UpdateStatus::Preparing(_, progress) => {
+                        ui.label(RichText::new(progress_label(*progress)).color(t.text_secondary));
+                        ui.add_space(6.0);
+                        progress_bar(ui, *progress);
                     }
                     UpdateStatus::Failed(_, error) => {
                         ui.label(RichText::new(error).color(t.text_secondary));
@@ -132,7 +146,7 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
         UpdateStatus::Checking => tr("Checking for updates…").to_owned(),
         UpdateStatus::Current => tr("Lizard is up to date.").to_owned(),
         UpdateStatus::Available(version) => format!("{} {version}", tr("New version available:")),
-        UpdateStatus::Preparing(_) => tr("Downloading and verifying the update…").to_owned(),
+        UpdateStatus::Preparing(_, progress) => progress_label(*progress),
         UpdateStatus::Ready(version) => format!("{} {version}", tr("Ready to install:")),
         UpdateStatus::Failed(_, error) => error.clone(),
         UpdateStatus::Installing => tr("Restarting to install the update…").to_owned(),
@@ -140,12 +154,16 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
         UpdateStatus::Unavailable => String::new(),
     };
     ui.label(RichText::new(description).color(t.text_secondary));
+    if let UpdateStatus::Preparing(_, progress) = &status {
+        ui.add_space(6.0);
+        progress_bar(ui, *progress);
+    }
     ui.add_space(10.0);
     if Button::new(tr("Check for updates"))
         .variant(ButtonVariant::Secondary)
         .enabled(!matches!(
             &status,
-            UpdateStatus::Checking | UpdateStatus::Preparing(_) | UpdateStatus::Ready(_) | UpdateStatus::Failed(_, _) | UpdateStatus::Installing
+            UpdateStatus::Checking | UpdateStatus::Preparing(_, _) | UpdateStatus::Ready(_) | UpdateStatus::Failed(_, _) | UpdateStatus::Installing
         ))
         .show(ui)
         .clicked()

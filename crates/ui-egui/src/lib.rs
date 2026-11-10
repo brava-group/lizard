@@ -267,11 +267,27 @@ pub enum UpdateStatus {
     Checking,
     Current,
     Available(String),
-    Preparing(String),
+    Preparing(String, UpdateProgress),
     Ready(String),
     Failed(String, String),
     Installing,
     Error(String),
+}
+
+/// Progress for the complete download, validation and staging sequence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpdateProgress {
+    pub step: UpdateStep,
+    /// Approximate overall completion, from 0 through 99 until the update is ready.
+    pub percent: u8,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UpdateStep {
+    #[default]
+    Downloading,
+    Verifying,
+    Staging,
 }
 
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).

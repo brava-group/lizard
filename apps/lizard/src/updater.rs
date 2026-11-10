@@ -3,11 +3,11 @@
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use lizard_ui_egui::UpdateStatus;
+use lizard_ui_egui::{UpdateProgress, UpdateStatus, UpdateStep};
 use semver::Version;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -24,6 +24,7 @@ struct Release {
     version: Version,
     url: String,
     digest: String,
+    size: u64,
 }
 
 #[derive(Debug)]
@@ -31,12 +32,12 @@ struct Prepared {
     version: Version,
     app: PathBuf,
     destination: PathBuf,
-    helper: PathBuf,
     work: PathBuf,
 }
 
 enum Reply {
     Checked(Result<Option<Release>, String>),
+    Progress(UpdateProgress),
     Prepared(Result<Prepared, String>),
 }
 
@@ -65,32 +66,45 @@ impl Updater {
         {
             self.check();
         }
-        let received = self.pending.as_ref().map(Receiver::try_recv);
-        if matches!(&received, Some(Err(TryRecvError::Disconnected))) {
-            self.pending = None;
-            let error = "The update process stopped unexpectedly".to_owned();
-            self.status = match &self.status {
-                UpdateStatus::Preparing(version) => UpdateStatus::Failed(version.clone(), error),
-                _ => UpdateStatus::Error(error),
-            };
-        }
-        if let Some(Ok(reply)) = received {
-            self.pending = None;
-            match reply {
-                Reply::Checked(Ok(Some(release))) => {
-                    self.status = UpdateStatus::Available(release.version.to_string());
-                    self.release = Some(release);
+        loop {
+            let received = self.pending.as_ref().map(Receiver::try_recv);
+            match received {
+                Some(Ok(Reply::Progress(progress))) => {
+                    if let UpdateStatus::Preparing(version, _) = &self.status {
+                        self.status = UpdateStatus::Preparing(version.clone(), progress);
+                    }
                 }
-                Reply::Checked(Ok(None)) => self.status = UpdateStatus::Current,
-                Reply::Checked(Err(error)) => self.status = UpdateStatus::Error(error),
-                Reply::Prepared(Err(error)) => {
-                    let version = self.release.as_ref().map(|release| release.version.to_string()).unwrap_or_default();
-                    self.status = UpdateStatus::Failed(version, error);
+                Some(Ok(reply)) => {
+                    self.pending = None;
+                    match reply {
+                        Reply::Checked(Ok(Some(release))) => {
+                            self.status = UpdateStatus::Available(release.version.to_string());
+                            self.release = Some(release);
+                        }
+                        Reply::Checked(Ok(None)) => self.status = UpdateStatus::Current,
+                        Reply::Checked(Err(error)) => self.status = UpdateStatus::Error(error),
+                        Reply::Prepared(Err(error)) => {
+                            let version = self.release.as_ref().map(|release| release.version.to_string()).unwrap_or_default();
+                            self.status = UpdateStatus::Failed(version, error);
+                        }
+                        Reply::Prepared(Ok(prepared)) => {
+                            self.status = UpdateStatus::Ready(prepared.version.to_string());
+                            self.prepared = Some(prepared);
+                        }
+                        Reply::Progress(_) => {}
+                    }
+                    break;
                 }
-                Reply::Prepared(Ok(prepared)) => {
-                    self.status = UpdateStatus::Ready(prepared.version.to_string());
-                    self.prepared = Some(prepared);
+                Some(Err(TryRecvError::Disconnected)) => {
+                    self.pending = None;
+                    let error = "The update process stopped unexpectedly".to_owned();
+                    self.status = match &self.status {
+                        UpdateStatus::Preparing(version, _) => UpdateStatus::Failed(version.clone(), error),
+                        _ => UpdateStatus::Error(error),
+                    };
+                    break;
                 }
+                Some(Err(TryRecvError::Empty)) | None => break,
             }
         }
         self.status.clone()
@@ -119,31 +133,44 @@ impl Updater {
             self.status = UpdateStatus::Ready(release.version.to_string());
             return;
         }
-        self.status = UpdateStatus::Preparing(release.version.to_string());
+        self.status = UpdateStatus::Preparing(release.version.to_string(), UpdateProgress::default());
         let (tx, rx) = mpsc::channel();
         self.pending = Some(rx);
         std::thread::spawn(move || {
-            let _ = tx.send(Reply::Prepared(prepare(&installed, &release)));
+            let _ = tx.send(Reply::Prepared(prepare(&installed, &release, &tx)));
         });
     }
 
     pub fn install(&mut self) -> Result<(), String> {
         let Some(prepared) = self.prepared.as_ref() else { return Err("No verified update is ready".into()) };
         let installed = self.installed.as_ref().ok_or("Lizard is not running from an app bundle")?;
-        Command::new(&prepared.helper)
-            .args([HELPER_ARG, &std::process::id().to_string()])
-            .arg(installed)
-            .arg(&prepared.destination)
-            .arg(&prepared.app)
-            .arg(&prepared.work)
-            .spawn()
-            .map_err(|error| {
-                let message = format!("Could not start the update installer: {error}");
-                self.status = UpdateStatus::Failed(prepared.version.to_string(), message.clone());
-                message
-            })?;
-        self.status = UpdateStatus::Installing;
-        Ok(())
+        let result = (|| -> Result<(), String> {
+            // The signed executable must run from its app bundle. Copying it into `work`
+            // invalidates the bundle's sealed resources and macOS kills it on launch.
+            let log = File::create(prepared.work.join("install.log")).map_err(|error| error.to_string())?;
+            Command::new(installed.join("Contents/MacOS/Lizard"))
+                .args([HELPER_ARG, &std::process::id().to_string()])
+                .arg(installed)
+                .arg(&prepared.destination)
+                .arg(&prepared.app)
+                .arg(&prepared.work)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::from(log))
+                .spawn()
+                .map_err(|error| format!("Could not start the update installer: {error}"))?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.status = UpdateStatus::Installing;
+                Ok(())
+            }
+            Err(error) => {
+                self.status = UpdateStatus::Failed(prepared.version.to_string(), error.clone());
+                Err(error)
+            }
+        }
     }
 
     pub fn cleanup(&mut self) {
@@ -229,13 +256,11 @@ fn parse_release(body: &Value, current: &str, arch: &str) -> Result<Option<Relea
         return Err("The update points outside the Lizard release channel".into());
     }
     let digest = asset["digest"].as_str().and_then(|value| value.strip_prefix("sha256:")).ok_or("The update has no SHA-256 digest")?;
-    if digest.len() != 64
-        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || asset["size"].as_u64().is_none_or(|size| size == 0 || size > MAX_DMG_BYTES)
-    {
+    let size = asset["size"].as_u64().ok_or("The update has no size")?;
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) || size == 0 || size > MAX_DMG_BYTES {
         return Err("The update has invalid size or digest".into());
     }
-    Ok(Some(Release { version, url: url.into(), digest: digest.to_ascii_lowercase() }))
+    Ok(Some(Release { version, url: url.into(), digest: digest.to_ascii_lowercase(), size }))
 }
 
 fn command(program: &str, args: &[&str]) -> Result<String, String> {
@@ -308,7 +333,55 @@ fn writable_destination(candidates: impl IntoIterator<Item = PathBuf>, stamp: u1
     Err("Could not write an update to Applications. Check that your Mac has free space and your account can install apps.".into())
 }
 
-fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
+fn percentage(done: u64, total: u64, start: u8, span: u8) -> u8 {
+    start + ((done.min(total) * u64::from(span)) / total.max(1)) as u8
+}
+
+fn report(tx: &mpsc::Sender<Reply>, step: UpdateStep, percent: u8) {
+    let _ = tx.send(Reply::Progress(UpdateProgress { step, percent }));
+}
+
+fn download(release: &Release, dmg: &Path, tx: &mpsc::Sender<Reply>) -> Result<(), String> {
+    let mut child = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "600",
+            "--max-filesize",
+            "629145600",
+            "--output",
+        ])
+        .arg(dmg)
+        .arg(&release.url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not download update: {error}"))?;
+    let mut last = 0;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| format!("Could not download update: {error}"))? {
+            return if status.success() { Ok(()) } else { Err(format!("The update download failed ({status})")) };
+        }
+        let received = fs::metadata(dmg).map_or(0, |metadata| metadata.len());
+        let percent = percentage(received, release.size, 0, 70);
+        if percent > last {
+            report(tx, UpdateStep::Downloading, percent);
+            last = percent;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn prepare(installed: &Path, release: &Release, tx: &mpsc::Sender<Reply>) -> Result<Prepared, String> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
     let work = std::env::temp_dir().join(format!("lizard-update-{}-{stamp}", std::process::id()));
     let (destination, stage) = update_destination(installed, stamp)?;
@@ -318,51 +391,38 @@ fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
     }
     let result = (|| {
         let dmg = work.join("update.dmg");
-        let status = Command::new("/usr/bin/curl")
-            .args([
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--connect-timeout",
-                "10",
-                "--max-time",
-                "600",
-                "--max-filesize",
-                "629145600",
-                "--output",
-            ])
-            .arg(&dmg)
-            .arg(&release.url)
-            .status()
-            .map_err(|error| format!("Could not download update: {error}"))?;
-        if !status.success() {
-            return Err("The update download failed".into());
-        }
+        download(release, &dmg, tx)?;
+        report(tx, UpdateStep::Verifying, 70);
         let mut file = File::open(&dmg).map_err(|error| error.to_string())?;
-        if file.metadata().map_err(|error| error.to_string())?.len() > MAX_DMG_BYTES {
-            return Err("The update is too large".into());
+        if file.metadata().map_err(|error| error.to_string())?.len() != release.size {
+            return Err("The update size does not match GitHub's release".into());
         }
         let mut hasher = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
+        let mut checked = 0_u64;
+        let mut last = 70;
         loop {
             let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
             if count == 0 {
                 break;
             }
             hasher.update(&buffer[..count]);
+            checked += count as u64;
+            let percent = percentage(checked, release.size, 70, 15);
+            if percent > last {
+                report(tx, UpdateStep::Verifying, percent);
+                last = percent;
+            }
         }
         if format!("{:x}", hasher.finalize()) != release.digest {
             return Err("The update checksum does not match GitHub's release".into());
         }
+        report(tx, UpdateStep::Verifying, 86);
         command(
             "/usr/sbin/spctl",
             &["--assess", "--type", "open", "--context", "context:primary-signature", dmg.to_str().ok_or("Invalid download path")?],
         )?;
+        report(tx, UpdateStep::Staging, 90);
         let mount = work.join("mount");
         fs::create_dir(&mount).map_err(|error| error.to_string())?;
         command(
@@ -376,16 +436,18 @@ fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
                 dmg.to_str().ok_or("Invalid download path")?,
             ],
         )?;
+        report(tx, UpdateStep::Staging, 93);
         let source = mount.join("Lizard.app");
         let copied = Command::new("/usr/bin/ditto").arg(&source).arg(&stage).status().map_err(|error| format!("Could not copy the update: {error}"));
         let detached = command("/usr/bin/hdiutil", &["detach", mount.to_str().ok_or("Invalid mount path")?]);
         copied?.success().then_some(()).ok_or("Could not stage the update in Applications")?;
         detached?;
+        report(tx, UpdateStep::Staging, 96);
         verify_bundle(&stage, &release.version)?;
+        report(tx, UpdateStep::Staging, 98);
         verify_destination(&destination, &release.version)?;
-        let helper = work.join("lizard-update-helper");
-        fs::copy(std::env::current_exe().map_err(|error| error.to_string())?, &helper).map_err(|error| error.to_string())?;
-        Ok(Prepared { version: release.version.clone(), app: stage.clone(), destination, helper, work: work.clone() })
+        report(tx, UpdateStep::Staging, 99);
+        Ok(Prepared { version: release.version.clone(), app: stage.clone(), destination, work: work.clone() })
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&work);
@@ -394,7 +456,7 @@ fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
     result
 }
 
-/// Run from a temporary copy of the signed executable after the UI has asked to quit.
+/// Continue running inside the signed bundle after the UI has asked to quit.
 pub fn run_helper(args: &[String]) -> i32 {
     let result = (|| -> Result<(), String> {
         let pid = args.get(1).ok_or("Missing parent process")?.parse::<u32>().map_err(|error| error.to_string())?;
@@ -472,6 +534,7 @@ pub fn run_helper(args: &[String]) -> i32 {
     })();
     if let Err(error) = result {
         eprintln!("Lizard update failed: {error}");
+        let _ = rfd::MessageDialog::new().set_title("Lizard update failed").set_description(&error).set_level(rfd::MessageLevel::Error).show();
         return 1;
     }
     0
@@ -481,6 +544,7 @@ pub fn run_helper(args: &[String]) -> i32 {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::os::unix::fs::PermissionsExt;
 
     fn release(version: &str, digest: &str) -> Value {
         let name = format!("lizard-{version}-macos-aarch64.dmg");
@@ -523,6 +587,71 @@ mod tests {
         assert_eq!(stage.parent(), destination.parent());
         assert!(stage.is_dir());
         fs::remove_dir_all(temporary)?;
+        Ok(())
+    }
+
+    #[test]
+    fn download_and_verification_percentages_are_bounded() {
+        assert_eq!(percentage(0, 200, 0, 70), 0);
+        assert_eq!(percentage(100, 200, 0, 70), 35);
+        assert_eq!(percentage(200, 200, 0, 70), 70);
+        assert_eq!(percentage(400, 200, 70, 15), 85);
+    }
+
+    #[test]
+    fn progress_does_not_finish_the_download() -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, rx) = mpsc::channel();
+        let mut updater = Updater {
+            installed: None,
+            status: UpdateStatus::Preparing("0.9.7".into(), UpdateProgress::default()),
+            pending: Some(rx),
+            release: None,
+            prepared: None,
+            last_check: None,
+        };
+        assert!(tx.send(Reply::Progress(UpdateProgress { step: UpdateStep::Downloading, percent: 35 })).is_ok());
+        assert_eq!(updater.status(), UpdateStatus::Preparing("0.9.7".into(), UpdateProgress { step: UpdateStep::Downloading, percent: 35 }));
+        assert!(updater.pending.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn installer_launches_from_the_app_bundle() -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "lizard-updater-helper-test-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        ));
+        let installed = root.join("Lizard.app");
+        let executable = installed.join("Contents/MacOS/Lizard");
+        let work = root.join("work");
+        fs::create_dir_all(executable.parent().ok_or("missing executable parent")?)?;
+        fs::create_dir_all(&work)?;
+        fs::write(&executable, "#!/bin/sh\nprintf '%s' \"$1\" > \"$6/helper-started\"\n")?;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))?;
+        let mut updater = Updater {
+            installed: Some(installed.clone()),
+            status: UpdateStatus::Ready("0.9.7".into()),
+            pending: None,
+            release: None,
+            prepared: Some(Prepared {
+                version: Version::new(0, 9, 7),
+                app: root.join(".Lizard-update-test.app"),
+                destination: installed,
+                work: work.clone(),
+            }),
+            last_check: None,
+        };
+        updater.install()?;
+        let marker = work.join("helper-started");
+        for _ in 0..50 {
+            if marker.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(fs::read_to_string(marker)?, HELPER_ARG);
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 }
