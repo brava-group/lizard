@@ -205,14 +205,7 @@ fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> building $DMG"
-STAGE="$WORK/dmg"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Lizard.app"
-ln -s /Applications "$STAGE/Applications"
-rm -f "$DMG"
-# `makehybrid -hfs` adds FinderInfo to files inside the image, invalidating the already-signed
-# app when the DMG is mounted. A direct compressed HFS+ image preserves the app's signature.
-retry hdiutil create -srcfolder "$STAGE" -format UDZO -fs HFS+ -volname Lizard -ov -o "$DMG"
+"$HERE/make-dmg.sh" "$APP" "$DMG"
 sign "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 if [ "$NOTARIZE" = 1 ]; then

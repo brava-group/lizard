@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440" viewBox="0 0 720 440">
+  <!-- Finder uses the rasterized 2x PNG beside this editable source. Lizard primary: #735DF7. -->
+  <rect width="720" height="440" fill="#735DF7"/>
+  <circle cx="688" cy="-96" r="272" fill="#FFFFFF" opacity=".055"/>
+  <circle cx="-34" cy="470" r="232" fill="#3420C6" opacity=".085"/>
+  <text x="46" y="72" fill="#FFFFFF" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" font-size="32" font-weight="600" letter-spacing="-.7">Lizard</text>
+  <path d="M338 222h42m-13-13 13 13-13 13" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <text x="360" y="322" text-anchor="middle" fill="#FFFFFF" opacity=".88" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" font-size="12" font-weight="600" letter-spacing="2">DRAG LIZARD TO APPLICATIONS</text>
+</svg>
