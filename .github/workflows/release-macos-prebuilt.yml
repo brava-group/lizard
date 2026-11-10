@@ -64,7 +64,7 @@ jobs:
             fi
             while IFS= read -r changed; do
               case "$changed" in
-                .github/workflows/release-macos-prebuilt.yml|packaging/env.sh|assets/fonts/inter/OFL.txt) ;;
+                .github/workflows/release-macos-prebuilt.yml|packaging/env.sh|packaging/macos/package.sh|assets/fonts/inter/OFL.txt) ;;
                 *) echo "::error::App source changed after the local build: $changed"; exit 1 ;;
               esac
             done < <(git -C "$GITHUB_WORKSPACE" diff --name-only HEAD^ HEAD)
