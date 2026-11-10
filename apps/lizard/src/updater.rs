@@ -1,4 +1,4 @@
-//! Checked macOS updates from published GitHub releases. No update is installed without a click.
+//! Checked macOS updates from published GitHub releases.
 
 use std::fs::{self, File};
 use std::io::Read;
@@ -17,7 +17,7 @@ const RELEASES_API: &str = "https://api.github.com/repos/brava-group/lizard/rele
 const TEAM: &str = "2L268W62AW";
 const BUNDLE_ID: &str = "com.brava.lizard";
 const MAX_DMG_BYTES: u64 = 600 * 1024 * 1024;
-const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Debug)]
 struct Release {
@@ -30,6 +30,7 @@ struct Release {
 struct Prepared {
     version: Version,
     app: PathBuf,
+    destination: PathBuf,
     helper: PathBuf,
     work: PathBuf,
 }
@@ -67,7 +68,11 @@ impl Updater {
         let received = self.pending.as_ref().map(Receiver::try_recv);
         if matches!(&received, Some(Err(TryRecvError::Disconnected))) {
             self.pending = None;
-            self.status = UpdateStatus::Error("The update check stopped unexpectedly".into());
+            let error = "The update process stopped unexpectedly".to_owned();
+            self.status = match &self.status {
+                UpdateStatus::Preparing(version) => UpdateStatus::Failed(version.clone(), error),
+                _ => UpdateStatus::Error(error),
+            };
         }
         if let Some(Ok(reply)) = received {
             self.pending = None;
@@ -77,7 +82,11 @@ impl Updater {
                     self.release = Some(release);
                 }
                 Reply::Checked(Ok(None)) => self.status = UpdateStatus::Current,
-                Reply::Checked(Err(error)) | Reply::Prepared(Err(error)) => self.status = UpdateStatus::Error(error),
+                Reply::Checked(Err(error)) => self.status = UpdateStatus::Error(error),
+                Reply::Prepared(Err(error)) => {
+                    let version = self.release.as_ref().map(|release| release.version.to_string()).unwrap_or_default();
+                    self.status = UpdateStatus::Failed(version, error);
+                }
                 Reply::Prepared(Ok(prepared)) => {
                     self.status = UpdateStatus::Ready(prepared.version.to_string());
                     self.prepared = Some(prepared);
@@ -103,7 +112,11 @@ impl Updater {
 
     pub fn prepare(&mut self) {
         let (Some(installed), Some(release)) = (self.installed.clone(), self.release.clone()) else { return };
-        if self.pending.is_some() || self.prepared.is_some() {
+        if self.pending.is_some() {
+            return;
+        }
+        if self.prepared.is_some() {
+            self.status = UpdateStatus::Ready(release.version.to_string());
             return;
         }
         self.status = UpdateStatus::Preparing(release.version.to_string());
@@ -120,10 +133,15 @@ impl Updater {
         Command::new(&prepared.helper)
             .args([HELPER_ARG, &std::process::id().to_string()])
             .arg(installed)
+            .arg(&prepared.destination)
             .arg(&prepared.app)
             .arg(&prepared.work)
             .spawn()
-            .map_err(|error| format!("Could not start the update installer: {error}"))?;
+            .map_err(|error| {
+                let message = format!("Could not start the update installer: {error}");
+                self.status = UpdateStatus::Failed(prepared.version.to_string(), message.clone());
+                message
+            })?;
         self.status = UpdateStatus::Installing;
         Ok(())
     }
@@ -251,12 +269,53 @@ fn verify_bundle(app: &Path, version: &Version) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_destination(destination: &Path, update_version: &Version) -> Result<(), String> {
+    if !destination.exists() {
+        return Ok(());
+    }
+    let plist = destination.join("Contents/Info.plist");
+    let current = command(
+        "/usr/bin/plutil",
+        &["-extract", "CFBundleShortVersionString", "raw", "-o", "-", plist.to_str().ok_or("Invalid existing app metadata")?],
+    )?;
+    let current = Version::parse(current.trim()).map_err(|error| error.to_string())?;
+    verify_bundle(destination, &current)?;
+    if update_version <= &current {
+        return Err("This version or a newer one is already installed in Applications".into());
+    }
+    Ok(())
+}
+
+fn update_destination(installed: &Path, stamp: u128) -> Result<(PathBuf, PathBuf), String> {
+    let mut candidates = vec![installed.to_path_buf(), PathBuf::from("/Applications/Lizard.app")];
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(PathBuf::from(home).join("Applications/Lizard.app"));
+    }
+    writable_destination(candidates, stamp)
+}
+
+fn writable_destination(candidates: impl IntoIterator<Item = PathBuf>, stamp: u128) -> Result<(PathBuf, PathBuf), String> {
+    for destination in candidates {
+        let Some(parent) = destination.parent() else { continue };
+        if fs::create_dir_all(parent).is_err() {
+            continue;
+        }
+        let stage = parent.join(format!(".Lizard-update-{stamp}.app"));
+        if fs::create_dir(&stage).is_ok() {
+            return Ok((destination, stage));
+        }
+    }
+    Err("Could not write an update to Applications. Check that your Mac has free space and your account can install apps.".into())
+}
+
 fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
     let work = std::env::temp_dir().join(format!("lizard-update-{}-{stamp}", std::process::id()));
-    let parent = installed.parent().ok_or("Invalid installed app path")?;
-    let stage = parent.join(format!(".Lizard-update-{stamp}.app"));
-    fs::create_dir(&work).map_err(|error| format!("Could not prepare update folder: {error}"))?;
+    let (destination, stage) = update_destination(installed, stamp)?;
+    if let Err(error) = fs::create_dir(&work) {
+        let _ = fs::remove_dir(&stage);
+        return Err(format!("Could not prepare update folder: {error}"));
+    }
     let result = (|| {
         let dmg = work.join("update.dmg");
         let status = Command::new("/usr/bin/curl")
@@ -320,12 +379,13 @@ fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
         let source = mount.join("Lizard.app");
         let copied = Command::new("/usr/bin/ditto").arg(&source).arg(&stage).status().map_err(|error| format!("Could not copy the update: {error}"));
         let detached = command("/usr/bin/hdiutil", &["detach", mount.to_str().ok_or("Invalid mount path")?]);
-        copied?.success().then_some(()).ok_or("Could not stage the update beside Lizard.app")?;
+        copied?.success().then_some(()).ok_or("Could not stage the update in Applications")?;
         detached?;
         verify_bundle(&stage, &release.version)?;
+        verify_destination(&destination, &release.version)?;
         let helper = work.join("lizard-update-helper");
         fs::copy(std::env::current_exe().map_err(|error| error.to_string())?, &helper).map_err(|error| error.to_string())?;
-        Ok(Prepared { version: release.version.clone(), app: stage.clone(), helper, work: work.clone() })
+        Ok(Prepared { version: release.version.clone(), app: stage.clone(), destination, helper, work: work.clone() })
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&work);
@@ -338,11 +398,13 @@ fn prepare(installed: &Path, release: &Release) -> Result<Prepared, String> {
 pub fn run_helper(args: &[String]) -> i32 {
     let result = (|| -> Result<(), String> {
         let pid = args.get(1).ok_or("Missing parent process")?.parse::<u32>().map_err(|error| error.to_string())?;
-        let installed = PathBuf::from(args.get(2).ok_or("Missing installed app")?);
-        let stage = PathBuf::from(args.get(3).ok_or("Missing staged app")?);
-        let work = PathBuf::from(args.get(4).ok_or("Missing update folder")?);
+        let installed = PathBuf::from(args.get(2).ok_or("Missing running app")?);
+        let destination = PathBuf::from(args.get(3).ok_or("Missing install destination")?);
+        let stage = PathBuf::from(args.get(4).ok_or("Missing staged app")?);
+        let work = PathBuf::from(args.get(5).ok_or("Missing update folder")?);
         if installed.extension().and_then(|extension| extension.to_str()) != Some("app")
-            || stage.parent() != installed.parent()
+            || destination.file_name().and_then(|name| name.to_str()) != Some("Lizard.app")
+            || stage.parent() != destination.parent()
             || !stage.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(".Lizard-update-") && name.ends_with(".app"))
         {
             return Err("Invalid update destination".into());
@@ -382,18 +444,29 @@ pub fn run_helper(args: &[String]) -> i32 {
             return Err("The staged app is not newer than the installed app".into());
         }
         verify_bundle(&stage, &version)?;
-        let backup = installed.with_file_name(format!(".Lizard-before-update-{pid}.app"));
-        fs::rename(&installed, &backup).map_err(|error| format!("Could not move the installed app: {error}"))?;
-        if let Err(error) = fs::rename(&stage, &installed) {
-            let _ = fs::rename(&backup, &installed);
+        verify_destination(&destination, &version)?;
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
+        let backup = destination.with_file_name(format!(".Lizard-before-update-{pid}-{stamp}.app"));
+        let had_previous = destination.exists();
+        if had_previous {
+            fs::rename(&destination, &backup).map_err(|error| format!("Could not move the installed app: {error}"))?;
+        }
+        if let Err(error) = fs::rename(&stage, &destination) {
+            if had_previous {
+                let _ = fs::rename(&backup, &destination);
+            }
             return Err(format!("Could not install the update: {error}"));
         }
-        if let Err(error) = command("/usr/bin/open", &["-a", installed.to_str().ok_or("Invalid installed path")?]) {
-            let _ = fs::rename(&installed, &stage);
-            let _ = fs::rename(&backup, &installed);
+        if let Err(error) = command("/usr/bin/open", &["-n", "-a", destination.to_str().ok_or("Invalid installed path")?]) {
+            let _ = fs::rename(&destination, &stage);
+            if had_previous {
+                let _ = fs::rename(&backup, &destination);
+            }
             return Err(error);
         }
-        let _ = fs::remove_dir_all(backup);
+        if had_previous {
+            let _ = fs::remove_dir_all(backup);
+        }
         let _ = fs::remove_dir_all(work);
         Ok(())
     })();
@@ -438,5 +511,18 @@ mod tests {
         for arch in ["aarch64", "x86_64"] {
             assert!(parse_release(&universal, "0.9.1", arch).is_ok_and(|found| found.is_some()));
         }
+    }
+
+    #[test]
+    fn update_stages_beside_writable_fallback_when_running_volume_cannot_be_written() -> Result<(), Box<dyn std::error::Error>> {
+        let temporary = std::env::temp_dir().join(format!("lizard-updater-test-{}", std::process::id()));
+        fs::create_dir(&temporary)?;
+        let destination = temporary.join("Lizard.app");
+        let (found, stage) = writable_destination([PathBuf::from("/dev/null/Lizard.app"), destination.clone()], 123)?;
+        assert_eq!(found, destination);
+        assert_eq!(stage.parent(), destination.parent());
+        assert!(stage.is_dir());
+        fs::remove_dir_all(temporary)?;
+        Ok(())
     }
 }

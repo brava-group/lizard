@@ -269,6 +269,7 @@ pub enum UpdateStatus {
     Available(String),
     Preparing(String),
     Ready(String),
+    Failed(String, String),
     Installing,
     Error(String),
 }

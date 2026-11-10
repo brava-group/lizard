@@ -7,24 +7,42 @@ use crate::primitives::{Button, ButtonVariant};
 use crate::theme::{Tokens, semibold};
 use crate::{LizardApp, UpdateStatus};
 
+fn begin_update(app: &mut LizardApp, ctx: &Context) {
+    ctx.data_mut(|data| data.remove_temp::<String>(Id::new("lizard_update_dismissed")));
+    app.services.update_prepare();
+}
+
 pub fn show(app: &mut LizardApp, ctx: &Context) {
     if app.windows.current != 0 {
         return;
     }
     let status = app.services.update_status();
+    let dismissed = Id::new("lizard_update_dismissed");
+    let ready_to_install = match &status {
+        UpdateStatus::Ready(version) => ctx.data(|data| data.get_temp::<String>(dismissed).as_deref() != Some(version.as_str())),
+        _ => false,
+    };
+    if ready_to_install && app.session.docs.iter().all(|document| !document.is_dirty()) && app.windows.list.is_empty() {
+        match app.services.update_install() {
+            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Err(error) => app.toast(error),
+        }
+        return;
+    }
     if matches!(&status, UpdateStatus::Checking | UpdateStatus::Preparing(_)) {
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
     } else if matches!(&status, UpdateStatus::Current | UpdateStatus::Error(_)) {
-        ctx.request_repaint_after(std::time::Duration::from_secs(10 * 60));
+        ctx.request_repaint_after(std::time::Duration::from_secs(60));
     }
     if app.ui.preferences {
         return;
     }
     let version = match &status {
-        UpdateStatus::Available(version) | UpdateStatus::Preparing(version) | UpdateStatus::Ready(version) => version,
+        UpdateStatus::Available(version) | UpdateStatus::Preparing(version) | UpdateStatus::Ready(version) | UpdateStatus::Failed(version, _) => {
+            version
+        }
         _ => return,
     };
-    let dismissed = Id::new("lizard_update_dismissed");
     if ctx.data(|data| data.get_temp::<String>(dismissed).as_deref() == Some(version.as_str())) {
         return;
     }
@@ -48,7 +66,7 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
                     UpdateStatus::Available(_) => {
                         ui.horizontal(|ui| {
                             if Button::new(tr("Update")).show(ui).clicked() {
-                                app.services.update_prepare();
+                                begin_update(app, ctx);
                             }
                             if Button::new(tr("Later")).variant(ButtonVariant::Secondary).show(ui).clicked() {
                                 close = true;
@@ -58,6 +76,17 @@ pub fn show(app: &mut LizardApp, ctx: &Context) {
                     UpdateStatus::Preparing(_) => {
                         ui.spinner();
                         ui.label(tr("Downloading and verifying the update…"));
+                    }
+                    UpdateStatus::Failed(_, error) => {
+                        ui.label(RichText::new(error).color(t.text_secondary));
+                        ui.horizontal(|ui| {
+                            if Button::new(tr("Retry update")).show(ui).clicked() {
+                                begin_update(app, ctx);
+                            }
+                            if Button::new(tr("Later")).variant(ButtonVariant::Secondary).show(ui).clicked() {
+                                close = true;
+                            }
+                        });
                     }
                     UpdateStatus::Ready(_) => {
                         let dirty = app.session.docs.iter().any(|document| document.is_dirty());
@@ -105,6 +134,7 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
         UpdateStatus::Available(version) => format!("{} {version}", tr("New version available:")),
         UpdateStatus::Preparing(_) => tr("Downloading and verifying the update…").to_owned(),
         UpdateStatus::Ready(version) => format!("{} {version}", tr("Ready to install:")),
+        UpdateStatus::Failed(_, error) => error.clone(),
         UpdateStatus::Installing => tr("Restarting to install the update…").to_owned(),
         UpdateStatus::Error(error) => error.clone(),
         UpdateStatus::Unavailable => String::new(),
@@ -113,7 +143,10 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
     ui.add_space(10.0);
     if Button::new(tr("Check for updates"))
         .variant(ButtonVariant::Secondary)
-        .enabled(!matches!(&status, UpdateStatus::Checking | UpdateStatus::Preparing(_) | UpdateStatus::Ready(_) | UpdateStatus::Installing))
+        .enabled(!matches!(
+            &status,
+            UpdateStatus::Checking | UpdateStatus::Preparing(_) | UpdateStatus::Ready(_) | UpdateStatus::Failed(_, _) | UpdateStatus::Installing
+        ))
         .show(ui)
         .clicked()
     {
@@ -123,7 +156,13 @@ pub fn settings(app: &mut LizardApp, ui: &mut egui::Ui) {
         UpdateStatus::Available(_) => {
             ui.add_space(8.0);
             if Button::new(tr("Update")).show(ui).clicked() {
-                app.services.update_prepare();
+                begin_update(app, ui.ctx());
+            }
+        }
+        UpdateStatus::Failed(_, _) => {
+            ui.add_space(8.0);
+            if Button::new(tr("Retry update")).show(ui).clicked() {
+                begin_update(app, ui.ctx());
             }
         }
         UpdateStatus::Ready(_) => {
