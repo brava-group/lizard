@@ -64,7 +64,7 @@ jobs:
             }
             while IFS= read -r changed; do
               case "$changed" in
-                .github/workflows/release-macos-prebuilt.yml|.github/workflows/release-macos.yml|packaging/env.sh|packaging/macos/package.sh|packaging/macos/make-dmg.sh|packaging/macos/dmg-background.svg|packaging/macos/dmg-background.png|assets/fonts/inter/OFL.txt) ;;
+                .github/workflows/release-macos-prebuilt.yml|.github/workflows/release-macos.yml|packaging/env.sh|packaging/macos/package.sh|packaging/macos/verify.sh|packaging/macos/make-dmg.sh|packaging/macos/dmg-background.svg|packaging/macos/dmg-background.png|assets/fonts/inter/OFL.txt) ;;
                 *) echo "::error::App source changed after the local build: $changed"; exit 1 ;;
               esac
             done < <(git -C "$GITHUB_WORKSPACE" diff --name-only "$source_sha" HEAD)
