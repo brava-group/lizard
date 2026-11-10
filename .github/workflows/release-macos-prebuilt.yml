@@ -1,0 +1,104 @@
+name: macOS release from local build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after signing, notarization and verification
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos-prebuilt
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: release
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Require distribution credentials
+        shell: bash
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] ||
+             [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] ||
+             [ "$APPLE_TEAM_ID" != 2L268W62AW ]; then
+            echo '::error::Configure the Developer ID certificate and Apple notarization credentials in the release environment.'
+            exit 1
+          fi
+
+      - name: Load binaries built locally from the preceding commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . packaging/env.sh
+          archive="lizard-prebuilt-$VERSION-macos-universal.zip"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$archive" --dir "$RUNNER_TEMP"
+          ditto -x -k "$RUNNER_TEMP/$archive" "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/prebuilt"
+          shasum -a 256 -c SHA256SUMS
+          source_sha="$(cat SOURCE_SHA)"
+          if [ "$source_sha" != "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^)" ]; then
+            echo '::error::The staged binaries do not match the source commit preceding this workflow.'
+            exit 1
+          fi
+          echo "LIZARD_BUILD_SHA=$source_sha" >> "$GITHUB_ENV"
+          for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+            mkdir -p "$GITHUB_WORKSPACE/target/$arch/release"
+            for bin in lizard lizard-cli; do
+              install -m 755 "$arch/$bin" "$GITHUB_WORKSPACE/target/$arch/release/$bin"
+            done
+          done
+
+      - name: Import Developer ID certificate
+        run: packaging/macos/import-cert.sh
+
+      - name: Assemble, sign and notarize universal app
+        run: packaging/macos/package.sh --arch universal --skip-build
+
+      - name: Verify the downloaded package format
+        run: packaging/macos/verify.sh --arch universal
+
+      - name: Upload verified release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . packaging/env.sh
+          cd dist/release
+          shasum -a 256 "lizard-$VERSION-macos-universal.dmg" \
+            "lizard-cli-$VERSION-macos-universal.zip" > "SHA256SUMS-$VERSION.txt"
+          gh release upload "v$VERSION" \
+            "lizard-$VERSION-macos-universal.dmg" \
+            "lizard-cli-$VERSION-macos-universal.zip" \
+            "SHA256SUMS-$VERSION.txt" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release delete-asset "v$VERSION" "lizard-prebuilt-$VERSION-macos-universal.zip" \
+            --repo "$GITHUB_REPOSITORY" --yes
+
+      - name: Publish verified release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . packaging/env.sh
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
