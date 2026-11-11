@@ -532,6 +532,18 @@ pub fn sync_instance(doc: &mut Document, inst: NodeId) {
         doc.subtree(inst).into_iter().filter_map(|i| doc.node_arc(i).map(|a| (a.clone(), doc.dirty().contains(&i)))).collect();
     let kept = slot_content(doc, inst);
     sync_instance_depth(doc, inst, 0, BTreeMap::new());
+    // A nested icon may also be synchronized on its own after its Button parent. Restore the
+    // parent's local matrix values after that rebuild, including when the icon was swapped.
+    if let Some(source) = doc.node(inst).and_then(|n| n.source)
+        && let Some(parent) = doc.ancestors(inst).into_iter().find(|id| is_instance(doc, *id))
+        && let Some(main) = doc.node(parent).and_then(|n| match &n.kind {
+            NodeKind::Instance { component, .. } => doc.node(*component).cloned(),
+            _ => None,
+        })
+        && let Some(root) = doc.node(parent).cloned()
+    {
+        apply_nested_icon_matrix(doc, &main, &root, &BTreeMap::from([(source, inst)]));
+    }
     restore_slot_content(doc, kept);
     for (a, was_dirty) in old {
         doc.keep_if_unchanged(a, was_dirty);
@@ -863,6 +875,91 @@ fn sync_instance_depth(doc: &mut Document, inst: NodeId, depth: usize, spare: BT
             .map(|(i, x)| (*i, x.clone()))
             .collect();
         sync_instance_depth(doc, n, depth + 1, below);
+    }
+    apply_nested_icon_matrix(doc, &comp, &root, &map);
+}
+
+/// A local matrix can size and tint an exposed icon instance. Its expanded layers belong to
+/// the icon component, so apply these values after a property swap has rebuilt that instance.
+fn apply_nested_icon_matrix(doc: &mut Document, main: &Node, instance: &Node, map: &BTreeMap<NodeId, NodeId>) {
+    let NodeKind::Instance { props, .. } = &instance.kind else { return };
+    let choices = main.component_matrix.choices(props);
+    for (&source, &copy) in map {
+        if !matches!(doc.node(source).map(|n| &n.kind), Some(NodeKind::Instance { .. })) {
+            continue;
+        }
+        let Some(icon_main) = doc.node(copy).and_then(|n| match &n.kind {
+            NodeKind::Instance { component, .. } => doc.node(*component),
+            _ => None,
+        }) else {
+            continue;
+        };
+        // The descendants are fresh copies of the icon's main. Scale from that source box,
+        // even when the first matrix pass has already sized the instance root.
+        let (base_w, base_h) = (icon_main.width, icon_main.height);
+        let mut size = (base_w, base_h);
+        let mut has_size = false;
+        let mut tint = None;
+        for field in &main.component_matrix.fields {
+            if field.layer != source {
+                continue;
+            }
+            let Some(value) = main.component_matrix.resolve(field, &choices) else { continue };
+            match field.field.as_str() {
+                "width" => {
+                    if let Some(v) = value.as_f64() {
+                        size.0 = v;
+                        has_size = true;
+                    }
+                }
+                "height" => {
+                    if let Some(v) = value.as_f64() {
+                        size.1 = v;
+                        has_size = true;
+                    }
+                }
+                "stroke" => tint = Some(value),
+                _ => {}
+            }
+        }
+        let descendants: Vec<NodeId> = doc.subtree(copy).into_iter().filter(|id| *id != copy).collect();
+        if let Some(color) = tint {
+            if let Some(n) = doc.node_mut(copy) {
+                n.strokes.clear();
+            }
+            for id in &descendants {
+                if doc.node(*id).is_some_and(|n| !n.strokes.is_empty()) {
+                    let props = serde_json::Map::from_iter([("stroke".to_string(), color.clone())]);
+                    let _ = crate::cmd::props::apply("component.matrixSetCell", doc, *id, &props);
+                    if let Some(n) = doc.node_mut(*id) {
+                        n.overrides.remove("strokes");
+                    }
+                }
+            }
+        }
+        if !has_size
+            || doc.node(copy).is_some_and(|n| n.overrides.contains("size"))
+            || base_w <= 0.0
+            || base_h <= 0.0
+            || size.0 <= 0.0
+            || size.1 <= 0.0
+        {
+            continue;
+        }
+        let (sx, sy) = (size.0 / base_w, size.1 / base_h);
+        if (sx - 1.0).abs() > 1e-9 || (sy - 1.0).abs() > 1e-9 {
+            for id in &descendants {
+                let Some(n) = doc.node(*id) else { continue };
+                let (mut transform, w, h) = (n.transform.as_coeffs(), n.width, n.height);
+                if let Some(n) = doc.node_mut(*id) {
+                    transform[4] *= sx;
+                    transform[5] *= sy;
+                    n.transform = lizard_geom::Affine::new(transform);
+                }
+                lizard_layout::set_size(doc, *id, w * sx, h * sy);
+            }
+        }
+        lizard_layout::set_size(doc, copy, size.0, size.1);
     }
 }
 

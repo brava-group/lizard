@@ -13,6 +13,51 @@ fn id(v: &serde_json::Value) -> NodeId {
 }
 
 #[test]
+fn button_matrix_sizes_and_tints_a_swappable_monochrome_icon() {
+    let mut s = Session::new();
+    let make_icon = |s: &mut Session, name: &str, x: f64| {
+        let frame = id(&run(s, "frame.create", json!({"name":name,"width":24,"height":24})));
+        run(s, "node.create", json!({"type":"line","parent":frame,"x":x,"y":5,"width":14,"height":0,"props":{"stroke":"#FFFFFF","strokeWeight":2}}));
+        id(&run(s, "component.create", json!({"ids":[frame]})))
+    };
+    let arrow = make_icon(&mut s, "Arrow", 5.0);
+    let plus = make_icon(&mut s, "Plus", 7.0);
+    let button = id(&run(&mut s, "frame.create", json!({"name":"Button","width":80,"height":40})));
+    let icon = id(&run(&mut s, "instance.create", json!({"component":arrow,"parent":button})));
+    let main = id(&run(&mut s, "component.create", json!({"ids":[button]})));
+    run(
+        &mut s,
+        "component.addProperty",
+        json!({"id":main,"name":"Icon","type":"instanceSwap","default":arrow,"layer":icon,"preferred":[arrow,plus]}),
+    );
+    run(&mut s, "component.matrixSetAxis", json!({"id":main,"name":"Size","options":["sm","md"]}));
+    run(&mut s, "component.matrixSetAxis", json!({"id":main,"name":"Style","options":["Primary","Secondary"]}));
+    for (size, pixels) in [("sm", 16), ("md", 24)] {
+        for field in ["width", "height"] {
+            run(&mut s, "component.matrixSetCell", json!({"id":main,"layer":icon,"field":field,"when":{"Size":size},"value":pixels}));
+        }
+    }
+    for (style, color) in [("Primary", "#FFFFFF"), ("Secondary", "#4C3BC4")] {
+        run(&mut s, "component.matrixSetCell", json!({"id":main,"layer":icon,"field":"stroke","when":{"Style":style},"value":color}));
+    }
+    for (icon_choice, style, color) in [(arrow, "Primary", "FFFFFF"), (plus, "Secondary", "4C3BC4")] {
+        let button_instance = id(&run(&mut s, "instance.create", json!({"component":main})));
+        run(&mut s, "instance.setProperties", json!({"ids":[button_instance],"properties":{"Icon":icon_choice,"Size":"sm","Style":style}}));
+        let doc = s.doc().unwrap();
+        let icon_copy = doc
+            .node(button_instance)
+            .and_then(|n| n.children.iter().find(|id| doc.node(**id).is_some_and(|child| matches!(child.kind, NodeKind::Instance { .. }))))
+            .copied()
+            .unwrap();
+        let icon_node = doc.node(icon_copy).unwrap();
+        assert_eq!((icon_node.width, icon_node.height), (16.0, 16.0));
+        let glyph = doc.node(*icon_node.children.first().unwrap()).unwrap();
+        assert!((glyph.width - 14.0 * 16.0 / 24.0).abs() < 0.01);
+        assert_eq!(glyph.strokes.first().and_then(|p| p.solid_color()).map(|c| c.to_hex()).as_deref(), Some(color));
+    }
+}
+
+#[test]
 fn one_main_resolves_size_style_and_state_without_drawn_combinations() {
     let mut s = Session::new();
     let frame = id(&run(&mut s, "frame.create", json!({"name":"Button", "width":120, "height":40})));
