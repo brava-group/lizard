@@ -277,6 +277,7 @@ fn show_inner(app: &mut LizardApp, ctx: &egui::Context, target: &PickerTarget, m
                 | PickerTarget::StyleEffect { .. }
                 | PickerTarget::PageBackground
                 | PickerTarget::Variable { .. }
+                | PickerTarget::ComponentCell { .. }
                 | PickerTarget::DraftVariable
                 | PickerTarget::PluginField { .. }
         );

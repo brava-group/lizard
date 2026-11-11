@@ -2647,6 +2647,7 @@ status = "draft — needs native review"
 
 "component.matrixSetAxis" = "Definir eixo do componente"
 "component.matrixRenameAxis" = "Renomear eixo do componente"
+"component.matrixRenameOption" = "Renomear opção do componente"
 "component.matrixDeleteAxis" = "Excluir eixo do componente"
 "component.matrixSetCell" = "Definir valor do componente"
 "component.matrixDeleteCell" = "Excluir valor do componente"

@@ -58,6 +58,29 @@ fn button_matrix_sizes_and_tints_a_swappable_monochrome_icon() {
 }
 
 #[test]
+fn renaming_a_matrix_column_preserves_cells_default_and_instance_choices() {
+    let mut s = Session::new();
+    let frame = id(&run(&mut s, "frame.create", json!({"name":"Button","width":100,"height":32})));
+    let main = id(&run(&mut s, "component.create", json!({"ids":[frame]})));
+    run(&mut s, "component.matrixSetAxis", json!({"id":main,"name":"Size","options":["sm","md"],"default":"sm"}));
+    run(&mut s, "component.matrixSetCell", json!({"id":main,"layer":main,"field":"height","when":{"Size":"sm"},"value":32}));
+    run(&mut s, "component.matrixSetCell", json!({"id":main,"layer":main,"field":"height","when":{"Size":"md"},"value":40}));
+    let small = id(&run(&mut s, "instance.create", json!({"component":main})));
+    let medium = id(&run(&mut s, "instance.create", json!({"component":main})));
+    run(&mut s, "instance.setProperties", json!({"ids":[small],"properties":{"Size":"sm"}}));
+    run(&mut s, "instance.setProperties", json!({"ids":[medium],"properties":{"Size":"md"}}));
+    run(&mut s, "component.matrixRenameOption", json!({"id":main,"axis":"Size","option":"sm","newName":"Small"}));
+    let doc = s.doc().unwrap();
+    let axis = &doc.node(main).unwrap().component_matrix.axes[0];
+    assert_eq!(axis.options, ["Small", "md"]);
+    assert_eq!(axis.default, "Small");
+    assert_eq!(doc.node(small).unwrap().height, 32.0);
+    assert_eq!(doc.node(medium).unwrap().height, 40.0);
+    assert!(matches!(&doc.node(small).unwrap().kind, NodeKind::Instance { props, .. } if props.get("Size") == Some(&json!("Small"))));
+    assert!(s.execute("component.matrixRenameOption", &json!({"id":main,"axis":"Size","option":"Small","newName":"md"})).is_err());
+}
+
+#[test]
 fn one_main_resolves_size_style_and_state_without_drawn_combinations() {
     let mut s = Session::new();
     let frame = id(&run(&mut s, "frame.create", json!({"name":"Button", "width":120, "height":40})));

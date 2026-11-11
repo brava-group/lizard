@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
+use lizard_color::{Color, Paint};
 use lizard_doc::{ComponentAxis, ComponentMatrix, Document, NodeId, NodeKind};
 use lizard_engine::components::inside_instance;
 use serde_json::{Value, json};
@@ -11,10 +12,10 @@ use serde_json::{Value, json};
 use crate::LizardApp;
 use crate::i18n::tr;
 use crate::icons::Icon;
-use crate::primitives::{Button, ButtonVariant, InlineField, PropertyController, PropertyControllerKind, Select, Surface};
+use crate::primitives::{Button, ButtonVariant, ColorControl, ColorValue, InlineField, PropertyController, PropertyControllerKind, Select, Surface};
 use crate::right::{menu_item, menu_popup};
 use crate::theme::{Tokens, regular, semibold};
-use crate::widgets;
+use crate::{icons, widgets};
 
 const SIDEBAR_W: f32 = 230.0;
 const LABEL_W: f32 = 196.0;
@@ -55,6 +56,9 @@ struct Editor {
     field: String,
     value: String,
     adding_row: bool,
+    renaming_option: Option<String>,
+    rename_start: bool,
+    reset_scroll: bool,
 }
 
 fn editor_id(main: NodeId) -> Id {
@@ -100,6 +104,9 @@ pub(crate) fn show(app: &mut LizardApp, ui: &mut Ui, doc: &Document, main: NodeI
     }
     let was_open = ctx.data(|data| data.get_temp::<bool>(id.with("open"))).unwrap_or(false);
     let mut open = was_open ^ clicked;
+    if open && !was_open {
+        state.reset_scroll = true;
+    }
     if open {
         let t = Tokens::get(&ctx);
         let screen = ctx.content_rect();
@@ -197,6 +204,8 @@ fn axis_sidebar(app: &mut LizardApp, ui: &mut Ui, main: NodeId, matrix: &Compone
         if response.clicked() {
             state.axis = axis.name.clone();
             state.edit_options = false;
+            state.renaming_option = None;
+            state.reset_scroll = true;
         }
         crate::right::context_popup(&response).show(|ui| {
             if menu_item(ui, tr("Edit axis"), "") {
@@ -282,7 +291,11 @@ fn table_view(app: &mut LizardApp, ui: &mut Ui, doc: &Document, main: NodeId, ma
     };
     let footer_h = if state.adding_row { 76.0 } else { 41.0 };
     let table_h = (ui.available_height() - footer_h).max(80.0);
-    egui::ScrollArea::both().id_salt(id.with("table")).auto_shrink([false, false]).max_height(table_h).show(ui, |ui| {
+    let mut scroll = egui::ScrollArea::both().id_salt(id.with("table")).auto_shrink([false, false]).max_height(table_h);
+    if state.reset_scroll {
+        scroll = scroll.vertical_scroll_offset(0.0).horizontal_scroll_offset(0.0);
+    }
+    scroll.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let cell_width = ((ui.available_width() - LABEL_W) / axis.options.len() as f32).max(CELL_W);
         let width = LABEL_W + cell_width * axis.options.len() as f32;
@@ -291,20 +304,24 @@ fn table_view(app: &mut LizardApp, ui: &mut Ui, doc: &Document, main: NodeId, ma
             ui.spacing_mut().item_spacing.x = 0.0;
             table_header(ui, tr("Layer · Field"), LABEL_W, t);
             for option in &axis.options {
-                table_header(ui, option, cell_width, t);
+                option_header(app, ui, main, axis, option, cell_width, state, id, t);
             }
         });
         for binding in &matrix.fields {
-            let layer_name = doc.node(binding.layer).map(|node| node.name.as_str()).unwrap_or(tr("Missing layer"));
+            let layer_name = doc
+                .node(binding.layer)
+                .map(|node| node.prop_refs.get("mainComponent").map(String::as_str).unwrap_or(&node.name))
+                .unwrap_or(tr("Missing layer"));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                table_label(ui, &format!("{layer_name} · {}", binding.field), LABEL_W, t);
+                table_label(ui, &format!("{layer_name} · {}", field_title(&binding.field)), &binding.field, LABEL_W, t);
                 for option in &axis.options {
                     table_value(app, ui, main, matrix, binding, axis, option, &state.filters, cell_width, id, t);
                 }
             });
         }
     });
+    state.reset_scroll = false;
     let (footer, _) = ui.allocate_exact_size(vec2(ui.available_width(), 41.0), Sense::hover());
     ui.painter().line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, t.border));
     let add = Rect::from_min_size(pos2(footer.left() + 8.0, footer.top() + 8.0), vec2(140.0, 24.0));
@@ -313,6 +330,23 @@ fn table_view(app: &mut LizardApp, ui: &mut Ui, doc: &Document, main: NodeId, ma
     }
     if state.adding_row {
         add_row(app, ui, doc, main, axis, state, id);
+    }
+}
+
+fn field_title(field: &str) -> &str {
+    match field {
+        "fill" | "fills" => tr("Fill"),
+        "stroke" | "strokes" => tr("Stroke"),
+        "strokeWeight" => tr("Stroke weight"),
+        "cornerRadius" => tr("Corner radius"),
+        "opacity" => tr("Opacity"),
+        "visible" => tr("Visible"),
+        "width" => tr("Width"),
+        "height" => tr("Height"),
+        "padding" => tr("Padding"),
+        "gap" => tr("Gap"),
+        "fontSize" => tr("Font size"),
+        _ => field,
     }
 }
 
@@ -358,20 +392,73 @@ fn table_header(ui: &mut Ui, title: &str, width: f32, t: Tokens) {
     ui.painter().text(pos2(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, title, semibold(11.0), t.text);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn option_header(
+    app: &mut LizardApp,
+    ui: &mut Ui,
+    main: NodeId,
+    axis: &ComponentAxis,
+    option: &str,
+    width: f32,
+    state: &mut Editor,
+    id: Id,
+    t: Tokens,
+) {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
+    table_lines(ui, rect, t);
+    let edit_rect = rect.shrink2(vec2(12.0, 5.0));
+    if state.renaming_option.as_deref() == Some(option) {
+        let start = std::mem::take(&mut state.rename_start);
+        let (renamed, open) = widgets::rename_field(ui, id.with(("rename_option", &axis.name, option)), option, edit_rect, semibold(11.0), start);
+        if let Some(name) = renamed.filter(|name| !name.trim().is_empty()) {
+            app.run("component.matrixRenameOption", json!({"id":main,"axis":axis.name,"option":option,"newName":name}));
+        }
+        if !open {
+            state.renaming_option = None;
+        }
+        return;
+    }
+    let response = ui.interact(edit_rect, id.with(("option_header", &axis.name, option)), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(edit_rect, CornerRadius::same(4), t.hover);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+    }
+    let shown = widgets::elide_font(ui, option, edit_rect.width() - 8.0, semibold(11.0));
+    ui.painter().text(pos2(edit_rect.left() + 4.0, rect.center().y), Align2::LEFT_CENTER, shown, semibold(11.0), t.text);
+    if response.clicked() {
+        state.renaming_option = Some(option.to_string());
+        state.rename_start = true;
+    }
+    crate::right::context_popup(&response).show(|ui| {
+        if menu_item(ui, tr("Rename"), "") {
+            state.renaming_option = Some(option.to_string());
+            state.rename_start = true;
+            ui.close();
+        }
+    });
+}
+
 fn table_lines(ui: &Ui, rect: Rect, t: Tokens) {
     let stroke = Stroke::new(1.0, t.border);
     ui.painter().line_segment([rect.right_top(), rect.right_bottom()], stroke);
     ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
 }
 
-fn table_label(ui: &mut Ui, title: &str, width: f32, t: Tokens) {
+fn table_label(ui: &mut Ui, title: &str, field: &str, width: f32, t: Tokens) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
     if response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
     }
     table_lines(ui, rect, t);
-    let shown = widgets::elide_font(ui, title, width - 24.0, regular(11.0));
-    ui.painter().text(pos2(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, shown, regular(11.0), t.text);
+    let icon = match field {
+        "fill" | "fills" | "stroke" | "strokes" => Icon::VariableColor,
+        "visible" => Icon::VariableBoolean,
+        "fontFamily" | "fontStyle" | "characters" => Icon::VariableString,
+        _ => Icon::VariableNumber,
+    };
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 22.0, rect.center().y), vec2(14.0, 14.0)), icon, t.icon_secondary);
+    let shown = widgets::elide_font(ui, title, width - 52.0, regular(11.0));
+    ui.painter().text(pos2(rect.left() + 42.0, rect.center().y), Align2::LEFT_CENTER, shown, regular(11.0), t.text);
     response.on_hover_text(title);
 }
 
@@ -402,7 +489,28 @@ fn table_value(
     let resolved = matrix.resolve(binding, &choices);
     let display = exact.map(|cell| &cell.value).or(resolved).map(value_text).unwrap_or_default();
     let edit_rect = Rect::from_min_max(pos2(rect.left() + 8.0, rect.top() + 5.0), pos2(rect.right() - 26.0, rect.bottom() - 5.0));
-    if let Some(edited) = InlineField::new(id.with(("cell", binding.layer, &binding.field, &when)), &display).show_at(ui, edit_rect)
+    let cell_id = id.with(("cell", binding.layer, &binding.field, &when));
+    let color = matches!(binding.field.as_str(), "fill" | "stroke").then(|| Color::from_hex_or_name(&display)).flatten();
+    if let Some(color) = color {
+        let paint = Paint::solid(color);
+        let hex = color.to_hex();
+        let edit = ColorControl::new(cell_id, &paint, ColorValue::EditableHex(&hex), f64::from(color.a) * 100.0).inline().show_at(ui, edit_rect);
+        if edit.open_picker {
+            app.ui.picker = Some(crate::colorpicker::PickerTarget::ComponentCell {
+                main,
+                layer: binding.layer,
+                field: binding.field.clone(),
+                when: when.clone(),
+            });
+        }
+        if let Some(edited) = edit.edited_hex
+            && let Some(next) = Color::from_hex_or_name(&edited)
+        {
+            let digits = edited.trim().trim_start_matches('#');
+            let next = if digits.len() == 8 && digits.chars().all(|ch| ch.is_ascii_hexdigit()) { next } else { next.with_alpha(color.a) };
+            app.run("component.matrixSetCell", json!({"id":main,"layer":binding.layer,"field":binding.field,"when":when,"value":next.to_css_hex()}));
+        }
+    } else if let Some(edited) = InlineField::new(cell_id, &display).show_at(ui, edit_rect)
         && !edited.trim().is_empty()
     {
         app.run("component.matrixSetCell", json!({"id":main,"layer":binding.layer,"field":binding.field,"when":when,"value":parse_value(&edited)}));

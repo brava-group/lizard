@@ -276,6 +276,13 @@ pub fn specs() -> Vec<CommandSpec> {
             matrix_rename_axis
         ),
         spec!(
+            "component.matrixRenameOption",
+            "Rename component option",
+            "{id (main component), axis, option, newName}  Preserves cells and instance choices",
+            true,
+            matrix_rename_option
+        ),
+        spec!(
             "component.matrixDeleteAxis",
             "Delete component axis",
             "{id (main component), name}  Also removes cells conditioned on that axis",
@@ -1920,6 +1927,66 @@ fn matrix_rename_axis(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"id": id, "name": new_name}))
+}
+
+fn matrix_rename_option(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.matrixRenameOption";
+    let id = req_id(cmd, p, "id")?;
+    let axis_name = p["axis"].as_str().ok_or_else(|| bad(cmd, "axis required"))?;
+    let option = p["option"].as_str().ok_or_else(|| bad(cmd, "option required"))?;
+    let new_name = p["newName"]
+        .as_str()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && name.len() <= 80)
+        .ok_or_else(|| bad(cmd, "newName must have 1–80 characters"))?;
+    let doc = s.doc()?;
+    let main = matrix_main(cmd, doc, id)?;
+    let axis = main.component_matrix.axes.iter().find(|axis| axis.name == axis_name).ok_or_else(|| bad(cmd, "axis not found"))?;
+    if !axis.options.iter().any(|value| value == option) {
+        return Err(bad(cmd, "option not found"));
+    }
+    if option == new_name {
+        return Ok(json!({"id": id, "axis": axis_name, "option": option}));
+    }
+    if axis.options.iter().any(|value| value == new_name) {
+        return Err(bad(cmd, "option name is already used"));
+    }
+    let doc = s.doc_mut()?;
+    let matrix = &mut doc.get_mut(id)?.component_matrix;
+    if let Some(axis) = matrix.axes.iter_mut().find(|axis| axis.name == axis_name) {
+        for value in &mut axis.options {
+            if value == option {
+                *value = new_name.to_string();
+            }
+        }
+        if axis.default == option {
+            axis.default = new_name.to_string();
+        }
+    }
+    for field in &mut matrix.fields {
+        for cell in &mut field.cells {
+            if cell.when.get(axis_name).is_some_and(|value| value == option) {
+                cell.when.insert(axis_name.to_string(), new_name.to_string());
+            }
+        }
+    }
+    let instances: Vec<NodeId> = doc
+        .nodes()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Instance { component, props }
+                if *component == id && props.get(axis_name).is_some_and(|value| value.as_str() == Some(option)) =>
+            {
+                Some(node.id)
+            }
+            _ => None,
+        })
+        .collect();
+    for instance in instances {
+        if let NodeKind::Instance { props, .. } = &mut doc.get_mut(instance)?.kind {
+            props.insert(axis_name.to_string(), json!(new_name));
+        }
+    }
+    Ok(json!({"id": id, "axis": axis_name, "option": new_name}))
 }
 
 fn matrix_when(cmd: &str, p: &Value, matrix: &ComponentMatrix) -> Result<BTreeMap<String, String>> {

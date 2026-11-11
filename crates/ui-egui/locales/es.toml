@@ -2746,6 +2746,7 @@ status = "draft — needs native review"
 
 "component.matrixSetAxis" = "Definir eje del componente"
 "component.matrixRenameAxis" = "Renombrar eje del componente"
+"component.matrixRenameOption" = "Renombrar opción del componente"
 "component.matrixDeleteAxis" = "Eliminar eje del componente"
 "component.matrixSetCell" = "Definir valor del componente"
 "component.matrixDeleteCell" = "Eliminar valor del componente"

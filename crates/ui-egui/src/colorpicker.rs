@@ -8,6 +8,7 @@ use lizard_color::{
 use lizard_doc::{NodeId, NodeKind};
 use lizard_engine::ToolId;
 use serde_json::json;
+use std::collections::BTreeMap;
 
 use crate::LizardApp;
 use crate::a11y::Tip;
@@ -134,6 +135,13 @@ pub enum PickerTarget {
         id: String,
         mode: String,
     },
+    /// A solid-colour cell of a component's local value table.
+    ComponentCell {
+        main: NodeId,
+        layer: NodeId,
+        field: String,
+        when: BTreeMap<String, String>,
+    },
     /// One paint of a colour style (edited from the style picker).
     Style {
         id: String,
@@ -220,6 +228,16 @@ fn current_paint(app: &LizardApp, target: &PickerTarget) -> Option<Paint> {
             }
             _ => None,
         },
+        PickerTarget::ComponentCell { main, layer, field, when } => {
+            let matrix = &doc.node(*main)?.component_matrix;
+            let binding = matrix.fields.iter().find(|binding| binding.layer == *layer && binding.field == *field)?;
+            let mut choices = matrix.choices(&BTreeMap::new());
+            choices.extend(when.iter().map(|(axis, option)| (axis.clone(), option.clone())));
+            let color = lizard_color::Color::from_hex_or_name(matrix.resolve(binding, &choices)?.as_str()?)?;
+            let mut paint = Paint::solid(color.with_alpha(1.0));
+            paint.opacity = color.a;
+            Some(paint)
+        }
         PickerTarget::Style { id, index } => style_paints(doc, id)?.get(*index).cloned(),
         PickerTarget::DraftStyle { index } => app.ui_context.as_ref().and_then(|ctx| library_tab::draft_paint(ctx, *index)),
         PickerTarget::DraftVariable => app.ui_context.as_ref().and_then(library_tab::draft_variable_paint),
@@ -301,6 +319,11 @@ fn write(app: &mut LizardApp, target: &PickerTarget, paint: &Paint, live: bool) 
         PickerTarget::Variable { id, mode } => {
             let c = paint.solid_color().unwrap_or(Color::BLACK);
             app.session.execute("variable.set", &json!({"variable": id, "mode": mode, "value": c.to_css_hex()}))
+        }
+        PickerTarget::ComponentCell { main, layer, field, when } => {
+            let color = paint.solid_color().unwrap_or(Color::BLACK).with_alpha(paint.opacity);
+            app.session
+                .execute("component.matrixSetCell", &json!({"id": main, "layer": layer, "field": field, "when": when, "value": color.to_css_hex()}))
         }
         PickerTarget::PluginField { .. } => return,
         PickerTarget::Style { id, index } => {
@@ -578,6 +601,9 @@ fn initial_position(app: &LizardApp, ctx: &egui::Context, target: &PickerTarget)
         PickerTarget::PluginField { plugin, .. } => {
             crate::plugins_ui::field_window(app, ctx, plugin).map(|rect| pos2(rect.left() - 248.0, rect.top()))
         }
+        PickerTarget::ComponentCell { main, .. } => {
+            ctx.memory(|memory| memory.area_rect(Id::new(("component_value_editor", main)))).map(|rect| pos2(rect.right() + 8.0, rect.top() + 48.0))
+        }
         _ => None,
     };
     beside.unwrap_or_else(|| pos2(ctx.content_rect().right() - app.ui.right_width - 260.0, 140.0))
@@ -718,6 +744,33 @@ mod selection_color_tests {
         }
         let c = current_paint(&app, &target).unwrap().solid_color().unwrap();
         assert_eq!(c.to_css_hex().to_uppercase(), "#0D6EFD80");
+    }
+
+    #[test]
+    fn component_cell_picker_writes_the_local_matrix_value() {
+        let mut session = Session::new();
+        let frame = NodeId(session.execute("frame.create", &json!({"name":"Button","width":80,"height":32})).unwrap()["id"].as_u64().unwrap());
+        let main = NodeId(session.execute("component.create", &json!({"ids":[frame]})).unwrap()["id"].as_u64().unwrap());
+        session.execute("component.matrixSetAxis", &json!({"id":main,"name":"Style","options":["Primary","Secondary"]})).unwrap();
+        session.execute("component.matrixSetCell", &json!({"id":main,"layer":main,"field":"fill","when":{},"value":"#6558E8"})).unwrap();
+        let instance = NodeId(session.execute("instance.create", &json!({"component":main})).unwrap()["id"].as_u64().unwrap());
+        let mut app = LizardApp::new(session, Box::new(NoServices));
+        let target = PickerTarget::ComponentCell {
+            main,
+            layer: main,
+            field: "fill".to_string(),
+            when: [("Style".to_string(), "Secondary".to_string())].into(),
+        };
+        let inherited = current_paint(&app, &target).unwrap();
+        assert_eq!(inherited.solid_color().unwrap().to_hex(), "6558E8");
+        write(&mut app, &target, &Paint::solid(Color::from_hex("#E2DCFD").unwrap()), false);
+        let description = app.session.execute("component.matrixDescribe", &json!({"id":main})).unwrap();
+        assert!(description["fields"].as_array().unwrap().iter().any(|field| {
+            field["field"] == "fill"
+                && field["cells"].as_array().unwrap().iter().any(|cell| cell["when"]["Style"] == "Secondary" && cell["value"] == "#E2DCFD")
+        }));
+        app.session.execute("instance.setProperties", &json!({"ids":[instance],"properties":{"Style":"Secondary"}})).unwrap();
+        assert_eq!(app.session.doc().unwrap().node(instance).unwrap().fills[0].solid_color().unwrap().to_hex(), "E2DCFD");
     }
 
     #[test]
