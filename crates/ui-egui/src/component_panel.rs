@@ -76,6 +76,7 @@ pub fn instance_section(app: &mut LizardApp, ui: &mut Ui, doc: &Document, sel: &
 /// Values of the selected variant. The component set owns the property definitions, so its
 /// editable property list stays on the set itself.
 fn variant_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, variant: &Node, set: NodeId) {
+    matrix_ui(app, ui, doc, variant.id);
     widgets::separator(ui);
     if widgets::section_header(ui, tr("Current variant"), &[(Icon::GoToComponentSet, tr("Go to component set"))], true).is_some() {
         app.run("select.set", json!({"ids": [set]}));
@@ -420,6 +421,10 @@ struct PropertyDraft {
     boolean: bool,
     instance: Option<NodeId>,
     preferred: Vec<NodeId>,
+}
+
+fn matrix_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, main: NodeId) {
+    crate::component_matrix_ui::show(app, ui, doc, main);
 }
 
 fn property_draft_id() -> Id {
@@ -901,6 +906,9 @@ fn properties_ui(app: &mut LizardApp, ui: &mut Ui, doc: &Document, owner: NodeId
     if has_properties {
         ui.add_space(12.0);
     }
+    if !is_set {
+        matrix_ui(app, ui, doc, owner);
+    }
 }
 
 /// The selected text layer's value and binding action, directly below its name and actions.
@@ -1224,6 +1232,24 @@ fn instance_props(app: &mut LizardApp, ui: &mut Ui, doc: &Document, n: &Node, co
                             }
                         }
                     });
+                });
+            });
+        }
+    }
+    if let Some(main) = doc.node(*component) {
+        for axis in &main.component_matrix.axes {
+            let current = props.get(&axis.name).and_then(Value::as_str).filter(|v| axis.options.iter().any(|o| o == *v)).unwrap_or(&axis.default);
+            row(ui, 32.0, |ui| {
+                prop_label(ui, &axis.name, PropertyControllerKind::Variant);
+                let width = ui.available_width().max(60.0);
+                let resp = Select::trigger(ui, current, width, None);
+                menu_popup(&resp).show(|ui| {
+                    for option in &axis.options {
+                        if menu_item(ui, option, "") {
+                            app.run("instance.setProperties", json!({"ids": [id], "properties": {axis.name.clone(): option}}));
+                            ui.close();
+                        }
+                    }
                 });
             });
         }

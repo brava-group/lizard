@@ -754,6 +754,7 @@ fn sync_instance_depth(doc: &mut Document, inst: NodeId, depth: usize, spare: BT
     fresh.children = order;
     fresh.transform = root.transform;
     fresh.kind = root.kind.clone();
+    fresh.component_matrix = ComponentMatrix::default();
     carry_prop_bindings(&root, &mut fresh);
     // A nested instance keeps mirroring its layer of the outer main.
     let nested_copy = inside_instance(doc, inst);
@@ -797,6 +798,7 @@ fn sync_instance_depth(doc: &mut Document, inst: NodeId, depth: usize, spare: BT
     if let Some(r) = doc.node_mut(inst) {
         *r = fresh;
     }
+    apply_component_matrix(doc, &comp, &root, &map, &mut remeasure);
     // A resized instance: children follow their constraints (auto layout re-flows later).
     let (iw, ih) = doc.node(inst).map(|n| (n.width, n.height)).unwrap_or((comp.width, comp.height));
     if (iw - comp.width).abs() > 1e-9 || (ih - comp.height).abs() > 1e-9 {
@@ -861,6 +863,54 @@ fn sync_instance_depth(doc: &mut Document, inst: NodeId, depth: usize, spare: BT
             .map(|(i, x)| (*i, x.clone()))
             .collect();
         sync_instance_depth(doc, n, depth + 1, below);
+    }
+}
+
+fn matrix_override_group(field: &str) -> &'static str {
+    match field {
+        "fill" | "fills" => "fills",
+        "stroke" | "strokes" | "strokeWeight" => "strokes",
+        "effects" => "effects",
+        "cornerRadius" => "corners",
+        "opacity" => "opacity",
+        "visible" => "visible",
+        "width" | "height" => "size",
+        "sizingH" | "sizingV" => "resizing",
+        "padding" | "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft" => "padding",
+        "gap" | "crossGap" => "gap",
+        "characters" => "characters",
+        "fontSize" | "fontFamily" | "fontStyle" | "lineHeight" | "letterSpacing" => "textStyle",
+        _ => "",
+    }
+}
+
+fn apply_component_matrix(doc: &mut Document, main: &Node, instance: &Node, map: &BTreeMap<NodeId, NodeId>, remeasure: &mut Vec<NodeId>) {
+    if main.component_matrix.fields.is_empty() {
+        return;
+    }
+    let selected = match &instance.kind {
+        NodeKind::Instance { props, .. } => props,
+        _ => return,
+    };
+    let choices = main.component_matrix.choices(selected);
+    for field in &main.component_matrix.fields {
+        let Some(&copy) = map.get(&field.layer) else { continue };
+        let Some(value) = main.component_matrix.resolve(field, &choices) else { continue };
+        if doc.node(copy).is_some_and(|n| n.overrides.contains(matrix_override_group(&field.field))) {
+            continue;
+        }
+        let previous_overrides = doc.node(copy).map(|n| n.overrides.clone()).unwrap_or_default();
+        let props = serde_json::Map::from_iter([(field.field.clone(), value.clone())]);
+        if crate::cmd::props::apply("component.matrixSetCell", doc, copy, &props).is_ok() {
+            // The ordinary property setter marks edits inside instances as user overrides.
+            // A resolved matrix cell is inherited from the main, so keep the earlier set.
+            if let Some(n) = doc.node_mut(copy) {
+                n.overrides = previous_overrides;
+            }
+            if matches!(field.field.as_str(), "characters" | "fontSize" | "fontFamily" | "fontStyle" | "lineHeight" | "letterSpacing") {
+                remeasure.push(copy);
+            }
+        }
     }
 }
 

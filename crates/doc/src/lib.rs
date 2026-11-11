@@ -10,6 +10,7 @@
 
 pub mod colors;
 pub mod comments;
+pub mod component_matrix;
 pub mod geometry;
 pub mod handoff;
 pub mod ids;
@@ -27,6 +28,7 @@ pub mod vector_regions;
 
 pub use colors::*;
 pub use comments::*;
+pub use component_matrix::*;
 pub use handoff::*;
 pub use library::*;
 pub use lizard_color as color;
@@ -826,6 +828,11 @@ impl Document {
             let Some(new_id) = map.get(&n.id) else { continue };
             let mut c = n.clone();
             c.id = *new_id;
+            for field in &mut c.component_matrix.fields {
+                if let Some(layer) = map.get(&field.layer) {
+                    field.layer = *layer;
+                }
+            }
             c.children = n.children.iter().filter_map(|k| map.get(k).copied()).collect();
             c.parent = if n.id == root { Some(parent) } else { n.parent.and_then(|p| map.get(&p).copied()) };
             for it in &mut c.interactions {

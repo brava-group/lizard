@@ -183,6 +183,13 @@ pub fn describe(doc: &Document, comp: NodeId) -> Option<Component> {
             add(k, ParamKind::Variant(vals), Value::String(default));
         }
     }
+    for axis in &n.component_matrix.axes {
+        if seen.contains(&axis.name) {
+            continue;
+        }
+        seen.push(axis.name.clone());
+        add(axis.name.clone(), ParamKind::Variant(axis.options.clone()), json!(axis.default));
+    }
     for (k, d) in props {
         if seen.contains(k) {
             continue;
@@ -669,7 +676,44 @@ fn web(doc: &Document, c: &Component, lang: CodeLang) -> (String, String, String
             variant_rules.push_str(&format!("{sel} {{\n{}}}\n", diff.iter().map(|l| format!("  {l}\n")).collect::<String>()));
         }
     }
-    let css = format!("{}{}{variant_rules}", m.tokens.root_rule(), m.styles);
+    // Matrix cells become CSS rules on the same data attributes as drawn variants. Specific
+    // conditions come later, so a Style+State cell wins over a Style-only cell.
+    let mut matrix_rules = String::new();
+    if let Some(main) = doc.node(c.comp) {
+        let mut cells: Vec<(&lizard_doc::ComponentField, &lizard_doc::ComponentCell)> =
+            main.component_matrix.fields.iter().flat_map(|f| f.cells.iter().map(move |cell| (f, cell))).collect();
+        cells.sort_by_key(|(_, cell)| cell.when.len());
+        for (field, cell) in cells.into_iter().take(512) {
+            let mut resolved = doc.clone();
+            let props = serde_json::Map::from_iter([(field.field.clone(), cell.value.clone())]);
+            if crate::cmd::props::apply("component.matrixSetCell", &mut resolved, field.layer, &props).is_err() {
+                continue;
+            }
+            let vctx = Ctx { doc: &resolved, root: c.comp, comp: Some(c), base: 2 };
+            let mut preview = Markup::new(&vctx, lang);
+            preview.root_class = Some(root_class.clone());
+            preview.node(c.comp, None, 2, "");
+            let attrs: String = variants
+                .iter()
+                .zip(&attr_names)
+                .filter_map(|(p, attr)| cell.when.get(&p.prop).map(|value| format!("[{attr}=\"{}\"]", value.replace(['"', '\\'], ""))))
+                .collect();
+            if cell.when.len() != attrs.matches("[data-").count() {
+                continue;
+            }
+            for (path, _, decls) in preview.rules {
+                let Some((_, class, base)) = m.rules.iter().find(|(p, _, _)| *p == path) else { continue };
+                let base_lines: Vec<&str> = base.lines().collect();
+                let diff: Vec<&str> = decls.lines().filter(|line| !base_lines.contains(line)).collect();
+                if diff.is_empty() {
+                    continue;
+                }
+                let sel = if path.is_empty() { format!(".{root_class}{attrs}") } else { format!(".{root_class}{attrs} .{class}") };
+                matrix_rules.push_str(&format!("{sel} {{\n{}}}\n", diff.iter().map(|line| format!("  {line}\n")).collect::<String>()));
+            }
+        }
+    }
+    let css = format!("{}{}{variant_rules}{matrix_rules}", m.tokens.root_rule(), m.styles);
     (root_class, m.markup, css)
 }
 

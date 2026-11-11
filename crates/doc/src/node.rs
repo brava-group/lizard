@@ -432,6 +432,9 @@ pub struct Node {
     pub name: String,
     #[serde(flatten)]
     pub kind: NodeKind,
+    /// Local property axes and value cells for a main component.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub component_matrix: crate::ComponentMatrix,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<NodeId>,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -609,6 +612,7 @@ impl Node {
             _ => Corners::default(),
         };
         Self {
+            component_matrix: crate::ComponentMatrix::default(),
             id,
             name: name.into(),
             kind,

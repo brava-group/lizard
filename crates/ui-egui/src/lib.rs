@@ -19,6 +19,7 @@ pub mod canvas;
 pub mod cjk;
 pub mod colorpicker;
 pub mod comments;
+mod component_matrix_ui;
 pub mod component_panel;
 pub mod control;
 pub mod cursors;

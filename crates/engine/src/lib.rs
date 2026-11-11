@@ -1718,6 +1718,8 @@ mod comments_polish_tests;
 #[cfg(test)]
 mod component_codegen_tests;
 #[cfg(test)]
+mod component_matrix_tests;
+#[cfg(test)]
 mod components_behaviour_tests;
 #[cfg(test)]
 mod components_scale_tests;

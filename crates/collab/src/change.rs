@@ -141,6 +141,7 @@ macro_rules! node_props {
 node_props! {
     Name => name,
     Kind => kind,
+    ComponentMatrix => component_matrix,
     Visible => visible,
     Locked => locked,
     Opacity => opacity,
