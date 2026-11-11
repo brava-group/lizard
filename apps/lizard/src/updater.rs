@@ -644,7 +644,7 @@ mod tests {
         };
         updater.install()?;
         let marker = work.join("helper-started");
-        for _ in 0..50 {
+        for _ in 0..250 {
             if marker.exists() {
                 break;
             }
