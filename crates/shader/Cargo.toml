@@ -15,4 +15,4 @@ naga = { version = "30.0.1", features = ["wgsl-in"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30.0.1"
-pollster = "0.4"
+pollster = "1.0"
